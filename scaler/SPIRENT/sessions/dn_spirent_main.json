@@ -1,0 +1,101 @@
+{
+  "session_name": "dn_spirent_main",
+  "session_id_on_server": "dn_spirent_main - dn_spirent",
+  "lab_server": "il-auto-containers",
+  "chassis_ip": "100.64.3.238",
+  "port_location": "//100.64.3.238/6/13",
+  "active": true,
+  "created": "2026-03-09T15:52:27.070432",
+  "last_joined": "2026-03-09T15:52:28.656217",
+  "join_count": 2,
+  "creation_attempts": 1,
+  "last_error": null,
+  "streams": [
+    {
+      "name": "fs_alpha_219",
+      "handle": "streamblock1",
+      "vlan": 219,
+      "inner_vlan": 101,
+      "src_mac": "00:10:94:00:00:01",
+      "dst_mac": "ff:ff:ff:ff:ff:ff",
+      "src_ip": "10.99.219.1",
+      "dst_ip": "100.100.100.1",
+      "rate": 10.0,
+      "rate_unit": "MEGABITS_PER_SECOND",
+      "frame_size": 128,
+      "protocol": "ipv4",
+      "created": "2026-03-09T15:54:08.841510"
+    }
+  ],
+  "devices": [
+    {
+      "name": "ALPHA_CE_0",
+      "handle": "emulateddevice3",
+      "ip": "49.49.49.9",
+      "gateway": "49.49.49.4",
+      "vlan": 219,
+      "inner_vlan": 100,
+      "router_id": "49.49.49.9",
+      "device_count": 1,
+      "created": "2026-03-09T16:56:41.562330",
+      "bgp_handle": "bgprouterconfig3",
+      "as_num": 65100,
+      "negotiated_afis": []
+    },
+    {
+      "name": "ZULU_CE_0",
+      "handle": "emulateddevice4",
+      "ip": "50.50.50.2",
+      "gateway": "50.50.50.1",
+      "vlan": 219,
+      "inner_vlan": 102,
+      "router_id": "50.50.50.2",
+      "device_count": 1,
+      "created": "2026-03-09T17:02:33.272864"
+    },
+    {
+      "name": "ALPHA_CE_PE1",
+      "handle": "emulateddevice5",
+      "ip": "16.16.16.2",
+      "gateway": "16.16.16.1",
+      "vlan": 214,
+      "inner_vlan": 1,
+      "router_id": "16.16.16.2",
+      "device_count": 1,
+      "created": "2026-03-09T18:54:00.162404",
+      "bgp_handle": "bgprouterconfig4",
+      "as_num": 65100,
+      "negotiated_afis": [
+        "ipv4-unicast",
+        "ipv6-unicast"
+      ]
+    },
+    {
+      "name": "ZULU_CE_PE1",
+      "handle": "emulateddevice6",
+      "ip": "16.16.16.6",
+      "gateway": "16.16.16.5",
+      "vlan": 214,
+      "inner_vlan": 2,
+      "router_id": "16.16.16.6",
+      "device_count": 1,
+      "created": "2026-03-09T18:54:05.810624",
+      "bgp_handle": "bgprouterconfig5",
+      "as_num": 4500,
+      "negotiated_afis": [
+        "ipv4-unicast",
+        "ipv6-unicast"
+      ]
+    }
+  ],
+  "port_reserved": true,
+  "project_handle": "project1",
+  "port_handle": "port1",
+  "inner_vlan_allocations": {
+    "219": [
+      100,
+      101,
+      102
+    ]
+  }
+}

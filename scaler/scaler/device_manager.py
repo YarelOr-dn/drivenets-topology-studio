@@ -69,17 +69,17 @@ class DeviceManager:
         return devices
     
     def get_device(self, device_id: str) -> Optional[Device]:
-        """Get a device by ID.
+        """Get a device by ID or hostname.
         
         Args:
-            device_id: Device ID to look up
+            device_id: Device ID or hostname to look up
         
         Returns:
             Device object or None if not found
         """
         db = self._load_db()
         for d in db.get("devices", []):
-            if d.get("id") == device_id:
+            if d.get("id") == device_id or d.get("hostname") == device_id:
                 try:
                     return Device(**d)
                 except Exception:

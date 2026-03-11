@@ -618,12 +618,16 @@ DNOS_LIMITS: Dict[str, int] = {
     "max_static_routes": 100000,
     "max_acl_entries": 10000,
     "max_policy_maps": 1024,
-    # Flowspec VPN limits (SW-182545, SW-182546)
+    # Flowspec VPN limits (SW-182545, SW-182546) - flowspec-local from dn-flowspec-local-policies.yang
+    # HW TCAM: 12000 IPv4 + 4000 IPv6 per NCP (show system npu-resources resource-type flowspec)
+    # YANG max-elements: 8000 IPv4 MC defs, 4000 IPv6 MC defs, 20 policies per AFI
     "max_flowspec_rules_per_vrf": 3000,
-    "max_flowspec_rules_total": 10000,
+    "max_flowspec_rules_total": 20000,
     "max_flowspec_interfaces": 1000,
-    "max_flowspec_local_policies": 256,
-    "max_flowspec_match_classes": 1024,
+    "max_flowspec_local_policies": 40,
+    "max_flowspec_match_classes": 12000,
+    "max_flowspec_hw_entries_ipv4": 12000,
+    "max_flowspec_hw_entries_ipv6": 4000,
 }
 
 

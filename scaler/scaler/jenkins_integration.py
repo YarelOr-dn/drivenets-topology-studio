@@ -97,24 +97,23 @@ def validate_artifact_url(url: str, timeout: int = 10) -> Tuple[bool, str]:
         response = requests.head(url, timeout=timeout, allow_redirects=True)
         
         if response.status_code == 200:
-            # Check content-length if available
             size = response.headers.get('content-length', 0)
             if size:
                 size_mb = int(size) / (1024 * 1024)
-                return True, f"✓ Available ({size_mb:.1f} MB)"
-            return True, "✓ Available"
+                return True, f"Available ({size_mb:.1f} MB)"
+            return True, "Available"
         elif response.status_code == 404:
-            return False, "❌ Not found (404) - artifact expired or deleted"
+            return False, "Not found (404) - artifact expired or deleted"
         elif response.status_code == 403:
-            return False, "❌ Access denied (403)"
+            return False, "Access denied (403)"
         else:
-            return False, f"❌ Error ({response.status_code})"
+            return False, f"Error ({response.status_code})"
     except requests.Timeout:
-        return False, "❌ Timeout - MinIO may be unreachable"
+        return False, "Timeout - MinIO may be unreachable"
     except requests.ConnectionError:
-        return False, "❌ Connection error - network issue"
+        return False, "Connection error - network issue"
     except Exception as e:
-        return False, f"❌ Error: {str(e)[:50]}"
+        return False, f"Error: {str(e)[:50]}"
 
 
 def validate_stack_artifacts(stack: Dict, console=None) -> Tuple[bool, Dict[str, Tuple[bool, str]]]:
@@ -178,7 +177,7 @@ class ParsedJenkinsUrl:
     """Parsed components from a Jenkins URL (classic or Blue Ocean)."""
     job_path: str  # e.g., "drivenets/cheetah"
     branch_or_pr: str  # e.g., "dev_v26_1" or "PR-86760"
-    build_number: int
+    build_number: Optional[int] = None
     is_pr: bool = False
     original_url: str = ""
     
@@ -200,6 +199,9 @@ class JenkinsClient:
     """Client for interacting with Jenkins API for DNOS builds."""
     
     CHEETAH_BASE = "/job/drivenets/job/cheetah"
+    
+    _branch_cache: Dict[str, Tuple[float, list]] = {}
+    BRANCH_CACHE_TTL = 120  # seconds
     
     def __init__(self, config: JenkinsConfig = None):
         self.config = config or JenkinsConfig()
@@ -259,7 +261,14 @@ class JenkinsClient:
             pattern: Regex pattern to filter branches
             sort_newest_first: If True, sort by version (newest first)
         """
-        data = self._api_get(self.CHEETAH_BASE)
+        cache_key = f"{pattern or 'all'}_{sort_newest_first}"
+        cached = JenkinsClient._branch_cache.get(cache_key)
+        if cached:
+            ts, branches = cached
+            if time.time() - ts < self.BRANCH_CACHE_TTL:
+                return branches
+        
+        data = self._api_get(self.CHEETAH_BASE, params={'tree': 'jobs[name,url]'})
         if not data or 'jobs' not in data:
             return []
         
@@ -267,7 +276,6 @@ class JenkinsClient:
         for job in data['jobs']:
             name = job.get('name', '')
             
-            # Filter by pattern if provided
             if pattern and not re.search(pattern, name, re.IGNORECASE):
                 continue
             
@@ -277,12 +285,9 @@ class JenkinsClient:
             )
             branches.append(branch)
         
-        # Sort by version (newest first)
         if sort_newest_first:
             def extract_version_tuple(branch: CheetahBranch) -> tuple:
-                """Extract version numbers for sorting (e.g., 'dev_v26_1' -> (26, 1, 0))."""
                 name = branch.name
-                # Match patterns like: dev_v26_1, rel_v25_4, rel_v11.0.1, dev_v26_1_flowspec
                 match = re.search(r'v(\d+)[._](\d+)(?:[._](\d+))?', name)
                 if match:
                     major = int(match.group(1))
@@ -293,6 +298,7 @@ class JenkinsClient:
             
             branches.sort(key=extract_version_tuple, reverse=True)
         
+        JenkinsClient._branch_cache[cache_key] = (time.time(), branches)
         return branches
     
     def list_dev_branches(self) -> List[CheetahBranch]:
@@ -325,14 +331,23 @@ class JenkinsClient:
     # Build Information
     # =========================================================================
     
-    def get_build_info(self, branch_name: str, build_number: int = None) -> Optional[JenkinsBuild]:
-        """Get build information including artifacts."""
+    def get_build_info(self, branch_name: str, build_number: int = None, latest: bool = False) -> Optional[JenkinsBuild]:
+        """Get build information including artifacts.
+        
+        Args:
+            branch_name: Jenkins branch name
+            build_number: Specific build number, or None for latest/lastSuccessful
+            latest: If True and build_number is None, fetch lastBuild (includes in-progress).
+                    If False, fetch lastSuccessfulBuild (only completed successful builds).
+        """
         # URL-encode the branch name - slashes become %2F
         # Double-encode for Jenkins API: feature/dev_v26_1/flowspec_vpn -> feature%252Fdev_v26_1%252Fflowspec_vpn
         encoded_branch = quote(quote(branch_name, safe=''), safe='')
         
         if build_number:
             endpoint = f"{self.CHEETAH_BASE}/job/{encoded_branch}/{build_number}"
+        elif latest:
+            endpoint = f"{self.CHEETAH_BASE}/job/{encoded_branch}/lastBuild"
         else:
             endpoint = f"{self.CHEETAH_BASE}/job/{encoded_branch}/lastSuccessfulBuild"
         
@@ -903,17 +918,28 @@ class JenkinsClient:
     def parse_jenkins_url(url: str) -> Optional[ParsedJenkinsUrl]:
         """Parse a Jenkins URL (Blue Ocean or classic) to extract job/build info.
         
-        Supported URL formats:
-        1. Blue Ocean: https://jenkins.dev.drivenets.net/blue/organizations/jenkins/drivenets%2Fcheetah/detail/PR-86760/5/pipeline
-        2. Blue Ocean branch: https://jenkins.dev.drivenets.net/blue/organizations/jenkins/drivenets%2Fcheetah/detail/dev_v26_1/123/pipeline
-        3. Classic: https://jenkins.dev.drivenets.net/job/drivenets/job/cheetah/job/dev_v26_1/123/
-        4. Classic PR: https://jenkins.dev.drivenets.net/job/drivenets/job/cheetah/view/change-requests/job/PR-86760/5/
+        Supported URL formats (with build number):
+        1. Blue Ocean: .../blue/organizations/jenkins/drivenets%2Fcheetah/detail/PR-86760/5/pipeline
+        2. Blue Ocean branch: .../blue/organizations/jenkins/drivenets%2Fcheetah/detail/dev_v26_1/123/pipeline
+        3. Classic: .../job/drivenets/job/cheetah/job/dev_v26_1/123/
+        4. Classic PR: .../job/drivenets/job/cheetah/view/change-requests/job/PR-86760/5/
+        
+        Branch-only formats (no build number -- resolves to lastSuccessfulBuild):
+        5. Classic branch-only: .../job/drivenets/job/cheetah/job/feature%252Fdev_v26_2%252Fbranch_name
+        6. Blue Ocean branch-only: .../blue/organizations/jenkins/drivenets%2Fcheetah/detail/dev_v26_1
+        7. Classic PR-only: .../job/drivenets/job/cheetah/view/change-requests/job/PR-86760
         
         Returns:
-            ParsedJenkinsUrl object or None if URL cannot be parsed
+            ParsedJenkinsUrl object or None if URL cannot be parsed.
+            build_number will be None for branch-only URLs.
         """
         if not url:
             return None
+        
+        # Clean URL for end-anchored patterns (strip whitespace, query params, fragments, trailing slashes)
+        clean = url.strip().split('?')[0].split('#')[0].rstrip('/')
+        
+        # --- Patterns WITH build number (try these first) ---
         
         # Blue Ocean URL pattern
         # Format: /blue/organizations/jenkins/{job_path_encoded}/detail/{branch_or_pr}/{build_number}/...
@@ -925,9 +951,7 @@ class JenkinsClient:
             branch_or_pr = match.group(2)
             build_number = int(match.group(3))
             
-            # URL decode the job path (e.g., "drivenets%2Fcheetah" -> "drivenets/cheetah")
             job_path = unquote(job_path_encoded)
-            
             is_pr = branch_or_pr.upper().startswith('PR-')
             
             return ParsedJenkinsUrl(
@@ -949,7 +973,6 @@ class JenkinsClient:
             branch = match.group(3)
             build_number = int(match.group(4))
             
-            # URL decode the branch name (handles double-encoded slashes like %252F -> %2F)
             branch = unquote(branch)
             
             return ParsedJenkinsUrl(
@@ -979,10 +1002,67 @@ class JenkinsClient:
                 original_url=url
             )
         
+        # --- Branch-only patterns (no build number) ---
+        
+        # Classic branch-only (handles double-encoded slashes like %252F in branch names)
+        classic_branch_only = r'/job/([^/]+)/job/([^/]+)/job/([^/]+)$'
+        match = re.search(classic_branch_only, clean)
+        
+        if match:
+            org = match.group(1)
+            repo = match.group(2)
+            branch = match.group(3)
+            branch = unquote(branch)
+            
+            return ParsedJenkinsUrl(
+                job_path=f"{org}/{repo}",
+                branch_or_pr=branch,
+                build_number=None,
+                is_pr=False,
+                original_url=url
+            )
+        
+        # Classic PR-only (no build number)
+        classic_pr_only = r'/job/([^/]+)/job/([^/]+)/view/change-requests/job/(PR-\d+)$'
+        match = re.search(classic_pr_only, clean)
+        
+        if match:
+            org = match.group(1)
+            repo = match.group(2)
+            pr = match.group(3)
+            
+            return ParsedJenkinsUrl(
+                job_path=f"{org}/{repo}",
+                branch_or_pr=pr,
+                build_number=None,
+                is_pr=True,
+                original_url=url
+            )
+        
+        # Blue Ocean branch-only (no build number)
+        blue_branch_only = r'/blue/organizations/jenkins/([^/]+)/detail/([^/]+)$'
+        match = re.search(blue_branch_only, clean)
+        
+        if match:
+            job_path = unquote(match.group(1))
+            branch_or_pr = match.group(2)
+            is_pr = branch_or_pr.upper().startswith('PR-')
+            
+            return ParsedJenkinsUrl(
+                job_path=job_path,
+                branch_or_pr=branch_or_pr,
+                build_number=None,
+                is_pr=is_pr,
+                original_url=url
+            )
+        
         return None
     
     def get_build_from_url(self, url: str) -> Optional[JenkinsBuild]:
         """Get build information from a Jenkins URL (Blue Ocean or classic).
+        
+        For branch-only URLs (no build number), tries lastSuccessfulBuild
+        then falls back to lastBuild.
         
         Args:
             url: A Jenkins URL in Blue Ocean or classic format
@@ -994,8 +1074,13 @@ class JenkinsClient:
         if not parsed:
             return None
         
-        endpoint = f"{parsed.jenkins_job_path}/{parsed.build_number}"
-        data = self._api_get(endpoint)
+        if parsed.build_number is not None:
+            endpoint = f"{parsed.jenkins_job_path}/{parsed.build_number}"
+            data = self._api_get(endpoint)
+        else:
+            data = self._api_get(f"{parsed.jenkins_job_path}/lastSuccessfulBuild")
+            if not data:
+                data = self._api_get(f"{parsed.jenkins_job_path}/lastBuild")
         
         if not data:
             return None
@@ -1028,7 +1113,8 @@ class JenkinsClient:
     
     def get_stack_urls_from_parsed(self, parsed: ParsedJenkinsUrl) -> Dict[str, Optional[str]]:
         """Get stack URLs using parsed URL info."""
-        base_url = f"{self.config.url}{parsed.jenkins_job_path}/{parsed.build_number}/artifact"
+        build_ref = str(parsed.build_number) if parsed.build_number is not None else 'lastSuccessfulBuild'
+        base_url = f"{self.config.url}{parsed.jenkins_job_path}/{build_ref}/artifact"
         
         result = {}
         # Define artifacts with fallback filenames for baseos
@@ -1190,7 +1276,12 @@ def get_stack_from_url(url: str) -> Dict:
             'parsed_build': parsed.build_number
         }
     
-    urls = client.get_stack_urls_from_url(url)
+    # For branch-only URLs, update parsed with the resolved build number
+    # so get_stack_urls_from_parsed uses the concrete number instead of lastSuccessfulBuild
+    if parsed.build_number is None:
+        parsed.build_number = build.build_number
+    
+    urls = client.get_stack_urls_from_parsed(parsed)
     
     return {
         'branch': parsed.branch_or_pr,

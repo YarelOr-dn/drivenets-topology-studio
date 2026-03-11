@@ -33,5 +33,15 @@
     "hostname": "NCP3_Alfasi_S-PE",
     "device_id": "ncp3_alfasi_s_pe",
     "deleted_at": "2026-01-26T11:21:55.105110"
+  },
+  "100.70.0.32": {
+    "hostname": "eCdnos-RR",
+    "device_id": "ecdnos_rr",
+    "deleted_at": "2026-02-26T08:23:02.376384"
+  },
+  "N/A": {
+    "hostname": "eCdnos-RR",
+    "device_id": "ecdnos_rr",
+    "deleted_at": "2026-02-26T08:23:02.376399"
   }
 }

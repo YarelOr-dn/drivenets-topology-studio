@@ -1,0 +1,20 @@
+{
+  "id": "test_15",
+  "name": "Multiple HA Events in Sequence",
+  "verdict": "PASS",
+  "recovery_sec": 2.691272020339966,
+  "ha_type": "sequential",
+  "cp_verdict": "PASS",
+  "dp_verdict": "PASS",
+  "sp_verdict": "N/A",
+  "xray_verdict": "PASS",
+  "xray_packets": 2,
+  "ncp_before": 0,
+  "ncp_after": 0,
+  "tcam_before": 0,
+  "tcam_after": 0,
+  "spirent_loss": 0,
+  "counter_delta": 0,
+  "before_routes": "show bgp ipv4 flowspec-vpn summary\r\n\u001b[1FYOR_CL_PE-4(01-Mar-2026-23:49:04)# show bgp ipv4 flowspec-vpn summary\r\n\r\nBGP router identifier 4.4.4.4, local AS number 1234567\r\nBGP table node count 1\r\n\r\n  Nei",
+  "after_routes": "show bgp ipv4 flowspec-vpn summary\r\n\u001b[1FYOR_CL_PE-4(01-Mar-2026-23:50:44)# show bgp ipv4 flowspec-vpn summary\r\n\r\nBGP router identifier 4.4.4.4, local AS number 1234567\r\nBGP table node count 1\r\n\r\n  Nei"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "test_12",
+  "name": "Clear BGP Neighbors Multiple Times",
+  "verdict": "PASS",
+  "recovery_sec": 1.6814863681793213,
+  "ha_type": "clear_neighbor",
+  "cp_verdict": "PASS",
+  "dp_verdict": "PASS",
+  "sp_verdict": "N/A",
+  "xray_verdict": "PASS",
+  "xray_packets": 2,
+  "ncp_before": 0,
+  "ncp_after": 0,
+  "tcam_before": 0,
+  "tcam_after": 0,
+  "spirent_loss": 0,
+  "counter_delta": 0,
+  "before_routes": "show bgp ipv4 flowspec-vpn summary\r\n\u001b[1FYOR_CL_PE-4(01-Mar-2026-23:25:39)# show bgp ipv4 flowspec-vpn summary\r\n\r\nBGP router identifier 4.4.4.4, local AS number 1234567\r\nBGP table node count 1\r\n\r\n  Nei",
+  "after_routes": "show bgp ipv4 flowspec-vpn summary\r\n\u001b[1FYOR_CL_PE-4(01-Mar-2026-23:27:40)# show bgp ipv4 flowspec-vpn summary\r\n\r\nBGP router identifier 4.4.4.4, local AS number 1234567\r\nBGP table node count 1\r\n\r\n  Nei"
+}

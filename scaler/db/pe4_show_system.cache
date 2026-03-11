@@ -1,0 +1,46 @@
+show system | no-more
+[FYOR_CL_PE-4(11-Mar-2026-09:42:03)# show system | no-more
+
+System Name: YOR_CL_PE-4, System-Id: a4999c44-1c60-4bb7-a413-0be699be2006
+System Type: CL-86, Family: NCR
+Enterprise-Id: 49739
+Description: DRIVENETS Network Cloud Router
+System status: running 
+System Start Time: 08-Mar-2026 17:23:11 UTC+02:00 (Israel)
+System Uptime: 2 days, 16:18:51
+System Boot Uptime: 2 days, 16:20:09
+Version: DNOS [25.4.13] build [146_dev], Copyright 2025 DRIVENETS LTD.
+Patch: N/A
+Environment:
+	Location: N/A
+	Floor: N/A
+	Rack: N/A
+Contact: support@drivenets.com
+Fabric Minimum Links: 1
+Fabric Minimum NCF: 1
+Dynamic Fabric State: disabled
+NCC switchovers: 0
+Last NCC switchover: N/A
+Escalation-stop-failovers
+  Max-failover(remaining): 2(2)
+  Failover-period(remaining): 30min(0 days, 0:30:00)
+Recovery-mode: supported
+BGP NSR: not-ready
+
+
+| Type | Id     | Admin    | Operational                        | Model           | Uptime              | Description                | Serial Number        |
++------+--------+----------+------------------------------------+-----------------+---------------------+----------------------------+----------------------+
+| NCC  | 0      |          | disconnected                       | X86             | 0 days, 00:00:00    | dn-ncc-0                   |                      |
+| NCC  | 1      |          | active-up                          | X86             | 2 days, 16:18:51    | dn-ncc-1                   | kvm108-cl408d-ncc1   |
+| NCF  | 0      | enabled  | up                                 | NCF-48CD        | 2 days, 16:01:25    | dn-ncf-0                   | WEB19B7G00012-P2     |
+| NCF  | 1      | enabled  | disconnected                       | NCF-48CD        | 0 days, 00:00:00    | dn-ncf-1                   |                      |
+| NCF  | 2      | enabled  | disconnected                       | NCF-48CD        | 0 days, 00:00:00    | dn-ncf-2                   |                      |
+| NCF  | 3      | enabled  | disconnected                       | NCF-48CD        | 0 days, 00:00:00    | dn-ncf-3                   |                      |
+| NCF  | 4      | enabled  | disconnected                       | NCF-48CD        | 0 days, 00:00:00    | dn-ncf-4                   |                      |
+| NCF  | 5      | enabled  | disconnected                       | NCF-48CD        | 0 days, 00:00:00    | dn-ncf-5                   |                      |
+| NCP  | 6      | enabled  | up                                 | NCP-40C         | 2 days, 15:47:19    | dn-ncp-6                   | WDY1A17E00011-P3     |
+| NCP  | 18     | enabled  | up                                 | NCP-40C         | 2 days, 15:47:17    | dn-ncp-18                  | WDY19C7M00013-P3     |
+| NCM  | A0     |          | up                                 | NCM-48X-6C      | 2 days, 23:37:30    | dn-ncm-A0                  | AAF1944AAAJ          |
+| NCM  | B0     |          | disconnected                       | NCM-48X-6C      | 0 days, 00:00:00    | dn-ncm-B0                  |                      |
+
+YOR_CL_PE-4# 

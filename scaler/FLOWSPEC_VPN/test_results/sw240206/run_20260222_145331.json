@@ -1,0 +1,19 @@
+{
+  "preflight": {
+    "vrfs": "",
+    "bgp": "",
+    "flowspec": "",
+    "ok": true
+  },
+  "tests": {
+    "test1": {
+      "pass": false,
+      "message": "Expected ALPHA, got None"
+    }
+  },
+  "cleanup": {
+    "ok": true,
+    "message": "Cleanup done"
+  },
+  "overall": "FAIL"
+}

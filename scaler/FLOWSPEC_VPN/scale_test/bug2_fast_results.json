@@ -1,0 +1,369 @@
+{
+  "test": "BUG-2 fast-v3",
+  "started": "2026-02-24T16:26:47.825841",
+  "cycles": [
+    {
+      "cycle": 1,
+      "round": 1,
+      "action": "rate-limit 0",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 2,
+      "round": 1,
+      "action": "rate-limit 64",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 3,
+      "round": 1,
+      "action": "rate-limit 1000",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 4,
+      "round": 1,
+      "action": "redirect-to-vrf ZULU",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 5,
+      "round": 1,
+      "action": "MIXED",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 6,
+      "round": 1,
+      "action": "rate-limit 0",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 7,
+      "round": 1,
+      "action": "rate-limit 1000",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 8,
+      "round": 1,
+      "action": "MIXED",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 9,
+      "round": 2,
+      "action": "rate-limit 0",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 10,
+      "round": 2,
+      "action": "rate-limit 64",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 11,
+      "round": 2,
+      "action": "rate-limit 1000",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 12,
+      "round": 2,
+      "action": "redirect-to-vrf ZULU",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 13,
+      "round": 2,
+      "action": "MIXED",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 14,
+      "round": 2,
+      "action": "rate-limit 0",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 15,
+      "round": 2,
+      "action": "rate-limit 1000",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 16,
+      "round": 2,
+      "action": "MIXED",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 17,
+      "round": 3,
+      "action": "rate-limit 0",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 18,
+      "round": 3,
+      "action": "rate-limit 64",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 19,
+      "round": 3,
+      "action": "rate-limit 1000",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 20,
+      "round": 3,
+      "action": "redirect-to-vrf ZULU",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 21,
+      "round": 3,
+      "action": "MIXED",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 22,
+      "round": 3,
+      "action": "rate-limit 0",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 23,
+      "round": 3,
+      "action": "rate-limit 1000",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 24,
+      "round": 3,
+      "action": "MIXED",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 25,
+      "round": 4,
+      "action": "rate-limit 0",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 26,
+      "round": 4,
+      "action": "rate-limit 64",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 27,
+      "round": 4,
+      "action": "rate-limit 1000",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 28,
+      "round": 4,
+      "action": "redirect-to-vrf ZULU",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 29,
+      "round": 4,
+      "action": "MIXED",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 30,
+      "round": 4,
+      "action": "rate-limit 0",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 31,
+      "round": 4,
+      "action": "rate-limit 1000",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 32,
+      "round": 4,
+      "action": "MIXED",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 33,
+      "round": 5,
+      "action": "rate-limit 0",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 34,
+      "round": 5,
+      "action": "rate-limit 64",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 35,
+      "round": 5,
+      "action": "rate-limit 1000",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 36,
+      "round": 5,
+      "action": "redirect-to-vrf ZULU",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 37,
+      "round": 5,
+      "action": "MIXED",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 38,
+      "round": 5,
+      "action": "rate-limit 0",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 39,
+      "round": 5,
+      "action": "rate-limit 1000",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    },
+    {
+      "cycle": 40,
+      "round": 5,
+      "action": "MIXED",
+      "inst6": 113,
+      "local6": 100,
+      "inst18": 113,
+      "how": "ok"
+    }
+  ],
+  "leak_detected": false,
+  "finished": "2026-02-24T17:04:50.914534",
+  "total_cycles": 40
+}

@@ -1033,12 +1033,13 @@ class FSVPNWizard:
   [P] 🛤️  [bold]Path Trace[/bold]            - Trace FlowSpec routes RR→PE with advertised/received
   [T] 🧪 [bold]TP RUN[/bold]                - Run Test Plan verification tests
   [V] 📊 [bold]Verbose View[/bold]          - Show detailed flow diagram and full table
+  [F] 📋 [bold]Flow Analysis[/bold]         - Ordered by DUT processing with commands shown
   
   [B] ← Back to device selection
   [Q] Exit wizard
 """
             console.print(Panel(menu, title="Options", border_style="blue"))
-            choice = Prompt.ask("Select option", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "A", "p", "P", "t", "T", "v", "V", "b", "B", "q", "Q"], default="1")
+            choice = Prompt.ask("Select option", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "A", "p", "P", "t", "T", "v", "V", "f", "F", "b", "B", "q", "Q"], default="1")
         else:
             print("\nMain Menu:")
             print("  [1] Full Analysis (IPv4 + IPv6)")
@@ -4410,6 +4411,91 @@ class FSVPNWizard:
                 border_style="green"
             ))
     
+    def print_ordered_flow_analysis(self, analysis: DeviceAnalysis):
+        """Print analysis ORDERED by DUT processing flow with commands shown"""
+        if not RICH_AVAILABLE:
+            return
+        
+        # Define flow order with explanations
+        flow_steps = [
+            ("1", "BGP RECEIVE", "BGP receives FlowSpec UPDATE from peer/RR", [
+                ("SAFI-133", "show bgp ipv4 flowspec summary"),
+                ("SAFI-134", "show bgp ipv4 flowspec-vpn summary"),
+            ]),
+            ("2", "BGP ROUTES", "Routes stored in BGP RIB", [
+                ("BGP-Routes", "show bgp ipv4 flowspec"),
+            ]),
+            ("3", "VRF IMPORT", "RT filtering applies, routes imported to VRF", [
+                ("VRF-RT", "show network-services vrf instance"),
+            ]),
+            ("4", "VRF FLOWSPEC", "VRF has address-family ipv4-flowspec", [
+                ("VRF-AF", "show running-config | include flowspec"),
+            ]),
+            ("5", "NCP INSTALL", "FIB→wb_agent→TCAM programming", [
+                ("NCP", "show flowspec ipv4 summary"),
+            ]),
+            ("6", "TCAM/XRAY", "Hardware entries in TCAM", [
+                ("XRay", "xraycli /wb_agent/flowspec/bgp/ipv4/info"),
+            ]),
+            ("7", "HW STATUS", "Write success/failure counters", [
+                ("HW", "xraycli /wb_agent/flowspec/counters"),
+            ]),
+            ("LP", "LOCAL POLICY", "Locally defined FlowSpec rules (priority 0-2M)", [
+                ("LP-Cfg", "show running-config routing-policy flowspec-local"),
+                ("LP-NCP", "show flowspec local-policy ipv4 summary"),
+            ]),
+        ]
+        
+        console.print(f"\n[bold cyan]═══ FlowSpec Flow Analysis - {analysis.hostname} ═══[/bold cyan]\n")
+        
+        for step_num, step_name, explanation, commands in flow_steps:
+            # Find matching checks from analysis
+            step_checks = [c for c in analysis.checks if c.step.startswith(step_num) or step_num in c.step]
+            
+            # Determine status
+            has_fail = any(c.status == CheckStatus.FAIL for c in step_checks)
+            has_warn = any(c.status == CheckStatus.WARN for c in step_checks)
+            has_pass = any(c.status == CheckStatus.PASS for c in step_checks)
+            
+            if has_fail:
+                icon, color = "✗", "red"
+            elif has_warn:
+                icon, color = "⚠", "yellow"
+            elif has_pass:
+                icon, color = "✓", "green"
+            else:
+                icon, color = "○", "dim"
+            
+            # Build step content
+            lines = [f"[dim]{explanation}[/dim]", ""]
+            
+            for check in step_checks:
+                cmd_display = check.command[:60] + "..." if len(check.command) > 60 else check.command
+                lines.append(f"[cyan]CMD:[/cyan] {cmd_display}")
+                lines.append(f"[{color}]{icon} {check.actual}[/{color}]")
+                
+                # Show brief raw output (first 3 meaningful lines)
+                if check.raw_output:
+                    raw_lines = [l.strip() for l in check.raw_output.split('\n') 
+                                if l.strip() and not l.startswith('#') and 'show' not in l.lower()][:3]
+                    if raw_lines:
+                        lines.append("[dim]Output:[/dim]")
+                        for rl in raw_lines:
+                            lines.append(f"  [dim]{rl[:70]}[/dim]")
+                lines.append("")
+            
+            if not step_checks:
+                lines.append(f"[dim]Commands: {', '.join(c[1][:30] for c in commands)}[/dim]")
+                lines.append("[dim]No data collected[/dim]")
+            
+            console.print(Panel(
+                "\n".join(lines),
+                title=f"[bold]STEP {step_num}: {step_name}[/bold]",
+                border_style=color
+            ))
+        
+        console.print("")
+    
     def print_flow_diagram(self, analysis: DeviceAnalysis):
         """Print visual flowchart showing DUT processing order"""
         if not RICH_AVAILABLE:
@@ -5820,6 +5906,15 @@ forwarding-options
                             console.print("\n[bold cyan]Verbose View - Full Details[/bold cyan]\n")
                         self.print_flow_diagram(self.current_analysis)
                         self.print_summary_table(self.current_analysis)
+                    else:
+                        if RICH_AVAILABLE:
+                            console.print("[yellow]No analysis available. Run Full Analysis [1] first.[/yellow]")
+                        else:
+                            print("No analysis available. Run Full Analysis first.")
+                elif choice == 'f':
+                    # Flow Analysis - ordered by DUT processing with commands
+                    if self.current_analysis:
+                        self.print_ordered_flow_analysis(self.current_analysis)
                     else:
                         if RICH_AVAILABLE:
                             console.print("[yellow]No analysis available. Run Full Analysis [1] first.[/yellow]")

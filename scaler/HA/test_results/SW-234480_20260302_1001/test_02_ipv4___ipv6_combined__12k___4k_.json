@@ -1,0 +1,13 @@
+{
+  "id": "test_02",
+  "name": "IPv4 + IPv6 Combined (12K + 4K)",
+  "verdict": "FAIL",
+  "ipv4_pfxrcd": 12000,
+  "ipv6_pfxrcd": 4000,
+  "ipv4_tcam": 12000,
+  "ipv6_tcam": 0,
+  "ipv4_convergence_sec": 4.5,
+  "ipv6_convergence_sec": 4.3,
+  "stable": true,
+  "reason": "IPv6 TCAM: 0/4000"
+}

@@ -122,58 +122,51 @@ def get_service_start_time(log_file: Path) -> Optional[datetime]:
 
 
 def count_total_extractions(log_file: Path) -> dict:
-    """Count total extraction cycles and success/failure from the full log file."""
-    result = {
-        'total': 0,
-        'successful': 0,
-        'failed': 0
-    }
-    
+    """Count total extraction cycles and success/failure using grep (fast on large files)."""
+    result = {'total': 0, 'successful': 0, 'failed': 0}
     if not log_file.exists():
         return result
-    
     try:
-        with open(log_file, 'r') as f:
-            for line in f:
-                if '=== Starting config extraction ===' in line:
-                    result['total'] += 1
-                elif ': No change -' in line or 'Config changed' in line or 'Config CHANGED' in line:
-                    result['successful'] += 1
-                elif 'FAILED' in line:
-                    result['failed'] += 1
-    except:
+        lf = str(log_file)
+        r = subprocess.run(['grep', '-c', 'Starting config extraction', lf],
+                          capture_output=True, text=True, timeout=5)
+        result['total'] = int(r.stdout.strip() or 0)
+        r = subprocess.run(['grep', '-cE', 'No change -|Config changed|Config CHANGED', lf],
+                          capture_output=True, text=True, timeout=5)
+        result['successful'] = int(r.stdout.strip() or 0)
+        r = subprocess.run(['grep', '-c', 'FAILED', lf],
+                          capture_output=True, text=True, timeout=5)
+        result['failed'] = int(r.stdout.strip() or 0)
+    except Exception:
         pass
     return result
 
 
 def parse_log_entries(log_file: Path, max_entries: int = 100) -> list:
-    """Parse extraction log entries."""
+    """Parse extraction log entries (uses tail for efficiency on large logs)."""
     entries = []
     if not log_file.exists():
         return entries
     
-    with open(log_file, 'r') as f:
-        lines = f.readlines()[-max_entries * 5:]  # Read last N*5 lines
+    try:
+        r = subprocess.run(['tail', '-n', str(max_entries * 5), str(log_file)],
+                          capture_output=True, text=True, timeout=5)
+        lines = r.stdout.splitlines()
+    except Exception:
+        return entries
     
     for line in lines:
         line = line.strip()
-        if not line:
+        if not line or not line.startswith('['):
             continue
-        
-        # Parse timestamp
-        if line.startswith('['):
-            try:
-                ts_end = line.index(']')
-                ts_str = line[1:ts_end]
-                timestamp = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-                message = line[ts_end + 2:]
-                entries.append({
-                    'timestamp': timestamp,
-                    'message': message,
-                    'raw': line
-                })
-            except:
-                pass
+        try:
+            ts_end = line.index(']')
+            ts_str = line[1:ts_end]
+            timestamp = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+            message = line[ts_end + 2:]
+            entries.append({'timestamp': timestamp, 'message': message, 'raw': line})
+        except:
+            pass
     
     return entries
 
@@ -433,11 +426,21 @@ def print_extraction_status(stats: dict, watch_mode: bool = False):
     print()
 
 
-# Multi-path connection strategy imports
+# Multi-path connection strategy imports (bypass scaler/__init__.py to avoid
+# loading pydantic, paramiko, config_parser, etc. — saves ~700ms startup)
 try:
-    from scaler.connection_strategy import detect_device_state, DeviceState, get_console_config_for_device
+    import importlib.util
+    _cs_spec = importlib.util.spec_from_file_location(
+        "connection_strategy",
+        str(SCALER_DIR / "scaler" / "connection_strategy.py"))
+    _cs_mod = importlib.util.module_from_spec(_cs_spec)
+    _cs_spec.loader.exec_module(_cs_mod)
+    detect_device_state = _cs_mod.detect_device_state
+    DeviceState = _cs_mod.DeviceState
+    get_console_config_for_device = _cs_mod.get_console_config_for_device
     HAS_CONNECTION_STRATEGY = True
-except ImportError:
+    del _cs_spec, _cs_mod
+except Exception:
     HAS_CONNECTION_STRATEGY = False
 
 
@@ -502,6 +505,12 @@ def update_device_state_live(devices: list, configs_dir: Path, stats: dict) -> l
             state, recovery_type, err = detect_device_state(temp_dev)
             
             if state and state != DeviceState.UNREACHABLE:
+                # Don't overwrite a known RECOVERY/DN_RECOVERY state with UNKNOWN
+                # (SSH may be unreachable while device is genuinely in recovery)
+                current_state = dev.get('device_state', '')
+                if state == DeviceState.UNKNOWN and current_state in ('RECOVERY', 'DN_RECOVERY'):
+                    continue
+                
                 # Update operational.json with live state
                 op_path = configs_dir / dev['name'] / "operational.json"
                 op_path.parent.mkdir(parents=True, exist_ok=True)
@@ -525,8 +534,9 @@ def update_device_state_live(devices: list, configs_dir: Path, stats: dict) -> l
                 # which is called separately. If not present, call it now.
                 if 'connection_method' not in op_data or not op_data.get('connection_method'):
                     try:
-                        from scaler.connection_strategy import refresh_device_state
-                        refresh_device_state(dev['name'], update_operational=True)
+                        _cs = importlib.util.spec_from_file_location("_cs_refresh", str(SCALER_DIR / "scaler" / "connection_strategy.py"))
+                        _cm = importlib.util.module_from_spec(_cs); _cs.loader.exec_module(_cm)
+                        _cm.refresh_device_state(dev['name'], update_operational=True)
                         # Re-read the updated data
                         with open(op_path, 'r') as f:
                             op_data = json.load(f)
@@ -550,8 +560,9 @@ def update_device_state_live(devices: list, configs_dir: Path, stats: dict) -> l
                 # Update running.txt header for recovery mode devices
                 if is_recovery:
                     try:
-                        from scaler.config_extractor import update_recovery_mode_header
-                        update_recovery_mode_header(dev['name'])
+                        _ce_spec = importlib.util.spec_from_file_location("_ce", str(SCALER_DIR / "scaler" / "config_extractor.py"))
+                        _ce_mod = importlib.util.module_from_spec(_ce_spec); _ce_spec.loader.exec_module(_ce_mod)
+                        _ce_mod.update_recovery_mode_header(dev['name'])
                     except Exception:
                         pass
                 
@@ -747,14 +758,14 @@ def print_device_table(devices: list):
         services = ' '.join(services_parts) if services_parts else '-'
         
         # Status indicator - show live-detected state if available
-        if dev.get('recovery_mode_detected'):
+        if dev.get('recovery_mode_detected') or dev.get('device_state') == 'RECOVERY':
             recovery_type = dev.get('recovery_type', '')
             if recovery_type == 'ONIE':
                 status = f"{Colors.BOLD}{Colors.RED}⚠ ONIE{Colors.RESET}"
             elif recovery_type == 'BASEOS_SHELL':
                 status = f"{Colors.YELLOW}⚠ BASEOS_SHELL{Colors.RESET}"
-            elif recovery_type == 'DN_RECOVERY':
-                status = f"{Colors.BOLD}{Colors.RED}⚠ DN_RECOVERY{Colors.RESET}"
+            elif recovery_type == 'DN_RECOVERY' or dev.get('device_state') == 'RECOVERY':
+                status = f"{Colors.BOLD}{Colors.RED}🔴 RECOVERY{Colors.RESET}"
             elif recovery_type == 'GI':
                 status = f"{Colors.CYAN}ℹ GI_MODE{Colors.RESET}"
             elif recovery_type == 'STANDALONE':
@@ -867,12 +878,11 @@ def main():
                 if last_mod_times:
                     stats['last_extraction'] = max(last_mod_times)
             
-            # Run live state detection BEFORE printing table
-            detected_issues = update_device_state_live(devices, configs_dir, stats)
-            
-            # Update LLDP for healthy devices (always, not just in watch mode)
-            # This ensures operational.json always has fresh LLDP data
-            lldp_updated = update_lldp_for_devices(devices, configs_dir)
+            # Live SSH probing only in watch mode (skip for quick one-shot status)
+            detected_issues = []
+            if continuous:
+                detected_issues = update_device_state_live(devices, configs_dir, stats)
+                update_lldp_for_devices(devices, configs_dir)
             
             # Print sections (with updated live states)
             print_extraction_status(stats, watch_mode=continuous)

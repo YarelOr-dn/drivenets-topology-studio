@@ -1,0 +1,105 @@
+{
+  "hostname": "PE-1",
+  "ip": "wk31d7vv00023",
+  "timestamp": "2026-02-03T13:49:59.748653",
+  "dnos_version": "",
+  "summary": {
+    "total_rules": 0,
+    "rules_installed": 0,
+    "rules_failed": 0,
+    "tcam_errors": 0,
+    "hw_write_failures": 0,
+    "vrf_count": 0
+  },
+  "problems": [
+    "No FlowSpec-VPN BGP sessions established"
+  ],
+  "warnings": [
+    "No FlowSpec-VPN routes received from peers",
+    "No VRFs configured with ipv4-flowspec address family"
+  ],
+  "checks": [
+    {
+      "step": "1",
+      "component": "BGP",
+      "check_name": "FlowSpec-VPN Sessions",
+      "status": "\u2717",
+      "expected": "\u22651 neighbor Established",
+      "actual": "0/0 Established",
+      "command": "show bgp ipv4 flowspec-vpn summary"
+    },
+    {
+      "step": "2",
+      "component": "BGP",
+      "check_name": "FlowSpec-VPN Routes Received",
+      "status": "\u26a0",
+      "expected": "\u22651 FlowSpec-VPN routes",
+      "actual": "0 routes",
+      "command": "show bgp ipv4 flowspec-vpn routes"
+    },
+    {
+      "step": "3",
+      "component": "VRF",
+      "check_name": "FlowSpec VRF Configuration",
+      "status": "\u26a0",
+      "expected": "\u22651 VRF with ipv4-flowspec",
+      "actual": "0 VRFs configured",
+      "command": "show running-config | include 'vrf instance\\|import-vpn route-target\\|ipv4-flowspec'"
+    },
+    {
+      "step": "4",
+      "component": "Zebra",
+      "check_name": "RIB Manager FlowSpec DB",
+      "status": "\u26a0",
+      "expected": "Routes in flowspec_db",
+      "actual": "IPv4: 0, IPv6: 0",
+      "command": "show dnos-internal routing rib-manager database flowspec"
+    },
+    {
+      "step": "5",
+      "component": "FPM",
+      "check_name": "NCP FlowSpec Installation",
+      "status": "\u2717",
+      "expected": "All rules 'Status: Installed'",
+      "actual": "Installed: 0, Failed: 0",
+      "command": "show flowspec ncp 0"
+    },
+    {
+      "step": "6",
+      "component": "wb_agent",
+      "check_name": "FlowSpec BGP Rules (xray)",
+      "status": "\u2717",
+      "expected": "Rules with vrf_id \u2260 0 for VPN",
+      "actual": "0 rules, 0 with VRF, 0 unsupported",
+      "command": "xraycli /wb_agent/flowspec/bgp/ipv4/rules"
+    },
+    {
+      "step": "7",
+      "component": "wb_agent",
+      "check_name": "FlowSpec Table Info",
+      "status": "\u2713",
+      "expected": "num_tcam_errors = 0",
+      "actual": "entries: 0, unsupported: 0, tcam_errors: 0",
+      "command": "xraycli /wb_agent/flowspec/bgp/ipv4/info"
+    },
+    {
+      "step": "9",
+      "component": "Counters",
+      "check_name": "FlowSpec Match Counters",
+      "status": "\u26a0",
+      "expected": "Counters incrementing with traffic",
+      "actual": "0 rules matched, 0 total packets",
+      "command": "show flowspec"
+    },
+    {
+      "step": "10",
+      "component": "Interfaces",
+      "check_name": "FlowSpec Enabled Interfaces",
+      "status": "\u2713",
+      "expected": "\u22651 interface with flowspec enabled",
+      "actual": "1 interfaces",
+      "command": "show running-config | include 'flowspec enabled'"
+    }
+  ],
+  "rules": []
+}

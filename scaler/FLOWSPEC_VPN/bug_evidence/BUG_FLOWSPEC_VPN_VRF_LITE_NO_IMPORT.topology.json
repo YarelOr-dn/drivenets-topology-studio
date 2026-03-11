@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "objects": [
+    { "id": "device_0", "type": "device", "deviceType": "router", "x": 120, "y": 300, "radius": 30, "color": "#e67e22", "label": "ExaBGP", "locked": false, "visualStyle": "server" },
+    { "id": "device_1", "type": "device", "deviceType": "router", "x": 420, "y": 300, "radius": 40, "color": "#3498db", "label": "PE-1", "locked": false, "visualStyle": "classic" },
+
+    { "id": "link_0", "type": "link", "originType": "QL", "device1": "device_0", "device2": "device_1", "start": {"x": 150, "y": 300}, "end": {"x": 380, "y": 300}, "color": "#2ecc71", "style": "arrow", "width": 3 },
+
+    { "id": "shape_0", "type": "shape", "shapeType": "rectangle", "x": 120, "y": 148, "width": 225, "height": 100, "rotation": 0, "fillColor": "#e67e22", "fillOpacity": 0.06, "fillEnabled": true, "strokeColor": "#e67e22", "strokeWidth": 1.5, "strokeEnabled": true, "cornerRadius": 10 },
+    { "id": "shape_1", "type": "shape", "shapeType": "rectangle", "x": 660, "y": 178, "width": 300, "height": 108, "rotation": 0, "fillColor": "#2ecc71", "fillOpacity": 0.06, "fillEnabled": true, "strokeColor": "#27ae60", "strokeWidth": 1.5, "strokeEnabled": true, "cornerRadius": 10 },
+    { "id": "shape_2", "type": "shape", "shapeType": "rectangle", "x": 660, "y": 420, "width": 300, "height": 108, "rotation": 0, "fillColor": "#e74c3c", "fillOpacity": 0.06, "fillEnabled": true, "strokeColor": "#c0392b", "strokeWidth": 1.5, "strokeEnabled": true, "cornerRadius": 10 },
+
+    { "id": "text_0", "type": "text", "x": 120, "y": 358, "text": "100.64.6.134", "fontSize": 10, "color": "#85929e", "showBackground": false },
+    { "id": "text_1", "type": "text", "x": 420, "y": 368, "text": "1.1.1.1", "fontSize": 10, "color": "#85929e", "showBackground": false },
+
+    { "id": "text_2", "type": "text", "x": 270, "y": 278, "text": "eBGP FlowSpec-VPN", "fontSize": 10, "color": "#2ecc71", "linkId": "link_0", "position": "middle", "_onLinkLine": true, "showBackground": false },
+
+    { "id": "text_3", "type": "text", "x": 120, "y": 148, "text": "Route Injected:\nrd 1.1.1.1:888\ndst 172.16.99.0/24\nredirect 888:888\next-community target:888:888", "fontSize": 10, "color": "#f0b27a", "showBackground": false },
+
+    { "id": "text_4", "type": "text", "x": 660, "y": 178, "text": "VRF TEST_WITH_RD\nRD 1.1.1.1:888  RT 888:888\nimport-vpn: ipv4-flowspec + ipv4-unicast\nRedirect target: selected\nTraffic redirected here", "fontSize": 11, "color": "#2ecc71", "showBackground": false },
+
+    { "id": "text_5", "type": "text", "x": 660, "y": 420, "text": "VRF TEST_NO_RD (VRF-Lite)\nNo RD configured  RT 888:888\nimport-vpn: ipv4-flowspec + ipv4-unicast\nRedirect target: excluded\nNot a candidate (requires RD)", "fontSize": 11, "color": "#e74c3c", "showBackground": false },
+
+    { "id": "shape_3", "type": "shape", "shapeType": "checkmark", "x": 820, "y": 130, "width": 30, "height": 30, "rotation": 0, "fillColor": "#2ecc71", "fillOpacity": 1.0, "fillEnabled": true, "strokeColor": "#1e8449", "strokeWidth": 2.5, "strokeEnabled": true },
+    { "id": "shape_4", "type": "shape", "shapeType": "cross", "x": 820, "y": 372, "width": 30, "height": 30, "rotation": 0, "fillColor": "#e74c3c", "fillOpacity": 1.0, "fillEnabled": true, "strokeColor": "#922b21", "strokeWidth": 2.5, "strokeEnabled": true }
+  ],
+  "metadata": {
+    "deviceIdCounter": 2,
+    "linkIdCounter": 1,
+    "textIdCounter": 6,
+    "shapeIdCounter": 5,
+    "linkCurveMode": true,
+    "globalCurveMode": "auto",
+    "description": "FlowSpec redirect-to-rt cannot target VRF-Lite (no RD) — ExaBGP → PE-1, redirect 888:888 selects TEST_WITH_RD but excludes TEST_NO_RD"
+  }
+}

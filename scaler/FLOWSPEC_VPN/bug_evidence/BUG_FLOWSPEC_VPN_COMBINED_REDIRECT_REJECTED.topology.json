@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "objects": [
+    { "id": "device_0", "type": "device", "deviceType": "router", "x": 120, "y": 300, "radius": 30, "color": "#e67e22", "label": "ExaBGP", "locked": false, "visualStyle": "server" },
+    { "id": "device_1", "type": "device", "deviceType": "router", "x": 480, "y": 300, "radius": 45, "color": "#3498db", "label": "PE-4", "locked": false, "visualStyle": "classic" },
+
+    { "id": "link_0", "type": "link", "originType": "QL", "device1": "device_0", "device2": "device_1", "start": {"x": 150, "y": 300}, "end": {"x": 435, "y": 300}, "color": "#2ecc71", "style": "arrow", "width": 3 },
+
+    { "id": "text_ip0", "type": "text", "x": 120, "y": 360, "text": "100.64.6.134", "fontSize": 10, "color": "#85929e", "showBackground": false },
+    { "id": "text_ip1", "type": "text", "x": 480, "y": 375, "text": "4.4.4.4 (100.70.0.206)", "fontSize": 10, "color": "#85929e", "showBackground": false },
+
+    { "id": "text_link", "type": "text", "x": 290, "y": 278, "text": "eBGP FlowSpec-VPN\nSAFI 134, AS 65200", "fontSize": 11, "color": "#2ecc71", "linkId": "link_0", "position": "middle", "_onLinkLine": true, "showBackground": false },
+
+    { "id": "text_route", "type": "text", "x": 120, "y": 155, "text": "Route Injected:\ndst 100.100.100.1/32\nRD 4.4.4.4:100  RT 1234567:300\nredirect-ip 49.49.49.9\nredirect-to-rt 1234567:101", "fontSize": 10, "color": "#f0b27a", "showBackground": true, "backgroundColor": "rgba(230,126,34,0.08)", "backgroundOpacity": 60, "showBorder": true, "borderColor": "rgba(230,126,34,0.4)", "borderWidth": 1 },
+
+    { "id": "shape_vrf_alpha", "type": "shape", "shapeType": "rectangle", "x": 620, "y": 180, "width": 290, "height": 110, "fillColor": "#e74c3c", "fillOpacity": 0.05, "fillEnabled": true, "strokeColor": "#c0392b", "strokeWidth": 1.5, "strokeEnabled": true, "cornerRadius": 10 },
+
+    { "id": "text_vrf_alpha", "type": "text", "x": 620, "y": 180, "text": "VRF ALPHA (vrf_id 104)\nRD 4.4.4.4:100  Import RT 1234567:300\nFlowSpec instance: rule present\nActions: redirect-ip-nh:0.0.0.0 + redirect-vrf:ZULU\nNCP: Not installed -- unsupported action", "fontSize": 10, "color": "#e74c3c", "showBackground": false },
+
+    { "id": "shape_ncp", "type": "shape", "shapeType": "rectangle", "x": 380, "y": 420, "width": 260, "height": 80, "fillColor": "#c0392b", "fillOpacity": 0.06, "fillEnabled": true, "strokeColor": "#c0392b", "strokeWidth": 1.5, "strokeEnabled": true, "cornerRadius": 10 },
+
+    { "id": "text_ncp", "type": "text", "x": 380, "y": 420, "text": "NCP 18 (wb_agent FlowspecManager)\nCheckActionSupport(): REJECTED\n\"Cannot add redirect next hop\n rule with redirect vrf\"", "fontSize": 10, "color": "#c0392b", "showBackground": false },
+
+    { "id": "text_pipeline", "type": "text", "x": 120, "y": 430, "text": "Pipeline: bgpd -> zebra -> fibmgrd -> NCP\nbgpd passes BOTH actions (should strip redirect-ip)\nfibmgrd protobuf: REDIRECT_IP_NH(nh_oid:0) + REDIRECT_VRF(vrf_id:106)\nSW-206876 spec: strip redirect-ip, keep only redirect-to-rt", "fontSize": 9, "color": "#85929e", "showBackground": true, "backgroundColor": "rgba(133,146,158,0.06)", "backgroundOpacity": 40, "showBorder": true, "borderColor": "rgba(133,146,158,0.25)", "borderWidth": 1 },
+
+    { "id": "shape_cross", "type": "shape", "shapeType": "cross", "x": 775, "y": 148, "width": 26, "height": 26, "rotation": 0, "fillColor": "#e74c3c", "fillOpacity": 1.0, "fillEnabled": true, "strokeColor": "#c0392b", "strokeWidth": 2, "strokeEnabled": true },
+    { "id": "shape_cross2", "type": "shape", "shapeType": "cross", "x": 510, "y": 400, "width": 22, "height": 22, "rotation": 0, "fillColor": "#e74c3c", "fillOpacity": 1.0, "fillEnabled": true, "strokeColor": "#c0392b", "strokeWidth": 2, "strokeEnabled": true }
+  ],
+  "metadata": {
+    "deviceIdCounter": 2,
+    "linkIdCounter": 1,
+    "textIdCounter": 8,
+    "shapeIdCounter": 5,
+    "description": "SW-206876: ExaBGP injects FlowSpec-VPN rule with redirect-ip + redirect-to-rt. bgpd passes both actions to NCP. NCP rejects combination. Spec says strip redirect-ip."
+  }
+}

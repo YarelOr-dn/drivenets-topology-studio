@@ -1,0 +1,128 @@
+{
+  "3a": {
+    "desc": "dest-ip only",
+    "hw": 10,
+    "rules": 10,
+    "ratio": 1.0,
+    "received": 24,
+    "installed": 23,
+    "not_installed": 2
+  },
+  "3b": {
+    "desc": "dest-ip + protocol tcp",
+    "hw": 10,
+    "rules": 10,
+    "ratio": 1.0,
+    "received": 24,
+    "installed": 23,
+    "not_installed": 2
+  },
+  "3c": {
+    "desc": "dest-ip + protocol + dest-ports",
+    "hw": 10,
+    "rules": 10,
+    "ratio": 1.0,
+    "received": 24,
+    "installed": 23,
+    "not_installed": 2
+  },
+  "3d": {
+    "desc": "dest-ip + protocol + dest-ports + dscp",
+    "hw": 10,
+    "rules": 10,
+    "ratio": 1.0,
+    "received": 24,
+    "installed": 23,
+    "not_installed": 2
+  },
+  "3e": {
+    "desc": "dest-ip + src-ip",
+    "hw": 10,
+    "rules": 10,
+    "ratio": 1.0,
+    "received": 24,
+    "installed": 23,
+    "not_installed": 2
+  },
+  "3f": {
+    "desc": "dest-ip + src-ports single",
+    "hw": 10,
+    "rules": 10,
+    "ratio": 1.0,
+    "received": 24,
+    "installed": 23,
+    "not_installed": 2
+  },
+  "3g": {
+    "desc": "dest-ip + src-ports range",
+    "hw": 10,
+    "rules": 10,
+    "ratio": 1.0,
+    "received": 24,
+    "installed": 23,
+    "not_installed": 2
+  },
+  "3h": {
+    "desc": "dest-ip + packet-length single",
+    "hw": 10,
+    "rules": 10,
+    "ratio": 1.0,
+    "received": 24,
+    "installed": 23,
+    "not_installed": 2
+  },
+  "3i": {
+    "desc": "dest-ip + packet-length range",
+    "hw": 0,
+    "rules": 10,
+    "ratio": 0,
+    "received": 24,
+    "installed": 13,
+    "not_installed": 12
+  },
+  "3j": {
+    "desc": "dest-ip + tcp-flag syn",
+    "hw": 10,
+    "rules": 10,
+    "ratio": 1.0,
+    "received": 24,
+    "installed": 23,
+    "not_installed": 2
+  },
+  "3k": {
+    "desc": "dest-ip + tcp-flag syn,ack",
+    "hw": 10,
+    "rules": 10,
+    "ratio": 1.0,
+    "received": 24,
+    "installed": 23,
+    "not_installed": 2
+  },
+  "3l": {
+    "desc": "dest-ip + fragmented",
+    "hw": 10,
+    "rules": 10,
+    "ratio": 1.0,
+    "received": 24,
+    "installed": 23,
+    "not_installed": 2
+  },
+  "3m": {
+    "desc": "dest-ip + icmp echo-request",
+    "hw": 10,
+    "rules": 10,
+    "ratio": 1.0,
+    "received": 24,
+    "installed": 23,
+    "not_installed": 2
+  },
+  "3n": {
+    "desc": "Combined worst-case",
+    "hw": 0,
+    "rules": 10,
+    "ratio": 0,
+    "received": 24,
+    "installed": 13,
+    "not_installed": 12
+  }
+}

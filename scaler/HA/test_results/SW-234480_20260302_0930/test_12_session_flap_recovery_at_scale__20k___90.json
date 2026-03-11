@@ -1,0 +1,17 @@
+{
+  "id": "test_12",
+  "name": "Session Flap Recovery at Scale (20K < 90s)",
+  "verdict": "FAIL",
+  "recovery_sec": 5.3,
+  "final_pfxrcd": 20000,
+  "dp_installed": 11,
+  "dp_pre_flap": 11,
+  "tcam": {
+    "installed": 12000,
+    "total": 12000,
+    "percent": 100.0,
+    "ipv6_installed": 21,
+    "ipv6_total": 4000
+  },
+  "reason": "DP not restored: 11/12000"
+}

@@ -1,0 +1,57 @@
+{
+  "session_id": "sw240206_rt_redirect",
+  "status": "closed",
+  "created": "2026-02-22T15:10:24.680414+00:00",
+  "exabgp_pid": 3545885,
+  "exabgp_config": "/tmp/exabgp_sw240206_rt_redirect.conf",
+  "exabgp_log": "/home/dn/SCALER/FLOWSPEC_VPN/exabgp/logs/sw240206_rt_redirect_exabgp.log",
+  "peer_ip": "100.64.1.35",
+  "peer_as": "1234567",
+  "exabgp_ip": "100.70.0.32",
+  "device_ip": "100.64.1.35",
+  "selected_afis": [
+    "ipv4 flow-vpn"
+  ],
+  "target_device": null,
+  "dnaas_leaf": null,
+  "applied_configs": {},
+  "injected_routes": [
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; } then { redirect 300:300; extended-community [ target:300:300 ]; }",
+      "injected_at": "2026-02-22T15:10:24.680431+00:00"
+    },
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; } then { redirect 300:300; extended-community [ target:300:300 ]; }",
+      "injected_at": "2026-02-22T15:10:24.680437+00:00"
+    },
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; } then { redirect 300:300; extended-community [ target:300:300 ]; }",
+      "injected_at": "2026-02-22T15:10:24.680441+00:00"
+    },
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; } then { redirect 300:300; extended-community [ target:300:300 ]; }",
+      "injected_at": "2026-02-22T15:10:24.680445+00:00"
+    },
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; } then { redirect 300:300; extended-community [ target:300:300 ]; }",
+      "injected_at": "2026-02-22T15:10:24.680450+00:00"
+    },
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; } then { redirect 300:300; extended-community [ target:300:300 ]; }",
+      "injected_at": "2026-02-22T15:10:24.680454+00:00"
+    },
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; } then { redirect 300:300; extended-community [ target:300:300 ]; }",
+      "injected_at": "2026-02-22T15:10:24.680458+00:00"
+    },
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; } then { redirect 300:300; extended-community [ target:300:300 ]; }",
+      "injected_at": "2026-02-22T15:10:24.680463+00:00"
+    },
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; } then { redirect 300:300; extended-community [ target:300:300 ]; }",
+      "injected_at": "2026-02-22T15:10:38.800913+00:00"
+    }
+  ],
+  "closed_at": "2026-02-22T15:18:09.597598+00:00"
+}

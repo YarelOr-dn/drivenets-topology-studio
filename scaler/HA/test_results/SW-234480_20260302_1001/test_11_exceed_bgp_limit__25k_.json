@@ -1,0 +1,20 @@
+{
+  "id": "test_11",
+  "name": "Exceed BGP Limit (25K)",
+  "verdict": "PASS",
+  "bgp_accepted": 25000,
+  "bgp_tried": 25000,
+  "dp_installed": 12000,
+  "dp_capped": true,
+  "capacity_warning": false,
+  "session_state": "Established",
+  "stable": true,
+  "tcam": {
+    "installed": 12000,
+    "total": 12000,
+    "percent": 100.0,
+    "ipv6_installed": 0,
+    "ipv6_total": 4000
+  },
+  "reason": null
+}

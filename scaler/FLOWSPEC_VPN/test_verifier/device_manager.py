@@ -44,13 +44,19 @@ class SSHConnection:
             return False
         
         try:
-            ssh_cmd = f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {self.username}@{self.ip}"
+            # ServerAliveInterval=10 sends keepalive every 10s to prevent idle timeout
+            ssh_cmd = (
+                f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+                f"-o ServerAliveInterval=10 -o ServerAliveCountMax=6 "
+                f"-o ConnectTimeout=20 "
+                f"{self.username}@{self.ip}"
+            )
             self.child = pexpect.spawn(ssh_cmd, timeout=self.timeout)
             
-            i = self.child.expect(['password:', 'Password:', pexpect.TIMEOUT, pexpect.EOF], timeout=10)
+            i = self.child.expect(['password:', 'Password:', pexpect.TIMEOUT, pexpect.EOF], timeout=20)
             if i == 0 or i == 1:
                 self.child.sendline(self.password)
-                self.child.expect(['#', '$', '>', pexpect.TIMEOUT], timeout=10)
+                self.child.expect(['#', '$', '>', pexpect.TIMEOUT], timeout=20)
                 self.connected = True
                 logger.info(f"Connected to {self.hostname} ({self.ip})")
                 return True
@@ -123,6 +129,16 @@ class SSHConnection:
             Tuple of (success, output)
         """
         return self.run_command(command, timeout)
+
+    def keepalive(self) -> bool:
+        """Send a no-op command to keep the session active. Returns True if connection is alive."""
+        if not self.connected or not self.child:
+            return False
+        try:
+            ok, _ = self.run_command("show hostname", timeout=5)
+            return ok
+        except Exception:
+            return False
     
     def run_config_command(self, config_lines: List[str], commit: bool = True) -> Tuple[bool, str]:
         """
@@ -141,37 +157,90 @@ class SSHConnection:
         try:
             # Enter configure mode
             self.child.sendline("configure")
-            self.child.expect(['#', '>'], timeout=5)
+            i = self.child.expect(['#', '>', pexpect.TIMEOUT, pexpect.EOF], timeout=10)
+            if i in (2, 3):  # TIMEOUT or EOF
+                raise Exception(f"Connection lost during configure (got {'TIMEOUT' if i == 2 else 'EOF'})")
             
             output_lines = []
             
-            # Send each config line
+            # Send each config line (10s timeout for slow devices)
             for line in config_lines:
                 self.child.sendline(line)
-                time.sleep(0.2)  # Small delay between commands
-                i = self.child.expect(['#', '>', 'Error', 'error'], timeout=5)
-                if i == 2 or i == 3:
+                time.sleep(0.4)  # Delay for device processing (reduces idle timeout risk)
+                i = self.child.expect(['#', '>', 'Error', 'error', pexpect.TIMEOUT, pexpect.EOF], timeout=10)
+                if i == 2 or i == 3:  # Error or error
                     error_output = self.child.before.decode('utf-8', errors='ignore')
                     output_lines.append(f"Error in '{line}': {error_output}")
-                    # Exit configure mode
                     self.child.sendline("exit")
                     self.child.expect(['#', '>'], timeout=5)
                     return False, "\n".join(output_lines)
+                if i == 4 or i == 5:  # TIMEOUT or EOF
+                    raise Exception(f"Connection lost at '{line}' (got {'TIMEOUT' if i == 4 else 'EOF'})")
             
             # Commit if requested
             if commit:
                 self.child.sendline("commit")
-                self.child.expect(['#', '>'], timeout=30)
+                i = self.child.expect(['#', '>', pexpect.TIMEOUT, pexpect.EOF], timeout=60)
+                if i in (2, 3):
+                    raise Exception(f"Connection lost during commit (got {'TIMEOUT' if i == 2 else 'EOF'})")
                 commit_output = self.child.before.decode('utf-8', errors='ignore')
                 output_lines.append(commit_output)
             
             # Exit configure mode
             self.child.sendline("exit")
-            self.child.expect(['#', '>'], timeout=5)
+            self.child.expect(['#', '>'], timeout=10)
             
             return True, "\n".join(output_lines)
         except Exception as e:
+            self.connected = False  # Mark stale so caller can reconnect
             logger.error(f"Error running config commands on {self.hostname}: {e}")
+            return False, str(e)
+
+    def run_config_set_commands(self, set_lines: List[str], commit: bool = True) -> Tuple[bool, str]:
+        """
+        Run configuration using 'load set terminal' - avoids exit/navigation issues.
+        Each line should be a full 'set ...' path.
+        """
+        if not self.connected:
+            return False, "Not connected"
+        try:
+            self.child.sendline("configure")
+            i = self.child.expect(['#', '>', pexpect.TIMEOUT, pexpect.EOF], timeout=10)
+            if i in (2, 3):
+                raise Exception(f"Connection lost during configure")
+            self.child.sendline("load set terminal")
+            i = self.child.expect(['#', '>', 'terminal', 'Type', pexpect.TIMEOUT, pexpect.EOF], timeout=15)
+            if i >= 4:  # TIMEOUT or EOF
+                raise Exception("Connection lost during load set terminal")
+            for line in set_lines:
+                line = line.strip()
+                if not line:
+                    continue
+                if not line.startswith("set ") and not line.startswith("delete "):
+                    line = f"set {line}"
+                self.child.sendline(line)
+                time.sleep(0.3)
+            self.child.sendline("\x04")  # Ctrl+D to end load
+            i = self.child.expect(['load complete', 'load failed', 'error', 'Error', '#', pexpect.TIMEOUT, pexpect.EOF], timeout=30)
+            if i == 1 or i == 2 or i == 3:
+                err = self.child.before.decode('utf-8', errors='ignore')
+                self.child.sendline("exit discard")
+                self.child.expect(['#', '>'], timeout=5)
+                return False, err
+            if i in (5, 6):
+                raise Exception("Connection lost during load")
+            if commit:
+                self.child.sendline("commit")
+                i = self.child.expect(['commit complete', 'commit failed', '#', '>', pexpect.TIMEOUT, pexpect.EOF], timeout=60)
+                if i == 1 or i in (4, 5):
+                    err = self.child.before.decode('utf-8', errors='ignore')
+                    return False, err
+            self.child.sendline("exit")
+            self.child.expect(['#', '>', pexpect.EOF], timeout=10)
+            return True, "OK"
+        except Exception as e:
+            self.connected = False
+            logger.error(f"Error in run_config_set_commands on {self.hostname}: {e}")
             return False, str(e)
 
 

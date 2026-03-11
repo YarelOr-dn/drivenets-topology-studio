@@ -1,0 +1,13 @@
+{
+  "session_id": "gobgp_test",
+  "engine": "gobgp",
+  "status": "closed",
+  "created": "2026-02-16T10:31:42.012663+00:00",
+  "gobgpd_pid": 496709,
+  "peer_ip": "100.70.0.205",
+  "peer_as": 1234567,
+  "local_as": 65200,
+  "grpc_port": 50051,
+  "config_path": "/tmp/gobgpd_gobgp_test.toml",
+  "injected_routes": []
+}

@@ -395,6 +395,50 @@ class StackManager:
         
         return current_major != target_major
     
+    @staticmethod
+    def extract_branch_name(version_str: str) -> str:
+        """Extract the branch/build portion from a full DNOS version string.
+        
+        Examples:
+            '26.1.0.27_priv.easraf_flowspec_vpn_wbox_side_29' -> 'easraf_flowspec_vpn_wbox_side'
+            '26.1.0.1_priv.aavraham_SW-243508_show_flowspec_scale_3' -> 'aavraham_SW-243508_show_flowspec_scale'
+            '26.1.0.200_dev_v26_1_200_3' -> 'dev_v26_1_200'
+            '25.4.0' -> '' (release, no branch)
+        """
+        import re
+        if not version_str:
+            return ""
+        # Strip leading version numbers: "26.1.0.27_" or "26.1.0_"
+        stripped = re.sub(r'^\d+\.\d+\.\d+(\.\d+)?_?', '', version_str)
+        if not stripped:
+            return ""
+        # Remove "priv." prefix
+        stripped = re.sub(r'^priv\.', '', stripped)
+        # Remove trailing build number (e.g. "_29", "_3")
+        stripped = re.sub(r'_\d+$', '', stripped)
+        return stripped
+
+    @staticmethod
+    def detect_branch_switch(current_version: str, target_version: str) -> Tuple[bool, str, str]:
+        """Detect if an upgrade switches between different development branches.
+        
+        Same major.minor.patch but different branch names can cause incompatibility
+        and DN_RECOVERY. This catches cases that version comparison misses.
+        
+        Returns:
+            (is_switch, current_branch, target_branch)
+        """
+        cur_branch = StackManager.extract_branch_name(current_version)
+        tgt_branch = StackManager.extract_branch_name(target_version)
+        
+        if not cur_branch or not tgt_branch:
+            return False, cur_branch, tgt_branch
+        
+        if cur_branch.lower() == tgt_branch.lower():
+            return False, cur_branch, tgt_branch
+        
+        return True, cur_branch, tgt_branch
+
     def check_freshness(self, stack: StackInfo) -> Tuple[bool, str]:
         """Check if a stack is fresh enough (< 48 hours).
         

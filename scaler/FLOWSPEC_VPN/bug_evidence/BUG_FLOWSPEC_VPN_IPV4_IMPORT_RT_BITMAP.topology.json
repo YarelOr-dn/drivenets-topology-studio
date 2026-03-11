@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "objects": [
+    { "id": "device_0", "type": "device", "deviceType": "router", "x": 100, "y": 300, "radius": 30, "color": "#e67e22", "label": "ExaBGP", "locked": false, "visualStyle": "server" },
+    { "id": "device_1", "type": "device", "deviceType": "router", "x": 370, "y": 300, "radius": 40, "color": "#3498db", "label": "PE-1", "locked": false, "visualStyle": "classic" },
+    { "id": "device_2", "type": "device", "deviceType": "router", "x": 680, "y": 300, "radius": 40, "color": "#9b59b6", "label": "RR-SA-2", "locked": false, "visualStyle": "classic" },
+    { "id": "device_3", "type": "device", "deviceType": "router", "x": 950, "y": 300, "radius": 40, "color": "#3498db", "label": "PE-4", "locked": false, "visualStyle": "classic" },
+
+    { "id": "link_0", "type": "link", "originType": "QL", "device1": "device_0", "device2": "device_1", "start": {"x": 130, "y": 300}, "end": {"x": 330, "y": 300}, "color": "#2ecc71", "style": "arrow", "width": 3 },
+    { "id": "link_1", "type": "link", "originType": "QL", "device1": "device_1", "device2": "device_2", "start": {"x": 410, "y": 300}, "end": {"x": 640, "y": 300}, "color": "#85c1e9", "style": "solid", "width": 2 },
+    { "id": "link_2", "type": "link", "originType": "QL", "device1": "device_2", "device2": "device_3", "start": {"x": 720, "y": 300}, "end": {"x": 910, "y": 300}, "color": "#85c1e9", "style": "solid", "width": 2 },
+
+    { "id": "shape_vrf_ipv4", "type": "shape", "shapeType": "rectangle", "x": 680, "y": 140, "width": 290, "height": 110,
+      "fillColor": "#e74c3c", "fillOpacity": 0.05, "fillEnabled": true,
+      "strokeColor": "#c0392b", "strokeWidth": 1.5, "strokeEnabled": true, "cornerRadius": 10 },
+    { "id": "shape_vrf_ipv6", "type": "shape", "shapeType": "rectangle", "x": 680, "y": 430, "width": 290, "height": 110,
+      "fillColor": "#2ecc71", "fillOpacity": 0.05, "fillEnabled": true,
+      "strokeColor": "#27ae60", "strokeWidth": 1.5, "strokeEnabled": true, "cornerRadius": 10 },
+
+    { "id": "text_ip0", "type": "text", "x": 100, "y": 358, "text": "100.64.6.134", "fontSize": 10, "color": "#85929e", "showBackground": false },
+    { "id": "text_ip1", "type": "text", "x": 370, "y": 368, "text": "1.1.1.1", "fontSize": 10, "color": "#85929e", "showBackground": false },
+    { "id": "text_ip2", "type": "text", "x": 680, "y": 368, "text": "2.2.2.2", "fontSize": 10, "color": "#85929e", "showBackground": false },
+    { "id": "text_ip3", "type": "text", "x": 950, "y": 368, "text": "4.4.4.4", "fontSize": 10, "color": "#85929e", "showBackground": false },
+
+    { "id": "text_link0", "type": "text", "x": 215, "y": 278, "text": "eBGP FlowSpec-VPN\nSAFI 133 + 134", "fontSize": 10, "color": "#2ecc71", "linkId": "link_0", "position": "middle", "_onLinkLine": true, "showBackground": false },
+    { "id": "text_link1", "type": "text", "x": 525, "y": 278, "text": "iBGP FlowSpec-VPN\nSAFI 133 + 134", "fontSize": 10, "color": "#85c1e9", "linkId": "link_1", "position": "middle", "_onLinkLine": true, "showBackground": false },
+    { "id": "text_link2", "type": "text", "x": 815, "y": 278, "text": "iBGP FlowSpec-VPN\nAdjOut: IPv4=0  IPv6=4000", "fontSize": 10, "color": "#85c1e9", "linkId": "link_2", "position": "middle", "_onLinkLine": true, "showBackground": false },
+
+    { "id": "text_route", "type": "text", "x": 100, "y": 145, "text": "Routes Injected:\nIPv4: 12,000 FlowSpec-VPN\n  RD 1.1.1.1:200  RT 300:300\n  action: rate-limit 0\nIPv6: 4,000 FlowSpec-VPN\n  RD 1.1.1.1:200  RT 1234567:401\n  action: rate-limit 0", "fontSize": 10, "color": "#f0b27a", "showBackground": true, "backgroundColor": "rgba(230,126,34,0.08)", "backgroundOpacity": 60, "showBorder": true, "borderColor": "rgba(230,126,34,0.4)", "borderWidth": 1 },
+
+    { "id": "text_vrf_ipv4", "type": "text", "x": 680, "y": 140, "text": "VRF ZULU — IPv4 FlowSpec\nimport-vpn RT: 300:300, 1234567:301\nshow bgp vrf ZULU: 0 IPv4 FlowSpec prefixes\nZebra DB: 0 rules  |  TCAM: 0/12000\nPfxAccepted: 12000  |  AdjOut: 0", "fontSize": 10, "color": "#e74c3c", "showBackground": false },
+
+    { "id": "text_vrf_ipv6", "type": "text", "x": 680, "y": 430, "text": "VRF ZULU — IPv6 FlowSpec\nimport-vpn RT: 1234567:401\nshow bgp vrf ZULU: 4000 IPv6 FlowSpec prefixes\nZebra DB: 4000 rules  |  TCAM: 4000/4000\nPfxAccepted: 4000  |  AdjOut: 4000", "fontSize": 10, "color": "#2ecc71", "showBackground": false },
+
+    { "id": "shape_cross", "type": "shape", "shapeType": "cross", "x": 860, "y": 100, "width": 26, "height": 26, "rotation": 0, "fillColor": "#e74c3c", "fillOpacity": 1.0, "fillEnabled": true, "strokeColor": "#c0392b", "strokeWidth": 2, "strokeEnabled": true },
+    { "id": "shape_check", "type": "shape", "shapeType": "checkmark", "x": 860, "y": 395, "width": 26, "height": 26, "rotation": 0, "fillColor": "#2ecc71", "fillOpacity": 1.0, "fillEnabled": true, "strokeColor": "#27ae60", "strokeWidth": 2, "strokeEnabled": true }
+  ],
+  "metadata": { "deviceIdCounter": 4, "linkIdCounter": 3, "textIdCounter": 10, "shapeIdCounter": 4, "linkCurveMode": true, "globalCurveMode": "auto", "description": "ExaBGP → PE-1 → RR-SA-2: IPv4 FlowSpec-VPN import fails (0 imported to VRF), IPv6 works (4000 imported)" }
+}

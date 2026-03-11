@@ -1,0 +1,338 @@
+{
+  "_description": "DNOS version compatibility knowledge base. Maps CLI commands/features to the version they were introduced. Used by scaler-wizard to warn about incompatible config during upgrades and to drive the config sanitizer.",
+  "_updated": "2026-03-10",
+  "_sources": [
+    "DNOS CLI RST documentation (Command History sections)",
+    "Live device testing: RR-SA-2 downgrade 25.4.13.146 -> 19.2.13.1 (2026-03-10)",
+    "SCALER upgrade_sources_history.json (observed version pairs)"
+  ],
+
+  "version_timeline": {
+    "_note": "Ordered list of known major DNOS releases. Used to compare source vs target.",
+    "releases": [
+      {"version": "10.0", "codename": "", "notes": "Early DNOS, CPRL introduced"},
+      {"version": "11.0", "codename": "", "notes": "IPMI shell, TACACS, user roles"},
+      {"version": "11.4", "codename": "", "notes": "cli-timestamp, CPRL gRPC/Flow-Monitor/Micro-BFD"},
+      {"version": "11.6", "codename": "", "notes": "Removed NCC option from IPMI shell"},
+      {"version": "12.0", "codename": "", "notes": "CPRL multicast support"},
+      {"version": "13.0", "codename": "", "notes": "ICMPv6 CPRL, TACACS OOB (13.1)"},
+      {"version": "15.0", "codename": "", "notes": "TTL-expired CPRL, TACACS IPv6 (15.1)"},
+      {"version": "19.2", "codename": "", "notes": "Synthetic loss measurement (CFM), FlowSpec base"},
+      {"version": "19.3", "codename": "", "notes": "CFM delay measurement"},
+      {"version": "25.1", "codename": "", "notes": "SSH security algorithms, CFM linktrace/loopback"},
+      {"version": "25.4", "codename": "", "notes": "SSH accepted-public-key-algorithms, system profile, grpc TLS enhancements"},
+      {"version": "26.1", "codename": "", "notes": "FlowSpec-VPN wbox side, new route-policy language"},
+      {"version": "26.2", "codename": "", "notes": "Latest dev branch"}
+    ]
+  },
+
+  "features": {
+    "system.ssh.security.accepted_public_key_algorithms": {
+      "added_in": "25.4",
+      "removed_in": null,
+      "config_path": "system ssh security accepted-public-key-algorithms",
+      "config_hierarchy": ["system", "ssh", "security"],
+      "match_type": "single_line",
+      "match_pattern": "^\\s+accepted-public-key-algorithms\\s",
+      "description": "SSH server public key algorithm selection",
+      "rst_source": "System/ssh/security/accepted-public-key-algorithms.rst",
+      "discovered_via": "RST Command History + live test on RR-SA-2 (19.2.13.1 rejected it)"
+    },
+    "system.ssh.security.ca_signature_algorithms": {
+      "added_in": "25.1",
+      "removed_in": null,
+      "config_path": "system ssh security ca-signature-algorithms",
+      "config_hierarchy": ["system", "ssh", "security"],
+      "match_type": "single_line",
+      "match_pattern": "^\\s+ca-signature-algorithms\\s",
+      "description": "SSH/Netconf CA signature algorithm selection",
+      "rst_source": "ssh/security/ca-signature-algorithms.rst",
+      "discovered_via": "RST Command History (25.1)"
+    },
+    "system.ssh.security.ciphers": {
+      "added_in": "25.1",
+      "removed_in": null,
+      "config_path": "system ssh security ciphers",
+      "config_hierarchy": ["system", "ssh", "security"],
+      "match_type": "single_line",
+      "match_pattern": "^\\s+ciphers\\s",
+      "description": "SSH server cipher selection",
+      "rst_source": "ssh/security/ciphers.rst",
+      "discovered_via": "RST Command History (25.1) + live test RR-SA-2"
+    },
+    "system.ssh.security.host_key_algorithms": {
+      "added_in": "25.1",
+      "removed_in": null,
+      "config_path": "system ssh security host-key-algorithms",
+      "config_hierarchy": ["system", "ssh", "security"],
+      "match_type": "single_line",
+      "match_pattern": "^\\s+host-key-algorithms\\s",
+      "description": "SSH server host key algorithm selection",
+      "rst_source": "ssh/security/host-key-algorithms.rst",
+      "discovered_via": "RST Command History (25.1) + live test RR-SA-2"
+    },
+    "system.ssh.security.key_exchange_algorithms": {
+      "added_in": "25.1",
+      "removed_in": null,
+      "config_path": "system ssh security key-exchange-algorithms",
+      "config_hierarchy": ["system", "ssh", "security"],
+      "match_type": "single_line",
+      "match_pattern": "^\\s+key-exchange-algorithms\\s",
+      "description": "SSH key exchange algorithm selection",
+      "rst_source": "ssh/security/key-exchange-algorithms.rst",
+      "discovered_via": "RST Command History (25.1) + live test RR-SA-2"
+    },
+    "system.ssh.security.macs": {
+      "added_in": "25.1",
+      "removed_in": null,
+      "config_path": "system ssh security macs",
+      "config_hierarchy": ["system", "ssh", "security"],
+      "match_type": "single_line",
+      "match_pattern": "^\\s+macs\\s",
+      "description": "SSH MAC algorithm selection",
+      "rst_source": "ssh/security/macs.rst",
+      "discovered_via": "RST Command History (25.1) + live test RR-SA-2"
+    },
+    "system.ssh.security_block": {
+      "added_in": "25.1",
+      "removed_in": null,
+      "config_path": "system ssh security",
+      "config_hierarchy": ["system", "ssh"],
+      "match_type": "block",
+      "match_pattern": "^\\s+security\\s*$",
+      "parent_context": "ssh",
+      "description": "Entire SSH security block (all children are 25.1+). Safe to strip as block when downgrading below 25.1.",
+      "rst_source": "ssh/security/*.rst",
+      "discovered_via": "All children introduced in 25.1/25.4; no children exist in 19.x"
+    },
+    "system.grpc_block": {
+      "added_in": "19.2",
+      "removed_in": null,
+      "config_path": "system grpc",
+      "config_hierarchy": ["system"],
+      "match_type": "block",
+      "match_pattern": "^\\s+grpc\\s*$",
+      "description": "gRPC server config. Present since 19.2 but TLS sub-commands (server-certificate, client-authentication) added later. Some TLS children not portable across major versions.",
+      "rst_source": "grpc/*.rst",
+      "version_notes": {
+        "19.2": "Basic gRPC config exists",
+        "25.1": "TLS server-certificate, client-authentication added",
+        "25.4": "TLS enhancements"
+      },
+      "discovered_via": "RST docs + live test: 19.2.13.1 rejected grpc TLS server-certificate"
+    },
+    "system.grpc.tls.server_certificate": {
+      "added_in": "25.1",
+      "removed_in": null,
+      "config_path": "system grpc tls server-certificate",
+      "config_hierarchy": ["system", "grpc", "tls"],
+      "match_type": "single_line",
+      "match_pattern": "^\\s+server-certificate\\s",
+      "description": "gRPC TLS server certificate selection",
+      "rst_source": "grpc/tls/server-certificate.rst",
+      "discovered_via": "RST docs + live test on RR-SA-2"
+    },
+    "system.login.ipmi_block": {
+      "added_in": "11.0",
+      "removed_in": null,
+      "config_path": "system login ipmi",
+      "config_hierarchy": ["system", "login"],
+      "match_type": "block",
+      "match_pattern": "^\\s+ipmi\\s*$",
+      "description": "IPMI user config under system login. Encrypted passwords are not portable across major versions (password hash format changes).",
+      "portability_note": "Block exists in all versions, but encrypted-password values are not portable. Strip when crossing major version boundaries.",
+      "rst_source": "login/ipmi.rst",
+      "discovered_via": "Live test: 19.2.13.1 rejected encrypted-password from 25.4.x config"
+    },
+    "system.cli_timestamp": {
+      "added_in": "11.4",
+      "removed_in": null,
+      "config_path": "system cli-timestamp",
+      "config_hierarchy": ["system"],
+      "match_type": "single_line",
+      "match_pattern": "^\\s+cli-timestamp\\s",
+      "description": "CLI timestamp display option",
+      "rst_source": "system cli-timestamp.rst",
+      "version_notes": {
+        "11.4": "Command introduced",
+        "19.x": "Present but format may differ from 25.x saved config"
+      },
+      "discovered_via": "RST Command History (11.4) + live test: 19.2.13.1 rejected cli-timestamp from 25.4.x config"
+    },
+    "system.timing_mode": {
+      "added_in": "19.2",
+      "removed_in": null,
+      "config_path": "system timing-mode",
+      "config_hierarchy": ["system"],
+      "match_type": "single_line",
+      "match_pattern": "^\\s+timing-mode\\s",
+      "description": "System timing mode configuration",
+      "portability_note": "Config syntax changed between major versions. May fail on downgrade even though command exists in both versions.",
+      "discovered_via": "Live test on RR-SA-2: 19.2.13.1 rejected timing-mode from 25.4.x"
+    },
+    "system.profile_default": {
+      "added_in": "25.4",
+      "removed_in": null,
+      "config_path": "system profile default",
+      "config_hierarchy": ["system"],
+      "match_type": "single_line",
+      "match_pattern": "^\\s+profile\\s+default\\s*$",
+      "description": "System profile selection (default profile)",
+      "rst_source": "system/profile.rst",
+      "discovered_via": "Live test: 19.2.13.1 does not have 'profile' command"
+    },
+    "protocols.bgp.nsr": {
+      "added_in": "19.2",
+      "removed_in": null,
+      "config_path": "protocols bgp nsr",
+      "config_hierarchy": ["protocols"],
+      "match_type": "single_line",
+      "match_pattern": "^\\s+bgp\\s+nsr\\s",
+      "description": "BGP Non-Stop Routing (NSR). Present since 19.2 but config format differs between major versions. Not portable across major jumps.",
+      "portability_note": "Command exists in 19.2+ but the parameter format changed. Stripping is safer than risking a parse error on target version.",
+      "rst_source": "bgp_nsr.rst",
+      "discovered_via": "Live test: 19.2.13.1 rejected 'bgp nsr enabled' from 25.4.x config"
+    },
+    "system.logging.suppress_event_list": {
+      "added_in": "25.1",
+      "removed_in": null,
+      "config_path": "system logging suppress-event-list",
+      "config_hierarchy": ["system", "logging"],
+      "match_type": "single_line",
+      "match_pattern": "^\\s+suppress-event-list\\s",
+      "description": "Logging event suppression list",
+      "rst_source": "logging/suppress-event-list.rst",
+      "discovered_via": "Live test: 19.2.13.1 does not have suppress-event-list"
+    },
+    "system.logging.timestamp_format_block": {
+      "added_in": "25.1",
+      "removed_in": null,
+      "config_path": "system logging timestamp-format",
+      "config_hierarchy": ["system", "logging"],
+      "match_type": "block",
+      "match_pattern": "^\\s+timestamp-format\\s*$",
+      "description": "Logging timestamp format block (contains utc-normalize)",
+      "rst_source": "logging/timestamp-format.rst",
+      "discovered_via": "Live test: 19.2.13.1 does not have timestamp-format block"
+    },
+    "system.logging.utc_normalize": {
+      "added_in": "25.1",
+      "removed_in": null,
+      "config_path": "system logging utc-normalize",
+      "config_hierarchy": ["system", "logging"],
+      "match_type": "single_line",
+      "match_pattern": "^\\s+utc-normalize\\s",
+      "description": "Logging UTC time normalization",
+      "rst_source": "logging/utc-normalize.rst",
+      "discovered_via": "Live test: 19.2.13.1 does not have utc-normalize"
+    },
+    "qos.hw_mapping.queue_size.speed_ranges_block": {
+      "added_in": "25.1",
+      "removed_in": null,
+      "config_path": "qos hw-mapping queue-size speed-ranges",
+      "config_hierarchy": ["qos", "hw-mapping", "queue-size"],
+      "match_type": "block",
+      "match_pattern": "^\\s+speed-ranges\\s*$",
+      "description": "QoS hardware queue size speed ranges configuration",
+      "rst_source": "qos/hw-mapping/queue-size/speed-ranges.rst",
+      "discovered_via": "Live test: 19.2.13.1 does not have speed-ranges"
+    },
+    "system.login.user.role_techsupport": {
+      "added_in": "25.4",
+      "removed_in": null,
+      "config_path": "system login user <name> role techsupport",
+      "config_hierarchy": ["system", "login", "user"],
+      "match_type": "block",
+      "match_pattern": "^\\s+user\\s+dntechsupport\\b",
+      "description": "User with role techsupport. The 'techsupport' role does not exist in versions before 25.4.",
+      "rst_source": "login/user/role.rst",
+      "discovered_via": "Live test: 19.2.13.1 rejected 'role techsupport' (Unknown word)"
+    },
+    "ethernet_oam.cfm.linktrace": {
+      "added_in": "25.1",
+      "removed_in": null,
+      "config_path": "run ethernet-oam cfm on-demand linktrace",
+      "config_hierarchy": [],
+      "match_type": "operational_only",
+      "description": "CFM on-demand linktrace (operational command, not config). Not relevant for config sanitization but useful for feature availability checks.",
+      "rst_source": "run ethernet-oam cfm on-demand linktrace.rst",
+      "discovered_via": "RST Command History"
+    },
+    "ethernet_oam.cfm.loopback": {
+      "added_in": "25.1",
+      "removed_in": null,
+      "config_path": "run ethernet-oam cfm on-demand loopback",
+      "config_hierarchy": [],
+      "match_type": "operational_only",
+      "description": "CFM on-demand loopback (operational command)",
+      "rst_source": "run ethernet-oam cfm on-demand loopback.rst",
+      "discovered_via": "RST Command History"
+    }
+  },
+
+  "upgrade_warnings": {
+    "_note": "Version-pair-specific warnings shown to user before upgrade. Key format: 'source_major.minor -> target_major.minor'",
+    "25.4 -> 19.2": {
+      "severity": "high",
+      "is_downgrade": true,
+      "incompatible_features": [
+        "system.ssh.security_block",
+        "system.profile_default",
+        "system.login.user.role_techsupport",
+        "system.grpc.tls.server_certificate",
+        "system.login.ipmi_block",
+        "system.logging.suppress_event_list",
+        "system.logging.timestamp_format_block",
+        "qos.hw_mapping.queue_size.speed_ranges_block",
+        "protocols.bgp.nsr",
+        "system.cli_timestamp",
+        "system.timing_mode"
+      ],
+      "warning_message": "Downgrade from 25.4 to 19.2 removes SSH security algorithms, system profile, gRPC TLS, QoS speed-ranges, logging enhancements, and BGP NSR format. Config will be automatically sanitized before restore.",
+      "tested_on": "2026-03-10, RR-SA-2, 25.4.13.146 -> 19.2.13.1",
+      "auto_sanitize": true
+    },
+    "25.1 -> 19.2": {
+      "severity": "high",
+      "is_downgrade": true,
+      "incompatible_features": [
+        "system.ssh.security_block",
+        "system.grpc.tls.server_certificate",
+        "system.logging.suppress_event_list",
+        "system.logging.timestamp_format_block",
+        "qos.hw_mapping.queue_size.speed_ranges_block"
+      ],
+      "warning_message": "Downgrade from 25.1 to 19.2 removes SSH security algorithms, gRPC TLS, QoS speed-ranges, and logging enhancements.",
+      "auto_sanitize": true
+    },
+    "26.x -> 25.x": {
+      "severity": "medium",
+      "is_downgrade": true,
+      "incompatible_features": [],
+      "warning_message": "Downgrade from 26.x to 25.x. New route-policy language features may not be backward-compatible. Config sanitization will handle known incompatibilities.",
+      "auto_sanitize": true
+    },
+    "19.x -> 25.x": {
+      "severity": "low",
+      "is_downgrade": false,
+      "incompatible_features": [],
+      "warning_message": "Upgrade from 19.x to 25.x. No config stripping needed (new version accepts old config). New features will need manual configuration after upgrade.",
+      "auto_sanitize": false
+    }
+  },
+
+  "collapsible_parents": {
+    "_note": "Config blocks that should be removed if they become empty after sanitization.",
+    "keywords": ["ssh", "ntp", "logging", "syslog", "hw-mapping", "queue-size", "qos", "security", "timestamp-format"]
+  },
+
+  "password_portability": {
+    "_note": "Encrypted password hashes are not portable across major DNOS versions. The hashing algorithm or salt format may change.",
+    "affected_paths": [
+      "system login user <name> encrypted-password",
+      "system login ipmi encrypted-password",
+      "protocols bgp <asn> neighbor <ip> password"
+    ],
+    "recommendation": "Strip encrypted-password lines when crossing major version boundaries. User must reconfigure passwords on target version."
+  }
+}

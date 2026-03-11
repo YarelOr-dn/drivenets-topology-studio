@@ -9,6 +9,7 @@ This module contains:
 - delete_hierarchy(): Delete a hierarchy from device config via CLI
 """
 
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from rich.console import Console
@@ -139,6 +140,15 @@ def suggest_error_fix(error_message: str):
     
     if "limit" in error_message.lower() or "exceeded" in error_message.lower():
         suggestions.append("Platform limit reached. Check DNOS limits with 'show platform limits'.")
+    
+    if "ip-addresses and l2-service" in error_message.lower() or "ip-address" in error_message.lower() and "l2-service" in error_message.lower():
+        iface_match = re.search(r"\('([^']+)'\)", error_message)
+        iface_name = iface_match.group(1) if iface_match else "the interface"
+        suggestions.append(
+            f"Interface {iface_name} already has IP addresses (L3) on the device. "
+            f"Cannot add l2-service enabled (L2) to the same interface. "
+            f"Either: (a) delete the IP addresses first, or (b) use a different sub-interface number."
+        )
     
     if "conflict" in error_message.lower():
         suggestions.append("Configuration conflict detected. Check for duplicate entries or incompatible settings.")

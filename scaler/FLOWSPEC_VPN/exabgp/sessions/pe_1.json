@@ -1,0 +1,96 @@
+{
+  "session_id": "pe_1",
+  "status": "closed",
+  "created": "2026-03-03T08:04:54.339527+00:00",
+  "exabgp_pid": 4140979,
+  "exabgp_config": "/tmp/exabgp_pe_1_clean.conf",
+  "exabgp_log": "/home/dn/SCALER/FLOWSPEC_VPN/exabgp/logs/pe_1_exabgp.log",
+  "peer_ip": "unknown",
+  "peer_as": "unknown",
+  "exabgp_ip": "100.70.0.32",
+  "device_ip": "100.70.0.205",
+  "selected_afis": [],
+  "target_device": null,
+  "dnaas_leaf": null,
+  "applied_configs": {},
+  "injected_routes": [
+    {
+      "route": "announce flow route rd 1.1.1.1:200 destination 50.50.50.1/32 redirect 16.16.16.6 extended-community [ target:1234567:301 ]",
+      "injected_at": "2026-03-03T08:06:06.805006+00:00"
+    },
+    {
+      "route": "announce flow route rd 1.1.1.1:200 destination 50.50.50.1/32 redirect 1234567:100 extended-community [ target:1234567:301 ]",
+      "injected_at": "2026-03-03T08:08:21.838692+00:00"
+    },
+    {
+      "route": "announce flow route rd 1.1.1.1:200 destination 50.50.50.1/32 redirect 16.16.16.6 extended-community [ target:1234567:301 redirect:1234567:100 ]",
+      "injected_at": "2026-03-03T08:09:29.059957+00:00"
+    }
+  ],
+  "scale_injections": [],
+  "advertised_state": {
+    "summary": {
+      "total_routes": 1,
+      "by_type": {
+        "flowspec-vpn": 1
+      },
+      "by_afi_safi": {
+        "ipv4 flow-vpn": 1
+      },
+      "prefix_count": 1,
+      "prefix_ranges": [
+        "50.50.50.1/32"
+      ],
+      "all_prefixes": [
+        "50.50.50.1/32"
+      ],
+      "rds": [
+        "1.1.1.1:200"
+      ],
+      "route_targets": [
+        "1234567:301"
+      ],
+      "actions": [
+        "redirect-ip 16.16.16.6"
+      ]
+    },
+    "routes": [
+      {
+        "raw": "announce flow route rd 1.1.1.1:200 destination 50.50.50.1/32 redirect 16.16.16.6 extended-community [ target:1234567:301 redirect:1234567:100 ]",
+        "action": "announce",
+        "type": "flowspec-vpn",
+        "rd": "1.1.1.1:200",
+        "afi_safi": "ipv4 flow-vpn",
+        "match": {
+          "destination": "50.50.50.1/32"
+        },
+        "actions": {
+          "redirect-ip": "16.16.16.6"
+        },
+        "extended_communities": [
+          "target:1234567:301",
+          "redirect:1234567:100"
+        ],
+        "route_targets": [
+          "1234567:301"
+        ],
+        "injected_at": "2026-03-03T08:09:29.059957+00:00"
+      }
+    ],
+    "capabilities": {
+      "peer_ip": "unknown",
+      "peer_as": "unknown",
+      "local_as": 65200,
+      "local_ip": "100.70.0.32",
+      "families": [],
+      "ebgp_multihop": 10,
+      "hold_time": 180,
+      "target_device": null,
+      "dnaas_leaf": null
+    }
+  },
+  "routes_injected": 0,
+  "last_watchdog_restart": "2026-03-04T09:41:07.632238+00:00",
+  "watchdog_restarts": 1,
+  "closed_at": "2026-03-04T10:35:42.911092+00:00"
+}

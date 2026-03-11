@@ -1,0 +1,52 @@
+{
+  "version": "1.0",
+  "objects": [
+    { "id": "device_0", "type": "device", "deviceType": "router", "x": 100, "y": 300, "radius": 30, "color": "#e67e22", "label": "ExaBGP", "locked": false, "visualStyle": "server" },
+    { "id": "device_1", "type": "device", "deviceType": "router", "x": 350, "y": 300, "radius": 40, "color": "#3498db", "label": "PE-1", "locked": false, "visualStyle": "classic" },
+    { "id": "device_2", "type": "device", "deviceType": "router", "x": 600, "y": 300, "radius": 35, "color": "#9b59b6", "label": "RR-SA-2", "locked": false, "visualStyle": "classic" },
+    { "id": "device_3", "type": "device", "deviceType": "router", "x": 850, "y": 300, "radius": 40, "color": "#3498db", "label": "PE-4", "locked": false, "visualStyle": "classic" },
+    { "id": "device_4", "type": "device", "deviceType": "router", "x": 350, "y": 520, "radius": 25, "color": "#2ecc71", "label": "CE", "locked": false, "visualStyle": "simple" },
+    { "id": "device_5", "type": "device", "deviceType": "router", "x": 850, "y": 520, "radius": 25, "color": "#2ecc71", "label": "CE", "locked": false, "visualStyle": "simple" },
+
+    { "id": "link_0", "type": "link", "originType": "QL", "device1": "device_0", "device2": "device_1", "start": {"x": 130, "y": 300}, "end": {"x": 310, "y": 300}, "color": "#2ecc71", "style": "arrow", "width": 3 },
+    { "id": "link_1", "type": "link", "originType": "QL", "device1": "device_1", "device2": "device_2", "start": {"x": 390, "y": 300}, "end": {"x": 565, "y": 300}, "color": "#5dade2", "style": "solid", "width": 2 },
+    { "id": "link_2", "type": "link", "originType": "QL", "device1": "device_2", "device2": "device_3", "start": {"x": 635, "y": 300}, "end": {"x": 810, "y": 300}, "color": "#5dade2", "style": "solid", "width": 2 },
+    { "id": "link_3", "type": "link", "originType": "QL", "device1": "device_4", "device2": "device_1", "start": {"x": 350, "y": 495}, "end": {"x": 350, "y": 340}, "color": "#2ecc71", "style": "dashed", "width": 1 },
+    { "id": "link_4", "type": "link", "originType": "QL", "device1": "device_5", "device2": "device_3", "start": {"x": 850, "y": 495}, "end": {"x": 850, "y": 340}, "color": "#2ecc71", "style": "dashed", "width": 1 },
+
+    { "id": "shape_0", "type": "shape", "shapeType": "rectangle", "x": 100, "y": 155, "width": 225, "height": 105, "rotation": 0, "fillColor": "#e67e22", "fillOpacity": 0.06, "fillEnabled": true, "strokeColor": "#e67e22", "strokeWidth": 1.5, "strokeEnabled": true, "cornerRadius": 10 },
+    { "id": "shape_1", "type": "shape", "shapeType": "rectangle", "x": 350, "y": 185, "width": 260, "height": 88, "rotation": 0, "fillColor": "#e74c3c", "fillOpacity": 0.05, "fillEnabled": true, "strokeColor": "#c0392b", "strokeWidth": 1.5, "strokeEnabled": true, "cornerRadius": 10 },
+    { "id": "shape_2", "type": "shape", "shapeType": "rectangle", "x": 850, "y": 185, "width": 265, "height": 88, "rotation": 0, "fillColor": "#e74c3c", "fillOpacity": 0.05, "fillEnabled": true, "strokeColor": "#c0392b", "strokeWidth": 1.5, "strokeEnabled": true, "cornerRadius": 10 },
+
+    { "id": "text_0", "type": "text", "x": 100, "y": 358, "text": "100.64.6.134", "fontSize": 10, "color": "#85929e", "showBackground": false },
+    { "id": "text_1", "type": "text", "x": 350, "y": 368, "text": "1.1.1.1", "fontSize": 10, "color": "#85929e", "showBackground": false },
+    { "id": "text_2", "type": "text", "x": 600, "y": 363, "text": "2.2.2.2", "fontSize": 10, "color": "#85929e", "showBackground": false },
+    { "id": "text_3", "type": "text", "x": 850, "y": 368, "text": "4.4.4.4", "fontSize": 10, "color": "#85929e", "showBackground": false },
+    { "id": "text_4", "type": "text", "x": 350, "y": 562, "text": "16.16.16.2  AS 65100", "fontSize": 9, "color": "#85929e", "showBackground": false },
+    { "id": "text_5", "type": "text", "x": 850, "y": 562, "text": "49.49.49.9  AS 65100", "fontSize": 9, "color": "#85929e", "showBackground": false },
+
+    { "id": "text_6", "type": "text", "x": 220, "y": 278, "text": "eBGP FlowSpec-VPN", "fontSize": 10, "color": "#2ecc71", "linkId": "link_0", "position": "middle", "_onLinkLine": true, "showBackground": false },
+    { "id": "text_7", "type": "text", "x": 478, "y": 278, "text": "iBGP FlowSpec-VPN", "fontSize": 10, "color": "#85c1e9", "linkId": "link_1", "position": "middle", "_onLinkLine": true, "showBackground": false },
+    { "id": "text_8", "type": "text", "x": 725, "y": 278, "text": "iBGP FlowSpec-VPN", "fontSize": 10, "color": "#85c1e9", "linkId": "link_2", "position": "middle", "_onLinkLine": true, "showBackground": false },
+    { "id": "text_9", "type": "text", "x": 385, "y": 425, "text": "eBGP", "fontSize": 9, "color": "#58d68d", "showBackground": false },
+    { "id": "text_10", "type": "text", "x": 885, "y": 425, "text": "eBGP", "fontSize": 9, "color": "#58d68d", "showBackground": false },
+
+    { "id": "text_11", "type": "text", "x": 100, "y": 155, "text": "Route Injected:\ndst 100.100.100.1/32\nsrc 16.16.16.0/30\nredirect-ip 10.0.0.230\nRD 1.1.1.1:100  RT 100:100", "fontSize": 10, "color": "#f0b27a", "showBackground": false },
+
+    { "id": "text_12", "type": "text", "x": 350, "y": 185, "text": "VRF ALPHA on PE-1\nRD 1.1.1.1:100  RT 100:100\n10.0.0.230 reachable via CE\nRedirect NH: (unreachable)", "fontSize": 10, "color": "#e74c3c", "showBackground": false },
+
+    { "id": "text_13", "type": "text", "x": 850, "y": 185, "text": "VRF ALPHA on PE-4\nRD 4.4.4.4:100  RT 100:100\n10.0.0.230 reachable via L3VPN\nRedirect NH: (unreachable)", "fontSize": 10, "color": "#e74c3c", "showBackground": false },
+
+    { "id": "shape_3", "type": "shape", "shapeType": "cross", "x": 488, "y": 148, "width": 26, "height": 26, "rotation": 0, "fillColor": "#e74c3c", "fillOpacity": 1.0, "fillEnabled": true, "strokeColor": "#922b21", "strokeWidth": 2.5, "strokeEnabled": true },
+    { "id": "shape_4", "type": "shape", "shapeType": "cross", "x": 990, "y": 148, "width": 26, "height": 26, "rotation": 0, "fillColor": "#e74c3c", "fillOpacity": 1.0, "fillEnabled": true, "strokeColor": "#922b21", "strokeWidth": 2.5, "strokeEnabled": true }
+  ],
+  "metadata": {
+    "deviceIdCounter": 6,
+    "linkIdCounter": 5,
+    "textIdCounter": 14,
+    "shapeIdCounter": 5,
+    "linkCurveMode": true,
+    "globalCurveMode": "auto",
+    "description": "Redirect-ip NH always unreachable in VRF ALPHA — ExaBGP → PE-1 → RR-SA-2 → PE-4"
+  }
+}

@@ -1,0 +1,48 @@
+interfaces
+  bundle-100.500
+    admin-state enabled
+    l2-service enabled
+    vlan-id 500
+  !
+  bundle-100.501
+    admin-state enabled
+    l2-service enabled
+    vlan-id 501
+  !
+  irb1
+    admin-state enabled
+    ipv4-address 20.0.0.1/19
+    ipv4-address 10.0.0.1/20 secondary
+  !
+  irb2
+    admin-state enabled
+    ipv4-address 20.0.0.1/18
+    ipv4-address 30.0.0.1/24 secondary
+  !
+!
+network-services
+  evpn
+    instance evpn_scale_1
+      router-interface irb1
+        host-routes enabled
+      !
+      interface bundle-100.500
+      !
+    !
+    instance evpn_scale_2
+      router-interface irb2
+        host-routes enabled
+      !
+      interface bundle-100.501
+      !
+    !
+  !
+  vrf
+    instance scale_1
+      interface irb1
+    !
+    instance scale_2
+      interface irb2
+    !
+  !
+!

@@ -635,9 +635,179 @@ Reference: `/home/dn/SCALER/docs/DNOS_VERSION_STACK.md`
 | Device operations | `scaler/device_upgrade.py` |
 | Jenkins client | `scaler/jenkins_integration.py` |
 | Stack management | `scaler/stack_manager.py` |
+| Connection strategy | `scaler/connection_strategy.py` |
+| Console mappings DB | `db/console_mappings.json` |
 | DNOS syntax ref | `docs/DNOS_DELETE_SYNTAX.md` |
 | Version stack ref | `docs/DNOS_VERSION_STACK.md` |
 | This guide | `docs/DEVELOPMENT_GUIDELINES.md` |
+
+---
+
+## Console Server Mappings (Centralized)
+
+Console port mappings are stored in `db/console_mappings.json` and managed via functions
+in `scaler/connection_strategy.py`. **Never hardcode console ports** in other files.
+
+### Architecture
+
+The mapping tracks devices by **NCC serial number** (permanent physical identifier) and
+**hostname** (current name). When a device is renamed, the serial number stays the same,
+so the console mapping follows the rename automatically.
+
+```
+db/console_mappings.json
+  console_server: { host, user, password, model }
+  ports:
+    "12": { hostname: "PE-1", serial_number: null }
+    "13": { hostname: "RR-SA-2", serial_number: "WKY1BC7400002B2", previous_hostnames: ["PE-2"] }
+    "14": { hostname: "PE-4", serial_number: null, hostname_aliases: ["YOR_CL_PE-4"] }
+```
+
+### API Functions (in `connection_strategy.py`)
+
+| Function | Purpose |
+|----------|---------|
+| `get_console_config_for_device(hostname)` | Look up console config by hostname or alias |
+| `get_console_config_by_serial(serial)` | Look up by NCC serial (for renames) |
+| `update_console_hostname(old, new, serial)` | Update mapping when device is renamed |
+| `save_console_discovery(port, hostname, serial)` | Save newly discovered console port |
+
+### Auto-Update Triggers
+
+1. **Config fetch** (`sync_device_from_live` in `utils.py`): When a hostname mismatch is
+   detected, the console mapping is auto-updated to the new hostname.
+2. **Console login**: When connecting via console, the NCC serial number from the login
+   prompt (e.g. `WKY1BC7400002B2 login:`) is captured and saved to the mapping.
+3. **Manual**: Call `save_console_discovery(port, hostname, serial)` after identifying a
+   new device on a console port.
+
+### Rules
+
+- **NEVER hardcode console ports** in `system_restore.py`, `interactive_scale.py`, or anywhere
+  else. Always call `get_console_config_for_device(hostname)`.
+- Console credentials: user `dn`, password `drive1234` on ATEN SN9116CO at `console-b15`.
+- To get into GI CLI from BaseOS shell: `dncli`.
+- Console server navigation: SSH to console-b15 -> option [3] Port Access -> port number.
+
+### Cluster NCC Type Classification
+
+Not all cluster devices (CL-*) have the same NCC architecture. The wizard auto-detects
+NCC type from `show system` output during `post_connect_verify`:
+
+| NCC Type | Model Column | Serial Number Column | Example |
+|----------|-------------|---------------------|---------|
+| **KVM (virtual)** | `X86` | DNS hostname (e.g. `kvm108-cl408d-ncc0`) | PE-4 (CL-86) |
+| **Physical** | Hardware model | Hardware S/N (e.g. `WDY1A...`) | Standard clusters |
+
+**Detection rules** (in `utils.py` `post_connect_verify`, Layer 2.5):
+- Parse NCC rows from `show system` table
+- If any NCC has `Model = X86` -> `ncc_type = "kvm"`
+- NCC serials starting with a lowercase letter are treated as VM hostnames
+- Result is auto-persisted to `operational.json` via `sync_device_from_live`
+
+### KVM NCC Access -- Two Distinct Paths
+
+KVM NCC clusters have completely different access paths depending on device state:
+
+**DNOS mode (VIP is alive)**:
+
+```
+ssh dnroot@100.64.4.98 (VIP)  -->  DNOS CLI directly
+```
+
+Standard SSH to VIP, same commands as any device.
+
+**GI mode (VIP is DEAD -- must use virsh console)**:
+
+The GI CLI session **persists** on the serial console. After the first
+successful `dncli` login, subsequent `virsh console` connections land
+directly on GI#. The full login chain is only needed once (after
+`system delete` or initial boot).
+
+*First connection (cold start / after system delete):*
+```
+Step 1: ssh dn@kvm108              (KVM host, password: drive1234!)
+Step 2: virsh list                 (find running NCC VM)
+Step 3: virsh console kvm108-cl408d-ncc1  (serial console to active NCC)
+Step 4: login: dn / drivenets      (lands on BaseOS shell)
+Step 5: dncli                      (SSH to localhost, password: dnroot)
+Step 6: GI# prompt ready           (can run target-stack load commands)
+```
+
+*Subsequent connections (GI session persisted):*
+```
+Step 1: ssh dn@kvm108              (KVM host)
+Step 2: virsh console kvm108-cl408d-ncc1  (attach to NCC serial)
+Step 3: Press Enter                (GI# prompt appears immediately)
+```
+
+This is a 3-hop, 3-credential chain (cold start only):
+
+| Hop | Target | User | Password | Result |
+|-----|--------|------|----------|--------|
+| 1 | KVM host (`kvm108`) | `dn` | `drive1234!` | Ubuntu shell |
+| 2 | virsh console (NCC VM) | `dn` | `drivenets` | BaseOS shell |
+| 3 | dncli (SSH to localhost) | `dnroot` | `dnroot` | GI/DNOS CLI |
+
+**Cleanup rule**: When disconnecting from a virsh console session, escape
+with Ctrl+] only. Do NOT `exit` the GI CLI -- this kills the persisted
+session and forces the next connection to redo the full login chain.
+
+**Connection strategy** (`connection_strategy.py`):
+- `SSH_NCC` method: SSH directly to NCC hostname (DNOS mode only, ncc_type=kvm)
+- `VIRSH_CONSOLE` method: Attaches virsh console, checks GI# first (persisted),
+  falls back to login+dncli chain if at login/BaseOS prompt (cold start)
+- Physical NCC clusters use SSH to VIP/SN/MGMT like standalones
+- Console on KVM cluster devices reaches NCPs only (data plane), NOT NCCs
+
+**Credential storage** (`operational.json` and `console_mappings.json`):
+
+```json
+{
+  "ncc_type": "kvm",
+  "kvm_host": "kvm108",
+  "kvm_host_ip": "100.64.6.6",
+  "kvm_host_credentials": {"username": "dn", "password": "drive1234!"},
+  "ncc_vms": ["kvm108-cl408d-ncc0", "kvm108-cl408d-ncc1"],
+  "ncc_console_credentials": {"username": "dn", "password": "drivenets"},
+  "dncli_credentials": {"username": "dnroot", "password": "dnroot"}
+}
+```
+
+**Manual override**: If auto-detection is wrong, set `ncc_type`, `kvm_host`, and
+credentials in `db/configs/<hostname>/operational.json` and
+`db/console_mappings.json` cluster_ncc_access.
+
+### Unified Upgrade Connection (`connect_for_upgrade`)
+
+**All upgrade flows** (image push, verify stacks, install target stack, check status,
+post-delete reconnect) MUST use `connect_for_upgrade(hostname)` from
+`connection_strategy.py`. Do NOT use `resolve_device_ip` + direct SSH for upgrades.
+
+`connect_for_upgrade` tries all available paths in order:
+1. SSH to serial number hostname
+2. SSH to management IP
+3. SSH to KVM NCC hostname (DNOS mode, ncc_type=kvm)
+4. virsh console via KVM host (GI mode, ncc_type=kvm)
+5. Console server (if configured)
+6. SSH to loopback IP
+
+Returns a dict compatible with `safe_connect_and_verify`:
+`connected`, `ssh`, `channel`, `ip`, `method`, `verified`, `device_state`, etc.
+
+**Per-device connection matrix** (which method works in which state):
+
+| Device Type | DNOS Mode | GI Mode |
+|-------------|-----------|---------|
+| Standalone (SA-36CD-S) | SSH->SN, SSH->MGMT | Console (if no DNS) |
+| KVM cluster (CL-86) | SSH->NCC, SSH->MGMT (VIP) | virsh->NCC (kvm108) |
+| Physical cluster | SSH->SN, SSH->MGMT | Console (NCP) |
+
+**RR-SA-2 (no DNS)**: After system delete, SSH is unreachable. `connect_for_upgrade`
+skips SSH and connects directly via console-b15 port 13.
+
+**YOR_CL_PE-4 (KVM)**: In GI mode VIP is dead. `connect_for_upgrade` uses virsh
+console via kvm108 to reach the NCC brain.
 
 ---
 
@@ -1865,10 +2035,24 @@ Flowspec VPN enables BGP-based DDoS protection for VRF traffic per RFC 8955 (SAF
 |----------|---------|-------|
 | Flowspec rules per VRF | 3,000 | Per-VRF rule limit |
 | Total flowspec rules | 10,000 | System-wide limit |
-| Flowspec-enabled interfaces | 1,000 | Interfaces with `flowspec enabled` |
-| VRFs with flowspec AFI | 512 | VRFs with address-family ipv4/6-flowspec |
-| Local policies | 256 | routing-policy flowspec-local-policies |
-| Match-classes | 1,024 | Per local policy match criteria |
+| Flowspec-enabled interfaces | 8,000 | All L3 interfaces (Confluence "(v25.2) Interface Scale & RNR") |
+| VRFs with flowspec AFI | No FlowSpec-specific limit | Follows platform VRF scale: 1.5k (v25.2) / 8k (v25.3+) |
+| Local policies | 40 (20 per AFI) | routing-policy flowspec-local-policies ipv4/ipv6 |
+| Match-classes | 12,000 (8k IPv4 + 4k IPv6) | mc-definitions per AFI (dn-flowspec-local-policies.yang) |
+
+### FlowSpec Local Policy VRF Match (SW-182546, SW-226319)
+
+Optional `vrf <vrf-name>` in match-class restricts rules to traffic from that VRF. Default: match any.
+
+In scaler-wizard, VRF options are taken from: (1) VRFs created in this session (services hierarchy), (2) device config.
+```
+routing-policy flowspec-local-policies ipv4
+  match-class MC-1
+    vrf CUSTOMER-A      # Optional: restrict to this VRF
+    dest-ip 192.0.2.0/24
+  !
+!
+```
 
 ### BGP Address Families
 
@@ -1941,6 +2125,36 @@ interfaces
    - Enable flowspec on VRF interfaces (Step 2b)
 4. **Verify scale**: Dashboard shows Flowspec VPN statistics
 
+### SW-240206 RT-Redirect Dynamic Re-evaluation Test
+
+Automated test script for FlowSpec-VPN RT-Redirect fix (SW-240206): verifies that when a VRF's unicast import RT is removed, the redirect target dynamically switches to the next valid VRF without requiring `clear bgp`.
+
+**Script:** `FLOWSPEC_VPN/test_sw240206_rt_redirect.py`
+
+**Usage:**
+```bash
+python3 test_sw240206_rt_redirect.py                    # Full run
+python3 test_sw240206_rt_redirect.py --test 1          # Run only Test 1 (core bug)
+python3 test_sw240206_rt_redirect.py --skip-setup     # Skip VRF creation
+python3 test_sw240206_rt_redirect.py --no-cleanup     # Leave config for inspection
+python3 test_sw240206_rt_redirect.py --debug          # Show debug output for redirect parsing
+```
+
+**Fixes applied (2026-02-22):**
+- ExaBGP subprocess: use absolute paths (BGP_TOOL, EXABGP_DIR) to avoid cwd resolution
+- bgp_tool kill_orphan: pass `spare_pid=os.getpid()` so bgp_tool doesn't kill itself (path contains "exabgp")
+- `--exabgp-ip`: Override ExaBGP bind IP (default: 100.70.0.32). Must match device neighbor config and exist on test machine.
+- Diagnostic step: After inject, checks BGP neighbor state and FlowSpec visibility.
+
+**RT-Redirect verification prerequisites:**
+- BGP neighbor must show **Established** (diagnostic reports this)
+- ExaBGP `local-address` must match device `neighbor <ip>` and be configured on the test machine
+- Use `--exabgp-ip <your-ip>` if different from default
+
+**Prerequisites:** PE-1 (or target device) in `db/devices.json`, ExaBGP server reachable from device, BGP neighbor 100.64.6.134 configured for ipv4-flowspec-vpn.
+
+**Tests:** (1) Core bug - RT removal triggers dynamic switch to ZULU, (2) RT re-add switches back to ALPHA, (3) VRF-light (no RD) as redirect candidate, (4) No BGP on default VRF.
+
 ### Live Scale Tracking
 
 The wizard automatically displays:
@@ -1949,7 +2163,7 @@ Flowspec VPN:
   Interfaces w/flowspec: 15/1000 (2%)
   VRFs w/flowspec AFI:   3/512 (1%)
   BGP FS-VPN neighbors:  2
-  ⚠️ Match-classes at 85% (868/1024)  ← Warning when >80%
+  ⚠️ Match-classes at 85% (10200/12000)  ← Warning when >80%
 ```
 
 ---
@@ -2241,6 +2455,82 @@ show_current_config_summary(config, parser)
 ---
 
 ## Recent Additions Log
+
+### FlowSpec VPN HA Test Orchestrator (SW-236398) (2026-03-01)
+
+**Status:** ✅ Implemented (Spirent FlowSpec class may need BgpFlowSpecConfig vs BgpFlowSpecRouteConfig per STC version; ExaBGP + pre-existing rules fallback available)
+
+**Purpose:** Automated end-to-end testing of FlowSpec-VPN HA behavior across 15 test cases (process restart, container restart, system restart, switchover, GR, special cases).
+
+**Key Paths:**
+| Component | Path |
+|-----------|------|
+| Orchestrator | `SCALER/HA/ha_flowspec_test.py` |
+| Test definitions | `SCALER/HA/test_definitions/sw_236398.json` |
+| DNAAS path setup | `SCALER/HA/ensure_dnaas_path.py` |
+| Results | `SCALER/HA/test_results/SW-236398_<timestamp>/` |
+
+**Trigger:** `/HA test SW-236398` or `/HA test flowspec-vpn-ha [PE-4]`
+
+**Flow:** Ensure DNAAS BD path (VLAN 212) → run orchestrator → Spirent BGP + 200 FlowSpec rules → HA event via paramiko SSH → recovery polling → diff + verdict.
+
+**Fallbacks:** (1) Spirent FlowSpec injection fails → ExaBGP. (2) ExaBGP not available → pre-existing rules (≥10 from /BGP ExaBGP→PE-1→RR→DUT). (3) Device alias: PE-4 → YOR_CL_PE-4.
+
+**Resilience (2026-03-01):** SSH retries (3x, 15/30/45s) on timeout; 45s cooldown after wb_agent/NCP datapath tests; incremental run_log.md after each test; DNOS requires interactive shell (invoke_shell).
+
+**Spirent Resilience + Cross-Command Integration (2026-03-01):** spirent_tool.py: _retry_rest() for transient REST failures, _validate_session() before stats/start/stop/create-stream, cmd_reconcile for local vs server session sync. ha_flowspec_test.py: spirent_poll_stats retries 3x, spirent_reachable tracking, sp_verdict UNKNOWN (unreachable) when Spirent down (no false PASS), active_ha_session.json gets spirent_expected_traffic, spirent_baseline, convergence_times; session closed (active: false) at end. VLAN auto-selected from ~/.spirent_learning.json known_stream_profiles (READY).
+
+**CL vs SA (2026-03-01):** Orchestrator detects device mode via `show system` (CL-* vs SA-*). On **Cluster**: NCC switchover and NCC restart tests available; NCC restart tests require `--standby-ip <standby_mgmt_ip>` so the orchestrator connects to the standby NCC when restarting the active NCC (avoids SSH loss). On **Standalone**: tests with `requires_cluster` (test_08–10, 13, 15) are skipped.
+
+**Unified 4-Layer HA Standard (2026-03-01):** Every /HA TEST uses all four verification layers as the default:
+1. **Control-plane (/HA):** BGP sessions, PfxAccepted, routes, BFD, alarms — before/during/after
+2. **Datapath (TCAM):** `show system npu-resources resource-type flowspec` + `show flowspec ncp <id>` — before/during/after
+3. **Traffic (/SPIRENT):** Create stream matching existing FlowSpec rules, start baseline, poll TX/RX/loss during HA event
+4. **Packet (/XRAY):** After recovery, capture at DUT interface to verify packets actually arrive at correct VRF
+5. **Traces (/debug-dnos):** After recovery, grep traces at HA event timestamp for documentation; on FAIL, escalate to full investigation
+Phase 7 assembles all layers into one unified diff table. Each layer degrades gracefully if unavailable (e.g., Spirent unreachable → proceed without traffic).
+
+**Background run:** `nohup python3 ~/SCALER/HA/ha_flowspec_test.py --device PE-4 > /tmp/ha_flowspec_pe4.log 2>&1 &`
+**Cluster (with standby):** `nohup python3 ~/SCALER/HA/ha_flowspec_test.py --device PE-4 --standby-ip <standby_ncc_ip> > /tmp/ha_flowspec_pe4.log 2>&1 &`
+
+**Files Modified:**
+- `SCALER/HA/ha_flowspec_test.py` (new)
+- `SCALER/HA/test_definitions/sw_236398.json` (new)
+- `SCALER/HA/ensure_dnaas_path.py` (new)
+- `SCALER/SPIRENT/spirent_tool.py` (FlowSpec add-routes, HoldTimeInterval/KeepAliveInterval)
+- `~/.cursor/commands/HA.md` (SW-236398 intent)
+- `~/.cursor/rules/cross-command-integration.mdc` (FlowSpec session fields)
+
+---
+
+### HA Config Framework and Generic Epic Support (2026-03-01)
+
+**Status:** Implemented
+
+**Purpose:** Enable /HA to configure devices directly (not just show commands), verify prerequisites before tests, and handle any epic/feature on any device. Network Mapper MCP only supports `show` commands; ha_executor provides SSH-based config and operational command execution.
+
+**Key Additions:**
+- `SCALER/HA/ha_ssh.py` — shared SSH shell utilities for all HA tools. Single source of truth for DNOS interactive SSH. Uses `select.select()` for OS-level zero-CPU blocking (no busy-loop). Exits as soon as CLI prompt returns or HA anomaly detected. Exports: `run_ssh_shell`, `ssh_quick_check`, `recv_until_ready`, `PROMPT_RE`, `HA_EVENT_PATTERNS`, `EXPECT_MAP` (per-command expect patterns for configure/commit/exit).
+- `SCALER/HA/ha_executor.py` — lightweight SSH executor: connect, run_show, run_operational, run_config, verify_device, cleanup, disconnect. Credentials from devices.json. Uses ha_ssh.run_ssh_shell internally.
+- Device Verification Gate — SSH + System Name + Serial check + AskQuestion permission before any test
+- Prerequisites Framework — 3-layer check (HA readiness, feature state, infrastructure) with auto-remediation via ha_executor
+- Device Configuration Protocol — Network Mapper for reads, ha_executor for writes
+- Generic Epic Test Runner — combines scenario + feature + device for any epic; feature-specific show commands from feature-ha-mapping.md
+
+**Rule:** Network Mapper for show commands; ha_executor for operational/config (request restart, clear bgp, set logging terminal, configure).
+
+**ha_ssh select() pattern:** `recv_until_ready()` uses `select.select([chan], [], [], min(remaining, 0.5))` to block at kernel level until data arrives — zero CPU while waiting, instant wakeup when bytes appear. Replaces fixed sleeps and busy-loop polling. Improves convergence time measurement accuracy in poll_recovery (ssh_quick_check).
+
+**Files Modified:**
+- `SCALER/HA/ha_ssh.py` (new, 2026-03-01)
+- `SCALER/HA/ha_executor.py` (imports from ha_ssh)
+- `SCALER/HA/ha_flowspec_test.py` (imports run_ssh_shell, ssh_quick_check from ha_ssh)
+- `SCALER/HA/ensure_dnaas_path.py` (imports run_ssh_shell from ha_ssh)
+- `~/.cursor/commands/HA.md` (Device Verification Gate, Prerequisites Framework, Device Configuration Protocol, TEST/EPIC updates)
+- `~/.cursor/ha-reference/feature-ha-mapping.md` (Prerequisites field per feature)
+- `~/.cursor/ha-reference/test-procedures.md` (Prerequisite checklist, ha_executor trigger per scenario)
+
+---
 
 ### L3 Interface Advanced Options (2026-01-27)
 
@@ -3648,6 +3938,10 @@ protocols
 
 ---
 
+*Updated: 2026-03-02 - SW-234480 FlowSpec VPN Scale Tests: 5/5 quick-win PASS on PE-4 (CL-16). Key findings: TCAM limit 12K IPv4, session flap recovery 5.5s at 20K routes, IPv6 TCAM leak bug confirmed (BUG_FLOWSPEC_TCAM_RESERVED_LEAK_BURST)*
+*Updated: 2026-03-02 - Scale test orchestrator fixes: filename sanitization, device-side NCP count via pipe filter, TCAM programming wait, convergence tracking*
+*Updated: 2026-03-02 - /debug-dnos adaptive polling: use Read tool on terminal files instead of sleep+tail (prevents Aborted errors)*
+*Updated: 2026-03-02 - SW-234480 Phase 2: test_10 PASS, test_11 PASS, test_02 PASS (after RT fix). test_02 "IPv6 TCAM=0" was RT mismatch in test tooling (bgp_tool parser default overrode per-mode RT; orchestrator used single RT for all modes). Fix: bgp_tool --rt default=None, orchestrator rt_overrides. Combined IPv4=12K + IPv6=4K works with ZERO NCP errors.*
 *Updated: 2026-02-01 - Added New Route-Policy Language (SW-181332) with programming-like syntax*
 *Updated: 2026-01-30 - Added BGP Labeled-Unicast dual hierarchy implementation*
 *Updated: 2026-01-27 - Added Granular Mirror Configuration with hierarchical selection, VRF support, and advanced transformations*

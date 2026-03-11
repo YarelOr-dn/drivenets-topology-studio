@@ -1,0 +1,18 @@
+{
+  "id": "test_10",
+  "name": "Withdraw All at Once (20K bulk)",
+  "verdict": "PASS",
+  "withdraw_sec": 69.3,
+  "dp_pre_withdraw": 12000,
+  "dp_post_withdraw": 0,
+  "pfxrcd_zero": true,
+  "stable": true,
+  "tcam": {
+    "installed": 0,
+    "total": 12000,
+    "percent": 0.0,
+    "ipv6_installed": 0,
+    "ipv6_total": 4000
+  },
+  "reason": null
+}

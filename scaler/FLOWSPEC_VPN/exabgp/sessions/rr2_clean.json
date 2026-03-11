@@ -1,0 +1,27 @@
+{
+  "session_id": "rr2_clean",
+  "status": "closed",
+  "created": "2026-02-16T13:50:25.826701+00:00",
+  "exabgp_pid": 567350,
+  "exabgp_config": "/tmp/exabgp_rr_redirect.conf",
+  "exabgp_log": "/home/dn/SCALER/FLOWSPEC_VPN/exabgp/logs/rr2_clean_exabgp.log",
+  "peer_ip": "100.70.0.205",
+  "peer_as": "1234567",
+  "exabgp_ip": "100.70.0.32",
+  "device_ip": "100.70.0.205",
+  "selected_afis": [],
+  "target_device": null,
+  "dnaas_leaf": null,
+  "applied_configs": {},
+  "injected_routes": [
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; source 16.16.16.0/30; } then { redirect 10.0.0.254; extended-community [ target:1234567:300 ]; }",
+      "injected_at": "2026-02-16T13:52:40.084184+00:00"
+    },
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; source 16.16.16.0/30; } then { redirect 10.0.0.254; extended-community [ target:1234567:300 ]; }",
+      "injected_at": "2026-02-16T13:55:27.921435+00:00"
+    }
+  ],
+  "closed_at": "2026-02-16T14:00:35.882037+00:00"
+}

@@ -99,22 +99,70 @@
       "description": "BGP peer limits"
     },
     "flowspec": {
-      "scale_from_jira": {
-        "jira_reference": "SW-206883 (Scale User Story under SW-182545)",
-        "max_flowspec_vpn_peers": 8,
-        "max_flowspec_vpn_peers_note": "~8 peers (like scale of VPN RR)",
-        "max_flowspec_vpn_routes": 20000,
-        "max_flowspec_vpn_routes_note": "~20k routes across all VRFs",
-        "dp_ipv4_rules": 12000,
-        "dp_ipv6_rules": 4000,
-        "dp_note": "DP resources shared among ALL flowspec entries regardless of VRF"
+      "scale_evolution_jira": {
+        "SW-69017": {
+          "summary": "Scale: BGP FlowSpec (8K IPv4, 4K IPv6)",
+          "status": "Verified",
+          "scale": "Original scale: 8K IPv4, 4K IPv6 installed simple rules"
+        },
+        "SW-139913": {
+          "summary": "Flowspec scale increase",
+          "status": "Verified",
+          "scale": "Increased to 12K IPv4, 4K IPv6 (customer: Tata, comparing Juniper 64K/Cisco 32K over J2)",
+          "note": "This is the ticket that bumped IPv4 from 8K to 12K. YANG max-elements was NOT updated to match."
+        },
+        "SW-206883": {
+          "summary": "Scale (VPN scale under SW-182545)",
+          "status": "Dev-Done",
+          "scale": "Confirms 12K IPv4, 4K IPv6 installed simple rules. ~20K routes total, ~8 VPN peers.",
+          "note": "DP scale matches SW-139913. All scale can be across different VRFs or in specific VRF."
+        },
+        "SW-182546": {
+          "summary": "Flowspec VPN - DP enabler",
+          "status": "In Scrum QA",
+          "features": "VRF support for flowspec, DP resources shared among ALL entries regardless of VRF, vrf match criteria (SW-226319)"
+        },
+        "SW-226319": {
+          "summary": "CLI Config | flowspec-local-policies ipv4/6 match-class vrf",
+          "status": "Dev-Done",
+          "feature": "vrf <vrf-name> match criteria in match-class. Default: match any VRF. Operator advised to add VRF to local-policy match when flowspec used on multiple VRFs."
+        }
+      },
+      "hw_tcam_per_ncp": {
+        "ipv4_capacity": 12000,
+        "ipv6_capacity": 4000,
+        "source": "show system npu-resources resource-type flowspec (PE-4 live 2026-02-22)",
+        "jira_source": "SW-139913 (scale increase to 12K), confirmed by SW-206883",
+        "note": "HW TCAM entries per NCP. Shared between BGP flowspec and local-policies. A complex match-class may expand to multiple HW entries.",
+        "verified_device": "YOR_CL_PE-4 (kvm108-cl408d-ncc0)",
+        "also_in": "FLOWSPEC_VPN/fsvpn_wizard.py ipv4_capacity=12000, ipv6_capacity=4000",
+        "vendor_comparison": "Cisco J2: 32K, Juniper: 64K (per SW-139913)"
+      },
+      "config_model_limits_yang": {
+        "source": "dn-flowspec-local-policies.yang (max-elements)",
+        "match_class_definitions_ipv4": 8000,
+        "match_class_definitions_ipv6": 4000,
+        "policies_per_afi": 20,
+        "match_classes_per_policy_ipv4": 8000,
+        "match_classes_per_policy_ipv6": 4000,
+        "policies_per_forwarding_options": 1,
+        "note": "YANG max-elements still 8000 from SW-69017 era. HW TCAM was increased to 12K by SW-139913 but YANG was NOT updated. Real DP limit is 12K IPv4.",
+        "yang_outdated": true
       },
       "max_rules_per_vrf": 3000,
       "max_rules_total": 20000,
-      "max_flowspec_interfaces": 1000,
-      "max_local_policies": 256,
-      "max_match_classes": 1024,
-      "max_vrfs_with_flowspec": 512,
+      "max_flowspec_interfaces": 8000,
+      "_max_flowspec_interfaces_source": "Confluence '(v25.2) Interface Scale & RNR' (page 5034508295): 'flowspec supports all 8k interfaces'",
+      "max_local_policies": 40,
+      "max_local_policies_per_afi": 20,
+      "max_match_classes": 12000,
+      "max_match_classes_ipv4": 8000,
+      "max_match_classes_ipv6": 4000,
+      "max_match_classes_per_policy_ipv4": 8000,
+      "max_match_classes_per_policy_ipv6": 4000,
+      "policies_per_forwarding_options": 1,
+      "max_vrfs_with_flowspec": "platform_limit",
+      "_max_vrfs_with_flowspec_note": "No FlowSpec-specific VRF limit. Follows platform VRF scale: 1.5k (v25.2) / 8k (v25.3+). Source: Confluence '(v25.2) Interface Scale & RNR' + SW-182546 'DP resources shared regardless of VRF'",
       "max_flowspec_vpn_peers": 8,
       "description": "Flowspec VPN limits per RFC 8955/8956 (SAFI 134)",
       "address_families": {
@@ -141,6 +189,26 @@
         "import_option": "import-vpn route-target <rt>",
         "description": "Import flowspec VPN routes into non-default VRF by route-target"
       },
+      "local_policy_actions": {
+        "rate-limit": "action rate-limit <0, 64-4294967295> kbps (0=drop)",
+        "redirect-to-vrf": "action redirect-to-vrf <vrf-name>",
+        "note": "redirect-to-ip is NOT supported for local policies (only BGP flowspec)"
+      },
+      "local_policy_match_criteria": {
+        "dest-ip": "A.B.C.D/x (required if no src-ip)",
+        "src-ip": "A.B.C.D/x (required if no dest-ip)",
+        "dest-ports": "0-65535 (single or range)",
+        "src-ports": "0-65535 (single or range)",
+        "protocol": "Named protocol or hex (130+ options, see FLOWSPEC_LOCAL_POLICIES_FULL_MAP.md)",
+        "dscp": "0-63 (IPv4 only)",
+        "traffic-class": "0-63 (IPv6 only, equivalent to dscp)",
+        "packet-length": "0-65535 (single or range)",
+        "tcp-flag": "syn,ack,urg,psh,rst,fin (comma-separated)",
+        "fragmented": "presence flag (no value)",
+        "icmp": "31 ICMP message types (echo-request, echo-reply, etc.)",
+        "vrf": "VRF name (restrict match to traffic from specific VRF, SW-182546/SW-226319)",
+        "source": "PE-4 live ? output 2026-02-22"
+      },
       "supported_interface_types": ["physical", "physical-vlan", "bundle", "bundle-vlan", "irb"],
       "actions": ["discard", "rate-limit", "redirect-to-ip"],
       "match_criteria": {
@@ -154,7 +222,36 @@
         "tcp_flag": "syn, ack, fin, rst, psh, urg",
         "fragmented": "true/false"
       },
-      "jira_reference": "SW-182545, SW-182546"
+      "jira_reference": "SW-69017, SW-139913, SW-182545, SW-182546, SW-206883, SW-226319",
+      "flowspec_local_policies_source": "dn-flowspec-local-policies.yang (config model, outdated max-elements), show system npu-resources (HW TCAM), fsvpn_wizard.py (capacity constants), Jira SW-139913 (scale increase)",
+      "limits_reconciliation": {
+        "last_verified": "2026-02-23",
+        "verified_on": "PE-4 (YOR_CL_PE-4, kvm108-cl408d-ncc0)",
+        "sources_checked": [
+          "Jira SW-69017 (original scale 8K/4K)",
+          "Jira SW-139913 (scale increase to 12K IPv4, Verified)",
+          "Jira SW-206883 (VPN scale confirms 12K/4K, Dev-Done)",
+          "Jira SW-182546 (DP enabler, VRF support, In Scrum QA)",
+          "Jira SW-226319 (vrf match-class CLI, Dev-Done)",
+          "dn-flowspec-local-policies.yang (max-elements 8000 - outdated, not updated after SW-139913)",
+          "show system npu-resources resource-type flowspec (PE-4 live: 12000/4000 per NCP)",
+          "FLOWSPEC_VPN/fsvpn_wizard.py (ipv4_capacity=12000, ipv6_capacity=4000)",
+          "SCALER/scaler/cli_rules_db.py",
+          "SCALER/scaler/interactive_scale.py",
+          "dnos_cheetah_docs/Show Commands/show system npu-resources.rst"
+        ],
+        "discrepancies_found": [
+          "YANG max-elements 8000 IPv4 not updated after SW-139913 scale increase to 12K (yang_outdated=true)",
+          "cli_rules_db.py had max_flowspec_rules_total=10000 vs Jira SW-206883 says 20000",
+          "interactive_scale.py fallbacks used old values (256 policies, 1024 match-classes)",
+          "Test plan v2 Appendix B still shows old limits (256 policies, 1024 match-classes)"
+        ],
+        "discrepancies_fixed": [
+          "cli_rules_db.py: max_flowspec_rules_total 10000 -> 20000",
+          "interactive_scale.py: fallback max_local_policies 256 -> 40",
+          "interactive_scale.py: fallback max_match_classes 1024 -> 12000"
+        ]
+      }
     }
   },
   "error_hooks": {

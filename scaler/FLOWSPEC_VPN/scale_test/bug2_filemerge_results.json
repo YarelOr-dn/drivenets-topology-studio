@@ -1,0 +1,522 @@
+{
+  "test": "BUG-2 file-merge reproduction",
+  "started": "2026-02-24T14:39:17.138590",
+  "baseline_installed": 13,
+  "local_rules": 100,
+  "expected_total": 113,
+  "cycles": [
+    {
+      "cycle": 1,
+      "timestamps": {
+        "load_start": "2026-02-24T14:39:24.419087",
+        "load_end": "2026-02-24T14:39:53.871323",
+        "delete_start": "2026-02-24T14:40:09.154997",
+        "delete_end": "2026-02-24T14:40:33.739073"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 2,
+      "timestamps": {
+        "load_start": "2026-02-24T14:40:49.021958",
+        "load_end": "2026-02-24T14:41:18.470353",
+        "delete_start": "2026-02-24T14:41:33.750018",
+        "delete_end": "2026-02-24T14:41:58.343028"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 3,
+      "timestamps": {
+        "load_start": "2026-02-24T14:42:13.617928",
+        "load_end": "2026-02-24T14:42:43.067083",
+        "delete_start": "2026-02-24T14:42:58.349929",
+        "delete_end": "2026-02-24T14:43:22.867115"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 4,
+      "timestamps": {
+        "load_start": "2026-02-24T14:43:38.149988",
+        "load_end": "2026-02-24T14:44:07.587119",
+        "delete_start": "2026-02-24T14:44:22.869969",
+        "delete_end": "2026-02-24T14:44:47.459145"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 5,
+      "timestamps": {
+        "load_start": "2026-02-24T14:45:02.737983",
+        "load_end": "2026-02-24T14:45:32.271099",
+        "delete_start": "2026-02-24T14:45:47.558957",
+        "delete_end": "2026-02-24T14:46:12.071098"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 6,
+      "timestamps": {
+        "load_start": "2026-02-24T14:46:27.353967",
+        "load_end": "2026-02-24T14:46:56.799086",
+        "delete_start": "2026-02-24T14:47:12.082271",
+        "delete_end": "2026-02-24T14:47:36.671095"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 7,
+      "timestamps": {
+        "load_start": "2026-02-24T14:47:51.950972",
+        "load_end": "2026-02-24T14:48:21.387104",
+        "delete_start": "2026-02-24T14:48:36.665959",
+        "delete_end": "2026-02-24T14:49:01.255044"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 8,
+      "timestamps": {
+        "load_start": "2026-02-24T14:49:16.534988",
+        "load_end": "2026-02-24T14:49:45.903097",
+        "delete_start": "2026-02-24T14:50:01.185975",
+        "delete_end": "2026-02-24T14:50:25.787012"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 9,
+      "timestamps": {
+        "load_start": "2026-02-24T14:50:41.067845",
+        "load_end": "2026-02-24T14:51:10.511063",
+        "delete_start": "2026-02-24T14:51:25.789436",
+        "delete_end": "2026-02-24T14:51:50.298060"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 10,
+      "timestamps": {
+        "load_start": "2026-02-24T14:52:05.577954",
+        "load_end": "2026-02-24T14:52:34.947013",
+        "delete_start": "2026-02-24T14:52:50.225936",
+        "delete_end": "2026-02-24T14:53:14.739006"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 11,
+      "timestamps": {
+        "load_start": "2026-02-24T14:53:30.022968",
+        "load_end": "2026-02-24T14:53:59.474988",
+        "delete_start": "2026-02-24T14:54:14.749973",
+        "delete_end": "2026-02-24T14:54:39.339122"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 12,
+      "timestamps": {
+        "load_start": "2026-02-24T14:54:54.622095",
+        "load_end": "2026-02-24T14:55:24.067870",
+        "delete_start": "2026-02-24T14:55:39.349978",
+        "delete_end": "2026-02-24T14:56:03.863035"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 13,
+      "timestamps": {
+        "load_start": "2026-02-24T14:56:19.069984",
+        "load_end": "2026-02-24T14:56:48.539209",
+        "delete_start": "2026-02-24T14:57:03.821957",
+        "delete_end": "2026-02-24T14:57:28.423058"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 14,
+      "timestamps": {
+        "load_start": "2026-02-24T14:57:43.697969",
+        "load_end": "2026-02-24T14:58:13.087185",
+        "delete_start": "2026-02-24T14:58:28.368777",
+        "delete_end": "2026-02-24T14:58:52.959096"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    },
+    {
+      "cycle": 15,
+      "timestamps": {
+        "load_start": "2026-02-24T14:59:08.241964",
+        "load_end": "2026-02-24T14:59:37.611278",
+        "delete_start": "2026-02-24T14:59:52.889956",
+        "delete_end": "2026-02-24T15:00:17.482175"
+      },
+      "load_success": true,
+      "after_load": {
+        "ncp6": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        },
+        "ncp18": {
+          "received": 114,
+          "installed": 113,
+          "hw": 113
+        }
+      },
+      "after_delete": {
+        "ncp6": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        },
+        "ncp18": {
+          "received": 14,
+          "installed": 13,
+          "hw": 13
+        }
+      }
+    }
+  ],
+  "leak_detected": false,
+  "leak_cycle": null,
+  "finished": "2026-02-24T15:00:32.764685"
+}

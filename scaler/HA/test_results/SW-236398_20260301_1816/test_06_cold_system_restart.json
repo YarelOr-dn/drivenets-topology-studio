@@ -1,0 +1,6 @@
+{
+  "id": "test_06",
+  "name": "Cold System Restart",
+  "verdict": "ERROR",
+  "reason": "[Errno None] Unable to connect to port 22 on 100.64.6.82"
+}

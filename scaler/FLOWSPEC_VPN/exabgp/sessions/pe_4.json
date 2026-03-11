@@ -1,0 +1,166 @@
+{
+  "session_id": "pe_4",
+  "status": "active",
+  "created": "2026-03-09T17:55:43.103432+00:00",
+  "exabgp_pid": 226620,
+  "exabgp_config": "/tmp/exabgp_pe_4.conf",
+  "exabgp_log": "/home/dn/SCALER/FLOWSPEC_VPN/exabgp/logs/pe_4_exabgp.log",
+  "peer_ip": "100.70.0.206",
+  "peer_as": "unknown",
+  "exabgp_ip": "100.70.0.32",
+  "device_ip": "100.70.0.206",
+  "selected_afis": [],
+  "target_device": null,
+  "dnaas_leaf": null,
+  "applied_configs": {},
+  "injected_routes": [
+    {
+      "route": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+      "injected_at": "2026-03-09T17:55:43.102634+00:00"
+    },
+    {
+      "route": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+      "injected_at": "2026-03-09T17:55:43.102695+00:00"
+    },
+    {
+      "route": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+      "injected_at": "2026-03-09T17:55:43.102704+00:00"
+    },
+    {
+      "route": "announce flow route rd 4.4.4.4:101 destination 100.100.100.1/32 redirect 1234567:101 extended-community [ target:1234567:301 ]",
+      "injected_at": "2026-03-09T17:55:43.102708+00:00"
+    }
+  ],
+  "scale_injections": [],
+  "advertised_state": {
+    "summary": {
+      "total_routes": 4,
+      "by_type": {
+        "flowspec-vpn": 4
+      },
+      "by_afi_safi": {
+        "ipv4 flow-vpn": 4
+      },
+      "prefix_count": 1,
+      "prefix_ranges": [
+        "100.100.100.1/32"
+      ],
+      "all_prefixes": [
+        "100.100.100.1/32"
+      ],
+      "rds": [
+        "4.4.4.4:100",
+        "4.4.4.4:101"
+      ],
+      "route_targets": [
+        "1234567:300",
+        "1234567:301"
+      ],
+      "actions": [
+        "redirect-ip 49.49.49.9",
+        "redirect-to-rt 1234567:101"
+      ]
+    },
+    "routes": [
+      {
+        "raw": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+        "action": "announce",
+        "type": "flowspec-vpn",
+        "rd": "4.4.4.4:100",
+        "afi_safi": "ipv4 flow-vpn",
+        "match": {
+          "destination": "100.100.100.1/32"
+        },
+        "actions": {
+          "redirect-ip": "49.49.49.9",
+          "redirect-to-rt": "1234567:101"
+        },
+        "extended_communities": [
+          "target:1234567:300"
+        ],
+        "route_targets": [
+          "1234567:300"
+        ],
+        "injected_at": "2026-03-09T17:55:43.102634+00:00"
+      },
+      {
+        "raw": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+        "action": "announce",
+        "type": "flowspec-vpn",
+        "rd": "4.4.4.4:100",
+        "afi_safi": "ipv4 flow-vpn",
+        "match": {
+          "destination": "100.100.100.1/32"
+        },
+        "actions": {
+          "redirect-ip": "49.49.49.9",
+          "redirect-to-rt": "1234567:101"
+        },
+        "extended_communities": [
+          "target:1234567:300"
+        ],
+        "route_targets": [
+          "1234567:300"
+        ],
+        "injected_at": "2026-03-09T17:55:43.102695+00:00"
+      },
+      {
+        "raw": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+        "action": "announce",
+        "type": "flowspec-vpn",
+        "rd": "4.4.4.4:100",
+        "afi_safi": "ipv4 flow-vpn",
+        "match": {
+          "destination": "100.100.100.1/32"
+        },
+        "actions": {
+          "redirect-ip": "49.49.49.9",
+          "redirect-to-rt": "1234567:101"
+        },
+        "extended_communities": [
+          "target:1234567:300"
+        ],
+        "route_targets": [
+          "1234567:300"
+        ],
+        "injected_at": "2026-03-09T17:55:43.102704+00:00"
+      },
+      {
+        "raw": "announce flow route rd 4.4.4.4:101 destination 100.100.100.1/32 redirect 1234567:101 extended-community [ target:1234567:301 ]",
+        "action": "announce",
+        "type": "flowspec-vpn",
+        "rd": "4.4.4.4:101",
+        "afi_safi": "ipv4 flow-vpn",
+        "match": {
+          "destination": "100.100.100.1/32"
+        },
+        "actions": {
+          "redirect-to-rt": "1234567:101"
+        },
+        "extended_communities": [
+          "target:1234567:301"
+        ],
+        "route_targets": [
+          "1234567:301"
+        ],
+        "injected_at": "2026-03-09T17:55:43.102708+00:00"
+      }
+    ],
+    "capabilities": {
+      "peer_ip": "100.70.0.206",
+      "peer_as": "unknown",
+      "local_as": 65200,
+      "local_ip": "100.70.0.32",
+      "families": [],
+      "ebgp_multihop": 10,
+      "hold_time": 600,
+      "target_device": null,
+      "dnaas_leaf": null
+    }
+  },
+  "routes_injected": 4,
+  "watchdog_storm_kills": 35,
+  "last_watchdog_restart": "2026-03-11T07:43:48.378253+00:00",
+  "watchdog_restarts": 35,
+  "watchdog_auto_restarts": 35
+}

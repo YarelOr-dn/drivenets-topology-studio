@@ -515,23 +515,71 @@ def load_images_via_ssh(
         line = ''.join(c for c in line if c >= ' ' or c in '\n\t')
         return line.strip()
     
-    # Try to connect via SSH
+    # Try to connect via SSH with multi-layer verification
     add_line(f"🔌 Connecting to {device_ip} via SSH...", "cyan")
     live.update(render_panel())
     
     try:
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(device_ip, username=username, password=password, timeout=15)
+        ssh.connect(device_ip, username=username, password=password, timeout=15,
+                    allow_agent=False, look_for_keys=False)
         channel = ssh.invoke_shell(width=200, height=50)
         channel.settimeout(30)
         time.sleep(2)
         
-        # Clear initial output
+        initial_prompt = ""
         if channel.recv_ready():
-            channel.recv(65535)
+            initial_prompt = channel.recv(65535).decode('utf-8', errors='replace')
         
-        add_line(f"✓ SSH connected to {device_ip}", "green")
+        # Multi-layer verification: prompt check + show system + live IP + DB sync
+        from ..utils import verify_device_hostname, post_connect_verify, sync_device_from_live
+        
+        # Layer 1: Fast prompt check
+        host_ok, actual_host = verify_device_hostname(initial_prompt, knowledge.hostname)
+        if not host_ok:
+            add_line(f"⛔ WRONG DEVICE: prompt='{actual_host}', expected='{knowledge.hostname}'", "red")
+            add_line("ABORTING - will not execute commands on wrong device!", "red")
+            live.update(render_panel())
+            ssh.close()
+            return False, f"SAFETY ABORT: Connected to '{actual_host}' but expected '{knowledge.hostname}'"
+        
+        # Layers 2-3: Deep verification (show system + live mgmt IP)
+        if actual_host not in ('GI', 'UNKNOWN'):
+            add_line("🔍 Verifying device identity...", "cyan")
+            live.update(render_panel())
+            verify = post_connect_verify(channel, knowledge.hostname, prompt_output=initial_prompt)
+            if verify.get('abort_reason'):
+                add_line(f"⛔ {verify['abort_reason']}", "red")
+                add_line("ABORTING - device identity mismatch!", "red")
+                live.update(render_panel())
+                ssh.close()
+                return False, f"SAFETY ABORT: {verify['abort_reason']}"
+            
+            # Sync DB with live data (IP, serial, system type)
+            db_changes = sync_device_from_live(knowledge.hostname, verify)
+            if db_changes:
+                for key, change in db_changes.items():
+                    add_line(f"📝 DB sync: {key}: {change}", "yellow")
+                live.update(render_panel())
+            
+            actual_host = verify.get('actual_hostname', actual_host)
+        elif actual_host == 'GI':
+            # GI mode: verify serial from show system stack
+            add_line("🔍 GI mode - verifying serial number...", "cyan")
+            live.update(render_panel())
+            from ..utils import verify_gi_serial
+            gi_v = verify_gi_serial(channel, knowledge.hostname)
+            if gi_v.get('abort_reason'):
+                add_line(f"⛔ {gi_v['abort_reason']}", "red")
+                add_line("ABORTING - GI serial mismatch!", "red")
+                live.update(render_panel())
+                ssh.close()
+                return False, f"SAFETY ABORT: {gi_v['abort_reason']}"
+            add_line("✓ GI serial verified", "green")
+            live.update(render_panel())
+        
+        add_line(f"✓ SSH connected to {device_ip} (verified: {actual_host})", "green")
         live.update(render_panel())
         
     except Exception as e:
@@ -638,7 +686,34 @@ def load_images_via_ssh(
     total = len(components)
     progress_per_component = 60 // total
     
-    for idx, (name, url) in enumerate(components):
+    # Pre-check: which images are already in the target stack?
+    add_line("🔍 Checking target stack for existing images...", "cyan")
+    live.update(render_panel())
+    stack_output = send_and_wait("show system stack | no-more", wait_time=3)
+    
+    components_to_load = []
+    for name, url in components:
+        if name.lower() in stack_output.lower():
+            # Verify it has a target version (not just listed with empty target)
+            lines = [l for l in stack_output.split('\n') if name.lower() in l.lower() and '|' in l]
+            has_target = False
+            for line in lines:
+                cols = [c.strip() for c in line.split('|')]
+                if len(cols) >= 7 and cols[6].strip():
+                    has_target = True
+            if has_target:
+                add_line(f"✓ {name} already in target stack - skipping upload", "green")
+                live.update(render_panel())
+                continue
+        components_to_load.append((name, url))
+    
+    if not components_to_load:
+        add_line("✓ All images already in target stack", "green")
+        live.update(render_panel())
+        ssh.close()
+        return True, "All images already loaded"
+    
+    for idx, (name, url) in enumerate(components_to_load):
         with progress_lock:
             progress_state['stage'] = f"Loading {name}..."
             progress_state['progress'] = 10 + (idx * progress_per_component)
@@ -1085,7 +1160,7 @@ def deploy_via_console(
     live.update(render_panel())
     
     # Execute deploy command
-    deploy_cmd = knowledge.deploy_command or f"request system deploy system-type {knowledge.system_type} name {knowledge.hostname} ncc-id 0"
+    deploy_cmd = knowledge.deploy_command or f"request system deploy system-type {knowledge.system_type} name {knowledge.hostname} ncc-id {knowledge.ncc_id or '0'}"
     add_line(f"🚀 Deploying: {deploy_cmd[:50]}...", "cyan")
     live.update(render_panel())
     
@@ -1274,10 +1349,29 @@ def show_restore_plan(knowledge: DeviceKnowledge, system_type: str, hostname: st
     console.print(Panel(plan_text, title=f"[bold]{device_state} Restore Plan[/bold]", border_style=border_style))
     
     # Show connection method if console is needed
-    if hostname in ["PE-2", "PE-1", "PE-4"] and device_state in ["BASEOS_SHELL", "ONIE", "DN_RECOVERY"]:
-        console_ports = {"PE-1": 12, "PE-2": 13, "PE-4": 14}
-        port = console_ports.get(hostname, 13)
-        console.print(f"\n[dim]📡 Connection: Will use console-b15 (port {port})[/dim]\n")
+    if device_state in ["BASEOS_SHELL", "ONIE", "DN_RECOVERY"]:
+        try:
+            from scaler.connection_strategy import get_console_config_for_device
+            # Check if this is a KVM cluster -- console server reaches NCP, not NCC
+            _is_kvm = False
+            try:
+                _op_file = Path(f"/home/dn/SCALER/db/configs/{hostname}/operational.json")
+                if _op_file.exists():
+                    with open(_op_file) as f:
+                        _op = json.load(f)
+                    if _op.get('ncc_type') == 'kvm':
+                        _is_kvm = True
+                        _kvm_host = _op.get('kvm_host', 'kvm-host')
+                        console.print(f"\n[dim]Connection: virsh console via {_kvm_host} (KVM NCC)[/dim]\n")
+            except:
+                pass
+            
+            if not _is_kvm:
+                _ccfg = get_console_config_for_device(hostname)
+                if _ccfg:
+                    console.print(f"\n[dim]Connection: Will use {_ccfg['host']} (port {_ccfg['port']})[/dim]\n")
+        except Exception:
+            pass
     
     # Show parameters
     table = Table(box=box.ROUNDED, title="Deployment Parameters (saved for deploy)")
@@ -1442,7 +1536,8 @@ def run_system_restore_wizard(device: Any, multi_ctx: Any = None) -> bool:
         system_type=system_type,
         hostname=hostname,
         knowledge=knowledge,
-        image_urls=image_urls  # This triggers console-based image loading
+        image_urls=image_urls,
+        known_device_state=device_state
     )
     
     if not gi_success:
@@ -1663,7 +1758,8 @@ def execute_restore_to_gi_mode(
     hostname: str,
     knowledge: DeviceKnowledge,
     progress_callback: Callable[[Dict], None] = None,
-    image_urls: Optional[Dict] = None
+    image_urls: Optional[Dict] = None,
+    known_device_state: str = ""
 ) -> bool:
     """
     Execute system restore - get device to GI mode, optionally load images and deploy.
@@ -1674,10 +1770,6 @@ def execute_restore_to_gi_mode(
     3. If image_urls provided: loads images and deploys DNOS via console
     4. If no image_urls: returns after reaching GI mode
     
-    IMPORTANT: When image_urls is provided, the SAME console session is used
-    throughout - this fixes the issue where SSH was attempted in GI mode
-    (which fails because there's no mgmt0 IP yet).
-    
     Args:
         device: Device object
         system_type: Target system type
@@ -1685,7 +1777,7 @@ def execute_restore_to_gi_mode(
         knowledge: DeviceKnowledge for persistence
         progress_callback: Optional callback for progress updates
         image_urls: Optional Dict with dnos_url, gi_url, baseos_url
-                   If provided, images are loaded and DNOS deployed via console
+        known_device_state: Pre-detected state from operational.json (fallback if SSH detection fails)
         
     Returns:
         True if device reached GI mode (and optionally deployed DNOS)
@@ -1773,8 +1865,14 @@ def execute_restore_to_gi_mode(
         except:
             pass
     
-    # Check if PE-2 and should use console
-    use_console = (device.hostname == "PE-2" and knowledge.recovery_mode_detected)
+    # Use console/virsh for devices in non-DNOS states (GI, BASEOS_SHELL, RECOVERY, etc.)
+    # SSH to device IP usually fails for these states
+    use_console = False
+    use_connect_for_upgrade = False
+    if knowledge.recovery_mode_detected or known_device_state in ('GI', 'BASEOS_SHELL', 'RECOVERY', 'DN_RECOVERY', 'DEPLOYING', 'ONIE'):
+        use_connect_for_upgrade = True
+    elif device.hostname == "PE-2":
+        use_console = True
     
     with Live(render_panel(), refresh_per_second=4, console=console, transient=False) as live:
         try:
@@ -1783,7 +1881,199 @@ def execute_restore_to_gi_mode(
                 current_stage = "connecting"
                 progress_pct = 5
             
-            if use_console:
+            if use_connect_for_upgrade:
+                # Use unified connection strategy (handles SSH, virsh, console automatically)
+                add_line(f"Connecting to {device.hostname} (auto-detect)...")
+                live.update(render_panel())
+                
+                try:
+                    from ..connection_strategy import connect_for_upgrade
+                    conn = connect_for_upgrade(device.hostname, timeout=30)
+                    if not conn['connected']:
+                        raise Exception(conn.get('abort_reason') or 'All connection methods failed')
+                    
+                    ssh = conn['ssh']
+                    channel = conn['channel']
+                    conn_method = conn.get('method', 'unknown')
+                    device_state_detected = conn.get('device_state', '')
+                    channel.settimeout(30)
+                    
+                    # Update NCC ID from connection auto-detection
+                    _conn_ncc = conn.get('ncc_id')
+                    if _conn_ncc is not None:
+                        knowledge.ncc_id = str(_conn_ncc)
+                        knowledge.deploy_command = knowledge.generate_deploy_command()
+                    
+                    add_line(f"Connected via {conn_method}")
+                    live.update(render_panel())
+                    
+                    # Read initial output to detect state
+                    time.sleep(1)
+                    initial_output = ""
+                    while channel.recv_ready():
+                        initial_output += channel.recv(8192).decode('utf-8', errors='replace')
+                        time.sleep(0.3)
+                    
+                    # Detect if we're in GI mode already (skip dncli)
+                    if device_state_detected == 'GI' or 'GI#' in initial_output or 'GI(' in initial_output or 'GI>' in initial_output:
+                        add_line("Device already in GI mode", "green")
+                        live.update(render_panel())
+                        with progress_lock:
+                            current_stage = "gi_ready"
+                            progress_pct = 40
+                    elif device_state_detected == 'BASEOS_SHELL' or '$' in initial_output:
+                        add_line("BaseOS shell detected - running dncli...")
+                        live.update(render_panel())
+                        channel.send("\x03")
+                        time.sleep(1)
+                        while channel.recv_ready():
+                            channel.recv(8192)
+                            time.sleep(0.2)
+                        channel.send("dncli\r\n")
+                        time.sleep(3)
+                        dncli_output = ""
+                        while channel.recv_ready():
+                            dncli_output += channel.recv(8192).decode('utf-8', errors='replace')
+                            time.sleep(0.3)
+                        if 'password' in dncli_output.lower():
+                            channel.send("dnroot\r\n")
+                            time.sleep(3)
+                            while channel.recv_ready():
+                                dncli_output += channel.recv(8192).decode('utf-8', errors='replace')
+                                time.sleep(0.3)
+                        channel.send("\r\n")
+                        time.sleep(1)
+                        while channel.recv_ready():
+                            dncli_output += channel.recv(8192).decode('utf-8', errors='replace')
+                            time.sleep(0.3)
+                        
+                        if 'GI#' in dncli_output or 'GI(' in dncli_output or 'GI>' in dncli_output:
+                            add_line("GI mode reached", "green")
+                            live.update(render_panel())
+                            with progress_lock:
+                                current_stage = "gi_ready"
+                                progress_pct = 40
+                        else:
+                            add_line(f"dncli output: {dncli_output[-80:].strip()}", "yellow")
+                            live.update(render_panel())
+                    elif device_state_detected == 'DNOS':
+                        add_line("Device is in DNOS mode (not recovery)", "yellow")
+                        live.update(render_panel())
+                        with progress_lock:
+                            current_stage = "gi_ready"
+                            progress_pct = 40
+                    
+                    # After reaching GI mode via connect_for_upgrade, handle images + deploy
+                    if current_stage == "gi_ready" and image_urls and channel:
+                        # Check target stack first -- skip loading if images already present
+                        add_line("Checking target stack for existing images...", "cyan")
+                        live.update(render_panel())
+                        
+                        def _send_and_wait_ch(cmd, wait=5):
+                            channel.sendall((cmd + "\n").encode('utf-8'))
+                            time.sleep(wait)
+                            out = ""
+                            for _ in range(10):
+                                if channel.recv_ready():
+                                    out += channel.recv(65535).decode('utf-8', errors='replace')
+                                else:
+                                    time.sleep(0.3)
+                                    if out:
+                                        break
+                            return out
+                        
+                        _stack_out = _send_and_wait_ch("show system stack | no-more", wait=5)
+                        _stack_lower = _stack_out.lower()
+                        
+                        _all_in_stack = True
+                        _urls = {
+                            'DNOS': image_urls.get('dnos_url', ''),
+                            'GI': image_urls.get('gi_url', ''),
+                            'BaseOS': image_urls.get('baseos_url', '')
+                        }
+                        for _comp, _url in _urls.items():
+                            if not _url:
+                                continue
+                            _ver = _url.rstrip('/').split('/')[-1]
+                            _ver = _ver.replace('drivenets_dnos_', '').replace('drivenets_gi_', '').replace('drivenets_baseos_', '')
+                            _ver = _ver.replace('.tar', '').replace('.gz', '')
+                            if _ver and _ver.lower() in _stack_lower:
+                                add_line(f"{_comp}: already in target stack", "green")
+                            else:
+                                add_line(f"{_comp}: not in target stack yet", "yellow")
+                                _all_in_stack = False
+                            live.update(render_panel())
+                        
+                        if _all_in_stack:
+                            add_line("All images already in target stack -- skipping upload", "green")
+                            live.update(render_panel())
+                            load_ok = True
+                            load_msg = "All images already loaded"
+                        else:
+                            add_line("Loading missing images via current session...", "cyan")
+                            live.update(render_panel())
+                            
+                            load_ok, load_msg = load_images_via_console(
+                                channel=channel,
+                                image_urls=image_urls,
+                                knowledge=knowledge,
+                                add_line=add_line,
+                                progress_lock=progress_lock,
+                                live=live,
+                                render_panel=render_panel,
+                            )
+                        
+                        if load_ok:
+                            add_line(f"Images: {load_msg}", "green")
+                            live.update(render_panel())
+                            
+                            # Deploy
+                            _progress_state = {
+                                'current_stage': current_stage,
+                                'progress_pct': progress_pct,
+                            }
+                            deploy_ok, _deploy_msg = deploy_via_console(
+                                channel=channel,
+                                knowledge=knowledge,
+                                add_line=add_line,
+                                progress_lock=progress_lock,
+                                live=live,
+                                render_panel=render_panel,
+                                progress_state=_progress_state,
+                                ssh_client=ssh,
+                            )
+                            if deploy_ok:
+                                with progress_lock:
+                                    current_stage = "gi_ready"
+                                    progress_pct = 100
+                                live.update(render_panel())
+                            else:
+                                add_line("Deploy failed - check device", "red")
+                                live.update(render_panel())
+                        else:
+                            add_line(f"Image loading failed: {load_msg}", "red")
+                            live.update(render_panel())
+                    
+                    elif current_stage == "gi_ready" and not image_urls:
+                        add_line("GI mode ready (no images to load)", "green")
+                        live.update(render_panel())
+                    
+                    try:
+                        ssh.close()
+                    except:
+                        pass
+                    return current_stage == "gi_ready"
+                    
+                except Exception as conn_err:
+                    add_line(f"Error: {str(conn_err)[:50]}", "red")
+                    live.update(render_panel())
+                    with progress_lock:
+                        current_stage = "failed"
+                        progress_pct = 100
+                    live.update(render_panel())
+                    return False
+            
+            elif use_console:
                 # PE-2 in recovery: Use console connection
                 add_line(f"PE-2 in recovery - connecting via console...")
                 live.update(render_panel())
@@ -1899,22 +2189,63 @@ def execute_restore_to_gi_mode(
                     live.update(render_panel())
                     return False
             else:
-                # Normal SSH connection
-                add_line(f"Connecting to {device.ip}...")
+                # Normal SSH connection with multi-path IP resolution (IP + SN fallback)
+                from ..utils import resolve_device_ip
+                resolved_ip, resolve_method = resolve_device_ip(device)
+                connect_ip = resolved_ip or device.ip
+                
+                add_line(f"Connecting to {connect_ip}..." + (f" (via {resolve_method})" if resolve_method not in ("DB", "MGMT") else ""))
                 live.update(render_panel())
                 
                 ssh = paramiko.SSHClient()
                 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.connect(device.ip, username=device.username or 'dnroot', password=password, timeout=30)
+                ssh.connect(connect_ip, username=device.username or 'dnroot', password=password, timeout=30,
+                            allow_agent=False, look_for_keys=False)
                 channel = ssh.invoke_shell(width=200, height=50)
-                time.sleep(2)
-                initial_output = channel.recv(65535).decode('utf-8', errors='replace')
+                
+                # Robust prompt collection: try multiple times to get actual prompt
+                initial_output = ""
+                for attempt in range(4):
+                    time.sleep(1.5)
+                    if channel.recv_ready():
+                        initial_output += channel.recv(65535).decode('utf-8', errors='replace')
+                    # Send newline to trigger prompt display
+                    channel.send("\r\n")
+                    time.sleep(1)
+                    if channel.recv_ready():
+                        initial_output += channel.recv(65535).decode('utf-8', errors='replace')
+                    # Stop early if we got something meaningful
+                    if any(kw in initial_output.lower() for kw in ['recovery', 'onie', 'gi#', 'gi(', 'dnrouter', ':~$']):
+                        break
+                
+                add_line(f"SSH output: {repr(initial_output[:120])}", "dim")
+                live.update(render_panel())
             
             # Detect device state: ONIE, BaseOS Shell, RECOVERY, GI, or DNOS
-            is_onie = 'ONIE:/' in initial_output or 'onie-' in initial_output.lower()
+            output_lower = initial_output.lower()
+            is_onie = 'ONIE:/' in initial_output or 'onie-' in output_lower
             is_baseos_shell = '@' in initial_output and ':~$' in initial_output and 'dn@' in initial_output
-            is_recovery = 'RECOVERY' in initial_output or 'dnRouter(RECOVERY)' in initial_output
-            is_gi = 'GI' in initial_output or 'gicli' in initial_output.lower() or 'GI(' in initial_output
+            is_recovery = ('(recovery)' in output_lower or 'dn_recovery' in output_lower
+                           or 'dn-recovery' in output_lower or 'recovery mode' in output_lower)
+            is_gi = ('GI#' in initial_output or 'GI(' in initial_output
+                     or 'gicli' in output_lower or 'GI>' in initial_output)
+            is_dnos = ('dnRouter#' in initial_output or 'DNOS' in initial_output) and not is_recovery
+            
+            # Fallback: if SSH detection found nothing, trust operational.json / known state
+            if not any([is_onie, is_baseos_shell, is_recovery, is_gi, is_dnos]) and known_device_state:
+                ks = known_device_state.upper()
+                add_line(f"SSH prompt unclear, using known state: {known_device_state}", "yellow")
+                live.update(render_panel())
+                if ks in ('DN_RECOVERY', 'RECOVERY'):
+                    is_recovery = True
+                elif ks == 'ONIE':
+                    is_onie = True
+                elif ks == 'BASEOS_SHELL':
+                    is_baseos_shell = True
+                elif ks == 'GI':
+                    is_gi = True
+                elif ks == 'DNOS':
+                    is_dnos = True
             
             # Handle BaseOS Shell Mode (need to run dncli to enter GI)
             if is_baseos_shell:
@@ -2329,13 +2660,10 @@ def execute_restore_to_gi_mode(
             
             # Handle normal DNOS or unknown state
             if not is_recovery:
-                add_line("⚠ Device not in RECOVERY mode!", "yellow")
-                # Check if device is running DNOS normally
-                if 'DNOS' in initial_output or '#' in initial_output:
-                    add_line("Device appears to be running DNOS normally", "yellow")
-                    add_line("No restore needed - device is operational", "green")
+                if is_dnos:
+                    add_line("⚠ Device is running DNOS normally - no restore needed", "yellow")
                     with progress_lock:
-                        current_stage = "gi_ready"  # Treat as success
+                        current_stage = "gi_ready"
                         progress_pct = 100
                     live.update(render_panel())
                     try:
@@ -2344,7 +2672,8 @@ def execute_restore_to_gi_mode(
                         pass
                     return True
                 else:
-                    add_line("Unknown device state", "red")
+                    add_line(f"⚠ Could not detect device state from SSH", "red")
+                    add_line(f"Raw output: {repr(initial_output[:200])}", "dim")
                     with progress_lock:
                         current_stage = "failed"
                         progress_pct = 100
@@ -2539,9 +2868,14 @@ def execute_restore_to_gi_mode(
                     time.sleep(gi_interval)
                     
                     try:
+                        from ..utils import resolve_device_ip
+                        gi_ip, _ = resolve_device_ip(device, timeout=3.0)
+                        gi_connect = gi_ip or device.ip
+                        
                         ssh = paramiko.SSHClient()
                         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                        ssh.connect(device.ip, username='dnroot', password=password, timeout=10)
+                        ssh.connect(gi_connect, username='dnroot', password=password, timeout=10,
+                                    allow_agent=False, look_for_keys=False)
                         channel = ssh.invoke_shell(width=200, height=50)
                         time.sleep(2)
                         
@@ -2577,20 +2911,88 @@ def execute_restore_to_gi_mode(
             # Success - GI mode reached
             with progress_lock:
                 current_stage = "gi_ready"
-                progress_pct = 100
+                progress_pct = 20
             add_line("✓ Device is now in GI mode!", "green")
-            
-            # If we got a new mgmt IP, offer to update devices.json
-            if new_mgmt_ip and new_mgmt_ip != device.ip:
-                add_line(f"📡 New mgmt IP detected: {new_mgmt_ip}", "cyan")
-                add_line("Consider updating devices.json with new IP", "cyan")
-            
-            add_line(f"Next: Load images via Image Upgrade menu", "cyan")
             live.update(render_panel())
             
-            # Pause to show success before exiting live display
-            time.sleep(2)
+            if new_mgmt_ip and new_mgmt_ip != device.ip:
+                add_line(f"📡 New mgmt IP detected: {new_mgmt_ip}", "cyan")
+                live.update(render_panel())
             
+            # Load images if URLs were provided (user already selected them)
+            if image_urls:
+                from ..utils import resolve_device_ip
+                mgmt_ip = new_mgmt_ip
+                if not mgmt_ip:
+                    resolved, _ = resolve_device_ip(device, timeout=3.0)
+                    mgmt_ip = resolved or device.ip
+                
+                add_line(f"📦 Loading images via SSH to {mgmt_ip}...", "cyan")
+                live.update(render_panel())
+                
+                progress_state = {'stage': current_stage, 'progress': progress_pct}
+                load_ok, load_msg = load_images_via_ssh(
+                    device_ip=mgmt_ip, image_urls=image_urls, knowledge=knowledge,
+                    add_line=add_line, progress_lock=progress_lock,
+                    live=live, render_panel=render_panel, progress_state=progress_state,
+                    username="dnroot", password="dnroot"
+                )
+                
+                if not load_ok:
+                    add_line(f"✗ Image load failed: {load_msg}", "red")
+                    with progress_lock:
+                        current_stage = "failed"
+                        progress_pct = 100
+                    live.update(render_panel())
+                    return False
+                
+                # Deploy DNOS - need a fresh SSH connection for deploy
+                add_line("🚀 Deploying DNOS...", "cyan")
+                live.update(render_panel())
+                try:
+                    deploy_ssh = paramiko.SSHClient()
+                    deploy_ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    deploy_ssh.connect(mgmt_ip, username='dnroot', password='dnroot', timeout=30,
+                                       allow_agent=False, look_for_keys=False)
+                    deploy_channel = deploy_ssh.invoke_shell(width=200, height=50)
+                    time.sleep(2)
+                    if deploy_channel.recv_ready():
+                        deploy_channel.recv(65535)
+                    
+                    deploy_ok, deploy_msg = deploy_via_console(
+                        channel=deploy_channel, knowledge=knowledge,
+                        add_line=add_line, progress_lock=progress_lock,
+                        live=live, render_panel=render_panel,
+                        progress_state=progress_state
+                    )
+                    try:
+                        deploy_ssh.close()
+                    except:
+                        pass
+                    
+                    if deploy_ok:
+                        with progress_lock:
+                            current_stage = "gi_ready"
+                            progress_pct = 100
+                        add_line("✓ Deploy command sent successfully!", "green")
+                        live.update(render_panel())
+                    else:
+                        add_line(f"⚠ Deploy issue: {deploy_msg}", "yellow")
+                        live.update(render_panel())
+                    
+                    return deploy_ok
+                except Exception as e:
+                    add_line(f"⚠ Deploy connection failed: {str(e)[:40]}", "yellow")
+                    add_line("Images loaded OK - deploy manually from GI CLI", "yellow")
+                    live.update(render_panel())
+                    return True
+            
+            # No images requested - just return GI success
+            with progress_lock:
+                progress_pct = 100
+            add_line("GI mode ready - no images selected", "cyan")
+            live.update(render_panel())
+            time.sleep(2)
             return True
             
         except Exception as e:
@@ -2646,9 +3048,14 @@ def check_recovery_and_prompt(device: Any) -> Optional[bool]:
             except:
                 pass
         
+        from ..utils import resolve_device_ip
+        resolved_ip, _ = resolve_device_ip(device, timeout=3.0)
+        connect_ip = resolved_ip or device.ip
+        
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(device.ip, username=device.username or 'dnroot', password=password, timeout=10)
+        ssh.connect(connect_ip, username=device.username or 'dnroot', password=password, timeout=10,
+                    allow_agent=False, look_for_keys=False)
         channel = ssh.invoke_shell(width=200, height=50)
         time.sleep(2)
         output = channel.recv(65535).decode('utf-8', errors='replace')

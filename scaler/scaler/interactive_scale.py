@@ -359,6 +359,113 @@ def set_wizard_state(state: 'WizardState'):
     _current_state = state
 
 
+def sanitize_config_for_version(config_text: str, target_version: str = "",
+                                source_version: str = "") -> tuple:
+    """Strip config sections known to be incompatible across DNOS major versions.
+    
+    Data-driven: reads incompatible features from db/dnos_version_compat.json.
+    When new incompatibilities are discovered, add them to the JSON knowledge base
+    and they are automatically picked up here.
+    
+    If source_version and target_version are provided, only strips features that
+    are in source but not in target. Otherwise strips all known version-specific
+    features (safe fallback for unknown version pairs).
+    
+    Returns: (cleaned_config, list_of_stripped_items)
+    """
+    try:
+        from .version_compat import sanitize_config
+        return sanitize_config(config_text, source_version, target_version)
+    except Exception:
+        pass
+    
+    # Fallback: hardcoded patterns if version_compat module fails to load.
+    # This ensures config restore works even if the JSON DB is missing/corrupt.
+    import re
+    lines = config_text.split('\n')
+    cleaned = []
+    stripped = []
+    skip_until_depth = -1
+    
+    SINGLE_LINE_REMOVALS = [
+        (r'^\s+suppress-event-list\s', 'logging suppress-event-list'),
+        (r'^\s+utc-normalize\s', 'logging utc-normalize'),
+        (r'^\s+cli-timestamp\s', 'system cli-timestamp'),
+        (r'^\s+timing-mode\s', 'system timing-mode'),
+        (r'^\s+profile\s+default\s*$', 'system profile'),
+        (r'^\s+bgp\s+nsr\s', 'bgp nsr'),
+    ]
+    
+    BLOCK_REMOVALS = [
+        (r'^\s+user\s+dntechsupport\b', 'user dntechsupport (role techsupport)'),
+        (r'^\s+ipmi\s*$', 'system login ipmi'),
+        (r'^\s+grpc\s*$', 'system grpc'),
+        (r'^\s+speed-ranges\s*$', 'qos speed-ranges'),
+        (r'^\s+security\s*$', 'ssh security (algorithms)'),
+        (r'^\s+timestamp-format\s*$', 'logging timestamp-format'),
+    ]
+    
+    COLLAPSIBLE_PARENTS = {
+        'ssh', 'ntp', 'logging', 'syslog', 'hw-mapping', 'queue-size', 'qos',
+    }
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped_line = line.rstrip()
+        indent = len(line) - len(line.lstrip())
+        if skip_until_depth >= 0:
+            if stripped_line.strip() == '!' and indent <= skip_until_depth:
+                skip_until_depth = -1
+            i += 1
+            continue
+        single_matched = False
+        for pattern, desc in SINGLE_LINE_REMOVALS:
+            if re.match(pattern, line):
+                stripped.append(desc)
+                single_matched = True
+                break
+        if single_matched:
+            i += 1
+            continue
+        block_matched = False
+        for pattern, desc in BLOCK_REMOVALS:
+            if re.match(pattern, line):
+                stripped.append(f"[block] {desc}")
+                skip_until_depth = indent
+                block_matched = True
+                break
+        if block_matched:
+            i += 1
+            continue
+        cleaned.append(stripped_line)
+        i += 1
+    
+    changed = True
+    while changed:
+        changed = False
+        result = []
+        j = 0
+        while j < len(cleaned):
+            line = cleaned[j]
+            keyword = line.strip()
+            if (j + 1 < len(cleaned) and
+                keyword in COLLAPSIBLE_PARENTS and
+                cleaned[j + 1].strip() == '!'):
+                indent_cur = len(line) - len(line.lstrip())
+                indent_next = len(cleaned[j + 1]) - len(cleaned[j + 1].lstrip())
+                if indent_next == indent_cur:
+                    stripped.append(f"[empty] {keyword}")
+                    j += 2
+                    changed = True
+                    continue
+            result.append(line)
+            j += 1
+        cleaned = result
+    
+    return '\n'.join(cleaned), stripped
+
+
 def _get_config_history_path(device_name: str) -> Path:
     """Get path to config history JSON file for a device."""
     from .utils import get_device_config_dir
@@ -518,17 +625,39 @@ def _show_multi_device_action_menu(multi_ctx: 'MultiDeviceContext', primary_devi
                     dnos_version = op_data.get('dnos_version', '')
                     recovery_type = op_data.get('recovery_type', '')
                     
+                    # Auto-detect stale state: if system delete was initiated
+                    # after the last state check, device is in GI (not DNOS)
+                    delete_ts = op_data.get('delete_initiated', '')
+                    last_verified = op_data.get('last_verified', '')
+                    if (device_state == 'DNOS' and delete_ts
+                            and delete_ts > last_verified):
+                        device_state = 'GI'
+                        op_data['device_state'] = 'GI'
+                        op_data['recovery_mode_detected'] = True
+                        op_data['recovery_type'] = 'GI'
+                        try:
+                            with open(op_file, 'w') as fw:
+                                json.dump(op_data, fw, indent=4)
+                        except IOError:
+                            pass
+                    
                     if device_state == 'GI' or recovery_type == 'GI':
                         state_info = {'state': 'GI', 'is_gi': True, 'is_recovery': False, 'display': '[cyan]GI[/cyan]'}
                         any_in_gi = True
-                    elif device_state in ('BASEOS_SHELL', 'ONIE', 'DN_RECOVERY') or recovery_type in ('BASEOS_SHELL', 'ONIE', 'DN_RECOVERY'):
+                    elif device_state in ('BASEOS_SHELL', 'ONIE', 'DN_RECOVERY', 'RECOVERY') or recovery_type in ('BASEOS_SHELL', 'ONIE', 'DN_RECOVERY'):
                         state_info = {'state': device_state or recovery_type, 'is_gi': False, 'is_recovery': True, 'display': f'[red]{device_state or recovery_type}[/red]'}
                         any_in_recovery = True
+                    elif device_state == 'DEPLOYING':
+                        state_info = {'state': 'DEPLOYING', 'is_gi': True, 'is_recovery': False, 'display': '[cyan]DEPLOYING[/cyan]'}
+                        any_in_gi = True
+                    elif device_state == 'UPGRADING':
+                        state_info = {'state': 'UPGRADING', 'is_gi': False, 'is_recovery': False, 'display': '[yellow]UPGRADING[/yellow]'}
+                        all_in_limited_mode = False
                     elif dnos_version in ('N/A', '', None) or 'N/A' in str(dnos_version):
                         state_info = {'state': 'GI?', 'is_gi': True, 'is_recovery': False, 'display': '[cyan]GI?[/cyan]'}
                         any_in_gi = True
                     else:
-                        all_in_limited_mode = False  # This device is in DNOS
+                        all_in_limited_mode = False
         except:
             all_in_limited_mode = False  # Assume DNOS if can't read
         
@@ -661,6 +790,7 @@ def _show_multi_device_action_menu(multi_ctx: 'MultiDeviceContext', primary_devi
             console.print("  [dim][3] Push Files - No saved configs available[/dim]")
         console.print("  [4] [cyan]Stag Pool Check[/cyan] - Live QinQ Stag usage from Linux shell")
     console.print("  [R] Refresh - Reload configs from all devices / Verify states")
+    console.print("  [I] [cyan]Change IP[/cyan] - Update management IP for a device")
     console.print()
     
     console.print("[bold]Configuration Actions:[/bold]")
@@ -695,12 +825,12 @@ def _show_multi_device_action_menu(multi_ctx: 'MultiDeviceContext', primary_devi
     
     # Build valid choices based on mode
     if all_in_limited_mode:
-        # Limited mode: only 8 (Image Upgrade), S (System Restore), R (Refresh), B (Back)
-        valid_choices = ["8", "s", "S", "r", "R", "b", "B"]
+        # Limited mode: only 8 (Image Upgrade), S (System Restore), R (Refresh), I (Change IP), B (Back)
+        valid_choices = ["8", "s", "S", "r", "R", "i", "I", "b", "B"]
         if NETWORK_MAPPER_AVAILABLE:
             valid_choices.extend(["n", "N"])
     else:
-        valid_choices = ["1", "2", "4", "5", "6", "7", "8", "9", "m", "M", "w", "W", "f", "F", "s", "S", "r", "R", "b", "B"]
+        valid_choices = ["1", "2", "4", "5", "6", "7", "8", "9", "m", "M", "w", "W", "f", "F", "s", "S", "r", "R", "i", "I", "b", "B"]
         if has_push_files:
             valid_choices.append("3")
         if NETWORK_MAPPER_AVAILABLE:
@@ -728,6 +858,7 @@ def _show_multi_device_action_menu(multi_ctx: 'MultiDeviceContext', primary_devi
         "s": "system_restore",
         "n": "sync_mapper",
         "r": "refresh",
+        "i": "change_ip",
         "b": "exit",
     }
     
@@ -1529,7 +1660,10 @@ def _show_multi_device_compare(multi_ctx: 'MultiDeviceContext'):
         fxc = len(re.findall(r'flexible-cross-connect-group', config))
         l2vpn = len(re.findall(r'l2vpn-instance\s+\S+', config))
         evpn = len(re.findall(r'evpn-instance\s+\S+', config))
-        return {'fxc': fxc, 'l2vpn': l2vpn, 'evpn': evpn}
+        vpws = len(re.findall(r'vpws-service-id\s+\d+', config))
+        vrf_blocks = re.findall(r'^\s{2}vrf\n(.*?)(?=^\s{2}\S|\Z)', config, re.MULTILINE | re.DOTALL)
+        vrf = sum(len(re.findall(r'^\s{4}instance\s+\S+', block, re.MULTILINE)) for block in vrf_blocks)
+        return {'fxc': fxc, 'l2vpn': l2vpn, 'evpn': evpn, 'vpws': vpws, 'vrf': vrf}
     
     all_svc = {h: count_services(multi_ctx.configs.get(h, "")) for h in hostnames}
     
@@ -1567,7 +1701,7 @@ def _show_multi_device_compare(multi_ctx: 'MultiDeviceContext'):
     add_scale_row("Multihoming", {h: set(all_mh[h].keys()) for h in hostnames})
     
     # Services
-    for svc_name in ['fxc', 'l2vpn', 'evpn']:
+    for svc_name in ['fxc', 'l2vpn', 'evpn', 'vpws', 'vrf']:
         svc_data = {h: all_svc[h].get(svc_name, 0) for h in hostnames}
         add_scale_row(f"Svc: {svc_name.upper()}", svc_data, is_set=False)
     
@@ -1915,26 +2049,23 @@ def _check_single_device_status(device) -> dict:
     except:
         pass
     
-    # Try SSH connection
+    # Try connection (SSH, console, virsh) via unified path
     try:
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        from .connection_strategy import connect_for_upgrade
+        conn = connect_for_upgrade(device.hostname, timeout=15)
+        if not conn['connected']:
+            return result
         
-        password = device.password
-        if hasattr(device, 'password') and device.password:
-            import base64
-            try:
-                password = base64.b64decode(device.password).decode('utf-8')
-            except:
-                password = device.password
-        
-        ssh.connect(device.ip, username=device.username or 'dnroot', password=password, timeout=10)
+        ssh = conn['ssh']
+        channel = conn['channel']
         
         # Use single shell for all commands - much faster
-        channel = ssh.invoke_shell()
         channel.settimeout(8)
-        time.sleep(0.3)
+        channel.send("\r\n")
+        time.sleep(0.5)
         initial_output = channel.recv(10000).decode(errors='ignore')
+        if not initial_output and conn.get('prompt_output'):
+            initial_output = conn['prompt_output']
         
         # Check for RECOVERY mode first (critical failure)
         is_recovery_mode = 'RECOVERY' in initial_output or 'dnRouter(RECOVERY)' in initial_output
@@ -2303,8 +2434,19 @@ def _monitor_triggered_builds(jenkins: 'JenkinsClient', multi_ctx: 'MultiDeviceC
                 # Build finished - show result
                 if build.result == "SUCCESS":
                     console.print(f"\n[green]✓ Build #{build.build_number} COMPLETED SUCCESSFULLY![/green]")
-                    console.print("[cyan]Artifacts should now be available.[/cyan]")
-                    console.print("[dim]Return to Image Upgrade menu and select this branch to push.[/dim]")
+                    urls = jenkins.get_stack_urls(branch, build.build_number)
+                    console.print(f"  DNOS: {'✓' if urls.get('dnos') else '✗'}")
+                    console.print(f"  GI: {'✓' if urls.get('gi') else '✗'}")
+                    console.print(f"  BaseOS: {'✓' if urls.get('baseos') else '✗'}")
+                    
+                    if Confirm.ask("\nContinue with upgrade using this build?", default=True):
+                        return {
+                            'branch': branch,
+                            'build': build.build_number,
+                            'dnos_url': urls.get('dnos'),
+                            'gi_url': urls.get('gi'),
+                            'baseos_url': urls.get('baseos'),
+                        }
                 else:
                     console.print(f"\n[red]✗ Build #{build.build_number} {build.result}[/red]")
         
@@ -2316,7 +2458,6 @@ def _monitor_triggered_builds(jenkins: 'JenkinsClient', multi_ctx: 'MultiDeviceC
             console.print(f"  URL: {build.url}")
             
             if build.result == "SUCCESS":
-                # Check for artifacts
                 urls = jenkins.get_stack_urls(branch, build.build_number)
                 has_dnos = urls.get('dnos') and urls.get('dnos') != 'N/A'
                 has_gi = urls.get('gi') and urls.get('gi') != 'N/A'
@@ -2324,14 +2465,25 @@ def _monitor_triggered_builds(jenkins: 'JenkinsClient', multi_ctx: 'MultiDeviceC
                 console.print(f"\n[bold]Artifacts:[/bold]")
                 console.print(f"  DNOS: {'✓ Available' if has_dnos else '✗ N/A'}")
                 console.print(f"  GI: {'✓ Available' if has_gi else '✗ N/A'}")
+                console.print(f"  BaseOS: {'✓' if urls.get('baseos') else '✗ N/A'}")
                 
                 if build.is_expired:
                     console.print(f"\n[yellow]⚠ Build is expired ({build.age_hours:.0f}h old) - artifacts may be unavailable[/yellow]")
+                
+                if (has_dnos or has_gi) and Confirm.ask("\nContinue with upgrade using this build?", default=True):
+                    return {
+                        'branch': branch,
+                        'build': build.build_number,
+                        'dnos_url': urls.get('dnos'),
+                        'gi_url': urls.get('gi'),
+                        'baseos_url': urls.get('baseos'),
+                    }
     
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
     
     Prompt.ask("\n[dim]Press Enter to continue[/dim]", default="")
+    return None
 
 
 def _restore_pre_delete_configs(multi_ctx: 'MultiDeviceContext'):
@@ -2361,9 +2513,9 @@ def _restore_pre_delete_configs(multi_ctx: 'MultiDeviceContext'):
             except:
                 pass
         
-        # Find all pre_delete_backup_*.txt files
-        backup_files = list(device_dir.glob("pre_delete_backup_*.txt"))
-        backup_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)  # Newest first
+        # Find all backup files (pre_delete and pre_upgrade)
+        backup_files = list(device_dir.glob("pre_delete_backup_*.txt")) + list(device_dir.glob("pre_upgrade_backup_*.txt"))
+        backup_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
         
         if backup_files:
             newest = backup_files[0]
@@ -2409,8 +2561,6 @@ def _restore_pre_delete_configs(multi_ctx: 'MultiDeviceContext'):
         status = "[dim]Unknown[/dim]"
         try:
             import paramiko
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             
             password = info['device'].password
             if password:
@@ -2420,20 +2570,47 @@ def _restore_pre_delete_configs(multi_ctx: 'MultiDeviceContext'):
                 except:
                     pass
             
-            ssh.connect(info['device'].ip, username=info['device'].username or 'dnroot', 
-                       password=password, timeout=5)
+            _status_creds = [
+                (info['device'].username or 'dnroot', password),
+                ('dnroot', 'dnroot'),
+                ('dn', 'drivenets'),
+            ]
+            _status_seen = set()
+            _status_unique = []
+            for _su, _sp in _status_creds:
+                _sk = f"{_su}:{_sp}"
+                if _sk not in _status_seen:
+                    _status_seen.add(_sk)
+                    _status_unique.append((_su, _sp))
             
-            channel = ssh.invoke_shell()
-            channel.settimeout(3)
-            time.sleep(0.5)
-            output = channel.recv(10000).decode(errors='ignore')
-            channel.close()
-            ssh.close()
-            
-            if 'GI(' in output or 'GI#' in output:
-                status = "[yellow]GI Mode[/yellow]"
-            else:
-                status = "[green]DNOS ✓[/green]"
+            _status_ok = False
+            for _su, _sp in _status_unique:
+                try:
+                    ssh = paramiko.SSHClient()
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    ssh.connect(info['device'].ip, username=_su,
+                               password=_sp, timeout=5,
+                               allow_agent=False, look_for_keys=False)
+                    
+                    channel = ssh.invoke_shell()
+                    channel.settimeout(3)
+                    time.sleep(0.5)
+                    output = channel.recv(10000).decode(errors='ignore')
+                    channel.close()
+                    ssh.close()
+                    
+                    if 'GI(' in output or 'GI#' in output:
+                        status = "[yellow]GI Mode[/yellow]"
+                    else:
+                        status = "[green]DNOS OK[/green]"
+                    _status_ok = True
+                    break
+                except paramiko.AuthenticationException:
+                    continue
+                except Exception:
+                    break
+            if not _status_ok:
+                status = "[red]Offline[/red]"
         except:
             status = "[red]Offline[/red]"
         
@@ -2500,12 +2677,17 @@ def _restore_pre_delete_configs(multi_ctx: 'MultiDeviceContext'):
         
         # Filter to only DNOS-ready devices
         ready_devices = []
+        _restore_working_creds = {}
+        _known_cred_sets = [
+            ('dnroot', 'dnroot'),
+            ('dn', 'drivenets'),
+            ('admin', 'admin'),
+            ('root', 'drivenets'),
+        ]
         for hostname in devices_to_push:
             info = backup_info[hostname]
             try:
                 import paramiko
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 
                 password = info['device'].password
                 if password:
@@ -2515,22 +2697,47 @@ def _restore_pre_delete_configs(multi_ctx: 'MultiDeviceContext'):
                     except:
                         pass
                 
-                ssh.connect(info['device'].ip, username=info['device'].username or 'dnroot',
-                           password=password, timeout=10)
+                _dev_creds = [(info['device'].username or 'dnroot', password)] + _known_cred_sets
+                _seen_rc = set()
+                _unique_rc = []
+                for _rcu, _rcp in _dev_creds:
+                    _rck = f"{_rcu}:{_rcp}"
+                    if _rck not in _seen_rc:
+                        _seen_rc.add(_rck)
+                        _unique_rc.append((_rcu, _rcp))
                 
-                channel = ssh.invoke_shell()
-                channel.settimeout(5)
-                time.sleep(0.5)
-                output = channel.recv(10000).decode(errors='ignore')
-                channel.close()
-                ssh.close()
-                
-                if 'GI(' not in output and 'GI#' not in output:
-                    ready_devices.append(hostname)
-                else:
-                    console.print(f"[yellow]⚠ {hostname}: Still in GI mode - skipping[/yellow]")
+                _connected = False
+                for _rcu, _rcp in _unique_rc:
+                    try:
+                        ssh = paramiko.SSHClient()
+                        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                        ssh.connect(info['device'].ip, username=_rcu,
+                                   password=_rcp, timeout=10,
+                                   allow_agent=False, look_for_keys=False)
+                        
+                        channel = ssh.invoke_shell()
+                        channel.settimeout(5)
+                        time.sleep(0.5)
+                        output = channel.recv(10000).decode(errors='ignore')
+                        channel.close()
+                        ssh.close()
+                        
+                        if 'GI(' not in output and 'GI#' not in output:
+                            ready_devices.append(hostname)
+                            _restore_working_creds[hostname] = (_rcu, _rcp)
+                        else:
+                            console.print(f"[yellow]-- {hostname}: Still in GI mode - skipping[/yellow]")
+                        _connected = True
+                        break
+                    except paramiko.AuthenticationException:
+                        continue
+                    except Exception as e:
+                        console.print(f"[red]x {hostname}: Cannot connect - {str(e)[:30]}[/red]")
+                        break
+                if not _connected:
+                    console.print(f"[red]x {hostname}: Authentication failed with all credential sets[/red]")
             except Exception as e:
-                console.print(f"[red]✗ {hostname}: Cannot connect - {str(e)[:30]}[/red]")
+                console.print(f"[red]x {hostname}: Cannot connect - {str(e)[:30]}[/red]")
         
         if not ready_devices:
             console.print("\n[red]No devices are ready for config push.[/red]")
@@ -2550,7 +2757,7 @@ def _restore_pre_delete_configs(multi_ctx: 'MultiDeviceContext'):
         # Push configs
         from .config_pusher import ConfigPusher
         
-        console.print("\n[bold cyan]📤 Pushing configurations...[/bold cyan]\n")
+        console.print("\n[bold cyan]Pushing configurations...[/bold cyan]\n")
         
         for hostname in ready_devices:
             info = backup_info[hostname]
@@ -2562,19 +2769,48 @@ def _restore_pre_delete_configs(multi_ctx: 'MultiDeviceContext'):
                 with open(info['backup_path']) as f:
                     config_text = f.read()
                 
-                pusher = ConfigPusher(dev.ip, dev.username or 'dnroot', dev.password)
+                _lines_r = [l for l in config_text.strip().split('\n') if not l.startswith('#')]
+                _cfg_no_comments_r = '\n'.join(_lines_r)
+                _src_ver_r = ''
+                _tgt_ver_r = ''
+                try:
+                    _op_r = Path(f"db/configs/{hostname}/operational.json")
+                    if _op_r.exists():
+                        with open(_op_r) as _fr:
+                            _opd_r = json.load(_fr)
+                        _tgt_ver_r = _opd_r.get('dnos_version', '')
+                        _src_ver_r = _opd_r.get('pre_upgrade_version', '')
+                except Exception:
+                    pass
+                _cfg_clean_r, _stripped_items_r = sanitize_config_for_version(
+                    _cfg_no_comments_r, source_version=_src_ver_r, target_version=_tgt_ver_r)
+                if _stripped_items_r:
+                    console.print(f"  [dim]Sanitized: removed {len(_stripped_items_r)} version-incompatible items[/dim]")
+                    for _si in _stripped_items_r[:5]:
+                        console.print(f"    [dim]- {_si}[/dim]")
+                    if len(_stripped_items_r) > 5:
+                        console.print(f"    [dim]... and {len(_stripped_items_r) - 5} more[/dim]")
+                
+                pusher = ConfigPusher()
+                
+                _orig_u = dev.username
+                _orig_p = dev.password
+                _wc = _restore_working_creds.get(hostname)
+                if _wc:
+                    dev.username = _wc[0]
+                    dev.password = Device.encode_password(_wc[1])
                 
                 success, message = pusher.push_config(
-                    config_text,
-                    dry_run=False,
-                    use_terminal_paste=False,  # Use file upload for safety
-                    use_merge=True  # Merge to preserve system settings
+                    dev, _cfg_clean_r,
+                    config_name=f"manual_restore_{hostname}"
                 )
                 
+                dev.username = _orig_u
+                dev.password = _orig_p
+                
                 if success:
-                    console.print(f"  [green]✓ {hostname}: Config pushed successfully[/green]")
+                    console.print(f"  [green]OK {hostname}: Config pushed successfully[/green]")
                     
-                    # Clear the pre_delete_backup from operational.json
                     try:
                         op_file = Path(f"db/configs/{hostname}/operational.json")
                         if op_file.exists():
@@ -2588,10 +2824,10 @@ def _restore_pre_delete_configs(multi_ctx: 'MultiDeviceContext'):
                     except:
                         pass
                 else:
-                    console.print(f"  [red]✗ {hostname}: {message}[/red]")
+                    console.print(f"  [red]x {hostname}: {message}[/red]")
                     
             except Exception as e:
-                console.print(f"  [red]✗ {hostname}: Error - {str(e)[:40]}[/red]")
+                console.print(f"  [red]x {hostname}: Error - {str(e)[:40]}[/red]")
         
         console.print("\n[bold]Configuration restore complete![/bold]")
         Prompt.ask("[dim]Press Enter to continue[/dim]", default="")
@@ -2618,7 +2854,8 @@ def _diagnose_device_recovery(device: 'Device'):
             except:
                 password = device.password
         
-        ssh.connect(device.ip, username=device.username or 'dnroot', password=password, timeout=10)
+        ssh.connect(device.ip, username=device.username or 'dnroot', password=password, timeout=10,
+                    allow_agent=False, look_for_keys=False)
         channel = ssh.invoke_shell()
         channel.settimeout(8)
         time.sleep(0.5)
@@ -2743,37 +2980,22 @@ def _diagnose_device_recovery(device: 'Device'):
 
 def _verify_device_stacks_live(multi_ctx: 'MultiDeviceContext') -> dict:
     """
-    SSH to devices using enhanced connection strategy and verify current stack versions.
-    
-    Connection priority:
-    1. SSH to serial number hostname
-    2. SSH to management IP  
-    3. Console server (if configured)
-    4. SSH to loopback IP
-    
-    Each method tries multiple credentials (dnroot, dn/drivenets, admin, root).
-    
-    Returns:
-        dict: {hostname: {'state': DeviceState, 'dnos': str, 'gi': str, 'baseos': str, 
-                          'target_dnos': str, 'channel': channel, 'ssh': ssh}}
+    SSH to devices in PARALLEL to verify current stack versions.
+    Uses ThreadPoolExecutor for concurrent connections (much faster than sequential).
     """
     import paramiko
     import socket
-    from rich.table import Table as RichTable
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from rich.panel import Panel as RichPanel
     from .connection_strategy import CREDENTIAL_SETS, DeviceState
     
-    table = RichTable(title="Live Stack Verification", box=box.ROUNDED)
-    table.add_column("Device", style="cyan")
-    table.add_column("State", style="yellow")
-    table.add_column("Connection", style="dim")
-    table.add_column("Current DNOS")
-    table.add_column("Target DNOS")
-    table.add_column("GI")
-    table.add_column("BaseOS")
+    num_devs = len(multi_ctx.devices)
+    console.print(f"[dim]  Connecting to {num_devs} device(s) in parallel...[/dim]")
     
     device_results = {}
     
-    for device in multi_ctx.devices:
+    def _verify_one(device):
+        """Per-device SSH + stack check. Runs in its own thread."""
         hostname = device.hostname
         result = {
             'state': None,
@@ -2999,7 +3221,7 @@ def _verify_device_stacks_live(multi_ctx: 'MultiDeviceContext') -> dict:
                                     connection_method = f"SSH→MGMT ({mgmt_ip})"
                                     break
                                 except paramiko.AuthenticationException:
-                                    continue
+                                    return hostname, result, "[red]Unreachable[/red]", "-"
                                 except Exception:
                                     break  # Network error, don't try more creds
                         
@@ -3020,16 +3242,20 @@ def _verify_device_stacks_live(multi_ctx: 'MultiDeviceContext') -> dict:
                 result['error'] = f"Console: {str(e)[:30]}"
         
         if not connected:
+            try:
+                from .connection_strategy import connect_for_upgrade
+                conn = connect_for_upgrade(hostname, timeout=30)
+                if conn['connected']:
+                    ssh = conn['ssh']
+                    channel = conn['channel']
+                    connected = True
+                    connection_method = conn.get('method', 'DeviceConnector')
+            except Exception:
+                pass
+        
+        if not connected:
             result['error'] = result.get('error') or "All connection methods failed"
-            table.add_row(
-                hostname, 
-                "[red]Unreachable[/red]", 
-                "-",
-                result['error'][:20], 
-                "-", "-", "-"
-            )
-            device_results[hostname] = result
-            continue
+            return hostname, result, "[red]Unreachable[/red]", "-"
         
         # Get interactive shell if not from console
         if not channel:
@@ -3061,6 +3287,49 @@ def _verify_device_stacks_live(multi_ctx: 'MultiDeviceContext') -> dict:
                     time.sleep(0.3)
             except:
                 pass
+        
+        # CRITICAL: Multi-layer device verification before sending any commands
+        from .utils import verify_device_hostname, post_connect_verify, sync_device_from_live
+        host_ok, actual_host = verify_device_hostname(prompt_output, hostname)
+        if not host_ok:
+            result['error'] = f"WRONG DEVICE: prompt shows '{actual_host}', expected '{hostname}'"
+            result['state'] = DeviceState.UNKNOWN
+            try:
+                ssh.close()
+            except:
+                pass
+            return hostname, result, f"[bold red]⛔ WRONG DEVICE ({actual_host})[/bold red]", "-"
+        
+        # Layer 2-3: Deep verification + live IP extraction + DB sync
+        if actual_host not in ('GI', 'UNKNOWN'):
+            verify_result = post_connect_verify(
+                channel, hostname, prompt_output=prompt_output, run_show_system=True
+            )
+            if verify_result.get('abort_reason'):
+                result['error'] = verify_result['abort_reason']
+                result['state'] = DeviceState.UNKNOWN
+                try:
+                    ssh.close()
+                except:
+                    pass
+                return hostname, result, f"[bold red]⛔ {verify_result['abort_reason'][:40]}[/bold red]", "-"
+            
+            # Sync DB with verified live data
+            db_changes = sync_device_from_live(hostname, verify_result)
+            if db_changes:
+                result['db_synced'] = db_changes
+        elif actual_host == 'GI':
+            # GI mode: verify serial number from show system stack
+            from .utils import verify_gi_serial
+            gi_verify = verify_gi_serial(channel, hostname)
+            if gi_verify.get('abort_reason'):
+                result['error'] = gi_verify['abort_reason']
+                result['state'] = DeviceState.UNKNOWN
+                try:
+                    ssh.close()
+                except:
+                    pass
+                return hostname, result, f"[bold red]⛔ GI SERIAL MISMATCH[/bold red]", "-"
         
         # Detect device state from prompt
         lower_prompt = prompt_output.lower()
@@ -3138,15 +3407,13 @@ def _verify_device_stacks_live(multi_ctx: 'MultiDeviceContext') -> dict:
                     target = parts[5] if len(parts) > 5 and parts[5] not in ('-', '') else 'N/A'
                     
                     if component == 'DNOS':
-                        result['dnos'] = current[:22] if current != 'N/A' else '-'
+                        result['dnos'] = current if current != 'N/A' else '-'
                         result['target_dnos'] = target if target != 'N/A' else '-'
-                        result['full_dnos'] = current if current != 'N/A' else '-'
-                        result['full_target_dnos'] = target if target != 'N/A' else '-'
                     elif component == 'GI':
-                        result['gi'] = current[:22] if current != 'N/A' else '-'
+                        result['gi'] = current if current != 'N/A' else '-'
                         result['target_gi'] = target if target != 'N/A' else '-'
                     elif component == 'BASEOS':
-                        result['baseos'] = current[:12] if current != 'N/A' else '-'
+                        result['baseos'] = current if current != 'N/A' else '-'
                         result['target_baseos'] = target if target != 'N/A' else '-'
         
         # Update operational.json with detected state
@@ -3202,24 +3469,64 @@ def _verify_device_stacks_live(multi_ctx: 'MultiDeviceContext') -> dict:
         result['channel'] = channel
         result['ssh'] = ssh
         result['connection_method'] = connection_method
-        
-        table.add_row(
-            hostname,
-            state_display,
-            connection_method[:15] if connection_method else "-",
-            result['dnos'],
-            result['target_dnos'],
-            result['gi'],
-            result['baseos']
-        )
-        device_results[hostname] = result
+
+        return hostname, result, state_display, connection_method
     
-    console.print(table)
+    # Execute all device verifications in parallel
+    with ThreadPoolExecutor(max_workers=min(num_devs, 8)) as pool:
+        futures = {pool.submit(_verify_one, dev): dev for dev in multi_ctx.devices}
+        for future in as_completed(futures):
+            try:
+                hostname, result, state_display, conn_method = future.result()
+                device_results[hostname] = result
+            except Exception as e:
+                dev = futures[future]
+                device_results[dev.hostname] = {
+                    'state': None, 'dnos': 'N/A', 'gi': 'N/A', 'baseos': 'N/A',
+                    'target_dnos': 'N/A', 'target_gi': '-', 'target_baseos': '-',
+                    'error': str(e)[:50]
+                }
+    
+    # Display panels in device order (not completion order)
+    state_map = {'DNOS': '[green]DNOS[/green]', 'GI': '[cyan]GI[/cyan]',
+                 'BASEOS_SHELL': '[yellow]BaseOS[/yellow]', 'ONIE': '[red]ONIE[/red]',
+                 'DN_RECOVERY': '[red]Recovery[/red]', 'RECOVERY': '[red]Recovery[/red]',
+                 'UNKNOWN': '[yellow]?[/yellow]'}
+    
+    for device in multi_ctx.devices:
+        hostname = device.hostname
+        r = device_results.get(hostname, {})
+        
+        if r.get('error') and r.get('state') is None:
+            title = f"[cyan]{hostname}[/cyan] [red]Error[/red]"
+            body = f"  [red]{r['error'][:80]}[/red]"
+        else:
+            state_val = r.get('state')
+            sv = state_val.value if hasattr(state_val, 'value') else str(state_val or '?')
+            sd = state_map.get(sv, f'[yellow]{sv}[/yellow]')
+            conn = r.get('connection_method', '-') or '-'
+            title = f"[cyan]{hostname}[/cyan] {sd} [dim]{conn}[/dim]"
+            
+            lines = []
+            for label, cur_k, tgt_k in [('DNOS', 'dnos', 'target_dnos'), ('GI', 'gi', 'target_gi'), ('BaseOS', 'baseos', 'target_baseos')]:
+                cur = r.get(cur_k, '-') or '-'
+                tgt = r.get(tgt_k, '-') or '-'
+                if tgt and tgt != '-':
+                    lines.append(f"  [bold]{label:6s}[/bold]  [dim]cur:[/dim] {cur}")
+                    lines.append(f"          [dim]tgt:[/dim] [bold yellow]{tgt}[/bold yellow]")
+                else:
+                    lines.append(f"  [bold]{label:6s}[/bold]  {cur}")
+            body = "\n".join(lines)
+        
+        console.print(RichPanel(body, title=title, title_align="left",
+                                border_style="dim", expand=True, padding=(0, 1)))
     
     # Offer follow-up actions based on detected states
     _offer_stack_actions(multi_ctx, device_results)
     
     return device_results
+
+
 
 
 def _offer_stack_actions(multi_ctx: 'MultiDeviceContext', device_results: dict):
@@ -3268,6 +3575,20 @@ def _offer_stack_actions(multi_ctx: 'MultiDeviceContext', device_results: dict):
         options.append('d')
     
     if dnos_devices:
+        # Check which DNOS devices have target stacks waiting
+        dnos_with_targets = []
+        for h in dnos_devices:
+            r = device_results.get(h, {})
+            tgt = r.get('target_dnos', '-')
+            if tgt and tgt not in ('-', 'N/A', None):
+                dnos_with_targets.append((h, tgt))
+        
+        if dnos_with_targets:
+            console.print(f"  [I] [bold green]⚡ Install Target Stack[/bold green] - Pre-check + Install on {len(dnos_with_targets)} device(s):")
+            for h, tgt in dnos_with_targets:
+                console.print(f"      └─ {h}: → {tgt}")
+            options.append('i')
+        
         console.print(f"  [L] [green]Load Images[/green] - Target-stack load on {len(dnos_devices)} DNOS device(s): {', '.join(dnos_devices)}")
         options.append('l')
     
@@ -3275,10 +3596,11 @@ def _offer_stack_actions(multi_ctx: 'MultiDeviceContext', device_results: dict):
         console.print(f"  [G] [yellow]Enter GI Mode[/yellow] - Run dncli on {len(baseos_devices)} BaseOS device(s): {', '.join(baseos_devices)}")
         options.append('g')
     
-    console.print("  [B] Back to Image Upgrade menu")
-    options.extend(['b', 'B'])
+    console.print("  [B] Back")
+    options.append('b')
     
-    choice = Prompt.ask("Select action", choices=options + [o.upper() for o in options], default="b").lower()
+    all_choices = list(set(options + [o.upper() for o in options]))
+    choice = Prompt.ask("Select", choices=all_choices, default="b").lower()
     
     if choice == 'b':
         # Close all connections
@@ -3294,6 +3616,26 @@ def _offer_stack_actions(multi_ctx: 'MultiDeviceContext', device_results: dict):
     
     elif choice == 'd' and gi_devices:
         _deploy_dnos_on_devices(multi_ctx, device_results, gi_devices)
+    
+    elif choice == 'i' and dnos_devices:
+        # Build targets list from device_results
+        install_targets = []
+        for h in dnos_devices:
+            r = device_results.get(h, {})
+            tgt = r.get('target_dnos', '-')
+            if tgt and tgt not in ('-', 'N/A', None):
+                install_targets.append((h, tgt))
+        if install_targets:
+            # Close existing connections first (install function opens its own)
+            for hostname, result in device_results.items():
+                try:
+                    if result.get('channel'):
+                        result['channel'].close()
+                    if result.get('ssh'):
+                        result['ssh'].close()
+                except:
+                    pass
+            _install_target_stack_on_devices(multi_ctx, install_targets)
     
     elif choice == 'l' and dnos_devices:
         console.print("\n[cyan]To load new images, go back and select a branch or enter URLs.[/cyan]")
@@ -3351,7 +3693,20 @@ def _deploy_dnos_on_devices(multi_ctx: 'MultiDeviceContext', device_results: dic
         console.print(f"    GI:     {gi_ver}")
         console.print(f"    BaseOS: {baseos_ver}")
         
-        cmd = f"request system deploy system-type {system_type} name {hostname} ncc-id 0"
+        # Auto-detect NCC ID from connection result or operational.json
+        _sd_ncc = result.get('ncc_id') if result.get('ncc_id') is not None else 0
+        if _sd_ncc == 0:
+            try:
+                _ncc_vms = op_data.get('ncc_vms', [])
+                for _vm in _ncc_vms:
+                    _vm_m = re.search(r'ncc(\d+)', _vm)
+                    if _vm_m:
+                        _sd_ncc = int(_vm_m.group(1))
+                        break
+            except:
+                pass
+        
+        cmd = f"request system deploy system-type {system_type} name {hostname} ncc-id {_sd_ncc}"
         console.print(f"  Command: [dim]{cmd}[/dim]")
         
         confirm = Prompt.ask(f"  Deploy target stacks on {hostname}?", choices=["y", "n", "b"], default="y").lower()
@@ -3361,8 +3716,8 @@ def _deploy_dnos_on_devices(multi_ctx: 'MultiDeviceContext', device_results: dic
             console.print(f"  [dim]Skipped {hostname}[/dim]")
             continue
         
-        # Execute deploy command
-        console.print(f"  [yellow]Deploying...[/yellow]")
+        # Execute deploy command with NCC ID retry
+        console.print(f"  [yellow]Deploying (NCC {_sd_ncc})...[/yellow]")
         channel.send(cmd + "\r\n")
         time.sleep(5)
         
@@ -3374,11 +3729,37 @@ def _deploy_dnos_on_devices(multi_ctx: 'MultiDeviceContext', device_results: dic
         except:
             pass
         
+        # NCC ID mismatch - retry with the other NCC
+        if "doesn't match" in output.lower() or 'auto detected' in output.lower():
+            _sd_ncc = 1 - _sd_ncc
+            cmd = f"request system deploy system-type {system_type} name {hostname} ncc-id {_sd_ncc}"
+            console.print(f"  [yellow]NCC ID mismatch, retrying with ncc-id {_sd_ncc}...[/yellow]")
+            channel.send(cmd + "\r\n")
+            time.sleep(5)
+            output = ""
+            try:
+                while channel.recv_ready():
+                    output += channel.recv(65535).decode(errors='ignore')
+                    time.sleep(0.5)
+            except:
+                pass
+        
+        # Handle confirmation prompt
+        if 'yes/no' in output.lower() or 'do you want' in output.lower() or 'y/n' in output.lower():
+            channel.send("yes\r\n")
+            time.sleep(5)
+            try:
+                while channel.recv_ready():
+                    output += channel.recv(65535).decode(errors='ignore')
+                    time.sleep(0.5)
+            except:
+                pass
+        
         if "error" in output.lower() or "failed" in output.lower():
             console.print(f"  [red]Deploy may have failed:[/red]")
             console.print(f"  [dim]{output[-200:]}[/dim]")
         else:
-            console.print(f"  [green]✓ System deploy initiated[/green]")
+            console.print(f"  [green]Deploy initiated (ncc-id {_sd_ncc})[/green]")
             console.print(f"  [dim]Device will boot into DNOS with target stacks. This takes 3-5 minutes.[/dim]")
             console.print(f"  [dim]After boot, device will be accessible via SSH.[/dim]")
     
@@ -3429,6 +3810,461 @@ def _enter_gi_mode_on_devices(multi_ctx: 'MultiDeviceContext', device_results: d
             console.print(f"  [dim]{output[-200:]}[/dim]")
     
     Prompt.ask("\n[dim]Press Enter to continue[/dim]", default="")
+
+
+def _install_target_stack_on_devices(multi_ctx: 'MultiDeviceContext', devices_with_targets: list):
+    """
+    Run pre-check + install on DNOS devices that already have images in their target stack.
+    No loading needed -- just pre-check and install.
+    
+    Args:
+        multi_ctx: Multi-device context
+        devices_with_targets: List of (hostname, target_version) tuples
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    num = len(devices_with_targets)
+    console.print(f"\n[bold]Install Target Stack on {num} device(s)[/bold]")
+    console.print(f"[yellow]⚠ Devices will reboot after install![/yellow]")
+    
+    confirm = Prompt.ask("Proceed?", choices=["y", "n"], default="y").lower()
+    if confirm != 'y':
+        console.print("[dim]Cancelled.[/dim]")
+        return
+    
+    print_lock = threading.Lock()
+    
+    def live_print(hostname, msg, style="dim"):
+        with print_lock:
+            console.print(f"  [cyan]{hostname:<12}[/cyan] [{style}]{msg}[/{style}]")
+    
+    def _install_one(hostname, target_ver):
+        """Connect to device and run pre-check + install. Thread-safe."""
+        result = {"precheck": "?", "install": "?", "detail": ""}
+        
+        def log(msg):
+            pass  # Only use live_print for screen output
+        
+        from .connection_strategy import connect_for_upgrade
+        conn = connect_for_upgrade(hostname, timeout=30)
+        if not conn['connected']:
+            live_print(hostname, "Connection failed", "red")
+            return hostname, False, conn.get('abort_reason') or "Connection failed"
+        
+        ssh = conn['ssh']
+        channel = conn['channel']
+        conn_method = conn.get('method', 'DeviceConnector')
+        live_print(hostname, f"Connected ({conn_method})")
+        channel.settimeout(20)
+        channel.send("\r\n")
+        time.sleep(1)
+        _ = channel.recv(10000)
+        
+        def send_cmd(cmd, wait=5):
+            channel.sendall((cmd + "\n").encode('utf-8'))
+            time.sleep(wait)
+            out = ""
+            attempts = 0
+            while attempts < 10:
+                if channel.recv_ready():
+                    out += channel.recv(65535).decode('utf-8', errors='replace')
+                    attempts = 0
+                else:
+                    attempts += 1
+                    time.sleep(0.3)
+                    if attempts >= 3 and out:
+                        break
+            return out
+        
+        # Step 1: Pre-check
+        live_print(hostname, "Pre-check running...")
+        precheck_out = send_cmd("request system target-stack pre-check", wait=10)
+        precheck_lower = precheck_out.lower()
+        
+        precheck_ok = None
+        if 'status: ok' in precheck_lower:
+            precheck_ok = True
+        elif 'status: error' in precheck_lower:
+            precheck_ok = False
+        
+        # Poll until task completes (pre-check is async)
+        if precheck_ok is None:
+            failed_tests = []
+            for poll in range(12):  # Up to ~2 min
+                time.sleep(10)
+                elapsed = (poll + 1) * 10
+                live_print(hostname, f"Pre-check running... ({elapsed}s)")
+                show_out = send_cmd("show system target-stack pre-check", wait=8)
+                show_lower = show_out.lower()
+                
+                if 'in-progress' in show_lower or 'in_progress' in show_lower or 'running' in show_lower:
+                    continue
+                
+                for sline in show_out.split('\n'):
+                    sl = sline.lower().strip()
+                    if 'pre-check result' in sl:
+                        if 'passed' in sl:
+                            precheck_ok = True
+                        elif 'failed' in sl:
+                            precheck_ok = False
+                    if '| failed' in sl or '|failed' in sl:
+                        parts = [p.strip() for p in sline.split('|') if p.strip()]
+                        if len(parts) >= 2:
+                            failed_tests.append(parts[0][:40])
+                
+                if precheck_ok is not None:
+                    break
+                if 'status: ok' in show_lower:
+                    precheck_ok = True
+                    break
+                elif 'task status' in show_lower and 'done' in show_lower:
+                    precheck_ok = True
+                    break
+        
+        if precheck_ok is None:
+            precheck_ok = True
+            live_print(hostname, "⚠ Pre-check timed out, proceeding", "yellow")
+        
+        if precheck_ok:
+            live_print(hostname, "✓ Pre-check passed", "green")
+            result["precheck"] = "OK"
+        else:
+            live_print(hostname, "✗ Pre-check FAILED", "red")
+            try:
+                channel.close()
+                ssh.close()
+            except:
+                pass
+            return hostname, False, "Pre-check failed"
+        
+        # Step 2: Install
+        live_print(hostname, "Installing...")
+        install_out = send_cmd("request system target-stack install", wait=15)
+        install_lower = install_out.lower()
+        confirm_out = ""
+        
+        # If "another precheck in-progress", wait and retry
+        if 'another precheck' in install_lower or ('precheck' in install_lower and 'already' in install_lower):
+            for retry in range(6):
+                time.sleep(10)
+                live_print(hostname, f"Waiting for pre-check... ({(retry + 1) * 10}s)")
+                install_out = send_cmd("request system target-stack install", wait=15)
+                install_lower = install_out.lower()
+                if 'another precheck' not in install_lower and 'already' not in install_lower:
+                    break
+        
+        # DNOS may auto-wait: "Precheck in progress, waiting till finished"
+        if 'precheck in progress' in install_lower and 'waiting' in install_lower:
+            live_print(hostname, "DNOS running pre-check internally...")
+            time.sleep(15)
+            extra = ""
+            try:
+                att = 0
+                while att < 20:
+                    if channel.recv_ready():
+                        extra += channel.recv(65535).decode('utf-8', errors='replace')
+                        att = 0
+                    else:
+                        att += 1
+                        time.sleep(1)
+                        if att >= 5 and extra:
+                            break
+            except:
+                pass
+            install_out += extra
+            install_lower = install_out.lower()
+        
+        # Only send "yes" if DNOS is actually prompting
+        if 'yes/no' in install_lower or 'do you want' in install_lower or 'continue' in install_lower:
+            confirm_out = send_cmd("yes", wait=10)
+        
+        combined = (install_out + confirm_out).lower()
+        
+        install_ok = False
+        if 'task id' in combined or 'started' in combined:
+            install_ok = True
+            live_print(hostname, "✓ Install started — device will reboot", "green")
+        elif 'rebooting' in combined:
+            install_ok = True
+            live_print(hostname, "✓ Rebooting!", "green")
+        elif 'error' in combined or 'failed' in combined:
+            live_print(hostname, "✗ Install error — check device", "red")
+        else:
+            live_print(hostname, "⚠ Install sent — verify on device", "yellow")
+        
+        try:
+            channel.close()
+            ssh.close()
+        except:
+            pass
+        
+        return hostname, install_ok, "OK" if install_ok else "Check manually"
+    
+    # Run all installs in parallel — live_print shows progress in real time
+    console.print()
+    results = {}
+    
+    with ThreadPoolExecutor(max_workers=min(num, 8)) as pool:
+        futures = {pool.submit(_install_one, h, tgt): (h, tgt) for h, tgt in devices_with_targets}
+        for future in as_completed(futures):
+            h, tgt = futures[future]
+            try:
+                hostname, success, status = future.result()
+                results[h] = success
+            except Exception as e:
+                live_print(h, f"✗ {str(e)[:50]}", "red")
+                results[h] = False
+    
+    # Summary
+    ok_count = sum(1 for v in results.values() if v)
+    fail_count = num - ok_count
+    console.print()
+    if ok_count == num:
+        console.print(f"[bold green]✓ All {num} device(s) installing — will reboot.[/bold green]")
+    elif ok_count > 0:
+        console.print(f"[yellow]⚠ {ok_count}/{num} installing, {fail_count} need attention.[/yellow]")
+    else:
+        console.print(f"[red]✗ No installs started.[/red]")
+    
+    Prompt.ask("\n[dim]Press Enter[/dim]", default="")
+
+
+def _deploy_target_stack_on_gi_devices(multi_ctx: 'MultiDeviceContext', gi_devices: list):
+    """
+    Deploy target stacks on GI-mode devices (request system deploy).
+    Images are already loaded -- just run pre-check + deploy.
+    
+    Args:
+        multi_ctx: Multi-device context
+        gi_devices: List of (hostname, target_version, system_type) tuples
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    num = len(gi_devices)
+    console.print(f"\n[bold]Deploy Target Stack on {num} GI device(s)[/bold]")
+    console.print(f"[yellow]Devices will reboot after deploy![/yellow]")
+    
+    # Show deploy parameters for each device
+    console.print(f"\n[bold]Deploy Parameters:[/bold]")
+    deploy_params = {}
+    for hostname, tgt_ver, sys_type in gi_devices:
+        console.print(f"  [cyan]{hostname}[/cyan]: system-type {sys_type}, name {hostname}, ncc-id [dim]auto[/dim]")
+        deploy_params[hostname] = {
+            'system_type': sys_type,
+            'deploy_name': hostname,
+            'target_version': tgt_ver
+        }
+    
+    confirm = Prompt.ask("\nProceed with deploy?", choices=["y", "n"], default="y").lower()
+    if confirm != 'y':
+        console.print("[dim]Cancelled.[/dim]")
+        return
+    
+    print_lock = threading.Lock()
+    
+    def live_print(hostname, msg, style="dim"):
+        with print_lock:
+            console.print(f"  [cyan]{hostname:<12}[/cyan] [{style}]{msg}[/{style}]")
+    
+    def _deploy_one(hostname, tgt_ver, sys_type):
+        """Connect to GI device and run deploy. Thread-safe."""
+        from .connection_strategy import connect_for_upgrade
+        conn = connect_for_upgrade(hostname, timeout=30)
+        if not conn['connected']:
+            live_print(hostname, "Connection failed", "red")
+            return hostname, False, conn.get('abort_reason') or "Connection failed"
+        
+        ssh = conn['ssh']
+        channel = conn['channel']
+        conn_method = conn.get('method', 'DeviceConnector')
+        live_print(hostname, f"Connected ({conn_method})")
+        channel.settimeout(30)
+        channel.send("\r\n")
+        time.sleep(1)
+        _ = channel.recv(10000)
+        
+        def send_cmd(cmd, wait=5):
+            channel.sendall((cmd + "\n").encode('utf-8'))
+            time.sleep(wait)
+            out = ""
+            attempts = 0
+            while attempts < 10:
+                if channel.recv_ready():
+                    out += channel.recv(65535).decode('utf-8', errors='replace')
+                    attempts = 0
+                else:
+                    attempts += 1
+                    time.sleep(0.3)
+                    if attempts >= 3 and out:
+                        break
+            return out
+        
+        # Capture old install task ID before deploy
+        old_install = send_cmd("show system install | no-more", wait=3)
+        old_install_match = re.search(r'Task ID:\s*(\d+)', old_install)
+        old_install_task_id = old_install_match.group(1) if old_install_match else ""
+        
+        # Step 1: Pre-check
+        live_print(hostname, "Pre-check running...")
+        precheck_out = send_cmd("show system target-stack pre-check | no-more", wait=5)
+        precheck_lower = precheck_out.lower()
+        
+        precheck_ok = False
+        if 'succeeded' in precheck_lower or 'passed' in precheck_lower:
+            precheck_ok = True
+        elif 'task status' in precheck_lower and 'done' in precheck_lower:
+            precheck_ok = True
+        
+        if not precheck_ok:
+            live_print(hostname, "Running fresh pre-check...")
+            req_out = send_cmd("request system target-stack pre-check", wait=10)
+            for poll in range(12):
+                time.sleep(10)
+                show_out = send_cmd("show system target-stack pre-check | no-more", wait=5)
+                sl = show_out.lower()
+                if 'succeeded' in sl or 'passed' in sl:
+                    precheck_ok = True
+                    break
+                if 'failed' in sl and 'pre-check result' in sl:
+                    break
+                if 'task status' in sl and 'done' in sl:
+                    precheck_ok = True
+                    break
+                live_print(hostname, f"Pre-check running... ({(poll+1)*10}s)")
+        
+        if not precheck_ok:
+            live_print(hostname, "Pre-check failed or timed out", "red")
+            try:
+                ssh.close()
+            except:
+                pass
+            return hostname, False, "Pre-check failed"
+        
+        live_print(hostname, "Pre-check passed", "green")
+        
+        # Step 2: Deploy (auto-detect NCC ID from connection, retry on mismatch)
+        _dep_ncc = conn.get('ncc_id') if conn.get('ncc_id') is not None else 0
+        deploy_cmd = f"request system deploy system-type {sys_type} name {hostname} ncc-id {_dep_ncc}"
+        live_print(hostname, f"> deploy ncc-id {_dep_ncc}...")
+        
+        deploy_out = send_cmd(deploy_cmd, wait=12)
+        deploy_lower = deploy_out.lower()
+        confirm_out = ""
+        
+        # NCC ID mismatch - retry with the other NCC
+        if "doesn't match" in deploy_lower or 'auto detected' in deploy_lower:
+            _dep_ncc = 1 - _dep_ncc
+            deploy_cmd = f"request system deploy system-type {sys_type} name {hostname} ncc-id {_dep_ncc}"
+            live_print(hostname, f"NCC retry -> ncc-id {_dep_ncc}")
+            deploy_out = send_cmd(deploy_cmd, wait=12)
+            deploy_lower = deploy_out.lower()
+        
+        if 'yes/no' in deploy_lower or 'do you want' in deploy_lower or 'continue' in deploy_lower or 'y/n' in deploy_lower:
+            confirm_out = send_cmd("yes", wait=5)
+            live_print(hostname, "> yes")
+        elif not deploy_lower.strip():
+            time.sleep(5)
+            extra = ""
+            while channel.recv_ready():
+                extra += channel.recv(65535).decode('utf-8', errors='replace')
+                time.sleep(0.3)
+            if extra:
+                deploy_out += extra
+                deploy_lower = deploy_out.lower()
+                if 'yes/no' in deploy_lower or 'do you want' in deploy_lower or 'y/n' in deploy_lower:
+                    confirm_out = send_cmd("yes", wait=5)
+                    live_print(hostname, "> yes")
+        
+        combined = (deploy_out + confirm_out).lower()
+        
+        if 'error' in combined and 'pre-check result' not in combined:
+            live_print(hostname, f"Deploy error: {combined[:60]}", "red")
+            try:
+                ssh.close()
+            except:
+                pass
+            return hostname, False, "Deploy failed"
+        
+        # Step 3: Verify deploy started via show system install
+        deploy_ok = False
+        socket_lost = False
+        for verify_attempt in range(10):
+            time.sleep(8)
+            try:
+                inst_out = send_cmd("show system install | no-more", wait=5)
+                inst_lower = inst_out.lower()
+                inst_match = re.search(r'Task ID:\s*(\d+)', inst_out)
+                inst_id = inst_match.group(1) if inst_match else ""
+                
+                if inst_id and inst_id != old_install_task_id:
+                    live_print(hostname, f"Deploy started (task {inst_id})", "green")
+                    deploy_ok = True
+                    break
+                if 'in-progress' in inst_lower:
+                    live_print(hostname, "Installation in progress", "green")
+                    deploy_ok = True
+                    break
+            except Exception as e:
+                if 'socket' in str(e).lower() or 'closed' in str(e).lower() or 'eof' in str(e).lower():
+                    socket_lost = True
+                    live_print(hostname, "Device rebooting (deploy in progress)", "green")
+                    deploy_ok = True
+                    break
+            elapsed = (verify_attempt + 1) * 8
+            live_print(hostname, f"Waiting for deploy to register... ({elapsed}s)")
+        
+        if deploy_ok or socket_lost:
+            # Update operational.json
+            try:
+                from pathlib import Path as _P
+                _opf = _P(f"db/configs/{hostname}/operational.json")
+                if _opf.exists():
+                    with open(_opf) as f:
+                        _opd = json.load(f)
+                    _opd['device_state'] = 'DEPLOYING'
+                    _opd['install_status'] = 'initiated'
+                    _opd['upgrade_in_progress'] = True
+                    with open(_opf, 'w') as f:
+                        json.dump(_opd, f, indent=4)
+            except:
+                pass
+        else:
+            live_print(hostname, "Deploy NOT confirmed -- check device", "red")
+        
+        try:
+            ssh.close()
+        except:
+            pass
+        
+        return hostname, deploy_ok, "Deploy started" if deploy_ok else "Deploy not confirmed"
+    
+    console.print()
+    results = {}
+    
+    with ThreadPoolExecutor(max_workers=min(num, 8)) as pool:
+        futures = {pool.submit(_deploy_one, h, tgt, st): (h, tgt) for h, tgt, st in gi_devices}
+        for future in as_completed(futures):
+            h, tgt = futures[future]
+            try:
+                hostname, success, status = future.result()
+                results[h] = success
+            except Exception as e:
+                live_print(h, f"Error: {str(e)[:50]}", "red")
+                results[h] = False
+    
+    ok_count = sum(1 for v in results.values() if v)
+    fail_count = num - ok_count
+    console.print()
+    if ok_count == num:
+        console.print(f"[bold green]All {num} device(s) deploying -- will reboot into DNOS.[/bold green]")
+    elif ok_count > 0:
+        console.print(f"[yellow]{ok_count}/{num} deploying, {fail_count} need attention.[/yellow]")
+    else:
+        console.print(f"[red]No deploys started.[/red]")
+    
+    Prompt.ask("\n[dim]Press Enter[/dim]", default="")
 
 
 def _save_to_upgrade_history(history_path: Path, recent_urls: list, recent_branches: list, 
@@ -3630,291 +4466,91 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
     device_names = ", ".join([d.hostname for d in multi_ctx.devices])
     console.print(f"[dim]Target devices: {device_names}[/dim]\n")
     
-    # Show current stacks by connecting to devices (SSH→SN, SSH→MGMT, Console)
-    console.print("[bold]Current Device Stacks:[/bold] [dim](connecting...)[/dim]")
-    from rich.table import Table as RichTable
-    
-    stack_table = RichTable(box=box.ROUNDED, show_header=True, header_style="bold")
-    stack_table.add_column("Device", style="cyan", width=10)
-    stack_table.add_column("State", width=12)
-    stack_table.add_column("Via", style="dim", width=15)
-    stack_table.add_column("Current DNOS", width=22)
-    stack_table.add_column("Target DNOS", width=22)
-    stack_table.add_column("GI", width=10)
-    stack_table.add_column("BaseOS", width=10)
+    # Show current stacks from DB cache (instant, no SSH)
+    # Panel-per-device layout: full version strings, no column truncation
+    console.print("[bold]Current Device Stacks:[/bold] [dim](from cache)[/dim]")
+    from rich.panel import Panel as RichPanel
     
     device_stacks = {}
+    any_missing = False
     
     for dev in multi_ctx.devices:
-        dnos_current = "-"
-        dnos_target = "-"
-        gi_version = "-"
-        baseos_version = "-"
+        stk = {'dnos': '-', 'dnos_t': '-', 'gi': '-', 'gi_t': '-', 'baseos': '-', 'baseos_t': '-'}
         device_state = "Unknown"
         state_display = "[yellow]?[/yellow]"
         connection_via = "-"
         
-        # Connect to device using priority: SSH→SN, SSH→MGMT, Console
         try:
-            from .connection_strategy import CREDENTIAL_SETS, get_console_config_for_device
-            import paramiko
-            import socket
-            
-            # Get serial number and mgmt_ip from operational.json
-            serial_number = None
-            stored_mgmt_ip = None
-            try:
-                op_file = Path(f"/home/dn/SCALER/db/configs/{dev.hostname}/operational.json")
-                if op_file.exists():
-                    with open(op_file) as f:
-                        op_data = json.load(f)
-                        sn = op_data.get('serial_number')
-                        if sn and sn != 'N/A':
-                            serial_number = sn
-                        mgmt = op_data.get('mgmt_ip')
-                        if mgmt and mgmt != 'N/A':
-                            stored_mgmt_ip = mgmt
-            except:
-                pass
-            
-            # Build connection targets (priority order)
-            connection_targets = []
-            if serial_number:
-                connection_targets.append(('SN', serial_number))
-            if stored_mgmt_ip:
-                connection_targets.append(('MGMT', stored_mgmt_ip))
-            if dev.ip and dev.ip != stored_mgmt_ip:
-                connection_targets.append(('MGMT', dev.ip))
-            
-            connected = False
-            ssh = None
-            channel = None
-            
-            # Try SSH connections first
-            for method_name, target in connection_targets:
-                for cred in CREDENTIAL_SETS:
-                    try:
-                        ssh = paramiko.SSHClient()
-                        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                        ssh.connect(
-                            target,
-                            username=cred['username'],
-                            password=cred['password'],
-                            timeout=8,
-                            banner_timeout=8,
-                            auth_timeout=8,
-                            allow_agent=False,
-                            look_for_keys=False
-                        )
-                        connected = True
-                        connection_via = f"SSH→{method_name}"
-                        break
-                    except paramiko.AuthenticationException:
-                        continue
-                    except (socket.timeout, socket.gaierror):
-                        break
-                    except:
-                        continue
-                if connected:
-                    break
-            
-            # Try console if SSH failed
-            if not connected:
-                console_cfg = get_console_config_for_device(dev.hostname)
-                if console_cfg:
-                    try:
-                        ssh = paramiko.SSHClient()
-                        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                        ssh.connect(
-                            console_cfg['host'],
-                            username=console_cfg['user'],
-                            password=console_cfg['password'],
-                            timeout=15
-                        )
-                        channel = ssh.invoke_shell(width=200, height=50)
-                        channel.settimeout(30)
-                        time.sleep(1.5)
-                        _ = channel.recv(8192)
-                        channel.send("3\r\n")
-                        time.sleep(3)
-                        _ = channel.recv(8192)
-                        channel.send(f"{console_cfg['port']}\r\n")
-                        time.sleep(1.5)
-                        channel.send("\r\n")
-                        time.sleep(2)
-                        output = channel.recv(8192).decode('utf-8', errors='replace')
-                        
-                        # Login if needed
-                        if "login" in output.lower():
-                            for cred in CREDENTIAL_SETS:
-                                channel.send(cred['username'] + "\r\n")
-                                time.sleep(0.8)
-                                channel.send(cred['password'] + "\r\n")
-                                time.sleep(3)
-                                new_out = channel.recv(8192).decode('utf-8', errors='replace')
-                                if "incorrect" not in new_out.lower():
-                                    connected = True
-                                    connection_via = "Console"
-                                    break
-                        else:
-                            connected = True
-                            connection_via = "Console"
-                    except:
-                        pass
-            
-            if connected:
-                # Get shell if not from console
-                if not channel:
-                    channel = ssh.invoke_shell(width=200, height=50)
-                    channel.settimeout(20)
-                    time.sleep(1)
-                    _ = channel.recv(10000)
+            op_file = Path(f"/home/dn/SCALER/db/configs/{dev.hostname}/operational.json")
+            if op_file.exists():
+                with open(op_file) as f:
+                    op_data = json.load(f)
                 
-                # Send newlines to get prompt
-                channel.send("\r\n\r\n")
-                time.sleep(1)
-                prompt_output = ""
-                try:
-                    while channel.recv_ready():
-                        prompt_output += channel.recv(8192).decode('utf-8', errors='replace')
-                        time.sleep(0.2)
-                except:
-                    pass
+                stk['dnos'] = op_data.get('dnos_version', '-') or '-'
+                stk['gi'] = op_data.get('gi_version', '-') or '-'
+                stk['baseos'] = op_data.get('baseos_version', '-') or '-'
+                stk['dnos_t'] = op_data.get('target_dnos_version', '-') or '-'
+                stk['gi_t'] = op_data.get('target_gi_version', '-') or '-'
+                stk['baseos_t'] = op_data.get('target_baseos_version', '-') or '-'
                 
-                # Detect state from prompt
-                lower_prompt = prompt_output.lower()
-                if re.search(r'gi\s*[#>]|gi\([^)]*\)\s*[#>]', lower_prompt):
-                    device_state = "GI"
-                    state_display = "[cyan]GI Mode[/cyan]"
-                elif re.search(r'(dn|root)@[a-zA-Z0-9_-]+:\s*~?\s*\$', prompt_output):
-                    device_state = "BaseOS"
-                    state_display = "[yellow]BaseOS[/yellow]"
-                elif "onie" in lower_prompt:
-                    device_state = "ONIE"
-                    state_display = "[red]ONIE[/red]"
-                else:
-                    device_state = "DNOS"
-                    state_display = "[green]DNOS[/green]"
+                cached_state = op_data.get('device_state', 'Unknown')
+                state_map = {'DNOS': '[green]DNOS[/green]', 'GI': '[cyan]GI[/cyan]',
+                             'BaseOS': '[yellow]BaseOS[/yellow]', 'BASEOS_SHELL': '[yellow]BaseOS[/yellow]',
+                             'ONIE': '[red]ONIE[/red]', 'DEPLOYING': '[cyan]GI[/cyan]',
+                             'UPGRADING': '[yellow]Upgrading[/yellow]', 'DN_RECOVERY': '[red]Recovery[/red]'}
+                state_display = state_map.get(cached_state, f'[yellow]{cached_state}[/yellow]')
+                device_state = cached_state
+                # DEPLOYING without a confirmed install task means the device is still in GI
+                if cached_state == 'DEPLOYING':
+                    install_status = op_data.get('install_status', '')
+                    if install_status != 'initiated':
+                        device_state = 'GI'
+                connection_via = op_data.get('connection_method', '-') or '-'
                 
-                # Run show system stack
-                channel.send("show system stack | no-more\r\n")
-                time.sleep(2)
-                stack_output = ""
-                try:
-                    while channel.recv_ready():
-                        stack_output += channel.recv(65535).decode('utf-8', errors='replace')
-                        time.sleep(0.3)
-                except:
-                    pass
-                
-                # Parse stack output - store full versions for saving
-                target_gi = "-"
-                target_baseos = "-"
-                full_dnos_current = "-"
-                full_dnos_target = "-"
-                full_gi_current = "-"
-                full_baseos_current = "-"
-                
-                for line in stack_output.split('\n'):
-                    if '|' in line and '---' not in line and 'Component' not in line:
-                        parts = [p.strip() for p in line.split('|') if p.strip()]
-                        if len(parts) >= 5:
-                            component = parts[0].upper()
-                            current = parts[4] if len(parts) > 4 and parts[4] not in ('-', '') else '-'
-                            target = parts[5] if len(parts) > 5 and parts[5] not in ('-', '') else '-'
-                            
-                            if component == 'DNOS':
-                                full_dnos_current = current if current != '-' else '-'
-                                full_dnos_target = target if target != '-' else '-'
-                                dnos_current = current[:22] if current != '-' else '-'
-                                dnos_target = target[:22] if target != '-' else '-'
-                            elif component == 'GI':
-                                full_gi_current = current if current != '-' else '-'
-                                target_gi = target if target != '-' else '-'
-                                gi_version = current[:10] if current != '-' else '-'
-                            elif component == 'BASEOS':
-                                full_baseos_current = current if current != '-' else '-'
-                                target_baseos = target if target != '-' else '-'
-                                baseos_version = current[:10] if current != '-' else '-'
-                
-                # Close connection
-                try:
-                    channel.close()
-                    ssh.close()
-                except:
-                    pass
-                
-                # Save to operational.json
-                try:
-                    op_file = Path(f"/home/dn/SCALER/db/configs/{dev.hostname}/operational.json")
-                    op_data = {}
-                    if op_file.exists():
-                        with open(op_file) as f:
-                            op_data = json.load(f)
-                    
-                    # Update with detected state and stacks
-                    op_data['device_state'] = device_state
-                    op_data['connection_method'] = connection_via.replace('[', '').replace(']', '').replace('dim', '').replace('/', '')
-                    
-                    # Current stacks
-                    if full_dnos_current != '-':
-                        op_data['dnos_version'] = full_dnos_current
-                    elif device_state == 'GI':
-                        op_data['dnos_version'] = 'N/A (GI Mode)'
-                    
-                    if full_gi_current != '-':
-                        op_data['gi_version'] = full_gi_current
-                    if full_baseos_current != '-':
-                        op_data['baseos_version'] = full_baseos_current
-                    
-                    # Target stacks (ready to deploy)
-                    if full_dnos_target != '-':
-                        op_data['target_dnos_version'] = full_dnos_target
-                    if target_gi != '-':
-                        op_data['target_gi_version'] = target_gi
-                    if target_baseos != '-':
-                        op_data['target_baseos_version'] = target_baseos
-                    
-                    # Recovery mode flags
-                    if device_state in ('GI', 'BaseOS', 'ONIE'):
-                        op_data['recovery_mode_detected'] = True
-                        op_data['recovery_type'] = device_state
-                    else:
-                        op_data['recovery_mode_detected'] = False
-                        op_data['recovery_type'] = None
-                    
-                    with open(op_file, 'w') as f:
-                        json.dump(op_data, f, indent=4)
-                    
-                    # Update running.txt header for recovery mode devices
-                    if device_state in ('GI', 'BaseOS', 'ONIE'):
-                        try:
-                            from .config_extractor import update_recovery_mode_header
-                            update_recovery_mode_header(dev.hostname)
-                        except Exception:
-                            pass
-                except Exception as e:
-                    pass  # Don't fail on save error
+                if stk['dnos'] == '-' and device_state not in ('GI', 'BaseOS', 'ONIE'):
+                    any_missing = True
             else:
-                connection_via = "[red]Failed[/red]"
-                state_display = "[red]Unreachable[/red]"
-        except Exception as e:
-            connection_via = f"[red]Error[/red]"
-            state_display = "[red]Error[/red]"
+                any_missing = True
+        except Exception:
+            any_missing = True
         
-        device_stacks[dev.hostname] = dnos_current if dnos_current != "-" else "Unknown"
+        device_stacks[dev.hostname] = stk['dnos'] if stk['dnos'] != "-" else "Unknown"
         
-        stack_table.add_row(
-            dev.hostname,
-            state_display,
-            connection_via,
-            dnos_current,
-            dnos_target,
-            gi_version,
-            baseos_version
-        )
+        lines = []
+        for label, cur_k, tgt_k in [('DNOS', 'dnos', 'dnos_t'), ('GI', 'gi', 'gi_t'), ('BaseOS', 'baseos', 'baseos_t')]:
+            cur = stk[cur_k]
+            tgt = stk[tgt_k]
+            if tgt and tgt != '-':
+                lines.append(f"  [bold]{label:6s}[/bold]  [dim]cur:[/dim] {cur}")
+                lines.append(f"          [dim]tgt:[/dim] [bold yellow]{tgt}[/bold yellow]")
+            else:
+                lines.append(f"  [bold]{label:6s}[/bold]  {cur}")
+        
+        title = f"[cyan]{dev.hostname}[/cyan] {state_display} [dim]{connection_via}[/dim]"
+        console.print(RichPanel("\n".join(lines), title=title, title_align="left",
+                                border_style="dim", expand=True, padding=(0, 1)))
     
-    console.print(stack_table)
+    if any_missing:
+        console.print("[dim]  Tip: Use [V] Verify Stacks Live to refresh from devices[/dim]")
+    
+    # Detect devices with target stacks waiting to be installed/deployed
+    devices_with_targets = []
+    gi_devices_with_targets = []
+    for dev in multi_ctx.devices:
+        try:
+            op_file = Path(f"/home/dn/SCALER/db/configs/{dev.hostname}/operational.json")
+            if op_file.exists():
+                with open(op_file) as f:
+                    op_data = json.load(f)
+                tgt = op_data.get('target_dnos_version', '-') or '-'
+                state = op_data.get('device_state', '')
+                _inst_status = op_data.get('install_status', '')
+                if tgt != '-' and state == 'DNOS':
+                    devices_with_targets.append((dev.hostname, tgt))
+                elif tgt != '-' and state in ('GI', 'DEPLOYING', 'BASEOS_SHELL'):
+                    gi_devices_with_targets.append((dev.hostname, tgt, op_data.get('system_type', 'SA-36CD-S')))
+        except Exception:
+            pass
     
     # Check for recent sources history
     history_path = Path("db/upgrade_sources_history.json")
@@ -3941,12 +4577,30 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
     console.print("  [6] [green]🔨 Trigger New Build[/green] (build from source)")
     console.print("  [T] [magenta]📊 Monitor Triggered Builds[/magenta] (watch build progress)")
     console.print("  [S] 📊 Check Upgrade Status (show install progress on devices)")
+    if devices_with_targets:
+        dev_list = ", ".join([f"{h}" for h, _ in devices_with_targets])
+        tgt_ver = devices_with_targets[0][1]
+        console.print(f"  [I] [bold green]⚡ Install Target Stack[/bold green] - Pre-check + Install on {len(devices_with_targets)} device(s): {dev_list}")
+        console.print(f"      [dim]Target: {tgt_ver}[/dim]")
+    if gi_devices_with_targets:
+        gi_dev_list = ", ".join([f"{h}" for h, _, _ in gi_devices_with_targets])
+        gi_tgt_ver = gi_devices_with_targets[0][1]
+        console.print(f"  [D] [bold cyan]⚡ Deploy Target Stack[/bold cyan] - Deploy on {len(gi_devices_with_targets)} GI device(s): {gi_dev_list}")
+        console.print(f"      [dim]Target: {gi_tgt_ver}[/dim]")
     console.print("  [V] 🔄 Verify Stacks Live (SSH→SN/MGMT/Console + Deploy/Install)")
     console.print("  [R] 📦 Restore Pre-Delete Config (push backed-up config)")
     console.print("  [B] Back")
     
-    choices = ["0", "1", "2", "3", "4", "5", "6", "t", "T", "s", "S", "v", "V", "r", "R", "b", "B"] if has_history else ["1", "2", "3", "4", "5", "6", "t", "T", "s", "S", "v", "V", "r", "R", "b", "B"]
-    choice = Prompt.ask("Select", choices=choices, default="b").lower()
+    base_choices = ["1", "2", "3", "4", "5", "6", "t", "T", "s", "S", "v", "V", "r", "R", "b", "B"]
+    if has_history:
+        base_choices = ["0"] + base_choices
+    if devices_with_targets:
+        base_choices.extend(["i", "I"])
+    if gi_devices_with_targets:
+        base_choices.extend(["d", "D"])
+    choices = base_choices
+    _default = "0" if has_history else "b"
+    choice = Prompt.ask("Select", choices=choices, default=_default).lower()
     
     if choice == "b":
         return False
@@ -3991,86 +4645,74 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
             
             all_entries = deduplicated
             
-            # For branch entries, fetch latest build numbers
+            # For branch entries, fetch latest build numbers (parallel with timeout)
             console.print("[dim]Checking latest builds...[/dim]", end="\r")
             
-            for i, entry in enumerate(all_entries[:10], 1):
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            import requests as _requests
+            
+            def _validate_entry(idx_entry):
+                """Validate a single history entry (runs in thread)."""
+                i, entry = idx_entry
                 branch = entry.get('branch', 'Unknown')
                 stored_build = entry.get('build', '?')
                 source_type = entry.get('source_type', entry.get('_type', 'unknown'))
+                result = {'idx': i, 'entry': entry}
                 
-                # For branch entries, fetch the LATEST build and validate artifacts
-                if entry.get('_type') == 'branch' and branch and branch != 'Unknown':
-                    try:
+                try:
+                    if entry.get('_type') == 'branch' and branch and branch != 'Unknown':
                         latest = jenkins.get_last_successful_build(branch)
                         if latest:
                             build = latest.build_number
-                            # Check artifacts on latest - get URLs
                             urls = jenkins.get_stack_urls(branch, build)
                             dnos_url = urls.get('dnos', '')
                             gi_url = urls.get('gi', '')
                             
-                            # LIVE VALIDATION: Check if artifacts are actually accessible
-                            import requests
                             has_dnos = "✗"
                             has_gi = "✗"
-                            
                             if dnos_url and dnos_url != 'N/A':
                                 try:
-                                    resp = requests.head(dnos_url, timeout=3)
-                                    has_dnos = "✓" if resp.status_code == 200 else f"[red]✗[/red]"
+                                    has_dnos = "✓" if _requests.head(dnos_url, timeout=2).status_code == 200 else "[red]✗[/red]"
                                 except:
                                     has_dnos = "[red]✗[/red]"
-                            
                             if gi_url and gi_url != 'N/A':
                                 try:
-                                    resp = requests.head(gi_url, timeout=3)
-                                    has_gi = "✓" if resp.status_code == 200 else f"[red]✗[/red]"
+                                    has_gi = "✓" if _requests.head(gi_url, timeout=2).status_code == 200 else "[red]✗[/red]"
                                 except:
                                     has_gi = "[red]✗[/red]"
                             
-                            # Show if newer build available
                             if stored_build and isinstance(stored_build, int) and build > stored_build:
                                 build_display = f"#{build} [green]↑{build - stored_build}[/green]"
                             else:
                                 build_display = f"#{build}"
                             
-                            # Store validated URLs for selection
                             entry['_latest_urls'] = urls
                             entry['_latest_build'] = build
                         else:
                             build_display = f"#{stored_build} [dim]?[/dim]"
                             has_dnos = "[dim]?[/dim]"
                             has_gi = "[dim]?[/dim]"
-                    except Exception as e:
-                        build_display = f"#{stored_build} [dim]err[/dim]"
-                        has_dnos = "[dim]?[/dim]"
-                        has_gi = "[dim]?[/dim]"
-                else:
-                    # Non-branch entry (URL) - validate stored URLs
-                    build_display = f"#{stored_build}"
-                    import requests
-                    dnos_url = entry.get('dnos_url', '')
-                    gi_url = entry.get('gi_url', '')
-                    
-                    has_dnos = "✗"
-                    has_gi = "✗"
-                    
-                    if dnos_url:
-                        try:
-                            resp = requests.head(dnos_url, timeout=3)
-                            has_dnos = "✓" if resp.status_code == 200 else f"[red]✗[/red]"
-                        except:
-                            has_dnos = "[red]✗[/red]"
-                    
-                    if gi_url:
-                        try:
-                            resp = requests.head(gi_url, timeout=3)
-                            has_gi = "✓" if resp.status_code == 200 else f"[red]✗[/red]"
-                        except:
-                            has_gi = "[red]✗[/red]"
+                    else:
+                        build_display = f"#{stored_build}"
+                        dnos_url = entry.get('dnos_url', '')
+                        gi_url = entry.get('gi_url', '')
+                        has_dnos = "✗"
+                        has_gi = "✗"
+                        if dnos_url:
+                            try:
+                                has_dnos = "✓" if _requests.head(dnos_url, timeout=2).status_code == 200 else "[red]✗[/red]"
+                            except:
+                                has_dnos = "[red]✗[/red]"
+                        if gi_url:
+                            try:
+                                has_gi = "✓" if _requests.head(gi_url, timeout=2).status_code == 200 else "[red]✗[/red]"
+                            except:
+                                has_gi = "[red]✗[/red]"
+                except Exception:
+                    build_display = f"#{stored_build} [dim]err[/dim]"
+                    has_dnos = "[dim]?[/dim]"
+                    has_gi = "[dim]?[/dim]"
                 
-                # Format display string
                 type_label = {
                     'dev_branch': '[cyan]dev[/cyan]',
                     'release_branch': '[green]rel[/green]',
@@ -4080,11 +4722,36 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                     'url': '[blue]url[/blue]',
                     'branch': '[yellow]branch[/yellow]',
                 }.get(source_type, source_type)
-                
-                # Truncate branch name if too long
                 branch_display = branch[:45] + "..." if len(branch) > 48 else branch
                 
-                items.append((str(i), f"{type_label} {branch_display} {build_display} | DNOS:{has_dnos} GI:{has_gi}", entry))
+                result['display'] = f"{type_label} {branch_display} {build_display} | MinIO Images: DNOS:{has_dnos} GI:{has_gi}"
+                return result
+            
+            entries_to_check = list(enumerate(all_entries[:10], 1))
+            validated = {}
+            
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                futures = {pool.submit(_validate_entry, e): e for e in entries_to_check}
+                try:
+                    for future in as_completed(futures, timeout=8):
+                        r = future.result()
+                        validated[r['idx']] = (str(r['idx']), r['display'], r['entry'])
+                except Exception:
+                    pass
+            
+            # Build items in original order, fill in timed-out entries
+            for i, entry in entries_to_check:
+                if i in validated:
+                    items.append(validated[i])
+                else:
+                    branch = entry.get('branch', 'Unknown')
+                    stored_build = entry.get('build', '?')
+                    source_type = entry.get('source_type', entry.get('_type', 'unknown'))
+                    type_label = {'dev_branch': '[cyan]dev[/cyan]', 'release_branch': '[green]rel[/green]',
+                                  'manual_branch': '[yellow]branch[/yellow]', 'jenkins_url': '[blue]url[/blue]',
+                                  'url': '[blue]url[/blue]', 'branch': '[yellow]branch[/yellow]'}.get(source_type, source_type)
+                    branch_display = branch[:45] + "..." if len(branch) > 48 else branch
+                    items.append((str(i), f"{type_label} {branch_display} #{stored_build} [dim]timeout[/dim]", entry))
             
             # Clear the "Checking..." message
             console.print(" " * 40, end="\r")
@@ -4093,13 +4760,193 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                 console.print(f"  [{idx}] {desc}")
             console.print("  [B] Back")
             
-            sel = Prompt.ask("Select", choices=[i[0] for i in items] + ["b", "B"], default="b").lower()
+            sel = Prompt.ask("Select", choices=[i[0] for i in items] + ["b", "B"], default="1").lower()
             if sel == "b":
                 return run_image_upgrade_wizard(multi_ctx)
             
             selected = next((i for i in items if i[0] == sel), None)
             if selected:
                 entry = selected[2]
+                display_text = selected[1] if len(selected) > 1 else ''
+                
+                # Early warning if artifacts are expired (✗ in display)
+                _artifacts_expired = '✗' in display_text and '✓' not in display_text
+                if _artifacts_expired and entry.get('branch'):
+                    _branch_name = entry.get('branch', 'Unknown')
+                    console.print(f"\n[yellow]⚠ Artifacts for this build are expired (48h MinIO retention)[/yellow]")
+                    console.print(f"[dim]  Branch: {_branch_name}[/dim]")
+                    
+                    # Check if a build is already running for this branch
+                    _current_build = None
+                    try:
+                        _current_build = jenkins.get_build_info(_branch_name, latest=True)
+                    except Exception:
+                        pass
+                    
+                    if _current_build and _current_build.building:
+                        _elapsed_min = int((time.time() - _current_build.timestamp / 1000) / 60)
+                        # Check if it has BaseOS by looking at artifacts so far
+                        _cur_urls = jenkins.get_stack_urls(_branch_name, _current_build.build_number)
+                        _has_baseos_hint = bool(_cur_urls.get('baseos'))
+                        
+                        console.print(f"\n[bold green]✓ Build #{_current_build.build_number} is already running![/bold green]")
+                        console.print(f"  [dim]Running for: {_elapsed_min} minutes[/dim]")
+                        if _has_baseos_hint:
+                            console.print(f"  [dim]BaseOS: included[/dim]")
+                        
+                        console.print(f"\n  [1] Monitor this build + auto-upgrade when ready (recommended)")
+                        console.print(f"  [2] Trigger a NEW build instead")
+                        console.print(f"  [3] Fetch latest completed build (may be expired)")
+                        console.print(f"  [B] Back")
+                        _run_sel = Prompt.ask("Select", choices=["1", "2", "3", "b", "B"], default="1").lower()
+                        
+                        if _run_sel == "1":
+                            # Monitor existing running build
+                            console.print(f"\n[yellow]📊 Monitoring build #{_current_build.build_number}...[/yellow]")
+                            console.print("[dim]Press Ctrl+C to detach (build continues in Jenkins)[/dim]\n")
+                            
+                            from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+                            
+                            try:
+                                with Progress(
+                                    SpinnerColumn(),
+                                    TextColumn("[progress.description]{task.description}"),
+                                    BarColumn(),
+                                    TextColumn("{task.fields[status]}"),
+                                    console=console
+                                ) as _bprogress:
+                                    _btask = _bprogress.add_task("Building...", total=100, status=f"Running ({_elapsed_min}m)")
+                                    
+                                    def _bupdate(msg, pct):
+                                        _bprogress.update(_btask, completed=pct, description=msg, status=f"{pct}%")
+                                    
+                                    _build = jenkins.wait_for_build_completion(
+                                        _branch_name, _current_build.build_number,
+                                        timeout=3600, poll_interval=30,
+                                        progress_callback=_bupdate
+                                    )
+                                    if _build and _build.result == "SUCCESS":
+                                        console.print(f"\n[bold green]✓ Build #{_current_build.build_number} COMPLETED![/bold green]")
+                                        _urls = jenkins.get_stack_urls(_branch_name, _current_build.build_number)
+                                        stack = {
+                                            'branch': _branch_name,
+                                            'build': _current_build.build_number,
+                                            'dnos_url': _urls.get('dnos'),
+                                            'gi_url': _urls.get('gi'),
+                                            'baseos_url': _urls.get('baseos'),
+                                        }
+                                        console.print(f"  DNOS: {'✓' if _urls.get('dnos') else '✗'}")
+                                        console.print(f"  GI: {'✓' if _urls.get('gi') else '✗'}")
+                                        console.print(f"  BaseOS: {'✓' if _urls.get('baseos') else '✗'}")
+                                        console.print("\n[bold cyan]Continuing with upgrade...[/bold cyan]")
+                                    elif _build:
+                                        console.print(f"\n[red]✗ Build #{_current_build.build_number} {_build.result}[/red]")
+                                        return False
+                                    else:
+                                        console.print("\n[yellow]Build timed out — check Jenkins manually[/yellow]")
+                                        return False
+                            except KeyboardInterrupt:
+                                console.print("\n[yellow]Detached. Build continues in Jenkins.[/yellow]")
+                                return run_image_upgrade_wizard(multi_ctx)
+                        elif _run_sel == "2":
+                            pass  # Fall through to trigger new build below
+                        elif _run_sel == "3":
+                            pass  # Fall through to fetch latest below (_exp_sel = "2" path)
+                        elif _run_sel == "b":
+                            return run_image_upgrade_wizard(multi_ctx)
+                        
+                        # If user chose [1] and build succeeded, stack is set — skip the menu below
+                        if stack:
+                            pass  # stack set from monitoring, continue to upgrade flow
+                        elif _run_sel == "3":
+                            _exp_sel = "2"  # Reuse the "fetch latest" path
+                        elif _run_sel == "2":
+                            _exp_sel = "1"  # Reuse the "trigger new" path
+                        else:
+                            _exp_sel = None
+                    else:
+                        console.print(f"\n  [1] Trigger new build + monitor + auto-upgrade when ready")
+                        console.print(f"  [2] Fetch latest build anyway (may also be expired)")
+                        console.print(f"  [B] Back")
+                        _exp_sel = Prompt.ask("Select", choices=["1", "2", "b", "B"], default="1").lower()
+                    
+                    if _exp_sel == "1" and not stack:
+                        console.print(f"\n[bold]Build Options for: {_branch_name}[/bold]")
+                        with_baseos = Confirm.ask("Build with BaseOS containers?", default=True)
+                        qa_version = Confirm.ask("QA version (60-day retention)?", default=False)
+                        
+                        console.print(f"\n[yellow]Triggering new build for {_branch_name}...[/yellow]")
+                        _trig_ok, _trig_msg = jenkins.trigger_build(_branch_name, with_baseos=with_baseos, qa_version=qa_version)
+                        if _trig_ok:
+                            console.print(f"[green]✓ {_trig_msg}[/green]")
+                            console.print("\n[dim]Waiting for build to start...[/dim]")
+                            
+                            _build_number = jenkins.wait_for_build_start(_branch_name, timeout=120)
+                            if _build_number:
+                                from urllib.parse import quote
+                                console.print(f"[green]✓ Build #{_build_number} started![/green]")
+                                console.print(f"[dim]Jenkins: {jenkins.CHEETAH_BASE}/job/{quote(quote(_branch_name, safe=''), safe='')}/{_build_number}/[/dim]")
+                                
+                                console.print("\n[yellow]📊 Monitoring build progress...[/yellow]")
+                                console.print("[dim]Press Ctrl+C to detach (build continues in Jenkins)[/dim]")
+                                console.print(f"[dim]Will auto-continue upgrade when build completes[/dim]\n")
+                                
+                                from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+                                
+                                try:
+                                    with Progress(
+                                        SpinnerColumn(),
+                                        TextColumn("[progress.description]{task.description}"),
+                                        BarColumn(),
+                                        TextColumn("{task.fields[status]}"),
+                                        console=console
+                                    ) as _bprogress:
+                                        _btask = _bprogress.add_task("Building...", total=100, status="Starting...")
+                                        
+                                        def _bupdate(msg, pct):
+                                            _bprogress.update(_btask, completed=pct, description=msg, status=f"{pct}%")
+                                        
+                                        _build = jenkins.wait_for_build_completion(
+                                            _branch_name, _build_number,
+                                            timeout=3600, poll_interval=30,
+                                            progress_callback=_bupdate
+                                        )
+                                        if _build and _build.result == "SUCCESS":
+                                            console.print(f"\n[bold green]✓ Build #{_build_number} COMPLETED![/bold green]")
+                                            
+                                            _urls = jenkins.get_stack_urls(_branch_name, _build_number)
+                                            stack = {
+                                                'branch': _branch_name,
+                                                'build': _build_number,
+                                                'dnos_url': _urls.get('dnos'),
+                                                'gi_url': _urls.get('gi'),
+                                                'baseos_url': _urls.get('baseos'),
+                                            }
+                                            console.print(f"  DNOS: {'✓' if _urls.get('dnos') else '✗'}")
+                                            console.print(f"  GI: {'✓' if _urls.get('gi') else '✗'}")
+                                            console.print(f"  BaseOS: {'✓' if _urls.get('baseos') else '✗'}")
+                                            console.print("\n[bold cyan]Continuing with upgrade...[/bold cyan]")
+                                            # stack is set — falls through to the upgrade flow below
+                                        elif _build:
+                                            console.print(f"\n[red]✗ Build #{_build_number} {_build.result}[/red]")
+                                            return False
+                                        else:
+                                            console.print("\n[yellow]Build timed out — check Jenkins manually[/yellow]")
+                                            return False
+                                except KeyboardInterrupt:
+                                    console.print("\n[yellow]Detached. Build continues in Jenkins.[/yellow]")
+                                    console.print("[dim]Use [T] Monitor Triggered Builds to check later.[/dim]")
+                                    return run_image_upgrade_wizard(multi_ctx)
+                            else:
+                                console.print("[yellow]Build didn't start within 2 minutes. Check Jenkins.[/yellow]")
+                                return False
+                        else:
+                            console.print(f"[red]✗ {_trig_msg}[/red]")
+                            return False
+                    elif _exp_sel == "b":
+                        return run_image_upgrade_wizard(multi_ctx)
+                    # _exp_sel == "2" falls through to fetch latest
+                
                 # Check if it's a URL entry (has non-empty url) or a branch entry
                 if entry.get('url'):
                     console.print(f"[dim]Loading from URL...[/dim]")
@@ -4287,7 +5134,7 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
         
         elif choice == "3":
             # Manual branch entry
-            branch = Prompt.ask("Enter branch name (e.g., dev_v26.1, PR-12345)")
+            branch = Prompt.ask("Enter branch name (e.g., dev_v25_4_13, rel_v26_1, PR-12345)")
             if not branch:
                 return False
             
@@ -4296,6 +5143,12 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                 console.print("[dim]Detected URL, fetching...[/dim]")
                 stack = get_stack_from_url(branch)
             else:
+                # Normalize dots to underscores for dev_v*/rel_v* branches
+                if re.match(r'^(dev|rel)_v\d+\.', branch):
+                    normalized = branch.replace('.', '_')
+                    console.print(f"[dim]Normalized: {branch} -> {normalized}[/dim]")
+                    branch = normalized
+                
                 console.print(f"[dim]Looking up {branch}...[/dim]")
                 build = jenkins.get_build_info(branch)
                 if build:
@@ -4341,77 +5194,136 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
             with_baseos = Confirm.ask("Build with BaseOS containers?", default=True)
             qa_version = Confirm.ask("QA version (60-day retention)?", default=False)
             
+            # Pre-select artifacts BEFORE triggering so user can walk away
+            console.print(f"\n[bold]Pre-select Artifacts to Push:[/bold]")
+            console.print("[dim]Choose now so install runs automatically after build completes[/dim]\n")
+            pre_push_dnos = Confirm.ask("  Push DNOS?", default=True)
+            pre_push_gi = Confirm.ask("  Push GI (Golden Image)?", default=True)
+            pre_push_baseos = False
+            if with_baseos:
+                _is_dd = stack.get('_requires_delete_deploy', False) if 'stack' in dir() else False
+                if _is_dd:
+                    pre_push_baseos = Confirm.ask("  Push BaseOS? (required for delete+deploy)", default=True)
+                else:
+                    pre_push_baseos = Confirm.ask("  Push BaseOS? (usually not needed for in-place)", default=False)
+            
+            if not pre_push_dnos and not pre_push_gi and not pre_push_baseos:
+                console.print("[yellow]No artifacts selected. Aborting.[/yellow]")
+                return run_image_upgrade_wizard(multi_ctx)
+            
+            selected_names = []
+            if pre_push_dnos: selected_names.append("DNOS")
+            if pre_push_gi: selected_names.append("GI")
+            if pre_push_baseos: selected_names.append("BaseOS")
+            console.print(f"  [green]✓ Will push: {', '.join(selected_names)}[/green]")
+            
+            # Ask about auto-monitor and push
+            console.print("\n[bold]After Build Completes:[/bold]")
+            console.print("  [1] 🚀 Auto-monitor & push when complete (recommended)")
+            console.print("  [2] 📊 Monitor only (push manually later)")
+            console.print("  [3] ⏸️  Detach (build continues in background)")
+            build_option = Prompt.ask("Select", choices=["1", "2", "3"], default="1")
+            
+            auto_push = (build_option == "1")
+            
+            # Now trigger the build
             console.print(f"\n[yellow]Triggering build for {branch}...[/yellow]")
             success, message = jenkins.trigger_build(branch, with_baseos=with_baseos, qa_version=qa_version)
             
             if success:
                 console.print(f"[green]✓ {message}[/green]")
+                multi_ctx._last_triggered_branch = branch
+                multi_ctx._last_build_with_baseos = with_baseos
+                multi_ctx._pre_push_dnos = pre_push_dnos
+                multi_ctx._pre_push_gi = pre_push_gi
+                multi_ctx._pre_push_baseos = pre_push_baseos
                 console.print("\n[dim]Waiting for build to start...[/dim]")
                 
-                # Wait for build to start
                 build_number = jenkins.wait_for_build_start(branch, timeout=120)
                 if build_number:
                     console.print(f"[green]✓ Build #{build_number} started![/green]")
                     console.print(f"\n[cyan]Jenkins URL: {jenkins.CHEETAH_BASE}/job/{quote(quote(branch, safe=''), safe='')}/{build_number}/[/cyan]")
                     
-                    if Confirm.ask("Wait for build completion? (may take 30-60 min)", default=False):
-                        console.print("\n[yellow]Monitoring build progress...[/yellow]")
-                        console.print("[dim]Press Ctrl+C to detach (build continues in Jenkins)[/dim]\n")
-                        
-                        from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-                        
-                        with Progress(
-                            SpinnerColumn(),
-                            TextColumn("[progress.description]{task.description}"),
-                            BarColumn(),
-                            TextColumn("{task.fields[status]}"),
-                            console=console
-                        ) as progress:
-                            task = progress.add_task("Building...", total=100, status="Starting...")
-                            
-                            def update_progress(msg, pct):
-                                progress.update(task, completed=pct, description=msg, status=f"{pct}%")
-                            
-                            try:
-                                build = jenkins.wait_for_build_completion(branch, build_number, 
-                                                                          timeout=3600, poll_interval=30,
-                                                                          progress_callback=update_progress)
-                                if build:
-                                    if build.result == "SUCCESS":
-                                        console.print(f"\n[green]✓ Build #{build_number} COMPLETED SUCCESSFULLY![/green]")
-                                        console.print("[cyan]Artifacts are now available![/cyan]")
-                                        console.print("\n[bold]What would you like to do?[/bold]")
-                                        console.print("  [1] Push artifacts to devices now")
-                                        console.print("  [2] Return to menu (push later)")
-                                        post_build = Prompt.ask("Select", choices=["1", "2"], default="1")
-                                        
-                                        if post_build == "2":
-                                            console.print("[dim]Return to Image Upgrade menu to push when ready.[/dim]")
-                                            return False
-                                        
-                                        # User chose to push - get stack URLs
-                                        urls = jenkins.get_stack_urls(branch, build_number)
-                                        stack = {
-                                            'branch': branch, 
-                                            'build': build_number,
-                                            'dnos_url': urls.get('dnos'),
-                                            'gi_url': urls.get('gi'),
-                                            'baseos_url': urls.get('baseos'),
-                                        }
-                                    else:
-                                        console.print(f"\n[red]✗ Build #{build_number} {build.result}[/red]")
-                                        return False
-                                else:
-                                    console.print("\n[yellow]Build timed out - check Jenkins manually[/yellow]")
-                                    return False
-                            except KeyboardInterrupt:
-                                console.print("\n[yellow]Detached from build monitoring. Build continues in Jenkins.[/yellow]")
-                                console.print("[dim]Use [T] Monitor Triggered Builds to check status later.[/dim]")
-                                return False
-                    else:
+                    if build_option == "3":
                         console.print("\n[cyan]Build running in background.[/cyan]")
                         console.print("[dim]Use [T] Monitor Triggered Builds to check status.[/dim]")
-                        return False
+                        console.print(f"[dim]Pre-selected artifacts: {', '.join(selected_names)}[/dim]")
+                        return run_image_upgrade_wizard(multi_ctx)
+                    
+                    console.print("\n[yellow]📊 Monitoring build progress...[/yellow]")
+                    console.print("[dim]Press Ctrl+C to detach (build continues in Jenkins)[/dim]")
+                    if auto_push:
+                        console.print(f"[dim]Will auto-push [{', '.join(selected_names)}] to: {', '.join([d.hostname for d in multi_ctx.devices])}[/dim]\n")
+                    
+                    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+                    
+                    with Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        BarColumn(),
+                        TextColumn("{task.fields[status]}"),
+                        console=console
+                    ) as progress:
+                        task = progress.add_task("Building...", total=100, status="Starting...")
+                        
+                        def update_progress(msg, pct):
+                            progress.update(task, completed=pct, description=msg, status=f"{pct}%")
+                        
+                        try:
+                            build = jenkins.wait_for_build_completion(branch, build_number, 
+                                                                      timeout=3600, poll_interval=30,
+                                                                      progress_callback=update_progress)
+                            if build:
+                                if build.result == "SUCCESS":
+                                    console.print(f"\n[bold green]✓ Build #{build_number} COMPLETED SUCCESSFULLY![/bold green]")
+                                    
+                                    urls = jenkins.get_stack_urls(branch, build_number)
+                                    console.print("\n[bold]Artifacts Available:[/bold]")
+                                    console.print(f"  • DNOS: {'✓' if urls.get('dnos') else '✗'}")
+                                    console.print(f"  • GI: {'✓' if urls.get('gi') else '✗'}")
+                                    console.print(f"  • BaseOS: {'✓' if urls.get('baseos') else '✗ (not requested)'}")
+                                    
+                                    # Apply pre-selected artifact choices
+                                    stack = {
+                                        'branch': branch, 
+                                        'build': build_number,
+                                        'dnos_url': urls.get('dnos') if pre_push_dnos else None,
+                                        'gi_url': urls.get('gi') if pre_push_gi else None,
+                                        'baseos_url': urls.get('baseos') if pre_push_baseos else None,
+                                    }
+                                    
+                                    if auto_push:
+                                        console.print(f"\n[bold cyan]🚀 Auto-pushing pre-selected [{', '.join(selected_names)}] to devices...[/bold cyan]")
+                                    else:
+                                        console.print(f"\n[bold]Pre-selected: {', '.join(selected_names)}[/bold]")
+                                        console.print("\n[bold]What would you like to do?[/bold]")
+                                        console.print("  [1] Push pre-selected artifacts to devices now")
+                                        console.print("  [2] Re-select artifacts")
+                                        console.print("  [3] Return to menu (push later)")
+                                        post_build = Prompt.ask("Select", choices=["1", "2", "3"], default="1")
+                                        
+                                        if post_build == "3":
+                                            console.print("[dim]Return to Image Upgrade menu to push when ready.[/dim]")
+                                            return run_image_upgrade_wizard(multi_ctx)
+                                        elif post_build == "2":
+                                            stack = {
+                                                'branch': branch, 
+                                                'build': build_number,
+                                                'dnos_url': urls.get('dnos'),
+                                                'gi_url': urls.get('gi'),
+                                                'baseos_url': urls.get('baseos'),
+                                            }
+                                else:
+                                    console.print(f"\n[red]✗ Build #{build_number} {build.result}[/red]")
+                                    return False
+                            else:
+                                console.print("\n[yellow]Build timed out - check Jenkins manually[/yellow]")
+                                return False
+                        except KeyboardInterrupt:
+                            console.print("\n[yellow]Detached from build monitoring. Build continues in Jenkins.[/yellow]")
+                            console.print("[dim]Use [T] Monitor Triggered Builds to check status later.[/dim]")
+                            console.print(f"[dim]Pre-selected artifacts: {', '.join(selected_names)}[/dim]")
+                            return run_image_upgrade_wizard(multi_ctx)
                 else:
                     console.print("[yellow]Build queued but not started yet. Check Jenkins manually.[/yellow]")
                     return False
@@ -4425,6 +5337,18 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
             _check_device_upgrade_status(multi_ctx)
             return run_image_upgrade_wizard(multi_ctx)
         
+        elif choice == "i" and devices_with_targets:
+            # Install target stacks directly (no new load needed)
+            console.print("\n[bold green]⚡ Installing Target Stacks on Devices[/bold green]")
+            _install_target_stack_on_devices(multi_ctx, devices_with_targets)
+            return run_image_upgrade_wizard(multi_ctx)
+        
+        elif choice == "d" and gi_devices_with_targets:
+            # Deploy target stacks on GI-mode devices
+            console.print("\n[bold cyan]⚡ Deploying Target Stacks on GI Devices[/bold cyan]")
+            _deploy_target_stack_on_gi_devices(multi_ctx, gi_devices_with_targets)
+            return run_image_upgrade_wizard(multi_ctx)
+        
         elif choice == "v":
             # Verify stacks live
             console.print("\n[bold cyan]🔄 Verifying Stacks Live from Devices[/bold cyan]")
@@ -4432,9 +5356,12 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
             return run_image_upgrade_wizard(multi_ctx)
         
         elif choice == "t":
-            # Monitor triggered builds
-            _monitor_triggered_builds(jenkins, multi_ctx)
-            return run_image_upgrade_wizard(multi_ctx)
+            # Monitor triggered builds — if build completes, continue to upgrade flow
+            _mon_result = _monitor_triggered_builds(jenkins, multi_ctx)
+            if _mon_result:
+                stack = _mon_result
+            else:
+                return run_image_upgrade_wizard(multi_ctx)
         
         elif choice == "r":
             # Restore pre-delete config
@@ -4590,9 +5517,27 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
         
         target_version = parse_version(target_version_str)
         
-        # Check each device for version jumps
+        # Determine which devices have active DNOS (skip GI/RECOVERY/ONIE -- no stack to compare)
+        _devices_with_dnos = set()
+        for dev in multi_ctx.devices:
+            try:
+                _opf = Path(f"db/configs/{dev.hostname}/operational.json")
+                if _opf.exists():
+                    with open(_opf) as f:
+                        _opd = json.load(f)
+                    _ds = (_opd.get('device_state') or '').upper()
+                    if _ds in ('GI', 'RECOVERY', 'DN_RECOVERY', 'BASEOS_SHELL', 'ONIE', 'DEPLOYING'):
+                        continue
+            except:
+                pass
+            _devices_with_dnos.add(dev.hostname)
+        stack['_devices_with_dnos_set'] = _devices_with_dnos
+        
+        # Check each device for version jumps (only devices running DNOS)
         version_jumps = []
         for dev in multi_ctx.devices:
+            if dev.hostname not in _devices_with_dnos:
+                continue
             current_ver_str = device_stacks.get(dev.hostname, "Unknown")
             current_version = parse_version(current_ver_str)
             
@@ -4607,7 +5552,101 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
         
         requires_delete_deploy = len(version_jumps) > 0
         
-        if requires_delete_deploy:
+        # === EXACT VERSION MATCH DETECTION ===
+        # Skip devices that are already running the exact target build
+        _target_full = ''
+        if dnos_url and dnos_url != 'N/A':
+            _target_full = dnos_url.rstrip('/').split('/')[-1].replace('drivenets_dnos_', '').replace('.tar', '')
+        
+        _already_on_target = []
+        for dev in multi_ctx.devices:
+            if dev.hostname not in _devices_with_dnos:
+                continue
+            cur_full = device_stacks.get(dev.hostname, '')
+            if cur_full and cur_full != 'Unknown' and _target_full and cur_full == _target_full:
+                _already_on_target.append(dev.hostname)
+        
+        if _already_on_target:
+            console.print(f"\n[bold green]✓ EXACT VERSION MATCH[/bold green]")
+            console.print("[dim]The following devices are already running the target build:[/dim]\n")
+            
+            from rich.table import Table as RichTable
+            skip_table = RichTable(box=box.ROUNDED)
+            skip_table.add_column("Device", style="cyan")
+            skip_table.add_column("Version", style="dim")
+            skip_table.add_column("Action", style="green")
+            
+            for h in _already_on_target:
+                skip_table.add_row(h, _target_full, "SKIP (already on target)")
+            
+            console.print(skip_table)
+            
+            console.print("\n[bold]Options:[/bold]")
+            console.print("  [C] [green]Continue (skip these devices)[/green]")
+            console.print("  [F] [yellow]Force upgrade all[/yellow] [dim](re-install even if version matches)[/dim]")
+            console.print("  [B] Back")
+            
+            skip_choice = Prompt.ask("  Select", choices=['c', 'C', 'f', 'F', 'b', 'B'], default='c').lower()
+            if skip_choice == 'b':
+                return False
+            elif skip_choice == 'c':
+                stack['_skip_devices'] = set(_already_on_target)
+                console.print(f"[dim]Will skip {len(_already_on_target)} device(s).[/dim]")
+            else:
+                stack['_skip_devices'] = set()
+                console.print(f"[dim]Force upgrade enabled - will re-install on all devices.[/dim]")
+        
+        # === BRANCH SWITCH DETECTION ===
+        # Same major.minor but different branch can cause DN_RECOVERY
+        branch_switches = []
+        if not requires_delete_deploy and dnos_url and dnos_url != 'N/A':
+            from .stack_manager import StackManager as _SM
+            _url_fname = dnos_url.rstrip('/').split('/')[-1].replace('drivenets_dnos_', '').replace('.tar', '')
+            for dev in multi_ctx.devices:
+                if dev.hostname not in _devices_with_dnos:
+                    continue
+                cur_full = device_stacks.get(dev.hostname, "")
+                if cur_full and cur_full != "Unknown":
+                    is_sw, cur_br, tgt_br = _SM.detect_branch_switch(cur_full, _url_fname)
+                    if is_sw:
+                        branch_switches.append({
+                            'hostname': dev.hostname,
+                            'current_full': cur_full,
+                            'target_full': _url_fname,
+                            'current_branch': cur_br,
+                            'target_branch': tgt_br,
+                        })
+        
+        if branch_switches and not requires_delete_deploy:
+            console.print("\n[bold yellow]⚠ BRANCH SWITCH DETECTED[/bold yellow]")
+            console.print("[yellow]Switching between development branches may require system delete + deploy.[/yellow]")
+            console.print("[dim]In-place install can fail and cause DN_RECOVERY if branches are incompatible.[/dim]\n")
+            
+            from rich.table import Table as RichTable
+            br_table = RichTable(title="Branch Switches", box=box.ROUNDED)
+            br_table.add_column("Device", style="cyan")
+            br_table.add_column("Current Branch", style="yellow")
+            br_table.add_column("→", style="dim")
+            br_table.add_column("Target Branch", style="green")
+            for bs in branch_switches:
+                br_table.add_row(bs['hostname'], bs['current_branch'], "→", bs['target_branch'])
+            console.print(br_table)
+            
+            console.print("\n[bold]Options:[/bold]")
+            console.print("  [D] [red]System Delete + Deploy[/red] [dim](safe — backs up config, wipes & re-deploys)[/dim]")
+            console.print("  [I] [yellow]Try in-place install[/yellow] [dim](faster — may cause DN_RECOVERY if incompatible)[/dim]")
+            console.print("  [B] Back")
+            
+            br_choice = Prompt.ask("  Select", choices=['d', 'D', 'i', 'I', 'b', 'B'], default='d').lower()
+            if br_choice == 'b':
+                return False
+            elif br_choice == 'd':
+                requires_delete_deploy = True
+                stack['_requires_delete_deploy'] = True
+                stack['_branch_switch'] = True
+                console.print("[bold]Using system delete + deploy flow.[/bold]")
+        
+        if requires_delete_deploy and version_jumps:
             console.print("\n[bold red]⚠ MAJOR VERSION JUMP DETECTED[/bold red]")
             console.print("[yellow]This upgrade requires: system delete → deploy (not in-place upgrade)[/yellow]")
             console.print("")
@@ -4629,132 +5668,80 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                     j['jump_type']
                 )
             console.print(jump_table)
-            
-            console.print("\n[bold]Upgrade Workflow Required:[/bold]")
-            console.print("  [1] Push GI image to devices")
-            console.print("  [2] SSH to each device and run:")
-            console.print("      [dim]request system delete[/dim]")
-            console.print("      [dim]<wait for GI mode>[/dim]")
-            console.print("      [dim]request system deploy system-type <TYPE> name <HOSTNAME> ncc-id 0[/dim]")
             console.print("")
             
-            if not Confirm.ask("[bold yellow]Proceed with major version upgrade (system delete flow)?[/bold yellow]", default=False):
+            # === VERSION COMPATIBILITY REPORT ===
+            try:
+                from .version_compat import build_compatibility_report, format_report_for_terminal
+                for j in version_jumps:
+                    compat_report = build_compatibility_report(j['current'], j['target'])
+                    if compat_report['incompatible_count'] > 0:
+                        console.print(format_report_for_terminal(compat_report))
+                        console.print("")
+                        stack['_compat_report'] = compat_report
+                        stack['_source_version'] = j['current']
+                        stack['_target_version'] = j['target']
+                        break
+            except Exception as e:
+                console.print(f"[dim]Version compat check skipped: {e}[/dim]")
+            
+            if not Confirm.ask("[bold yellow]Proceed with system delete + deploy?[/bold yellow]", default=False):
                 return False
             
-            # For major jumps, force GI push and mark as delete-deploy workflow
             stack['_requires_delete_deploy'] = True
-            
-            # === CONFIG BACKUP BEFORE DELETE ===
-            # System delete wipes all configuration - offer to save current config
-            console.print("\n[bold cyan]📦 Configuration Backup[/bold cyan]")
-            console.print("[yellow]⚠ System delete will wipe ALL device configuration![/yellow]")
-            console.print("[dim]You can backup the current running config before deletion.[/dim]\n")
-            
-            backup_configs = {}
-            
-            # Check what configs we have cached
-            from pathlib import Path
-            from datetime import datetime
-            
-            for dev in multi_ctx.devices:
-                cached_config_path = Path(f"db/configs/{dev.hostname}/running.txt")
-                if cached_config_path.exists():
-                    with open(cached_config_path) as f:
-                        config_lines = len(f.readlines())
-                    console.print(f"  [cyan]{dev.hostname}[/cyan]: [green]✓[/green] Cached config ({config_lines:,} lines)")
-                else:
-                    console.print(f"  [cyan]{dev.hostname}[/cyan]: [yellow]⚠ No cached config[/yellow]")
-            
-            backup_choice = Prompt.ask(
-                "\nBackup configuration before delete?",
-                choices=["y", "n", "b"],
-                default="y"
-            ).lower()
-            
-            if backup_choice == "b":
-                return False
-            
-            if backup_choice == "y":
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                
-                for dev in multi_ctx.devices:
-                    cached_config_path = Path(f"db/configs/{dev.hostname}/running.txt")
-                    backup_path = Path(f"db/configs/{dev.hostname}/pre_delete_backup_{timestamp}.txt")
-                    
-                    if cached_config_path.exists():
-                        # Copy cached config to backup
-                        import shutil
-                        backup_path.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(cached_config_path, backup_path)
-                        console.print(f"  [green]✓[/green] {dev.hostname}: Saved to [dim]{backup_path}[/dim]")
-                        backup_configs[dev.hostname] = str(backup_path)
-                    else:
-                        # Try to fetch from device
-                        console.print(f"  [yellow]⏳[/yellow] {dev.hostname}: Fetching config from device...")
-                        try:
-                            import paramiko
-                            ssh = paramiko.SSHClient()
-                            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                            
-                            password = dev.password
-                            if hasattr(dev, 'password') and dev.password:
-                                import base64
-                                try:
-                                    password = base64.b64decode(dev.password).decode('utf-8')
-                                except:
-                                    password = dev.password
-                            
-                            ssh.connect(dev.ip, username=dev.username or 'dnroot', password=password, timeout=15)
-                            channel = ssh.invoke_shell()
-                            channel.settimeout(60)
-                            time.sleep(1)
-                            channel.recv(10000)  # Clear banner
-                            
-                            channel.send("show config | no-more\n")
-                            time.sleep(3)
-                            
-                            config_output = ""
-                            while True:
-                                if channel.recv_ready():
-                                    config_output += channel.recv(65535).decode(errors='ignore')
-                                else:
-                                    time.sleep(0.5)
-                                    if not channel.recv_ready():
-                                        break
-                            
-                            channel.close()
-                            ssh.close()
-                            
-                            # Save config
-                            backup_path.parent.mkdir(parents=True, exist_ok=True)
-                            with open(backup_path, 'w') as f:
-                                f.write(config_output)
-                            
-                            config_lines = len(config_output.split('\n'))
-                            console.print(f"  [green]✓[/green] {dev.hostname}: Fetched and saved ({config_lines} lines)")
-                            backup_configs[dev.hostname] = str(backup_path)
-                            
-                        except Exception as e:
-                            console.print(f"  [red]✗[/red] {dev.hostname}: Failed to fetch - {str(e)[:40]}")
-                
-                if backup_configs:
-                    console.print(f"\n[green]✓ Backed up {len(backup_configs)} device config(s)[/green]")
-                    console.print("[dim]After upgrade, use 'Load Config' to restore these configurations.[/dim]")
-                    
-                    # Store backup paths in stack for later reference
-                    stack['_pre_delete_backups'] = backup_configs
-            else:
-                console.print("[dim]Skipping config backup.[/dim]")
-            
             console.print("")
-        else:
+        elif not requires_delete_deploy:
             if not Confirm.ask("\nProceed with upgrade?", default=False):
                 return False
         
+        # === AUTO-BACKUP CONFIG BEFORE ANY UPGRADE ===
+        from pathlib import Path
+        from datetime import datetime
+        import shutil
+        backup_configs = {}
+        backup_label = "pre_delete" if requires_delete_deploy else "pre_upgrade"
+        backup_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        for dev in multi_ctx.devices:
+            cached_config_path = Path(f"db/configs/{dev.hostname}/running.txt")
+            backup_path = Path(f"db/configs/{dev.hostname}/{backup_label}_backup_{backup_ts}.txt")
+            if cached_config_path.exists():
+                backup_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(cached_config_path, backup_path)
+                backup_configs[dev.hostname] = str(backup_path)
+        
+        if backup_configs:
+            console.print(f"[dim]Auto-backed up {len(backup_configs)} config(s) -> db/configs/*/[/dim]")
+            stack['_pre_delete_backups'] = backup_configs
+        
+        # Save pre-upgrade version to operational.json for each device
+        # so the config sanitizer knows the source version during restore
+        for dev in multi_ctx.devices:
+            _cur_ver = device_stacks.get(dev.hostname, "")
+            if _cur_ver and _cur_ver not in ('Unknown', 'N/A', ''):
+                try:
+                    _op_path = Path(f"db/configs/{dev.hostname}/operational.json")
+                    _op_data = {}
+                    if _op_path.exists():
+                        with open(_op_path) as f:
+                            _op_data = json.load(f)
+                    _op_data['pre_upgrade_version'] = _cur_ver
+                    _op_data['target_upgrade_version'] = target_version_str
+                    with open(_op_path, 'w') as f:
+                        json.dump(_op_data, f, indent=2)
+                except Exception:
+                    pass
+        
         # === ARTIFACT SELECTION ===
-        # Let user choose which artifacts to push
+        # Devices in GI/RECOVERY need all 3 images (same as delete+deploy)
+        _needs_full_deploy = requires_delete_deploy or any(
+            d.hostname not in _devices_with_dnos for d in multi_ctx.devices)
+        
         console.print("\n[bold]Select Artifacts to Push:[/bold]")
-        console.print("[dim]Choose which components to upgrade on devices[/dim]\n")
+        if _needs_full_deploy:
+            console.print("[yellow]Deploy from GI/RECOVERY requires all 3 images (DNOS + GI + BaseOS)[/yellow]\n")
+        else:
+            console.print("[dim]Choose which components to upgrade on devices[/dim]\n")
         
         dnos_url = stack.get('dnos_url')
         gi_url = stack.get('gi_url')
@@ -4798,9 +5785,15 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
         if baseos_available:
             baseos_name = get_artifact_name(baseos_url)
             console.print(f"  [green]✓[/green] BaseOS: {baseos_name}")
-            push_baseos = Confirm.ask(f"    Push BaseOS? (usually not needed)", default=False)
+            if _needs_full_deploy:
+                push_baseos = Confirm.ask(f"    Push BaseOS? (required for GI/deploy)", default=True)
+            else:
+                push_baseos = Confirm.ask(f"    Push BaseOS? (usually not needed for in-place)", default=False)
         else:
-            console.print("  [red]✗[/red] [dim]BaseOS: Not available[/dim]")
+            if _needs_full_deploy:
+                console.print("  [red]✗[/red] [yellow]BaseOS: Not available (required for GI/deploy!)[/yellow]")
+            else:
+                console.print("  [red]✗[/red] [dim]BaseOS: Not available[/dim]")
         
         if not push_dnos and not push_gi and not push_baseos:
             console.print("[yellow]No artifacts selected. Aborting.[/yellow]")
@@ -4848,22 +5841,29 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
             if push_baseos and stack.get('baseos_url'):
                 urls_to_validate.append(("BaseOS", stack.get('baseos_url')))
             
+            validation_results = []
             with ValidationProgress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
-                console=console
+                console=console,
+                transient=True,
             ) as validation_progress:
                 for artifact_name, url in urls_to_validate:
                     task = validation_progress.add_task(f"[cyan]Validating {artifact_name}...", total=None)
                     is_valid, message = validate_artifact_url(url, timeout=15)
+                    validation_results.append((artifact_name, url, is_valid, message))
                     
                     if is_valid:
-                        validation_progress.update(task, description=f"[green]✓ {artifact_name}: {message}[/green]")
-                        console.print(f"  [green]✓ {artifact_name}:[/green] {message}")
+                        validation_progress.update(task, description=f"[green]{artifact_name}: {message}[/green]")
                     else:
-                        validation_progress.update(task, description=f"[red]✗ {artifact_name}: {message}[/red]")
-                        console.print(f"  [red]✗ {artifact_name}:[/red] {message}")
+                        validation_progress.update(task, description=f"[red]{artifact_name}: {message}[/red]")
                         validation_errors.append((artifact_name, url, message))
+            
+            for artifact_name, url, is_valid, message in validation_results:
+                if is_valid:
+                    console.print(f"  [green]✓ {artifact_name}:[/green] {message}")
+                else:
+                    console.print(f"  [red]✗ {artifact_name}:[/red] {message}")
             
             if not validation_errors:
                 # All URLs valid!
@@ -4922,6 +5922,46 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
             console.print("\n[dim]Please select a different build or source.[/dim]")
             return False
         
+        # For GI/RECOVERY devices: confirm deploy params (hostname + system-type)
+        # These are needed for: request system deploy system-type <T> name <N> ncc-id <auto>
+        _gi_deploy_params = {}
+        _gi_devices = [d for d in multi_ctx.devices if d.hostname not in _devices_with_dnos]
+        if _gi_devices:
+            console.print("\n[bold cyan]═══ GI/Recovery Deploy Configuration ═══[/bold cyan]")
+            console.print("[dim]These devices need hostname and system-type for the deploy command.[/dim]\n")
+            
+            for _gd in _gi_devices:
+                _cached_type = None
+                _cached_name = _gd.hostname
+                try:
+                    _opf = Path(f"db/configs/{_gd.hostname}/operational.json")
+                    if _opf.exists():
+                        with open(_opf) as f:
+                            _opd = json.load(f)
+                        _cached_type = _opd.get('system_type') or _opd.get('deploy_system_type')
+                        _sn = _opd.get('deploy_name') or _opd.get('pre_delete_hostname')
+                        if _sn:
+                            _cached_name = _sn
+                except:
+                    pass
+                
+                if not _cached_type or _cached_type == 'N/A':
+                    _cached_type = _gd.platform.value if hasattr(_gd, 'platform') else 'SA-36CD-S'
+                
+                console.print(f"  [bold cyan]{_gd.hostname}[/bold cyan]")
+                _deploy_name = Prompt.ask(
+                    f"    Deploy hostname", default=_cached_name)
+                _deploy_type = Prompt.ask(
+                    f"    System type", default=_cached_type)
+                
+                _gi_deploy_params[_gd.hostname] = {
+                    'deploy_name': _deploy_name,
+                    'system_type': _deploy_type,
+                }
+                console.print(f"    [green]→ deploy system-type {_deploy_type} name {_deploy_name}[/green]\n")
+            
+            stack['_gi_deploy_params'] = _gi_deploy_params
+        
         # Push images to devices
         console.print(f"\n[bold green]🚀 Pushing Stack to Devices[/bold green]")
         
@@ -4941,7 +5981,130 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
             console.print(f"  [cyan]BaseOS:[/cyan] {baseos_name}")
         
         console.print(f"  [cyan]Devices:[/cyan] {', '.join(d.hostname for d in multi_ctx.devices)}")
-        console.print(f"\n[dim]Estimated time: ~3m 45s per device[/dim]")
+        
+        # Per-device action plan for mixed-mode awareness
+        _dnos_set = stack.get('_devices_with_dnos_set', set())
+        _mixed_modes = False
+        _per_device_flows = {}
+        for _pd in multi_ctx.devices:
+            _pd_state = 'DNOS'
+            try:
+                _pd_opf = Path(f"db/configs/{_pd.hostname}/operational.json")
+                if _pd_opf.exists():
+                    with open(_pd_opf) as f:
+                        _pd_op = json.load(f)
+                    _pd_state = (_pd_op.get('device_state', '') or 'DNOS').upper()
+                    if _pd_state in ('', 'UNKNOWN'):
+                        _pd_state = 'DNOS' if _pd.hostname in _dnos_set else 'GI'
+            except Exception:
+                pass
+            
+            if _pd.hostname in stack.get('_skip_devices', set()):
+                _per_device_flows[_pd.hostname] = ('already on target (skip)', _pd_state, 'magenta')
+            elif stack.get('_requires_delete_deploy', False) and _pd.hostname in _dnos_set:
+                _per_device_flows[_pd.hostname] = ('delete + deploy', _pd_state, 'red')
+            elif _pd_state in ('GI', 'BASEOS_SHELL', 'ONIE', 'DN_RECOVERY', 'RECOVERY', 'DEPLOYING'):
+                _per_device_flows[_pd.hostname] = ('GI deploy', _pd_state, 'cyan')
+            else:
+                _per_device_flows[_pd.hostname] = ('in-place upgrade', _pd_state, 'green')
+        
+        _flow_set = set(f[0] for f in _per_device_flows.values())
+        _mixed_modes = len(_flow_set) > 1
+        
+        if _mixed_modes or any(f[0] != 'in-place upgrade' for f in _per_device_flows.values()):
+            _plan_table = Table(title="Per-Device Upgrade Plan", box=box.SIMPLE)
+            _plan_table.add_column("Device", style="cyan")
+            _plan_table.add_column("Current State", style="dim")
+            _plan_table.add_column("Upgrade Action", style="bold")
+            _plan_table.add_column("Details", style="dim")
+            
+            for _pd_h, (_pd_flow, _pd_st, _pd_color) in _per_device_flows.items():
+                if _pd_flow == 'delete + deploy':
+                    _details = "system delete -> GI -> load images -> deploy"
+                elif _pd_flow == 'GI deploy':
+                    _details = "load images -> deploy (already in GI)"
+                elif _pd_flow == 'already on target (skip)':
+                    _details = "no action needed (exact match)"
+                else:
+                    _details = "request system install -> automatic"
+                _plan_table.add_row(
+                    _pd_h, _pd_st,
+                    f"[{_pd_color}]{_pd_flow}[/{_pd_color}]",
+                    _details
+                )
+            
+            console.print()
+            console.print(_plan_table)
+            
+            if _mixed_modes:
+                console.print(f"\n[bold yellow][!!] Mixed modes detected:[/bold yellow] "
+                              f"devices will follow different upgrade paths.")
+                console.print("[dim]Each device is handled independently in parallel. "
+                              "GI/recovery devices go straight to deploy, DNOS devices "
+                              f"{'need system delete first' if stack.get('_requires_delete_deploy') else 'use in-place install'}.[/dim]")
+        
+        # Data-driven time estimate from past upgrades
+        _is_dd = stack.get('_requires_delete_deploy', False)
+        _any_gi = any(
+            d.hostname not in stack.get('_devices_with_dnos_set', set())
+            for d in multi_ctx.devices
+        ) if '_devices_with_dnos_set' in stack else False
+        _flow_type = 'delete_deploy' if _is_dd else ('gi_deploy' if _any_gi else 'in_place')
+        
+        _hist_times = []  # seconds
+        _hist_label = ""
+        try:
+            # Read history file first
+            _hf = Path("db/upgrade_history.json")
+            if _hf.exists():
+                with open(_hf) as f:
+                    _hist = json.load(f)
+                for _he in _hist.get('entries', []):
+                    if _he.get('flow_type') == _flow_type and _he.get('elapsed_s', 0) > 0:
+                        _hist_times.append(_he['elapsed_s'])
+            
+            # Also scan operational.json for past timings
+            for _opdir in Path("db/configs").iterdir():
+                _opj = _opdir / "operational.json"
+                if _opj.exists():
+                    with open(_opj) as f:
+                        _opd = json.load(f)
+                    _ie = _opd.get('install_elapsed', '')
+                    _it = _opd.get('install_type', '')
+                    if _ie and ':' in _ie:
+                        parts = _ie.split(':')
+                        _secs = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2].split('.')[0])
+                        if _secs > 0:
+                            _matches = False
+                            if _flow_type == 'in_place' and _it in ('upgrade', 'in_place', ''):
+                                _matches = True
+                            elif _flow_type in ('delete_deploy', 'gi_deploy') and _it in ('gi_deploy', 'deploy', 'delete_deploy'):
+                                _matches = True
+                            if _matches and _secs not in _hist_times:
+                                _hist_times.append(_secs)
+        except Exception:
+            pass
+        
+        total_est_seconds = 600  # default 10 min
+        if _hist_times:
+            _avg_s = sum(_hist_times) / len(_hist_times)
+            _max_s = max(_hist_times)
+            if _flow_type == 'delete_deploy':
+                _est_s = _max_s + 300  # delete adds ~5min on top of deploy
+                _est_label = "delete + deploy"
+            else:
+                _est_s = _avg_s
+                _est_label = "GI deploy" if _flow_type == 'gi_deploy' else "in-place"
+            total_est_seconds = int(_est_s)
+            _em, _es = divmod(int(_est_s), 60)
+            _hist_label = f"[dim](based on {len(_hist_times)} past upgrade{'s' if len(_hist_times) > 1 else ''})[/dim]"
+            console.print(f"\n[dim]Estimated time: ~{_em}m {_es:02d}s per device ({_est_label}) {_hist_label}[/dim]")
+        else:
+            _defaults = {'in_place': (5, 'in-place'), 'gi_deploy': (15, 'GI deploy'), 'delete_deploy': (20, 'delete + deploy')}
+            _def_min, _def_label = _defaults.get(_flow_type, (10, 'upgrade'))
+            total_est_seconds = _def_min * 60
+            console.print(f"\n[dim]Estimated time: ~{_def_min}m per device ({_def_label}) (no history yet)[/dim]")
+        
         console.print("[dim]This runs on SERVER - safe to close Cursor.[/dim]\n")
         
         # Check for recovery mode devices BEFORE starting push
@@ -4962,7 +6125,8 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                     except:
                         pass
                 
-                ssh_check.connect(device.ip, username=device.username or 'dnroot', password=password, timeout=10)
+                ssh_check.connect(device.ip, username=device.username or 'dnroot', password=password, timeout=10,
+                                  allow_agent=False, look_for_keys=False)
                 channel_check = ssh_check.invoke_shell(width=200, height=50)
                 time.sleep(1)
                 initial_check = channel_check.recv(65535).decode('utf-8', errors='replace')
@@ -5035,21 +6199,22 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
             panels = []
             num_devices = len(multi_ctx.devices)
             
-            # Fixed dimensions based on device count
-            # 1 device: full size, 2 devices: side by side, 3+ devices: 2-column grid
             if num_devices == 1:
-                panel_height = 22
-                panel_width = 75
-                terminal_lines_count = 10
-            elif num_devices == 2:
                 panel_height = 18
-                panel_width = 65
-                terminal_lines_count = 6
-            else:
-                # Grid layout - more compact panels
+                panel_width = 70
+                terminal_lines_count = 8
+            elif num_devices == 2:
                 panel_height = 16
-                panel_width = 55
+                panel_width = 60
                 terminal_lines_count = 5
+            elif num_devices == 3:
+                panel_height = 14
+                panel_width = 50
+                terminal_lines_count = 4
+            else:
+                panel_height = 12
+                panel_width = 45
+                terminal_lines_count = 3
             
             for dev in multi_ctx.devices:
                 with progress_lock:
@@ -5070,10 +6235,9 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                 bar = '█' * filled + '░' * (bar_width - filled)
                 lines.append(f"[{bar}] {pct}%")
                 
-                # Elapsed time
                 elapsed = int(time.time() - start_time)
                 mins, secs = divmod(elapsed, 60)
-                est_remaining = max(0, 300 - elapsed)
+                est_remaining = max(0, total_est_seconds - elapsed)
                 rem_mins, rem_secs = divmod(est_remaining, 60)
                 lines.append(f"⏱ {mins:02d}:{secs:02d} elapsed | ~{rem_mins:02d}:{rem_secs:02d} remaining")
                 lines.append("")
@@ -5093,8 +6257,9 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                 while len(term_lines) < terminal_lines_count:
                     term_lines.append("")  # Pad with empty lines
                 
+                max_line_len = panel_width - 8
                 for tl in term_lines:
-                    lines.append(tl[:58] if tl else "")
+                    lines.append(tl[:max_line_len] if tl else "")
                 
                 # Build content with fixed lines
                 content = Text()
@@ -5114,29 +6279,33 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
             
             if num_devices == 1:
                 return panels[0]  # Single panel, no columns
-            elif num_devices == 2:
+            elif num_devices <= 3:
                 return Columns(panels, expand=True, equal=True)  # Side by side
             else:
-                # Grid layout: 2 columns per row
+                # Grid layout: 2 columns per row (4+ devices)
                 rows = []
                 for i in range(0, len(panels), 2):
                     row_panels = panels[i:i+2]
-                    if len(row_panels) == 2:
-                        rows.append(Columns(row_panels, expand=True, equal=True))
-                    else:
-                        # Single panel on last row - center it
-                        rows.append(Columns(row_panels, expand=True, equal=True))
+                    rows.append(Columns(row_panels, expand=True, equal=True))
                 return Group(*rows)
         
         def push_to_device(device):
+            from datetime import datetime
             hostname = device.hostname
             is_gi_mode = False
             system_type = None
             
             try:
+                if hostname in stack.get('_skip_devices', set()):
+                    with progress_lock:
+                        device_progress[hostname]['status'] = 'success'
+                        device_progress[hostname]['stage'] = 'Skipped (already on target)'
+                        device_progress[hostname]['progress'] = 100
+                    return True, "Skipped (already on target)"
+                
                 with progress_lock:
                     device_progress[hostname]['status'] = 'loading'
-                    device_progress[hostname]['stage'] = 'Connecting via SSH...'
+                    device_progress[hostname]['stage'] = 'Connecting to device...'
                 
                 # Get system_type from operational.json (needed for GI deploy)
                 # This persists even when device goes to GI mode
@@ -5165,24 +6334,13 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                 if not system_type:
                     system_type = device.platform.value if hasattr(device, 'platform') else 'SA-36CD-S'
                 
+                # Override with user-confirmed GI deploy params if available
+                deploy_hostname = hostname
+                _gdp = stack.get('_gi_deploy_params', {}).get(hostname)
+                if _gdp:
+                    system_type = _gdp['system_type']
+                    deploy_hostname = _gdp['deploy_name']
                 
-                # Connect via SSH
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                
-                password = device.password
-                if device.password:
-                    try:
-                        password = base64.b64decode(device.password).decode('utf-8')
-                    except:
-                        pass
-                
-                ssh.connect(device.ip, username=device.username or 'dnroot', password=password, timeout=30)
-                channel = ssh.invoke_shell(width=200, height=50)
-                time.sleep(2)
-                initial_output = channel.recv(65535).decode('utf-8', errors='replace')
-                
-                # Define helper functions first
                 def get_timestamp():
                     """Get current time as HH:MM:SS."""
                     from datetime import datetime
@@ -5214,12 +6372,44 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                             device_progress[hostname]['terminal_lines'] = device_progress[hostname]['terminal_lines'][-30:]
                         if msg:  # Only add non-empty lines
                             device_progress[hostname]['terminal_lines'].append(f"[{get_timestamp()}] {msg}")
+
+                # Connect via unified path (SSH, console, virsh) for all device types
+                from .connection_strategy import connect_for_upgrade
+                conn = connect_for_upgrade(hostname, timeout=30)
+                
+                if not conn['connected'] or not conn['verified']:
+                    reason = conn.get('abort_reason') or 'Connection failed'
+                    with progress_lock:
+                        device_progress[hostname]['status'] = 'failed'
+                        device_progress[hostname]['error'] = reason[:60]
+                        device_progress[hostname]['stage'] = reason[:80]
+                    return False, f"SAFETY: {reason}"
+                
+                ssh = conn['ssh']
+                channel = conn['channel']
+                initial_output = conn['prompt_output']
+                
+                method_used = conn.get('method', 'Unknown')
+                if hasattr(method_used, 'value'):
+                    method_used = method_used.value
+                add_terminal_line(f"Connected via {method_used}")
+                
+                # Update system_type from live data if available
                 
                 # Log system type
                 add_terminal_line(f"System: {system_type}")
                 
-                # Check if this is a delete-deploy workflow (major version jump)
-                requires_delete_deploy = stack.get('_requires_delete_deploy', False)
+                # Per-device delete decision: only DNOS devices need system delete
+                # GI/RECOVERY devices already had DNOS removed -- skip delete, go straight to load+deploy
+                _dnos_devices = stack.get('_devices_with_dnos_set', set())
+                requires_delete_deploy = (stack.get('_requires_delete_deploy', False)
+                                          and hostname in _dnos_devices)
+                
+                # Also skip delete if connect_for_upgrade already detected GI/BASEOS state
+                if requires_delete_deploy and conn.get('device_state') in ('GI', 'BASEOS_SHELL'):
+                    requires_delete_deploy = False
+                    is_gi_mode = True
+                    add_terminal_line(f"Device already in GI mode -- skipping system delete")
                 
                 # Detect RECOVERY mode - user already confirmed, proceed with delete
                 is_recovery_mode = 'RECOVERY' in initial_output or 'dnRouter(RECOVERY)' in initial_output
@@ -5238,18 +6428,28 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                             with open(op_file) as f:
                                 op_data = json.load(f)
                         
-                        # Store deployment parameters for use after GI mode
-                        from datetime import datetime as dt_module
-                        op_data.update({
+                        _detected_ncc = conn.get('ncc_id') if conn.get('ncc_id') is not None else 0
+                        _update = {
                             'deploy_system_type': system_type,
-                            'deploy_name': hostname,
-                            'deploy_ncc_id': '0',
-                            'deploy_command': f"request system deploy system-type {system_type} name {hostname} ncc-id 0",
+                            'deploy_name': deploy_hostname,
+                            'deploy_ncc_id': str(_detected_ncc),
+                            'deploy_command': f"request system deploy system-type {system_type} name {deploy_hostname} ncc-id {_detected_ncc}",
                             'pre_delete_system_type': system_type,
-                            'pre_delete_hostname': hostname,
-                            'delete_initiated': dt_module.now().isoformat(),
-                            'recovery_mode_detected': True
-                        })
+                            'pre_delete_hostname': deploy_hostname,
+                            'delete_initiated': datetime.now().isoformat(),
+                            'recovery_mode_detected': True,
+                            'device_state': 'GI',
+                            'recovery_type': 'GI',
+                            'recovery_mode_detected_at': datetime.now().isoformat()
+                        }
+                        try:
+                            from .connection_strategy import get_console_config_for_device
+                            _ccfg = get_console_config_for_device(hostname)
+                            if _ccfg and _ccfg.get('port'):
+                                _update['connection_method'] = f"Console ({_ccfg.get('console_server_name', 'console')} p{_ccfg['port']})"
+                        except ImportError:
+                            pass
+                        op_data.update(_update)
                         
                         with open(op_file, 'w') as f:
                             json.dump(op_data, f, indent=4)
@@ -5308,28 +6508,43 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                         time.sleep(gi_check_interval)
                         
                         try:
-                            # Try to reconnect
-                            ssh = paramiko.SSHClient()
-                            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                            ssh.connect(device.ip, username='dnroot', password=password, timeout=10)
-                            channel = ssh.invoke_shell(width=200, height=50)
-                            time.sleep(2)
-                            
-                            # Check if in GI mode
-                            new_output = channel.recv(65535).decode('utf-8', errors='replace')
-                            
-                            # More comprehensive GI mode detection
-                            if ('GI(' in new_output or 'GI#' in new_output or 'GI>' in new_output or 
-                                'dnRouter(GI)' in new_output or 'GI mode' in new_output):
-                                is_gi_mode = True
-                                gi_connected = True
-                                add_terminal_line(f"✓ GI mode reached after {mins}m {secs}s")
-                                break
-                            else:
-                                # Connected but not in GI mode yet - might still be booting
+                            from .connection_strategy import connect_for_upgrade
+                            conn = connect_for_upgrade(hostname, timeout=15)
+                            if conn['connected']:
+                                ssh = conn['ssh']
+                                channel = conn['channel']
+                                state = conn.get('device_state') or ''
+                                if state in ('GI', 'BASEOS_SHELL'):
+                                    is_gi_mode = True
+                                    gi_connected = True
+                                    add_terminal_line(f"✓ GI mode reached after {mins}m {secs}s")
+                                    try:
+                                        _opf = Path(f"db/configs/{hostname}/operational.json")
+                                        _opd = {}
+                                        if _opf.exists():
+                                            with open(_opf) as f:
+                                                _opd = json.load(f)
+                                        _opd['device_state'] = 'GI'
+                                        _opd['recovery_mode_detected'] = False
+                                        _opd['upgrade_in_progress'] = True
+                                        _opd['install_type'] = 'gi_deploy'
+                                        with open(_opf, 'w') as f:
+                                            json.dump(_opd, f, indent=4)
+                                    except:
+                                        pass
+                                    break
                                 add_terminal_line(f"⏳ Connected but not in GI mode yet... ({mins}m {secs}s)")
-                                consecutive_failures = 0  # Reset on successful connection
-                                ssh.close()  # Close and retry
+                                consecutive_failures = 0
+                                try:
+                                    ssh.close()
+                                except:
+                                    pass
+                            else:
+                                consecutive_failures += 1
+                                if consecutive_failures <= max_consecutive_failures:
+                                    add_terminal_line(f"⏳ Connection attempt failed, retrying... ({mins}m {secs}s)")
+                                else:
+                                    add_terminal_line(f"⏳ Still waiting for device... ({mins}m {secs}s)")
                         except paramiko.ssh_exception.SSHException as ssh_err:
                             # SSH-specific errors (connection refused, etc.)
                             consecutive_failures += 1
@@ -5356,13 +6571,72 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                     # After recovery delete, we're now in GI mode - continue to load images
                     # The code will continue below to load components
                 
-                # Detect GI mode from prompt (normal case, not recovery)
-                elif 'GI(' in initial_output or 'GI#' in initial_output or 'GI>' in initial_output:
+                # Detect GI mode from prompt OR from connect_for_upgrade state detection
+                # Also use operational.json as fallback when connect returns UNKNOWN
+                # (e.g. console was jammed by previous 'yes' command)
+                _conn_state = conn.get('device_state', '')
+                _op_state = None
+                if _conn_state in ('UNKNOWN', '', None):
+                    try:
+                        _op_check = Path(f"db/configs/{hostname}/operational.json")
+                        if _op_check.exists():
+                            with open(_op_check) as f:
+                                _op_state = json.load(f).get('device_state')
+                    except:
+                        pass
+                
+                _is_gi_from_prompt = ('GI(' in initial_output or 'GI#' in initial_output or 'GI>' in initial_output)
+                _is_gi_from_connect = _conn_state in ('GI', 'BASEOS_SHELL')
+                _is_gi_from_db = _op_state in ('GI', 'BASEOS_SHELL', 'RECOVERY')
+                
+                if _is_gi_from_prompt or _is_gi_from_connect or _is_gi_from_db:
                     is_gi_mode = True
-                    add_terminal_line("⚠ Device in GI mode")
+                    if _is_gi_from_connect:
+                        _gi_src = f"connect ({_conn_state})"
+                    elif _is_gi_from_db:
+                        _gi_src = f"operational.json ({_op_state})"
+                    else:
+                        _gi_src = "prompt"
+                    add_terminal_line(f"GI mode (detected via {_gi_src})")
+                    
+                    # Clean up channel before sending any GI commands.
+                    # A previous session may have left 'yes' or other commands running.
+                    channel.sendall(b"\x03")  # Ctrl+C to kill stuck processes
+                    time.sleep(1)
+                    while channel.recv_ready():
+                        channel.recv(65535)
+                    
+                    # Check if we're in BaseOS shell and need dncli
+                    _need_dncli = (
+                        _conn_state == 'BASEOS_SHELL' 
+                        or 'dn@' in initial_output 
+                        or ':~$' in initial_output
+                        or (_is_gi_from_db and not _is_gi_from_prompt)
+                    )
+                    
+                    if _need_dncli:
+                        add_terminal_line("Entering dncli from BaseOS shell...")
+                            
+                        channel.sendall(b"dncli\n")
+                        time.sleep(3)
+                        
+                        # Handle potential password prompt
+                        dncli_out = ""
+                        while channel.recv_ready():
+                            dncli_out += channel.recv(65535).decode('utf-8', errors='replace')
+                        if 'assword' in dncli_out.lower():
+                            channel.sendall(b"dnroot\n")
+                            time.sleep(15)  # Wait for GI prompt to initialize
+                        
+                        # Send enter to get clean prompt
+                        for _ in range(3):
+                            channel.sendall(b"\n")
+                            time.sleep(2)
+                            while channel.recv_ready():
+                                channel.recv(65535)
                 elif requires_delete_deploy:
-                    # Major version jump - need to delete first, then wait for GI mode
-                    add_terminal_line("🔄 Major version jump - deleting system...")
+                    _dd_reason = "Branch switch" if stack.get('_branch_switch') else "Version jump"
+                    add_terminal_line(f"🔄 {_dd_reason} - deleting system...")
                     
                     # CRITICAL: Save system_type and hostname BEFORE delete for deploy command later
                     add_terminal_line(f"💾 Saving deploy params: {system_type}, {hostname}")
@@ -5375,16 +6649,28 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                             with open(op_file) as f:
                                 op_data = json.load(f)
                         
-                        # Store deployment parameters for use after GI mode
-                        op_data.update({
+                        _detected_ncc2 = conn.get('ncc_id') if conn.get('ncc_id') is not None else 0
+                        _update2 = {
                             'deploy_system_type': system_type,
-                            'deploy_name': hostname,
-                            'deploy_ncc_id': '0',
-                            'deploy_command': f"request system deploy system-type {system_type} name {hostname} ncc-id 0",
+                            'deploy_name': deploy_hostname,
+                            'deploy_ncc_id': str(_detected_ncc2),
+                            'deploy_command': f"request system deploy system-type {system_type} name {deploy_hostname} ncc-id {_detected_ncc2}",
                             'pre_delete_system_type': system_type,
-                            'pre_delete_hostname': hostname,
-                            'delete_initiated': datetime.now().isoformat()
-                        })
+                            'pre_delete_hostname': deploy_hostname,
+                            'delete_initiated': datetime.now().isoformat(),
+                            'device_state': 'GI',
+                            'recovery_mode_detected': True,
+                            'recovery_type': 'GI',
+                            'recovery_mode_detected_at': datetime.now().isoformat()
+                        }
+                        try:
+                            from .connection_strategy import get_console_config_for_device
+                            _ccfg2 = get_console_config_for_device(hostname)
+                            if _ccfg2 and _ccfg2.get('port'):
+                                _update2['connection_method'] = f"Console ({_ccfg2.get('console_server_name', 'console')} p{_ccfg2['port']})"
+                        except ImportError:
+                            pass
+                        op_data.update(_update2)
                         
                         with open(op_file, 'w') as f:
                             json.dump(op_data, f, indent=4)
@@ -5406,9 +6692,10 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                             time.sleep(0.3)
                         return output
                     
-                    # Send request system delete
+                    from .utils import audit_log
+                    audit_log(hostname, device.ip, "request system delete", "recovery-delete-deploy")
                     send_and_wait_temp("request system delete", wait_time=3)
-                    send_and_wait_temp("yes", wait_time=2)  # Confirm
+                    send_and_wait_temp("yes", wait_time=2)
                     add_terminal_line("✓ System delete initiated")
                     
                     # Wait for GI mode (device reboots into GI)
@@ -5433,25 +6720,36 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                         time.sleep(gi_check_interval)
                         
                         try:
-                            # Try to reconnect
-                            ssh = paramiko.SSHClient()
-                            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                            ssh.connect(device.ip, username='dnroot', password='dnroot', timeout=15)
-                            channel = ssh.invoke_shell(width=200, height=50)
-                            time.sleep(2)
-                            
-                            # Check if in GI mode
-                            new_output = channel.recv(65535).decode('utf-8', errors='replace')
-                            if 'GI(' in new_output or 'GI#' in new_output or 'GI>' in new_output:
-                                is_gi_mode = True
-                                gi_connected = True
-                                add_terminal_line("✓ Device now in GI mode")
-                                break
-                            else:
-                                # Not in GI mode yet, close and retry
-                                ssh.close()
-                        except Exception as conn_err:
-                            # Connection failed, device may be rebooting
+                            from .connection_strategy import connect_for_upgrade
+                            conn = connect_for_upgrade(hostname, timeout=15)
+                            if conn['connected']:
+                                ssh = conn['ssh']
+                                channel = conn['channel']
+                                state = conn.get('device_state') or ''
+                                if state in ('GI', 'BASEOS_SHELL'):
+                                    is_gi_mode = True
+                                    gi_connected = True
+                                    add_terminal_line("✓ Device now in GI mode")
+                                    try:
+                                        _opf = Path(f"db/configs/{hostname}/operational.json")
+                                        _opd = {}
+                                        if _opf.exists():
+                                            with open(_opf) as f:
+                                                _opd = json.load(f)
+                                        _opd['device_state'] = 'GI'
+                                        _opd['recovery_mode_detected'] = False
+                                        _opd['upgrade_in_progress'] = True
+                                        _opd['install_type'] = 'gi_deploy'
+                                        with open(_opf, 'w') as f:
+                                            json.dump(_opd, f, indent=4)
+                                    except:
+                                        pass
+                                    break
+                                try:
+                                    ssh.close()
+                                except:
+                                    pass
+                        except Exception:
                             add_terminal_line(f"⏳ Reconnect attempt... ({elapsed}s)")
                     
                     if not gi_connected:
@@ -5503,18 +6801,13 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                     return output
                 
                 def wait_for_download_complete(timeout=300, component="", base_progress=5, progress_range=25):
-                    """Wait for download to reach 100%.
-                    
-                    Args:
-                        timeout: Max seconds to wait
-                        component: Component name for display
-                        base_progress: Starting progress percentage
-                        progress_range: How much progress this download represents
-                    """
+                    """Wait for download to reach 100% with stall detection."""
                     start = time.time()
                     last_pct = 0
                     poll_count = 0
                     last_update = 0
+                    first_progress_at = None
+                    stall_threshold = 120
                     
                     add_terminal_line(f"📥 Downloading {component}...")
                     
@@ -5525,46 +6818,47 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                         with progress_lock:
                             device_progress[hostname]['stage'] = f"Downloading {component}..."
                         
-                        # Silent polling - we show progress separately
                         output = send_and_wait("show system target-stack load | no-more", wait_time=4, silent=True)
                         
-                        # Look for percentage in download progress - multiple patterns
                         pct_match = re.search(r'(\d+)\s*%', output)
                         if not pct_match:
-                            # Try alternative patterns
                             pct_match = re.search(r'Progress[:\s]+(\d+)', output, re.IGNORECASE)
                         
                         if pct_match:
                             pct = int(pct_match.group(1))
-                            # Only log every 20% to reduce noise
+                            if first_progress_at is None:
+                                first_progress_at = time.time()
                             if pct >= last_update + 20:
                                 last_update = pct
                                 add_terminal_line(f"📥 {component}: {pct}%")
                             if pct > last_pct:
                                 last_pct = pct
                             
-                            # Calculate actual progress within our allocated range
                             actual_progress = base_progress + int((pct / 100) * progress_range)
-                            
                             with progress_lock:
                                 device_progress[hostname]['stage'] = f"📥 {component} {pct}%"
                                 device_progress[hostname]['progress'] = actual_progress
                         
-                        # Check for completion
                         output_lower = output.lower()
                         if 'completed' in output_lower or last_pct >= 100:
                             add_terminal_line(f"✓ {component} complete!")
                             return True, output
                         
-                        # Check for "no download tasks in progress" after seeing progress
                         if ('no download' in output_lower or 'no tasks' in output_lower) and last_pct > 0:
                             add_terminal_line(f"✓ {component} complete!")
                             return True, output
                         
-                        # Check for failure
-                        if 'failed' in output_lower or 'error' in output_lower:
+                        if 'failed' in output_lower:
                             add_terminal_line(f"✗ {component} FAILED")
                             return False, output
+                        
+                        # Stall detection: if 0% for > stall_threshold, signal retry
+                        if last_pct == 0 and elapsed > stall_threshold:
+                            _no_dl = 'no download' in output_lower or 'no tasks' in output_lower
+                            _err = 'error' in output_lower or 'upgrade in progress' in output_lower
+                            if _no_dl or _err or not pct_match:
+                                add_terminal_line(f"⚠ {component} stalled at 0% ({elapsed}s) — will retry")
+                                return False, f"STALL:{output}"
                         
                         time.sleep(5)
                     
@@ -5572,6 +6866,35 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                     return False, f"Timeout after {timeout}s"
                 
                 # Calculate progress steps based on what we're loading
+                # Safety: clean channel before sending any commands
+                channel.sendall(b"\x03")  # Ctrl+C
+                time.sleep(0.5)
+                while channel.recv_ready():
+                    channel.recv(65535)
+                
+                # Verify we have a CLI prompt (not stuck in shell)
+                channel.sendall(b"\n")
+                time.sleep(2)
+                _prompt_check = ""
+                while channel.recv_ready():
+                    _prompt_check += channel.recv(8192).decode('utf-8', errors='replace')
+                
+                if 'dn@' in _prompt_check or ':~$' in _prompt_check:
+                    add_terminal_line("In BaseOS shell, entering dncli...")
+                    channel.sendall(b"dncli\n")
+                    time.sleep(3)
+                    _dncli_out = ""
+                    while channel.recv_ready():
+                        _dncli_out += channel.recv(8192).decode('utf-8', errors='replace')
+                    if 'assword' in _dncli_out.lower():
+                        channel.sendall(b"dnroot\n")
+                        time.sleep(15)
+                    for _ in range(3):
+                        channel.sendall(b"\n")
+                        time.sleep(2)
+                        while channel.recv_ready():
+                            channel.recv(65535)
+                
                 components_to_load = []
                 if dnos_url and dnos_url != 'N/A':
                     components_to_load.append(('DNOS', dnos_url))
@@ -5587,7 +6910,70 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                         device_progress[hostname]['error'] = 'No components to load'
                     return False, "No components to load"
                 
-                progress_per_component = 85 // total_components  # Reserve 15% for install
+                # Check target stack to skip images already loaded on the device
+                try:
+                    # Use 'show system stack' which shows Target column with loaded versions
+                    _ts_check = send_and_wait("show system stack | no-more", wait_time=5, silent=True)
+                    _ts_clean = sanitize_terminal(_ts_check).lower()
+                    
+                    _already_loaded = []
+                    _still_needed = []
+                    for comp_name, comp_url in components_to_load:
+                        # Extract version from URL: .../drivenets_dnos_25.4.13.146_dev.dev_v25_4_13_578.tar
+                        _url_ver = comp_url.rstrip('/').split('/')[-1]
+                        _url_ver = _url_ver.replace('drivenets_dnos_', '').replace('drivenets_gi_', '').replace('drivenets_baseos_', '')
+                        _url_ver = _url_ver.replace('.tar', '').replace('.gz', '')
+                        
+                        if _url_ver and _url_ver.lower() in _ts_clean:
+                            _already_loaded.append(comp_name)
+                        else:
+                            _still_needed.append((comp_name, comp_url))
+                            add_terminal_line(f"{comp_name}: not in stack yet")
+                    
+                    if _already_loaded:
+                        _skip_msg = ", ".join(_already_loaded)
+                        add_terminal_line(f"Already in target: {_skip_msg}")
+                    
+                    if _still_needed:
+                        components_to_load = _still_needed
+                        total_components = len(components_to_load)
+                    elif _already_loaded:
+                        add_terminal_line("All images already in target stack!")
+                        components_to_load = []
+                        total_components = 0
+                except Exception:
+                    pass  # If check fails, proceed with loading all
+                
+                # If all images already in target stack, skip loading entirely
+                _all_images_preloaded = (total_components == 0 and bool(locals().get('_already_loaded')))
+                
+                if _all_images_preloaded:
+                    add_terminal_line("Skipping image upload (all in target)")
+                    with progress_lock:
+                        device_progress[hostname]['stage'] = 'All images already loaded'
+                        device_progress[hostname]['progress'] = 90
+                
+                # After system delete + GI reconnect, device needs time before accepting loads.
+                if not _all_images_preloaded and is_gi_mode and requires_delete_deploy:
+                    add_terminal_line("⏳ Settling after delete (30s)...")
+                    time.sleep(30)
+                    for _settle in range(12):
+                        _ts_out = send_and_wait("show system target-stack | no-more", wait_time=3, silent=True)
+                        _ts_lower = _ts_out.lower()
+                        if 'upgrade in progress' in _ts_lower or 'in-progress' in _ts_lower or 'error' in _ts_lower:
+                            _sw = (_settle + 1) * 15
+                            add_terminal_line(f"⏳ GI busy, waiting... ({30 + _sw}s)")
+                            time.sleep(15)
+                        else:
+                            break
+                elif not _all_images_preloaded and is_gi_mode:
+                    add_terminal_line("⏳ Settling GI (15s)...")
+                    time.sleep(15)
+                
+                if _all_images_preloaded:
+                    progress_per_component = 0
+                else:
+                    progress_per_component = 85 // total_components  # Reserve 15% for install
                 current_progress = 5
                 
                 # Load each component
@@ -5596,31 +6982,77 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                         device_progress[hostname]['stage'] = f'Loading {comp_name}...'
                         device_progress[hostname]['progress'] = current_progress
                     
-                    # Send load command
-                    send_and_wait(f"request system target-stack load {comp_url}", wait_time=3)
+                    # Send load command with retry for "upgrade in progress"
+                    _load_ok = False
+                    for _load_try in range(4):
+                        load_output = send_and_wait(f"request system target-stack load {comp_url}", wait_time=3)
+                        
+                        time.sleep(1)
+                        if channel.recv_ready():
+                            immediate_output = channel.recv(65535).decode('utf-8', errors='replace')
+                            load_output += immediate_output
+                            clean_output = sanitize_terminal(immediate_output)
+                            for line in clean_output.split('\n')[-4:]:
+                                line = line.strip()
+                                if line and len(line) > 5:
+                                    add_terminal_line(line)
+                        
+                        _lo = load_output.lower()
+                        if 'upgrade in progress' in _lo or 'error downloading' in _lo:
+                            add_terminal_line(f"⏳ Device busy, retry in 15s ({_load_try+1}/4)")
+                            time.sleep(15)
+                            continue
+                        
+                        # Only send 'yes' if there's a confirmation prompt.
+                        # NEVER send 'yes' blindly -- in BaseOS Linux 'yes' is an infinite loop command.
+                        if 'command not found' in _lo or 'unknown command' in _lo:
+                            add_terminal_line(f"✗ {comp_name}: not in CLI mode!")
+                            break
+                        
+                        if 'continue' in _lo or '[yes/no]' in _lo or 'y/n' in _lo or 'confirm' in _lo:
+                            send_and_wait("yes", wait_time=2)
+                        
+                        _load_ok = True
+                        break
                     
-                    # Read any immediate output (like warnings, prompts)
-                    time.sleep(1)
-                    if channel.recv_ready():
-                        immediate_output = channel.recv(65535).decode('utf-8', errors='replace')
-                        # Properly split by both \r\n and \n, sanitize output
-                        clean_output = sanitize_terminal(immediate_output)
-                        for line in clean_output.split('\n')[-4:]:
-                            line = line.strip()
-                            if line and len(line) > 5:
-                                add_terminal_line(line)
+                    if not _load_ok:
+                        add_terminal_line(f"✗ {comp_name}: device busy after retries")
+                        with progress_lock:
+                            device_progress[hostname]['status'] = 'failed'
+                            device_progress[hostname]['error'] = f'{comp_name}: device busy'
+                        ssh.close()
+                        return False, f"{comp_name} load failed: device reports upgrade in progress"
                     
-                    send_and_wait("yes", wait_time=2)  # Confirm if prompted
                     add_terminal_line(f"✓ {comp_name} load started")
                     
-                    # Wait for download with progress tracking
-                    success, output = wait_for_download_complete(
-                        timeout=300, 
-                        component=comp_name,
-                        base_progress=current_progress,
-                        progress_range=progress_per_component
-                    )
-                    if not success:
+                    # Wait for download with stall-retry loop
+                    _dl_attempts = 0
+                    _dl_max_attempts = 3
+                    _dl_success = False
+                    while _dl_attempts < _dl_max_attempts:
+                        _dl_attempts += 1
+                        success, output = wait_for_download_complete(
+                            timeout=300, 
+                            component=comp_name,
+                            base_progress=current_progress,
+                            progress_range=progress_per_component
+                        )
+                        if success:
+                            _dl_success = True
+                            break
+                        if isinstance(output, str) and output.startswith("STALL:"):
+                            add_terminal_line(f"🔄 Retrying {comp_name} load ({_dl_attempts}/{_dl_max_attempts})...")
+                            time.sleep(10)
+                            send_and_wait(f"request system target-stack load {comp_url}", wait_time=3)
+                            time.sleep(1)
+                            if channel.recv_ready():
+                                channel.recv(65535)
+                            send_and_wait("yes", wait_time=2)
+                            add_terminal_line(f"✓ {comp_name} re-sent")
+                            continue
+                        break
+                    
+                    if not _dl_success:
                         with progress_lock:
                             device_progress[hostname]['status'] = 'failed'
                             device_progress[hostname]['error'] = f'{comp_name} load failed'
@@ -5632,73 +7064,593 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                         device_progress[hostname]['progress'] = current_progress
                     add_terminal_line(f"✓ {comp_name} loaded")
                 
-                # Install/Deploy phase
+                # Pre-check phase: run pre-check then verify result
                 with progress_lock:
                     device_progress[hostname]['status'] = 'installing'
+                    device_progress[hostname]['progress'] = 88
+                    device_progress[hostname]['stage'] = 'Running pre-check...'
+                
+                add_terminal_line("Pre-check...")
+                req_output = send_and_wait("request system target-stack pre-check", wait_time=15)
+                req_lower = req_output.lower()
+                
+                precheck_passed = None
+                precheck_detail = ""
+                failed_tests = []
+                
+                if 'status: ok' in req_lower or 'result: succeeded' in req_lower or 'result: passed' in req_lower:
+                    precheck_passed = True
+                    precheck_detail = "OK"
+                elif 'status: error' in req_lower:
+                    precheck_passed = False
+                    for rline in req_output.split('\n'):
+                        if 'reason' in rline.lower():
+                            precheck_detail = rline.strip()[:80]
+                            break
+                    if not precheck_detail:
+                        precheck_detail = "Error"
+                elif 'in progress' in req_lower or 'in-progress' in req_lower:
+                    add_terminal_line("  Pre-check in progress, polling...")
+                
+                # If request output was unclear, poll show command
+                if precheck_passed is None:
+                    with progress_lock:
+                        device_progress[hostname]['progress'] = 90
+                        device_progress[hostname]['stage'] = 'Waiting for pre-check to complete...'
+                    
+                    for poll_attempt in range(12):  # Up to ~2 minutes (12 x 10s)
+                        time.sleep(10)
+                        show_output = send_and_wait("show system target-stack pre-check", wait_time=8)
+                        show_lower = show_output.lower()
+                        
+                        if 'in-progress' in show_lower or 'in_progress' in show_lower or 'running' in show_lower:
+                            elapsed_s = (poll_attempt + 1) * 10
+                            add_terminal_line(f"  Pre-check running... ({elapsed_s}s)")
+                            with progress_lock:
+                                device_progress[hostname]['stage'] = f'Pre-check running... ({elapsed_s}s)'
+                            continue
+                        
+                        for sline in show_output.split('\n'):
+                            sl = sline.lower().strip()
+                            if 'pre-check result' in sl:
+                                if 'passed' in sl or 'succeeded' in sl:
+                                    precheck_passed = True
+                                    precheck_detail = "Passed"
+                                elif 'failed' in sl:
+                                    precheck_passed = False
+                                    precheck_detail = sline.strip()
+                            if '| failed' in sl or '|failed' in sl:
+                                parts = [p.strip() for p in sline.split('|') if p.strip()]
+                                if len(parts) >= 2:
+                                    failed_tests.append(parts[0][:40])
+                        
+                        if precheck_passed is not None:
+                            break
+                        
+                        # Task done but no explicit result -- likely OK
+                        if 'task status' in show_lower and 'done' in show_lower:
+                            precheck_passed = True
+                            precheck_detail = "Task completed"
+                            break
+                    
+                    add_terminal_line("> show system target-stack pre-check")
+                
+                # Default: if still unknown after all attempts, proceed (don't block install)
+                if precheck_passed is None:
+                    precheck_passed = True
+                    precheck_detail = "Pre-check inconclusive, proceeding with install"
+                    add_terminal_line("⚠ Pre-check output unclear, proceeding with install")
+                
+                if not precheck_passed:
+                    # Check if Stack Validity specifically failed due to "will cause DNOS deletion"
+                    # This means the upgrade requires system delete + deploy
+                    stack_validity_deletion = False
+                    _show_out = show_output if 'show_output' in locals() else ""
+                    all_output = (req_output + "\n" + _show_out).lower()
+                    if 'stack validity' in ' '.join(t.lower() for t in failed_tests) or 'stack validity' in all_output:
+                        if 'deletion' in all_output or 'cause dnos' in all_output:
+                            stack_validity_deletion = True
+                    
+                    if stack_validity_deletion:
+                        add_terminal_line("⚠ DNOS says: upgrade requires system delete + deploy")
+                        add_terminal_line("Auto-switching to delete+deploy flow...")
+                        with progress_lock:
+                            device_progress[hostname]['stage'] = 'System delete required - switching flow...'
+                        
+                        # Full flow: delete → wait GI → reload images → deploy
+                        try:
+                            add_terminal_line("> request system delete")
+                            delete_output = send_and_wait("request system delete", wait_time=5)
+                            if 'yes/no' in delete_output.lower() or 'confirm' in delete_output.lower():
+                                send_and_wait("yes", wait_time=3)
+                                add_terminal_line("> yes")
+                        except Exception as del_err:
+                            _de = str(del_err).lower()
+                            if not ('socket' in _de or 'closed' in _de or 'eof' in _de):
+                                add_terminal_line(f"✗ Delete failed: {str(del_err)[:35]}")
+                                with progress_lock:
+                                    device_progress[hostname]['status'] = 'failed'
+                                    device_progress[hostname]['error'] = 'System delete failed'
+                                return False, f"System delete failed: {del_err}"
+                        
+                        time.sleep(5)
+                        try:
+                            ssh.close()
+                        except:
+                            pass
+                        
+                        add_terminal_line("⏳ Waiting for GI mode...")
+                        _pw = getattr(device, 'password', 'dnroot') or 'dnroot'
+                        _gi_timeout = 300
+                        _gi_start = time.time()
+                        _gi_ok = False
+                        
+                        while time.time() - _gi_start < _gi_timeout:
+                            _el = int(time.time() - _gi_start)
+                            with progress_lock:
+                                device_progress[hostname]['stage'] = f'Delete: waiting for GI ({_el}s)'
+                            time.sleep(30)
+                            try:
+                                ssh = paramiko.SSHClient()
+                                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                                from .utils import resolve_device_ip
+                                _rip, _rm = resolve_device_ip(device, timeout=2.0)
+                                _tip = _rip or device.ip
+                                ssh.connect(_tip, username='dnroot', password=_pw, timeout=15,
+                                            allow_agent=False, look_for_keys=False)
+                                channel = ssh.invoke_shell(width=200, height=50)
+                                time.sleep(2)
+                                _nout = channel.recv(65535).decode('utf-8', errors='replace')
+                                if 'GI(' in _nout or 'GI#' in _nout or 'GI>' in _nout:
+                                    _gi_ok = True
+                                    add_terminal_line(f"✓ GI mode ({_el}s)")
+                                    break
+                                ssh.close()
+                            except:
+                                add_terminal_line(f"⏳ Reconnecting... ({_el}s)")
+                        
+                        if not _gi_ok:
+                            with progress_lock:
+                                device_progress[hostname]['status'] = 'failed'
+                                device_progress[hostname]['error'] = 'Timeout: GI after delete'
+                            return False, "Timeout waiting for GI after system delete"
+                        
+                        add_terminal_line("⏳ Settling after delete (30s)...")
+                        time.sleep(30)
+                        for _stl in range(12):
+                            _stl_out = send_and_wait("show system target-stack | no-more", wait_time=3, silent=True)
+                            if 'upgrade in progress' in _stl_out.lower() or 'in-progress' in _stl_out.lower() or 'error' in _stl_out.lower():
+                                add_terminal_line(f"⏳ GI busy ({30 + (_stl+1)*15}s)")
+                                time.sleep(15)
+                            else:
+                                break
+                        
+                        add_terminal_line("📥 Reloading images...")
+                        with progress_lock:
+                            device_progress[hostname]['stage'] = 'Reloading images...'
+                            device_progress[hostname]['progress'] = 40
+                        
+                        for _cn, _cu in components_to_load:
+                            _rl_ok = False
+                            for _rl_try in range(4):
+                                _rl_out = send_and_wait(f"request system target-stack load {_cu}", wait_time=3)
+                                time.sleep(1)
+                                if channel.recv_ready():
+                                    _rl_out += channel.recv(65535).decode('utf-8', errors='replace')
+                                if 'upgrade in progress' in _rl_out.lower() or 'error downloading' in _rl_out.lower():
+                                    add_terminal_line(f"⏳ Device busy, retry in 15s ({_rl_try+1}/4)")
+                                    time.sleep(15)
+                                    continue
+                                send_and_wait("yes", wait_time=2)
+                                _rl_ok = True
+                                break
+                            if not _rl_ok:
+                                add_terminal_line(f"✗ {_cn}: device busy after retries")
+                                with progress_lock:
+                                    device_progress[hostname]['status'] = 'failed'
+                                    device_progress[hostname]['error'] = f'{_cn} reload failed'
+                                ssh.close()
+                                return False, f"{_cn} reload failed: device busy"
+                            
+                            add_terminal_line(f"📥 {_cn}...")
+                            _dl_attempts_fb = 0
+                            _dl_ok = False
+                            while _dl_attempts_fb < 3:
+                                _dl_attempts_fb += 1
+                                _dl_ok, _dl_out = wait_for_download_complete(
+                                    timeout=300, component=_cn, base_progress=40, progress_range=15)
+                                if _dl_ok:
+                                    break
+                                if isinstance(_dl_out, str) and _dl_out.startswith("STALL:"):
+                                    add_terminal_line(f"🔄 Retrying {_cn} ({_dl_attempts_fb}/3)...")
+                                    time.sleep(10)
+                                    send_and_wait(f"request system target-stack load {_cu}", wait_time=3)
+                                    time.sleep(1)
+                                    if channel.recv_ready():
+                                        channel.recv(65535)
+                                    send_and_wait("yes", wait_time=2)
+                                    continue
+                                break
+                            
+                            if not _dl_ok:
+                                with progress_lock:
+                                    device_progress[hostname]['status'] = 'failed'
+                                    device_progress[hostname]['error'] = f'{_cn} reload failed'
+                                ssh.close()
+                                return False, f"{_cn} reload failed after delete"
+                            add_terminal_line(f"✓ {_cn} loaded")
+                        
+                        add_terminal_line("Pre-check...")
+                        with progress_lock:
+                            device_progress[hostname]['stage'] = 'Pre-check after reload...'
+                            device_progress[hostname]['progress'] = 85
+                        send_and_wait("request system target-stack pre-check", wait_time=15)
+                        
+                        _pc_ok = False
+                        for _ in range(12):
+                            time.sleep(10)
+                            _pc_out = send_and_wait("show system target-stack pre-check", wait_time=8)
+                            _pcl = _pc_out.lower()
+                            if 'succeeded' in _pcl or 'status: ok' in _pcl:
+                                _pc_ok = True
+                                add_terminal_line("✓ Pre-check passed")
+                                break
+                            if 'failed' in _pcl and ('status' in _pcl or 'result' in _pcl):
+                                add_terminal_line("✗ Pre-check failed")
+                                with progress_lock:
+                                    device_progress[hostname]['status'] = 'failed'
+                                    device_progress[hostname]['error'] = 'Pre-check failed after reload'
+                                ssh.close()
+                                return False, "Pre-check failed after delete + reload"
+                        
+                        if not _pc_ok:
+                            add_terminal_line("⚠ Pre-check inconclusive, deploying...")
+                        
+                        _fb_ncc = conn.get('ncc_id') if conn.get('ncc_id') is not None else 0
+                        deploy_cmd = f"request system deploy system-type {system_type} name {deploy_hostname} ncc-id {_fb_ncc}"
+                        add_terminal_line(f"Deploying (NCC {_fb_ncc})...")
+                        with progress_lock:
+                            device_progress[hostname]['stage'] = 'Deploying DNOS...'
+                            device_progress[hostname]['progress'] = 92
+                        
+                        from .utils import audit_log as _al
+                        _al(hostname, device.ip, deploy_cmd, "precheck-fallback-deploy")
+                        _dep_out = ""
+                        try:
+                            _dep_out = send_and_wait(deploy_cmd, wait_time=8)
+                            _dep_lower = _dep_out.lower()
+                            # NCC ID mismatch - retry with the other NCC
+                            if "doesn't match" in _dep_lower or 'auto detected' in _dep_lower:
+                                _fb_ncc = 1 - _fb_ncc
+                                deploy_cmd = f"request system deploy system-type {system_type} name {deploy_hostname} ncc-id {_fb_ncc}"
+                                add_terminal_line(f"Retrying NCC {_fb_ncc}...")
+                                _dep_out = send_and_wait(deploy_cmd, wait_time=8)
+                                _dep_lower = _dep_out.lower()
+                            if 'yes/no' in _dep_lower or 'do you want' in _dep_lower or 'y/n' in _dep_lower or 'continue' in _dep_lower:
+                                send_and_wait("yes", wait_time=5)
+                        except Exception as _derr:
+                            _ds = str(_derr).lower()
+                            if not ('socket' in _ds or 'closed' in _ds or 'eof' in _ds):
+                                raise
+                        
+                        _dtm = re.search(r'task\s*(?:id|ID)?\s*[=:]\s*(\d+)', _dep_out)
+                        _tid = _dtm.group(1) if _dtm else ""
+                        
+                        add_terminal_line(f"✓ Deploy started{f' ({_tid})' if _tid else ''}")
+                        with progress_lock:
+                            device_progress[hostname]['status'] = 'success'
+                            device_progress[hostname]['progress'] = 100
+                            device_progress[hostname]['stage'] = f'Deployed{f" (task {_tid})" if _tid else ""}'
+                        is_gi_mode = True
+                        try:
+                            ssh.close()
+                        except:
+                            pass
+                        return True, f"Delete+reload+deploy done{f' (task {_tid})' if _tid else ''}"
+                    
+                    fail_summary = precheck_detail
+                    if failed_tests:
+                        fail_summary += f" [{', '.join(failed_tests)}]"
+                        for t in failed_tests:
+                            add_terminal_line(f"  ✗ {t}: Failed")
+                    add_terminal_line(f"✗ Pre-check FAILED: {fail_summary[:80]}")
+                    with progress_lock:
+                        device_progress[hostname]['status'] = 'failed'
+                        device_progress[hostname]['error'] = f'Pre-check failed: {fail_summary[:120]}'
+                    ssh.close()
+                    return False, f"Pre-check failed: {fail_summary}"
+                
+                add_terminal_line(f"✓ Pre-check: {precheck_detail}")
+                
+                with progress_lock:
                     device_progress[hostname]['progress'] = 92
                 
+                # Install/Deploy phase
                 if is_gi_mode:
-                    # GI mode: use request system deploy
                     with progress_lock:
                         device_progress[hostname]['stage'] = f'Deploying DNOS (GI mode)...'
                     
                     add_terminal_line(f"🚀 GI deploy: {system_type}")
                     
-                    # Use request system deploy system-type <TYPE> name <HOSTNAME> ncc-id 0
-                    deploy_cmd = f"request system deploy system-type {system_type} name {hostname} ncc-id 0"
-                    add_terminal_line(f"> {deploy_cmd[:45]}...")
+                    # Capture old task IDs BEFORE deploy so we can detect fresh ones
+                    old_precheck = send_and_wait("show system target-stack pre-check | no-more", wait_time=3)
+                    old_task_id = ""
+                    old_task_match = re.search(r'Task ID:\s*(\d+)', old_precheck)
+                    if old_task_match:
+                        old_task_id = old_task_match.group(1)
                     
-                    deploy_output = send_and_wait(deploy_cmd, wait_time=5)
-                    confirm_output = send_and_wait("yes", wait_time=3)  # Confirm if prompted
-                    add_terminal_line("> yes (confirmed)")
+                    old_install = send_and_wait("show system install | no-more", wait_time=3)
+                    old_install_task_id = ""
+                    old_install_match = re.search(r'Task ID:\s*(\d+)', old_install)
+                    if old_install_match:
+                        old_install_task_id = old_install_match.group(1)
                     
-                    # Check for successful initiation
+                    _main_ncc = conn.get('ncc_id') if conn.get('ncc_id') is not None else 0
+                    deploy_cmd = f"request system deploy system-type {system_type} name {deploy_hostname} ncc-id {_main_ncc}"
+                    add_terminal_line(f"> deploy ncc-id {_main_ncc}...")
+                    
+                    from .utils import audit_log
+                    audit_log(hostname, conn.get('ip', device.ip), deploy_cmd, "multi-device-upgrade")
+                    deploy_output = send_and_wait(deploy_cmd, wait_time=12)
+                    deploy_lower = deploy_output.lower()
+                    confirm_output = ""
+                    
+                    # NCC ID mismatch - retry with the other NCC
+                    if "doesn't match" in deploy_lower or 'auto detected' in deploy_lower:
+                        _main_ncc = 1 - _main_ncc
+                        deploy_cmd = f"request system deploy system-type {system_type} name {deploy_hostname} ncc-id {_main_ncc}"
+                        add_terminal_line(f"NCC retry -> ncc-id {_main_ncc}")
+                        deploy_output = send_and_wait(deploy_cmd, wait_time=12)
+                        deploy_lower = deploy_output.lower()
+                    
+                    if 'yes/no' in deploy_lower or 'do you want' in deploy_lower or 'continue' in deploy_lower or 'y/n' in deploy_lower or 'proceed' in deploy_lower:
+                        confirm_output = send_and_wait("yes", wait_time=5)
+                        add_terminal_line("> yes")
+                    elif not deploy_lower.strip() or ('deploy' not in deploy_lower and 'task' not in deploy_lower and 'error' not in deploy_lower):
+                        time.sleep(5)
+                        extra_out = ""
+                        while channel.recv_ready():
+                            extra_out += channel.recv(65535).decode('utf-8', errors='replace')
+                            time.sleep(0.3)
+                        if extra_out:
+                            deploy_output += extra_out
+                            deploy_lower = deploy_output.lower()
+                            if 'yes/no' in deploy_lower or 'do you want' in deploy_lower or 'continue' in deploy_lower or 'y/n' in deploy_lower:
+                                confirm_output = send_and_wait("yes", wait_time=5)
+                                add_terminal_line("> yes")
+                    
                     combined_output = (deploy_output + confirm_output).lower()
-                    if 'started' in combined_output or 'deploy' in combined_output:
-                        add_terminal_line("✓ Deploy started successfully!")
-                    elif 'error' in combined_output or 'failed' in combined_output:
-                        add_terminal_line(f"⚠ Deploy may have failed")
+                    
+                    # Extract task ID from deploy response
+                    deploy_task_match = re.search(r'task\s*(?:id|ID)?\s*[=:]\s*(\d+)', deploy_output + confirm_output)
+                    deploy_task_id = deploy_task_match.group(1) if deploy_task_match else ""
+                    
+                    if 'error' in combined_output or 'failed' in combined_output:
+                        # Ignore false positives: "Pre-check result: Failed" in combined_output
+                        # is NOT a deploy error -- it's leftover from show commands
+                        _real_error = True
+                        if 'pre-check result' in combined_output:
+                            _real_error = False
+                        if _real_error:
+                            add_terminal_line(f"Deploy error: {combined_output[:60]}")
+                            with progress_lock:
+                                device_progress[hostname]['status'] = 'failed'
+                                device_progress[hostname]['error'] = 'Deploy command failed'
+                                device_progress[hostname]['stage'] = 'Deploy failed'
+                            ssh.close()
+                            return False, "Deploy command failed"
+                    
+                    if 'started' in combined_output or deploy_task_id:
+                        add_terminal_line(f"Started deployment{f', task ID = {deploy_task_id}' if deploy_task_id else ''}")
                     else:
-                        add_terminal_line("✓ Deploy command sent")
+                        add_terminal_line("Deploy command sent - verifying...")
                     
                     with progress_lock:
-                        device_progress[hostname]['status'] = 'success'
-                        device_progress[hostname]['progress'] = 100
-                        device_progress[hostname]['stage'] = 'Deploy initiated - DNOS creating'
+                        device_progress[hostname]['progress'] = 93
+                        device_progress[hostname]['stage'] = 'Verifying deploy...'
+                    
+                    # Verify deployment actually started.
+                    # PRIMARY check: `show system install` for a NEW or IN-PROGRESS install task.
+                    # SECONDARY: new pre-check task ID (deploy triggers its own pre-check).
+                    # The OLD pre-check result must NEVER be used as proof of deploy start.
+                    deploy_verified = False
+                    verify_start = time.time()
+                    max_verify_time = 90
+                    socket_lost = False
+                    
+                    while time.time() - verify_start < max_verify_time:
+                        time.sleep(8)
+                        
+                        # PRIMARY: check show system install for active deploy
+                        try:
+                            install_output = send_and_wait("show system install | no-more", wait_time=5)
+                            install_lower = install_output.lower()
+                            
+                            install_task_match = re.search(r'Task ID:\s*(\d+)', install_output)
+                            install_task_id = install_task_match.group(1) if install_task_match else ""
+                            
+                            # New install task (different from the one before deploy)
+                            if install_task_id and install_task_id != old_install_task_id:
+                                if 'in-progress' in install_lower or 'in_progress' in install_lower:
+                                    add_terminal_line(f"Installation in progress (task {install_task_id})")
+                                    deploy_verified = True
+                                    break
+                                elif 'done' in install_lower or 'completed' in install_lower:
+                                    add_terminal_line(f"Install task completed (task {install_task_id})")
+                                    deploy_verified = True
+                                    break
+                                else:
+                                    add_terminal_line(f"New install task detected ({install_task_id})")
+                                    deploy_verified = True
+                                    break
+                            
+                            # Same install task ID but now has running tasks
+                            if 'in-progress' in install_lower:
+                                add_terminal_line("Installation in progress")
+                                deploy_verified = True
+                                break
+                            
+                        except Exception as inst_err:
+                            err_str = str(inst_err).lower()
+                            if 'socket' in err_str or 'closed' in err_str or 'eof' in err_str or 'reset' in err_str:
+                                socket_lost = True
+                                add_terminal_line("Device rebooting (deploy in progress)")
+                                break
+                            raise
+                        
+                        # SECONDARY: check pre-check for a NEW task (deploy triggers its own)
+                        try:
+                            precheck_output = send_and_wait("show system target-stack pre-check | no-more", wait_time=3)
+                            new_task_match = re.search(r'Task ID:\s*(\d+)', precheck_output)
+                            new_task_id = new_task_match.group(1) if new_task_match else ""
+                            task_status_match = re.search(r'Task status:\s*(\S+)', precheck_output)
+                            task_status = task_status_match.group(1) if task_status_match else ""
+                            
+                            # ONLY trust a genuinely NEW pre-check task (different ID)
+                            _is_new_task = new_task_id and new_task_id != old_task_id
+                            
+                            if _is_new_task:
+                                _is_done = task_status.upper() in ('COMPLETED', 'DONE')
+                                if _is_done:
+                                    result_match = re.search(r'Pre-check result:\s*(\S+)', precheck_output)
+                                    result = result_match.group(1) if result_match else ""
+                                    if result.lower() in ('succeeded', 'passed'):
+                                        add_terminal_line(f"Deploy pre-check passed (task {new_task_id})")
+                                        deploy_verified = True
+                                        break
+                                    elif result.lower() == 'failed':
+                                        add_terminal_line(f"Deploy pre-check failed: {result}")
+                                        with progress_lock:
+                                            device_progress[hostname]['status'] = 'failed'
+                                            device_progress[hostname]['error'] = f'Deploy pre-check: {result}'
+                                            device_progress[hostname]['stage'] = f'Pre-check {result}'
+                                        ssh.close()
+                                        return False, f"Deploy pre-check failed: {result}"
+                                elif task_status.upper() == 'IN-PROGRESS':
+                                    add_terminal_line(f"  Deploy pre-check running (task {new_task_id})...")
+                                    with progress_lock:
+                                        device_progress[hostname]['stage'] = 'Deploy pre-check in progress...'
+                                    continue
+                        except Exception as pc_err:
+                            err_str = str(pc_err).lower()
+                            if 'socket' in err_str or 'closed' in err_str or 'eof' in err_str or 'reset' in err_str:
+                                socket_lost = True
+                                add_terminal_line("Device rebooting (deploy in progress)")
+                                break
+                        
+                        elapsed = int(time.time() - verify_start)
+                        add_terminal_line(f"  Waiting for deploy to register... ({elapsed}s)")
+                    
+                    if socket_lost:
+                        with progress_lock:
+                            device_progress[hostname]['status'] = 'success'
+                            device_progress[hostname]['progress'] = 100
+                            device_progress[hostname]['stage'] = f'Deploy in progress - device rebooting{f" (task {deploy_task_id})" if deploy_task_id else ""}'
+                    elif deploy_verified:
+                        with progress_lock:
+                            device_progress[hostname]['status'] = 'success'
+                            device_progress[hostname]['progress'] = 100
+                            device_progress[hostname]['stage'] = 'Deploy verified - DNOS installing'
+                    else:
+                        # Deploy not confirmed after max_verify_time -- mark as FAILED
+                        add_terminal_line("Deploy NOT confirmed - no new install task detected")
+                        add_terminal_line("Check manually: show system install")
+                        with progress_lock:
+                            device_progress[hostname]['status'] = 'failed'
+                            device_progress[hostname]['error'] = 'Deploy not confirmed'
+                            device_progress[hostname]['stage'] = 'Deploy not confirmed - check device'
+                        # Reset device_state back to GI (don't leave as DEPLOYING)
+                        try:
+                            _opf = Path(f"db/configs/{hostname}/operational.json")
+                            if _opf.exists():
+                                with open(_opf) as f:
+                                    _opd = json.load(f)
+                                if _opd.get('device_state') == 'DEPLOYING':
+                                    _opd['device_state'] = 'GI'
+                                    _opd['install_status'] = 'deploy_failed'
+                                    _opd['upgrade_in_progress'] = False
+                                    with open(_opf, 'w') as f:
+                                        json.dump(_opd, f, indent=4)
+                        except:
+                            pass
+                        ssh.close()
+                        return False, "Deploy not confirmed - no install task detected"
                 else:
-                    # Normal DNOS mode: use request system target-stack install
                     with progress_lock:
-                        device_progress[hostname]['stage'] = 'Installing target-stack...'
+                        device_progress[hostname]['stage'] = 'Installing...'
                     
-                    add_terminal_line("🚀 Initiating target-stack install...")
+                    add_terminal_line("Installing...")
+                    from .utils import audit_log as _audit
+                    _audit(hostname, conn.get('ip', device.ip), "request system target-stack install", "multi-device-upgrade")
+                    install_output = send_and_wait("request system target-stack install", wait_time=15)
+                    install_lower = install_output.lower()
+                    confirm_output = ""
                     
-                    # Send the install command
-                    install_output = send_and_wait("request system target-stack install", wait_time=5)
-                    add_terminal_line("> request system target-stack install")
+                    # If "another precheck in-progress", wait and retry
+                    if 'another precheck' in install_lower or ('precheck' in install_lower and 'already' in install_lower):
+                        add_terminal_line("  Waiting for pre-check to finish...")
+                        for retry_n in range(6):
+                            time.sleep(10)
+                            install_output = send_and_wait("request system target-stack install", wait_time=15)
+                            install_lower = install_output.lower()
+                            if 'another precheck' not in install_lower and 'already' not in install_lower:
+                                break
+                            add_terminal_line(f"  Retrying... ({(retry_n + 1) * 10}s)")
                     
-                    # Send confirmation - the command prompts "Do you want to continue? (yes/no)?"
-                    confirm_output = send_and_wait("yes", wait_time=3)
-                    add_terminal_line("> yes (confirmed)")
+                    # DNOS auto-waits: "Precheck in progress, waiting till finished"
+                    if 'precheck in progress' in install_lower and 'waiting' in install_lower:
+                        add_terminal_line("  DNOS waiting for pre-check...")
+                        time.sleep(15)
+                        extra = ""
+                        try:
+                            att = 0
+                            while att < 20:
+                                if channel.recv_ready():
+                                    extra += channel.recv(65535).decode('utf-8', errors='replace')
+                                    att = 0
+                                else:
+                                    att += 1
+                                    time.sleep(1)
+                                    if att >= 5 and extra:
+                                        break
+                        except:
+                            pass
+                        install_output += extra
+                        install_lower = install_output.lower()
                     
-                    # Check for successful initiation
-                    combined_output = (install_output + confirm_output).lower()
-                    if 'started' in combined_output or 'initiating' in combined_output or 'task' in combined_output:
-                        add_terminal_line("✓ Install started successfully!")
-                    elif 'error' in combined_output or 'failed' in combined_output:
-                        add_terminal_line(f"⚠ Install may have failed")
+                    # Only confirm if DNOS is actually prompting
+                    if 'yes/no' in install_lower or 'do you want' in install_lower or 'continue' in install_lower:
+                        confirm_output = send_and_wait("yes", wait_time=10)
+                        add_terminal_line("> yes")
+                    elif 'started' in install_lower or 'task id' in install_lower:
+                        pass
                     else:
-                        add_terminal_line("✓ Install command sent")
+                        add_terminal_line("  No confirmation prompt detected")
+                    
+                    combined_output = (install_output + confirm_output).lower()
+                    
+                    install_started = False
+                    if 'task id' in combined_output or 'started' in combined_output:
+                        install_started = True
+                        add_terminal_line("✓ Install started!")
+                    elif 'rebooting' in combined_output:
+                        install_started = True
+                        add_terminal_line("✓ Rebooting!")
+                    elif 'error' in combined_output or 'failed' in combined_output:
+                        add_terminal_line("✗ Install error")
+                    
+                    if not install_started:
+                        add_terminal_line("⚠ Verify on device")
                     
                     with progress_lock:
                         device_progress[hostname]['status'] = 'success'
                         device_progress[hostname]['progress'] = 100
-                        device_progress[hostname]['stage'] = 'Install initiated - device will reboot'
+                        device_progress[hostname]['stage'] = 'Install initiated' if install_started else 'Verify manually'
                 
                 ssh.close()
                 
                 # Save stack info to operational.json for status tracking
                 try:
-                    from datetime import datetime
                     op_file = Path(f"db/configs/{hostname}/operational.json")
                     op_file.parent.mkdir(parents=True, exist_ok=True)
                     
@@ -5708,7 +7660,6 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                         with open(op_file) as f:
                             op_data = json.load(f)
                     
-                    # Update with stack info
                     op_data.update({
                         'dnos_url': dnos_url if dnos_url and dnos_url != 'N/A' else op_data.get('dnos_url'),
                         'gi_url': gi_url if gi_url and gi_url != 'N/A' else op_data.get('gi_url'),
@@ -5716,6 +7667,8 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                         'install_status': 'initiated',
                         'install_start': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         'install_type': 'gi_deploy' if is_gi_mode else 'upgrade',
+                        'device_state': 'DEPLOYING' if is_gi_mode else 'UPGRADING',
+                        'recovery_mode_detected': False,
                         'upgrade_in_progress': True,
                         'system_type': system_type,
                     })
@@ -5731,6 +7684,386 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                     add_terminal_line(f"✓ Saved stack info")
                 except Exception as save_err:
                     add_terminal_line(f"⚠ Could not save: {str(save_err)[:30]}")
+                
+                # ═══ PER-DEVICE POST-DEPLOY: wait for DNOS + auto-restore config ═══
+                # Each device waits in its own thread -- no dependency on other devices
+                _backup_path = stack.get('_pre_delete_backups', {}).get(hostname)
+                _has_backup = _backup_path and Path(_backup_path).exists()
+                if True:  # Always wait for DNOS boot to reset device_state
+                    with progress_lock:
+                        device_progress[hostname]['stage'] = 'Waiting for DNOS boot...'
+                    add_terminal_line("Waiting for device to boot DNOS...")
+                    
+                    _boot_timeout = 1200  # 20 minutes
+                    _boot_interval = 20
+                    _boot_start = time.time()
+                    _config_restored = False
+                    
+                    while time.time() - _boot_start < _boot_timeout:
+                        time.sleep(_boot_interval)
+                        _elapsed = int(time.time() - _boot_start)
+                        _bm, _bs = divmod(_elapsed, 60)
+                        
+                        with progress_lock:
+                            device_progress[hostname]['stage'] = f'Waiting for DNOS boot... ({_bm}m {_bs}s)'
+                        
+                        try:
+                            from .connection_strategy import connect_for_upgrade
+                            _rc = connect_for_upgrade(hostname, timeout=20)
+                            if not _rc['connected']:
+                                _reason = (_rc.get('abort_reason') or 'unreachable')[:40]
+                                add_terminal_line(f"  Probe: {_reason} ({_bm}m {_bs}s)")
+                                continue
+                            
+                            _state = _rc.get('device_state', '')
+                            _prompt = _rc.get('prompt_output', '') or ''
+                            
+                            if _state in ('GI', 'BASEOS_SHELL'):
+                                add_terminal_line(f"Still in GI mode ({_bm}m {_bs}s)")
+                                try:
+                                    _rc['ssh'].close()
+                                except:
+                                    pass
+                                continue
+                            
+                            if _state == 'DN_RECOVERY':
+                                add_terminal_line(f"[!!] RECOVERY mode ({_bm}m {_bs}s)")
+                                try:
+                                    _rc['ssh'].close()
+                                except:
+                                    pass
+                                continue
+                            
+                            _is_booted = _state in ('DNOS', 'STANDALONE')
+                            if not _is_booted and '#' in _prompt:
+                                _is_booted = True
+                            
+                            if not _is_booted:
+                                add_terminal_line(f"  State: {_state or 'unknown'} ({_bm}m {_bs}s)")
+                                try:
+                                    _rc['ssh'].close()
+                                except:
+                                    pass
+                                continue
+                            
+                            # Verify system health: show system -> check NCP UP + NCC active-up
+                            _ch_health = _rc.get('channel')
+                            _health_ok = False
+                            _health_info = ""
+                            
+                            if _ch_health:
+                                try:
+                                    with progress_lock:
+                                        device_progress[hostname]['stage'] = 'Checking system health...'
+                                    
+                                    _ch_health.sendall(b"show system | no-more\n")
+                                    time.sleep(5)
+                                    _sys_out = ""
+                                    _rd = 0
+                                    while _rd < 10:
+                                        if _ch_health.recv_ready():
+                                            _sys_out += _ch_health.recv(8192).decode('utf-8', errors='replace')
+                                            _rd = 0
+                                        else:
+                                            _rd += 1
+                                            time.sleep(0.5)
+                                            if _rd >= 3 and _sys_out:
+                                                break
+                                    
+                                    _ncp_up_c, _ncp_total_c = 0, 0
+                                    _ncc_up_c, _ncc_total_c = 0, 0
+                                    
+                                    for _sl in _sys_out.split('\n'):
+                                        if '|' in _sl:
+                                            _parts = [p.strip() for p in _sl.split('|')]
+                                            if len(_parts) >= 5:
+                                                _ntype = _parts[1].upper() if len(_parts) > 1 else ""
+                                                _ostate = _parts[4].lower() if len(_parts) > 4 else ""
+                                                
+                                                if 'NCP' in _ntype:
+                                                    _ncp_total_c += 1
+                                                    if _ostate == 'up':
+                                                        _ncp_up_c += 1
+                                                elif 'NCC' in _ntype:
+                                                    _ncc_total_c += 1
+                                                    if 'up' in _ostate:
+                                                        _ncc_up_c += 1
+                                    
+                                    if _ncp_total_c > 0 and _ncp_up_c == 0:
+                                        add_terminal_line(f"NCP initializing (0/{_ncp_total_c} UP), waiting... ({_bm}m {_bs}s)")
+                                        try:
+                                            _rc['ssh'].close()
+                                        except:
+                                            pass
+                                        continue
+                                    
+                                    if _ncc_total_c > 0 and _ncc_up_c == 0:
+                                        add_terminal_line(f"NCC initializing (0/{_ncc_total_c} UP), waiting... ({_bm}m {_bs}s)")
+                                        try:
+                                            _rc['ssh'].close()
+                                        except:
+                                            pass
+                                        continue
+                                    
+                                    if _ncp_total_c > 0:
+                                        _health_info = f"NCP {_ncp_up_c}/{_ncp_total_c} UP"
+                                    if _ncc_total_c > 0:
+                                        _sep = ", " if _health_info else ""
+                                        _health_info += f"{_sep}NCC {_ncc_up_c}/{_ncc_total_c} UP"
+                                    if not _health_info:
+                                        _health_info = "CLI ready"
+                                    
+                                    _health_ok = True
+                                    
+                                except Exception:
+                                    _health_ok = True
+                                    _health_info = "CLI ready"
+                            else:
+                                _health_ok = True
+                                _health_info = "connected"
+                            
+                            if not _health_ok:
+                                try:
+                                    _rc['ssh'].close()
+                                except:
+                                    pass
+                                continue
+                            
+                            if True:
+                                add_terminal_line(f"DNOS online: {_health_info} ({_bm}m {_bs}s)")
+                                
+                                # Fetch the new management IP from the live device
+                                _new_mgmt_ip = None
+                                _new_conn_method = None
+                                try:
+                                    _ch = _rc.get('channel')
+                                    if _ch:
+                                        _ch.sendall(b"show interfaces management | no-more\n")
+                                        time.sleep(3)
+                                        _mgmt_out = ""
+                                        while _ch.recv_ready():
+                                            _mgmt_out += _ch.recv(8192).decode('utf-8', errors='replace')
+                                            time.sleep(0.3)
+                                        
+                                        _ncc_mgmt_ip = None
+                                        for _ml in _mgmt_out.split('\n'):
+                                            _ml_lower = _ml.lower()
+                                            if 'up' not in _ml_lower:
+                                                continue
+                                            _ip_m = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', _ml)
+                                            if not _ip_m:
+                                                continue
+                                            _pip = _ip_m.group(1)
+                                            if _pip.startswith('127.') or _pip.startswith('0.'):
+                                                continue
+                                            if re.search(r'\bmgmt0\b', _ml_lower) or re.search(r'\bmgmt\s*\|', _ml_lower):
+                                                _new_mgmt_ip = _pip
+                                            elif 'mgmt-ncc' in _ml_lower and not _ncc_mgmt_ip:
+                                                _ncc_mgmt_ip = _pip
+                                                if not _new_mgmt_ip:
+                                                    _new_mgmt_ip = _pip
+                                        
+                                        if not _new_mgmt_ip:
+                                            _ip_m2 = re.search(r'inet\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', _mgmt_out)
+                                            if _ip_m2:
+                                                _pip2 = _ip_m2.group(1)
+                                                if not _pip2.startswith('127.'):
+                                                    _new_mgmt_ip = _pip2
+                                except Exception:
+                                    pass
+                                
+                                # Try SSH to the new mgmt IP to confirm it works
+                                if _new_mgmt_ip:
+                                    add_terminal_line(f"New mgmt IP: {_new_mgmt_ip}")
+                                    _ssh_cred_sets = [
+                                        ('dnroot', 'dnroot'),
+                                        ('dn', 'drivenets'),
+                                        ('admin', 'admin'),
+                                        ('root', 'drivenets'),
+                                    ]
+                                    _ssh_ok = False
+                                    _working_creds = ('dnroot', 'dnroot')
+                                    for _tu, _tp in _ssh_cred_sets:
+                                        try:
+                                            import paramiko as _pmk
+                                            _test_ssh = _pmk.SSHClient()
+                                            _test_ssh.set_missing_host_key_policy(_pmk.AutoAddPolicy())
+                                            _test_ssh.connect(
+                                                _new_mgmt_ip,
+                                                username=_tu, password=_tp,
+                                                timeout=10, banner_timeout=10, auth_timeout=10,
+                                                allow_agent=False, look_for_keys=False
+                                            )
+                                            _test_ssh.close()
+                                            _ssh_ok = True
+                                            _working_creds = (_tu, _tp)
+                                            break
+                                        except _pmk.AuthenticationException:
+                                            continue
+                                        except Exception:
+                                            break
+                                    if _ssh_ok:
+                                        _new_conn_method = f"SSH->MGMT ({_new_mgmt_ip})"
+                                        add_terminal_line(f"SSH to {_new_mgmt_ip} OK (user={_working_creds[0]})")
+                                    else:
+                                        add_terminal_line(f"SSH to {_new_mgmt_ip} not ready yet")
+                                
+                                # Reset device_state to DNOS in operational.json
+                                try:
+                                    _opf = Path(f"db/configs/{hostname}/operational.json")
+                                    if _opf.exists():
+                                        with open(_opf) as f:
+                                            _opd = json.load(f)
+                                        _opd['device_state'] = 'DNOS'
+                                        _opd['recovery_mode_detected'] = False
+                                        _opd['upgrade_in_progress'] = False
+                                        _opd['install_status'] = 'completed'
+                                        _opd['install_finish'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                        if _new_mgmt_ip:
+                                            _opd['mgmt_ip'] = _new_mgmt_ip
+                                            _opd['ssh_host'] = _new_mgmt_ip
+                                        elif _rc.get('ip'):
+                                            _fallback_ip = str(_rc['ip'])
+                                            if 'console' not in _fallback_ip.lower():
+                                                _opd['mgmt_ip'] = _fallback_ip
+                                                _opd['ssh_host'] = _fallback_ip
+                                            else:
+                                                _opd['mgmt_ip'] = _dev_obj.ip if hasattr(_dev_obj, 'ip') else _fallback_ip
+                                                _opd['ssh_host'] = _opd['mgmt_ip']
+                                        if _ncc_mgmt_ip:
+                                            _opd['ncc_mgmt_ip'] = _ncc_mgmt_ip
+                                        if _new_conn_method:
+                                            _opd['connection_method'] = _new_conn_method
+                                        elif _rc.get('method'):
+                                            _m = _rc['method']
+                                            if hasattr(_m, 'value'):
+                                                _m = _m.value
+                                            _opd['connection_method'] = _m
+                                        # Save active NCC ID (may have changed after reboot)
+                                        _post_ncc = _rc.get('ncc_id')
+                                        if _post_ncc is not None:
+                                            _opd['deploy_ncc_id'] = str(_post_ncc)
+                                        _post_vm = _rc.get('active_ncc_vm')
+                                        if _post_vm:
+                                            _opd['active_ncc_vm'] = _post_vm
+                                        with open(_opf, 'w') as f:
+                                            json.dump(_opd, f, indent=4)
+                                except Exception:
+                                    pass
+                                
+                                # Also update the device entry in devices.json
+                                if _new_mgmt_ip:
+                                    try:
+                                        _dev_file = Path("db/devices.json")
+                                        if _dev_file.exists():
+                                            with open(_dev_file) as f:
+                                                _dev_data = json.load(f)
+                                            for _dd in _dev_data.get('devices', []):
+                                                if _dd.get('hostname') == hostname:
+                                                    _dd['ip'] = _new_mgmt_ip
+                                                    break
+                                            with open(_dev_file, 'w') as f:
+                                                json.dump(_dev_data, f, indent=2)
+                                    except Exception:
+                                        pass
+                                
+                                # Push backed-up config if available
+                                if _has_backup:
+                                    with progress_lock:
+                                        device_progress[hostname]['stage'] = 'Restoring config...'
+                                    
+                                    # Wait for SSH to stabilize after DNOS boot
+                                    add_terminal_line("Waiting for SSH to stabilize (30s)...")
+                                    time.sleep(30)
+                                    
+                                    add_terminal_line("Restoring pre-delete config...")
+                                    
+                                    try:
+                                        _dev_obj = next(
+                                            (d for d in multi_ctx.devices if d.hostname == hostname), None)
+                                        if _dev_obj:
+                                            if _new_mgmt_ip:
+                                                _dev_obj.ip = _new_mgmt_ip
+                                            
+                                            from .config_pusher import ConfigPusher
+                                            _pusher = ConfigPusher()
+                                            with open(_backup_path) as f:
+                                                _cfg = f.read()
+                                            _lines = [l for l in _cfg.strip().split('\n')
+                                                       if not l.startswith('#')]
+                                            _cfg_no_comments = '\n'.join(_lines)
+                                            _src_ver = stack.get('_source_version', '')
+                                            _tgt_ver = stack.get('_target_version', '')
+                                            _cfg_clean, _stripped_items = sanitize_config_for_version(
+                                                _cfg_no_comments, source_version=_src_ver, target_version=_tgt_ver)
+                                            if _stripped_items:
+                                                add_terminal_line(f"Sanitized config: removed {len(_stripped_items)} version-incompatible items ({_src_ver} -> {_tgt_ver})")
+                                            
+                                            _restore_ok = False
+                                            _orig_user = _dev_obj.username
+                                            _orig_pw = _dev_obj.password
+                                            _restore_creds = [
+                                                (_orig_user, _orig_pw),
+                                                ('dnroot', Device.encode_password('dnroot')),
+                                                ('dn', Device.encode_password('drivenets')),
+                                                ('admin', Device.encode_password('admin')),
+                                            ]
+                                            _seen_creds = set()
+                                            _unique_restore_creds = []
+                                            for _rcu, _rcp in _restore_creds:
+                                                _ck = f"{_rcu}:{_rcp}"
+                                                if _ck not in _seen_creds:
+                                                    _seen_creds.add(_ck)
+                                                    _unique_restore_creds.append((_rcu, _rcp))
+                                            
+                                            for _rcu, _rcp in _unique_restore_creds:
+                                                _dev_obj.username = _rcu
+                                                _dev_obj.password = _rcp
+                                                for _restore_attempt in range(2):
+                                                    _ok, _msg = _pusher.push_config(
+                                                        _dev_obj, _cfg_clean,
+                                                        config_name=f"auto_restore_{hostname}")
+                                                    if _ok:
+                                                        _config_restored = True
+                                                        _restore_ok = True
+                                                        add_terminal_line(f"Config restored ({len(_lines)} lines)")
+                                                        break
+                                                    else:
+                                                        _m_lower = _msg.lower() if _msg else ""
+                                                        if 'auth' in _m_lower:
+                                                            add_terminal_line(f"Auth failed ({_rcu}), trying next credential...")
+                                                            break
+                                                        if 'timeout' in _m_lower or 'refused' in _m_lower or 'reset' in _m_lower:
+                                                            add_terminal_line(f"Config push attempt {_restore_attempt+1}/2: {_msg[:35]}")
+                                                            if _restore_attempt < 1:
+                                                                time.sleep(20)
+                                                                continue
+                                                        add_terminal_line(f"Config push failed: {_msg[:40]}")
+                                                        break
+                                                if _restore_ok:
+                                                    break
+                                            _dev_obj.username = _orig_user
+                                            _dev_obj.password = _orig_pw
+                                    except Exception as _re:
+                                        add_terminal_line(f"Restore error: {str(_re)[:35]}")
+                                
+                                try:
+                                    _rc['ssh'].close()
+                                except:
+                                    pass
+                                break
+                        except Exception as _boot_err:
+                            add_terminal_line(f"  Error: {str(_boot_err)[:35]} ({_bm}m {_bs}s)")
+                            pass
+                    
+                    if _config_restored:
+                        with progress_lock:
+                            device_progress[hostname]['stage'] = 'Done (config restored)'
+                        return True, "Upgrade + config restore done"
+                    else:
+                        with progress_lock:
+                            device_progress[hostname]['stage'] = 'Done (config NOT restored)'
+                        add_terminal_line("Config not auto-restored, use [R] to retry")
                 
                 return True, f"Upgrade initiated {'(GI deploy)' if is_gi_mode else ''}successfully"
                 
@@ -5748,14 +8081,14 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
         results = {}
         cancelled = False
         try:
-            with Live(render_multi_device_panel(), refresh_per_second=2, console=console) as live:
+            with Live(render_multi_device_panel(), refresh_per_second=1, console=console, vertical_overflow="crop") as live:
                 with ThreadPoolExecutor(max_workers=len(multi_ctx.devices)) as executor:
                     futures = {executor.submit(push_to_device, dev): dev for dev in multi_ctx.devices}
                     
                     try:
                         while not all(f.done() for f in futures):
                             live.update(render_multi_device_panel())
-                            time.sleep(0.5)
+                            time.sleep(1.0)
                     except KeyboardInterrupt:
                         console.print("\n[yellow]⚠ Cancelling... (push operations may continue on devices)[/yellow]")
                         cancelled = True
@@ -5795,34 +8128,394 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
         console.print(f"\n[bold]Summary:[/bold] {success_count}/{len(results)} devices upgraded")
         
         if success_count > 0:
-            console.print("\n[yellow]⚠ Devices will reboot to complete installation.[/yellow]")
-            console.print("[dim]Use [S] Check Upgrade Status to monitor progress.[/dim]")
-            
-            # Check if we have pre-delete config backups to restore
+            # Collect all successfully upgraded devices for post-deploy tracking
+            _upgraded_hosts = [h for h, (s, _) in results.items() if s]
             pre_delete_backups = stack.get('_pre_delete_backups', {})
-            if pre_delete_backups:
-                console.print("\n[bold cyan]📦 Configuration Restore Available[/bold cyan]")
-                console.print(f"[dim]You have {len(pre_delete_backups)} config backup(s) from before system delete:[/dim]")
-                for hostname, backup_path in pre_delete_backups.items():
-                    console.print(f"  • [cyan]{hostname}[/cyan]: {backup_path}")
-                console.print("\n[bold]After devices are back online:[/bold]")
-                console.print("  [1] Use [R] Restore Pre-Delete Config from the upgrade menu")
-                console.print("  [2] Or manually push configs via Configure Device option")
+            restore_targets = {h: str(p) for h, p in pre_delete_backups.items()
+                               if h in _upgraded_hosts} if pre_delete_backups else {}
+            
+            for _h, _bp in restore_targets.items():
+                try:
+                    op_file = Path(f"db/configs/{_h}/operational.json")
+                    op_data = {}
+                    if op_file.exists():
+                        with open(op_file) as f:
+                            op_data = json.load(f)
+                    op_data['pre_delete_backup'] = _bp
+                    op_data['pre_delete_backup_time'] = datetime.now().isoformat()
+                    with open(op_file, 'w') as f:
+                        json.dump(op_data, f, indent=4)
+                except:
+                    pass
+            
+            # ═══════════════════════════════════════════════════════════════
+            # POST-DEPLOY: Wait for all devices to boot DNOS + auto-restore
+            # Always wait, regardless of whether config backups exist
+            # ═══════════════════════════════════════════════════════════════
+            _post_state = {}  # hostname -> {status, elapsed, ip, config_restored}
+            for _h in _upgraded_hosts:
+                _post_state[_h] = {
+                    'status': 'rebooting', 'elapsed': 0, 'ip': '',
+                    'config_backup': restore_targets.get(_h),
+                    'config_restored': False, 'config_msg': '',
+                    'attempts': 0, 'last_probe': '',
+                }
+            
+            _post_start = time.time()
+            _post_max = 1200  # 20 minutes max
+            _all_done = len(_upgraded_hosts) == 0
+            
+            def _render_post_deploy_panel():
+                from rich.table import Table as _PDT
+                from rich.console import Group
+                _we = int(time.time() - _post_start)
+                _wm, _ws = divmod(_we, 60)
                 
-                # Save backup paths to operational.json for persistence
-                for hostname, backup_path in pre_delete_backups.items():
-                    try:
-                        op_file = Path(f"db/configs/{hostname}/operational.json")
-                        op_data = {}
-                        if op_file.exists():
-                            with open(op_file) as f:
-                                op_data = json.load(f)
-                        op_data['pre_delete_backup'] = backup_path
-                        op_data['pre_delete_backup_time'] = datetime.now().isoformat()
-                        with open(op_file, 'w') as f:
-                            json.dump(op_data, f, indent=4)
-                    except:
-                        pass
+                tbl = _PDT(title=f"Post-Deploy Progress  ⏱ {_wm:02d}:{_ws:02d}", box=box.ROUNDED, expand=True)
+                tbl.add_column("Device", style="cyan", width=14)
+                tbl.add_column("Status", width=20)
+                tbl.add_column("Elapsed", width=10, justify="right")
+                tbl.add_column("Config Restore", width=30)
+                
+                for _h in _upgraded_hosts:
+                    _s = _post_state[_h]
+                    _em, _es = divmod(_s['elapsed'], 60)
+                    _elapsed_str = f"{_em}m {_es}s"
+                    
+                    if _s['status'] == 'rebooting':
+                        _status = f"[yellow]⏳ Rebooting[/yellow] [dim]({_s['attempts']})[/dim]"
+                    elif _s['status'] in ('gi_detected', 'gi_installing'):
+                        _status = f"[cyan]⚙ GI installing[/cyan] [dim]({_s['attempts']})[/dim]"
+                    elif _s['status'] == 'ncp_waiting':
+                        _status = f"[yellow]⚙ NCP initializing[/yellow] [dim]({_s['attempts']})[/dim]"
+                    elif _s['status'] == 'dnos_up':
+                        _status = "[green]✓ DNOS UP[/green]"
+                    elif _s['status'] == 'timeout':
+                        _status = "[red]⏰ Timeout[/red]"
+                    elif _s['status'] == 'done':
+                        _status = "[bold green]✅ Ready[/bold green]"
+                    else:
+                        _status = f"[dim]{_s['status']}[/dim]"
+                    
+                    if _s['config_backup']:
+                        if _s['config_restored']:
+                            _cfg = f"[green]✓ Restored[/green] {_s['config_msg']}"
+                        elif _s['status'] in ('dnos_up', 'done'):
+                            _cfg = "[cyan]Pushing...[/cyan]"
+                        elif _s['status'] == 'ncp_waiting':
+                            _cfg = "[yellow]Waiting for NCP...[/yellow]"
+                        elif _s['config_msg']:
+                            _cfg = f"[yellow]{_s['config_msg'][:28]}[/yellow]"
+                        else:
+                            _cfg = "[dim]Waiting for DNOS...[/dim]"
+                    else:
+                        if _s['status'] in ('dnos_up', 'done'):
+                            _cfg = "[dim]No backup (use [P] to push)[/dim]"
+                        else:
+                            _cfg = "[dim]No backup[/dim]"
+                    
+                    tbl.add_row(_h, _status, _elapsed_str, _cfg)
+                
+                _remaining = _post_max - int(time.time() - _post_start)
+                _rm, _rs = divmod(max(0, _remaining), 60)
+                footer = f"[dim]Timeout in {_rm}m {_rs}s — Ctrl+C to skip wait[/dim]"
+                
+                from rich.panel import Panel as _PDP
+                from rich.columns import Columns
+                return _PDP(
+                    Group(tbl, Text(footer, justify="center")),
+                    title="[bold]Waiting for devices to come online[/bold]",
+                    border_style="cyan", expand=True
+                )
+            
+            console.print(f"\n[bold cyan]{'═' * 50}[/bold cyan]")
+            console.print(f"[bold]⏳ Waiting for {len(_upgraded_hosts)} device(s) to boot DNOS...[/bold]")
+            if restore_targets:
+                console.print(f"[dim]Config will be auto-restored when devices come online.[/dim]")
+            console.print(f"[dim]Timeout: 20 minutes. Ctrl+C to skip.[/dim]\n")
+            
+            try:
+                with Live(_render_post_deploy_panel(), refresh_per_second=0.5, console=console) as _post_live:
+                    while not _all_done and (time.time() - _post_start) < _post_max:
+                        for _h in _upgraded_hosts:
+                            _s = _post_state[_h]
+                            _s['elapsed'] = int(time.time() - _post_start)
+                            
+                            if _s['status'] in ('done', 'timeout'):
+                                continue
+                            
+                            _dev = next((d for d in multi_ctx.devices if d.hostname == _h), None)
+                            if not _dev:
+                                _s['status'] = 'done'
+                                continue
+                            
+                            _pw_raw = getattr(_dev, 'password', 'dnroot') or 'dnroot'
+                            try:
+                                _pw = _dev.get_password() if hasattr(_dev, 'get_password') else _pw_raw
+                            except Exception:
+                                _pw = _pw_raw
+                            _s['attempts'] += 1
+                            
+                            try:
+                                import paramiko as _pm
+                                _ssh = _pm.SSHClient()
+                                _ssh.set_missing_host_key_policy(_pm.AutoAddPolicy())
+                                from .utils import resolve_device_ip
+                                _rip, _rm = resolve_device_ip(_dev, timeout=2.0)
+                                _ip = _rip or _dev.ip
+                                if _ip and 'console' in str(_ip).lower():
+                                    _ip = _dev.ip
+                                _post_cred_sets = [
+                                    ('dnroot', _pw),
+                                    ('dnroot', 'dnroot'),
+                                    ('dn', 'drivenets'),
+                                    ('admin', 'admin'),
+                                    ('root', 'drivenets'),
+                                ]
+                                _post_seen = set()
+                                _post_unique = []
+                                for _pu, _pp in _post_cred_sets:
+                                    _pk = f"{_pu}:{_pp}"
+                                    if _pk not in _post_seen:
+                                        _post_seen.add(_pk)
+                                        _post_unique.append((_pu, _pp))
+                                _post_connected = False
+                                _post_working_user = 'dnroot'
+                                _post_working_pw = 'dnroot'
+                                for _pu, _pp in _post_unique:
+                                    try:
+                                        _ssh = _pm.SSHClient()
+                                        _ssh.set_missing_host_key_policy(_pm.AutoAddPolicy())
+                                        _ssh.connect(_ip, username=_pu, password=_pp, timeout=10,
+                                                    allow_agent=False, look_for_keys=False)
+                                        _post_connected = True
+                                        _post_working_user = _pu
+                                        _post_working_pw = _pp
+                                        break
+                                    except _pm.AuthenticationException:
+                                        continue
+                                    except Exception:
+                                        raise
+                                if not _post_connected:
+                                    raise _pm.AuthenticationException("All credential sets failed")
+                                _ch = _ssh.invoke_shell(width=200, height=50)
+                                time.sleep(3)
+                                _out = ""
+                                if _ch.recv_ready():
+                                    _out = _ch.recv(65535).decode('utf-8', errors='replace')
+                                _ch.send("\r\n")
+                                time.sleep(2)
+                                if _ch.recv_ready():
+                                    _out += _ch.recv(65535).decode('utf-8', errors='replace')
+                                _ol = _out.lower()
+                                _is_gi = 'gi(' in _ol or 'gi#' in _ol or 'gi>' in _ol
+                                _is_dnos = '#' in _out and 'gi' not in _ol and 'recovery' not in _ol and '~$' not in _out
+                                
+                                # Identity verification: check hostname in prompt
+                                # After system delete, DHCP may reassign mgmt0 IP to
+                                # a different device. Reject if prompt doesn't match.
+                                _identity_ok = True
+                                if _is_dnos:
+                                    _h_lower = _h.lower().replace('-', '').replace('_', '')
+                                    _prompt_lower = _ol.replace('-', '').replace('_', '')
+                                    if _h_lower not in _prompt_lower:
+                                        _identity_ok = False
+                                elif _is_gi:
+                                    pass
+                                
+                                if not _identity_ok:
+                                    _ssh.close()
+                                    _s['last_probe'] = f'Wrong device at {_ip}, trying alt IPs...'
+                                    # Try ncc_mgmt_ip as fallback
+                                    try:
+                                        _opf2 = Path(f"db/configs/{_h}/operational.json")
+                                        if _opf2.exists():
+                                            with open(_opf2) as _f2:
+                                                _od2 = json.load(_f2)
+                                            _ncc_ip = _od2.get('ncc_mgmt_ip')
+                                            if _ncc_ip and _ncc_ip != _ip:
+                                                _ip = _ncc_ip
+                                                _s['last_probe'] = f'Trying NCC mgmt IP {_ncc_ip}...'
+                                    except Exception:
+                                        pass
+                                    continue
+                                
+                                _ncp_ready = True
+                                if _is_dnos and _s.get('config_backup'):
+                                    try:
+                                        _ch.send("show system | no-more\r\n")
+                                        time.sleep(5)
+                                        _sys_out = ""
+                                        if _ch.recv_ready():
+                                            _sys_out = _ch.recv(65535).decode('utf-8', errors='replace')
+                                        _sys_lo = _sys_out.lower()
+                                        if 'initializing' in _sys_lo or 'not-ready' in _sys_lo:
+                                            _ncp_ready = False
+                                    except Exception:
+                                        pass
+                                
+                                _ssh.close()
+                                
+                                if _is_gi:
+                                    _s['status'] = 'gi_installing'
+                                    _s['ip'] = _ip
+                                    _s['last_probe'] = 'GI active, waiting for DNOS...'
+                                elif _is_dnos:
+                                    _s['ip'] = _ip
+                                    
+                                    if not _ncp_ready:
+                                        _s['status'] = 'ncp_waiting'
+                                        _s['last_probe'] = 'NCP initializing, waiting...'
+                                        continue
+                                    
+                                    _s['status'] = 'dnos_up'
+                                    
+                                    # Update operational.json
+                                    try:
+                                        _opf = Path(f"db/configs/{_h}/operational.json")
+                                        _opd = {}
+                                        if _opf.exists():
+                                            with open(_opf) as f:
+                                                _opd = json.load(f)
+                                        _opd['device_state'] = 'DNOS'
+                                        _opd['recovery_mode_detected'] = False
+                                        _opd['upgrade_in_progress'] = False
+                                        _opd['install_status'] = 'completed'
+                                        _opd['install_finish'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                        if _ip and 'console' not in str(_ip).lower():
+                                            _opd['mgmt_ip'] = _ip
+                                            _opd['ssh_host'] = _ip
+                                        with open(_opf, 'w') as f:
+                                            json.dump(_opd, f, indent=4)
+                                    except Exception:
+                                        pass
+                                    
+                                    # Auto-restore config if backup exists
+                                    if _s['config_backup']:
+                                        _post_live.update(_render_post_deploy_panel())
+                                        try:
+                                            from .config_pusher import ConfigPusher
+                                            _pusher = ConfigPusher()
+                                            with open(_s['config_backup']) as f:
+                                                _cfg = f.read()
+                                            _lines = [l for l in _cfg.strip().split('\n') if not l.startswith('#')]
+                                            _cfg_clean = '\n'.join(_lines)
+                                            
+                                            _orig_dev_user = _dev.username
+                                            _orig_dev_pw = _dev.password
+                                            _dev.username = _post_working_user
+                                            _dev.password = Device.encode_password(_post_working_pw)
+                                            
+                                            _ok, _msg = _pusher.push_config(_dev, _cfg_clean,
+                                                config_name=f"auto_restore_{_h}")
+                                            if _ok:
+                                                _s['config_restored'] = True
+                                                _s['config_msg'] = f"({len(_lines)} lines)"
+                                            else:
+                                                _post_restore_creds = [
+                                                    ('dnroot', 'dnroot'),
+                                                    ('dn', 'drivenets'),
+                                                    ('admin', 'admin'),
+                                                ]
+                                                for _pru, _prp in _post_restore_creds:
+                                                    if _pru == _post_working_user and _prp == _post_working_pw:
+                                                        continue
+                                                    _dev.username = _pru
+                                                    _dev.password = Device.encode_password(_prp)
+                                                    _ok2, _msg2 = _pusher.push_config(_dev, _cfg_clean,
+                                                        config_name=f"auto_restore_{_h}")
+                                                    if _ok2:
+                                                        _s['config_restored'] = True
+                                                        _s['config_msg'] = f"({len(_lines)} lines)"
+                                                        break
+                                                if not _s.get('config_restored'):
+                                                    _s['config_msg'] = _msg[:40]
+                                            _dev.username = _orig_dev_user
+                                            _dev.password = _orig_dev_pw
+                                        except Exception as _pe:
+                                            _s['config_msg'] = f"Error: {str(_pe)[:30]}"
+                                    
+                                    _s['status'] = 'done'
+                            except Exception:
+                                pass
+                        
+                        _post_live.update(_render_post_deploy_panel())
+                        
+                        # Check if all done
+                        _all_done = all(_post_state[h]['status'] in ('done', 'timeout')
+                                       for h in _upgraded_hosts)
+                        if _all_done:
+                            break
+                        
+                        time.sleep(20)
+                    
+                    # Mark remaining as timeout
+                    for _h in _upgraded_hosts:
+                        _s = _post_state[_h]
+                        _s['elapsed'] = int(time.time() - _post_start)
+                        if _s['status'] not in ('done',):
+                            _s['status'] = 'timeout'
+                    _post_live.update(_render_post_deploy_panel())
+                    
+            except KeyboardInterrupt:
+                console.print("\n[yellow]⚠ Wait skipped. Devices may still be rebooting.[/yellow]")
+                console.print("[dim]Use [R] Refresh to check device state later.[/dim]")
+            
+            # Report restore failures prominently
+            _failed_restores = [h for h in _upgraded_hosts
+                                if _post_state[h].get('config_backup')
+                                and not _post_state[h].get('config_restored')]
+            if _failed_restores:
+                console.print(f"\n[bold red]⚠ Config restore FAILED on {len(_failed_restores)} device(s):[/bold red]")
+                for _fh in _failed_restores:
+                    _fs = _post_state[_fh]
+                    _reason = _fs.get('config_msg') or _fs.get('status', 'unknown')
+                    _backup_path = _fs.get('config_backup', 'N/A')
+                    console.print(f"  [red]• {_fh}[/red]: {_reason}")
+                    console.print(f"    Backup file: {_backup_path}")
+                console.print("[yellow]Use [R] Restore Pre-Delete Config to retry manually.[/yellow]")
+            
+            # Final summary
+            _up_count = sum(1 for h in _upgraded_hosts if _post_state[h]['status'] == 'done')
+            _restored = sum(1 for h in _upgraded_hosts if _post_state[h].get('config_restored'))
+            _total_elapsed = int(time.time() - _post_start)
+            _tm, _ts = divmod(_total_elapsed, 60)
+            
+            console.print(f"\n[bold]{'═' * 50}[/bold]")
+            console.print(f"[bold]Post-Deploy Summary[/bold] ({_tm}m {_ts}s)")
+            for _h in _upgraded_hosts:
+                _s = _post_state[_h]
+                if _s['status'] == 'done':
+                    _extra = f" | Config restored" if _s.get('config_restored') else ""
+                    console.print(f"  [green]✓ {_h}: DNOS UP{_extra}[/green]")
+                else:
+                    console.print(f"  [yellow]⚠ {_h}: {_s['status']} — check with [R] Refresh[/yellow]")
+            
+            # Save upgrade timing to history for future estimates
+            _full_elapsed = int(time.time() - start_time)
+            try:
+                _hf = Path("db/upgrade_history.json")
+                _hist = {'entries': []}
+                if _hf.exists():
+                    with open(_hf) as f:
+                        _hist = json.load(f)
+                _flow = 'delete_deploy' if stack.get('_requires_delete_deploy') else (
+                    'gi_deploy' if any(d.hostname not in stack.get('_devices_with_dnos_set', set())
+                                       for d in multi_ctx.devices) else 'in_place')
+                _hist['entries'].append({
+                    'timestamp': datetime.now().isoformat(),
+                    'devices': [d.hostname for d in multi_ctx.devices],
+                    'flow_type': _flow,
+                    'elapsed_s': _full_elapsed,
+                    'success_count': success_count,
+                    'total_count': len(results),
+                    'post_deploy_s': int(time.time() - _post_start) if '_post_start' in dir() else 0,
+                })
+                _hist['entries'] = _hist['entries'][-50:]
+                with open(_hf, 'w') as f:
+                    json.dump(_hist, f, indent=2)
+            except Exception:
+                pass
         
         return success_count > 0
         
@@ -6116,95 +8809,26 @@ def _show_lldp_status_menu(device: 'Device', multi_ctx: 'MultiDeviceContext'):
 
 def _refresh_lldp_live(device: 'Device'):
     """Fetch LLDP neighbors live from device."""
-    import paramiko
-    import socket
     from .config_extractor import fetch_lldp_neighbors, update_lldp_in_operational_json
-    from .connection_strategy import get_console_config_for_device
     
     console.print(f"\n[cyan]Connecting to {device.hostname}...[/cyan]")
     
     try:
-        # Get connection info (same logic as _enable_lldp_on_device_interactive)
-        op_file = Path(f"/home/dn/SCALER/db/configs/{device.hostname}/operational.json")
-        serial_number = None
-        mgmt_ip = None
+        from .utils import safe_connect_and_verify
+        conn = safe_connect_and_verify(device, timeout=2.0, verify_layers=True)
         
-        if op_file.exists():
-            with open(op_file) as f:
-                op_data = json.load(f)
-                serial_number = op_data.get('serial_number')
-                raw_mgmt = op_data.get('mgmt_ip') or op_data.get('gi_mgmt_ip')
-                if raw_mgmt and raw_mgmt != 'N/A':
-                    mgmt_ip = str(raw_mgmt).split('/')[0].strip()
-        
-        targets = []
-        if mgmt_ip:
-            targets.append(('mgmt', mgmt_ip))
-        if device.ip and device.ip != mgmt_ip:
-            targets.append(('device', device.ip))
-        if serial_number and serial_number != 'N/A' and serial_number not in (t[1] for t in targets):
-            targets.append(('serial', serial_number))
-        
-        if not targets:
-            console.print("[red]No connection target (mgmt_ip, device.ip, or serial_number).[/red]")
+        if not conn['connected'] or not conn['verified']:
+            reason = conn.get('abort_reason') or 'Connection failed'
+            console.print(f"[bold red]⛔ {reason}[/bold red]")
             return
         
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        connected = False
-        channel = None
+        ssh = conn['ssh']
+        channel = conn['channel']
+        console.print(f"[green]✓ Connected & verified: {conn['actual_hostname']} ({conn['ip']} via {conn['method']})[/green]")
         
-        for method, target in targets:
-            try:
-                sock = socket.create_connection((target, 22), timeout=5)
-                sock.close()
-            except (socket.gaierror, OSError):
-                continue
-            try:
-                ssh.connect(target, username='dnroot', password='dnroot', timeout=10, allow_agent=False, look_for_keys=False)
-                connected = True
-                console.print(f"[green]✓ Connected via {target}[/green]")
-                break
-            except Exception:
-                continue
-        
-        if not connected:
-            console_cfg = get_console_config_for_device(device.hostname)
-            if console_cfg:
-                try:
-                    ssh.connect(console_cfg['host'], username=console_cfg['user'], password=console_cfg['password'], timeout=10)
-                    channel = ssh.invoke_shell(width=200, height=50)
-                    channel.settimeout(30)
-                    time.sleep(1)
-                    _ = channel.recv(8192)
-                    channel.send("3\r\n")
-                    time.sleep(2)
-                    _ = channel.recv(8192)
-                    channel.send(f"{console_cfg['port']}\r\n")
-                    time.sleep(2)
-                    output = channel.recv(8192).decode('utf-8', errors='replace')
-                    if 'login' in output.lower():
-                        channel.send("dnroot\r\n")
-                        time.sleep(0.5)
-                        channel.send("dnroot\r\n")
-                        time.sleep(2)
-                        _ = channel.recv(8192)
-                    connected = True
-                    console.print(f"[green]✓ Connected via console[/green]")
-                except Exception:
-                    pass
-        
-        if not connected:
-            console.print(f"[red]Could not connect to {device.hostname}. Tried: {', '.join(t[1] for t in targets)}[/red]")
-            return
-        
-        if channel is None:
-            channel = ssh.invoke_shell(width=200, height=50)
-            channel.settimeout(15)
-            time.sleep(1)
-        
-        while channel.recv_ready():
-            channel.recv(65535)
+        if conn.get('db_changes'):
+            for key, change in conn['db_changes'].items():
+                console.print(f"[dim]  DB sync: {key}: {change}[/dim]")
         
         console.print("[dim]Fetching LLDP neighbors...[/dim]")
         lldp_data = fetch_lldp_neighbors(channel, device.hostname)
@@ -6254,100 +8878,23 @@ def _refresh_lldp_live(device: 'Device'):
 
 def _enable_lldp_on_device_interactive(device: 'Device'):
     """Enable LLDP on device interactively."""
-    import paramiko
-    import socket
     from .config_extractor import check_lldp_configured, enable_lldp_on_device
-    from .connection_strategy import get_console_config_for_device
     
     console.print(f"\n[cyan]Connecting to {device.hostname} to enable LLDP...[/cyan]")
     
     try:
-        # Get connection info
-        op_file = Path(f"/home/dn/SCALER/db/configs/{device.hostname}/operational.json")
-        op_data = {}
-        serial_number = None
-        mgmt_ip = None
+        from .utils import safe_connect_and_verify
+        conn = safe_connect_and_verify(device, timeout=2.0, verify_layers=True)
         
-        if op_file.exists():
-            with open(op_file) as f:
-                op_data = json.load(f)
-                serial_number = op_data.get('serial_number')
-                # Prefer mgmt IP from device (e.g. 100.64.8.81/20 -> 100.64.8.81)
-                raw_mgmt = op_data.get('mgmt_ip') or op_data.get('gi_mgmt_ip')
-                if raw_mgmt and raw_mgmt != 'N/A':
-                    mgmt_ip = str(raw_mgmt).split('/')[0].strip()
-        
-        # Build connection targets: mgmt IP first, then device.ip, then serial
-        targets = []
-        if mgmt_ip:
-            targets.append(('mgmt', mgmt_ip))
-        if device.ip and device.ip != mgmt_ip:
-            targets.append(('device', device.ip))
-        if serial_number and serial_number != 'N/A' and serial_number not in (t[1] for t in targets):
-            targets.append(('serial', serial_number))
-        
-        if not targets:
-            console.print("[red]No connection target (mgmt_ip, device.ip, or serial_number).[/red]")
+        if not conn['connected'] or not conn['verified']:
+            reason = conn.get('abort_reason') or 'Connection failed'
+            console.print(f"[bold red]⛔ {reason}[/bold red]")
             return
         
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        connected = False
-        channel = None  # Set when using console; otherwise we invoke_shell after SSH
-        
-        for method, target in targets:
-            try:
-                sock = socket.create_connection((target, 22), timeout=5)
-                sock.close()
-            except (socket.gaierror, OSError):
-                continue
-            try:
-                ssh.connect(target, username='dnroot', password='dnroot', timeout=10, allow_agent=False, look_for_keys=False)
-                connected = True
-                console.print(f"[green]✓ Connected via {method}[/green]")
-                break
-            except Exception:
-                continue
-        
-        if not connected:
-            # Try console if configured
-            console_cfg = get_console_config_for_device(device.hostname)
-            if console_cfg:
-                try:
-                    ssh.connect(console_cfg['host'], username=console_cfg['user'], password=console_cfg['password'], timeout=10)
-                    channel = ssh.invoke_shell(width=200, height=50)
-                    channel.settimeout(30)
-                    time.sleep(1)
-                    _ = channel.recv(8192)
-                    channel.send("3\r\n")
-                    time.sleep(2)
-                    _ = channel.recv(8192)
-                    channel.send(f"{console_cfg['port']}\r\n")
-                    time.sleep(2)
-                    output = channel.recv(8192).decode('utf-8', errors='replace')
-                    if 'login' in output.lower():
-                        channel.send("dnroot\r\n")
-                        time.sleep(0.5)
-                        channel.send("dnroot\r\n")
-                        time.sleep(2)
-                        _ = channel.recv(8192)
-                    connected = True
-                    console.print(f"[green]✓ Connected via console[/green]")
-                except Exception:
-                    pass
-        
-        if not connected:
-            console.print(f"[red]Could not connect to {device.hostname}. Tried: {', '.join(t[1] for t in targets)}[/red]")
-            return
-        
-        # If we connected via SSH (not console), we need a shell channel
-        if channel is None:
-            channel = ssh.invoke_shell(width=200, height=50)
-            channel.settimeout(30)
-            time.sleep(1)
-        
-        while channel.recv_ready():
-            channel.recv(65535)
+        ssh = conn['ssh']
+        channel = conn['channel']
+        connected = True
+        console.print(f"[green]✓ Connected & verified: {conn['actual_hostname']} ({conn['ip']} via {conn['method']})[/green]")
         
         # Check if LLDP is already configured
         if check_lldp_configured(channel):
@@ -6422,15 +8969,28 @@ def _fix_interface_speed_fec(device: 'Device'):
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         
-        target = serial_number if serial_number and serial_number != 'N/A' else device.ip
+        # Use safe connection with IP resolution + verification
+        from .utils import resolve_device_ip, verify_device_hostname
+        resolved_ip, method = resolve_device_ip(device)
+        target = resolved_ip if resolved_ip else device.ip
         ssh.connect(target, username='dnroot', password='dnroot', timeout=15, allow_agent=False, look_for_keys=False)
-        console.print(f"[green]✓ Connected[/green]")
         
         channel = ssh.invoke_shell(width=200, height=50)
         channel.settimeout(30)
         time.sleep(1)
-        while channel.recv_ready():
-            channel.recv(65535)
+        _prompt = ""
+        try:
+            while channel.recv_ready():
+                _prompt += channel.recv(65535).decode('utf-8', errors='replace')
+        except:
+            pass
+        
+        _hok, _ah = verify_device_hostname(_prompt, device.hostname)
+        if not _hok:
+            console.print(f"[bold red]⛔ WRONG DEVICE: '{_ah}' at {target} (expected '{device.hostname}'). Aborting.[/bold red]")
+            ssh.close()
+            return
+        console.print(f"[green]✓ Connected & verified: {_ah}[/green]")
         
         # Get interface status
         channel.send("show interfaces | no-more\r\n")
@@ -9907,8 +12467,8 @@ def get_flowspec_vpn_scale(config_text: str, limits: Dict[str, Any]) -> Dict[str
     # Get limits
     max_interfaces = flowspec_limits.get('max_flowspec_interfaces', 1000)
     max_vrfs = flowspec_limits.get('max_vrfs_with_flowspec', 512)
-    max_policies = flowspec_limits.get('max_local_policies', 256)
-    max_match_classes = flowspec_limits.get('max_match_classes', 1024)
+    max_policies = flowspec_limits.get('max_local_policies', 40)
+    max_match_classes = flowspec_limits.get('max_match_classes', 12000)
     
     # Calculate percentages and warnings
     warnings = []
@@ -10581,7 +13141,10 @@ def parse_number_selection(selection: str, items: List[Any], key: str = None) ->
     seen = set()
     unique = []
     for item in selected:
-        item_key = item if not isinstance(item, dict) else str(item)
+        try:
+            item_key = id(item) if not isinstance(item, (str, int, float, tuple)) else item
+        except TypeError:
+            item_key = id(item)
         if item_key not in seen:
             seen.add(item_key)
             unique.append(item)
@@ -11017,6 +13580,262 @@ def print_wizard_banner():
     console.print("[bold cyan]╚═══════════════════════════════════════════════════════════════════╝[/bold cyan]")
 
 
+def _show_device_alerts() -> None:
+    """Show any unacknowledged device integrity alerts from extraction monitoring.
+    Offers context-aware actions: recovery for RECOVERY devices, IP change for connection issues."""
+    alerts_file = Path("db/alerts.json")
+    if not alerts_file.exists():
+        return
+    try:
+        with open(alerts_file) as f:
+            data = json.load(f)
+        alerts = [a for a in data.get('alerts', []) if not a.get('acknowledged')]
+        if not alerts:
+            return
+        
+        # Filter out alerts for devices no longer in devices.json
+        devices_file = Path("db/devices.json")
+        known_hostnames = set()
+        if devices_file.exists():
+            try:
+                with open(devices_file) as df:
+                    known_hostnames = {d.get('hostname') for d in json.load(df).get('devices', [])}
+            except Exception:
+                pass
+        
+        if known_hostnames:
+            stale = [a for a in alerts if a.get('device') not in known_hostnames]
+            if stale:
+                data['alerts'] = [a for a in data.get('alerts', []) if a.get('device') in known_hostnames]
+                with open(alerts_file, 'w') as f:
+                    json.dump(data, f, indent=2)
+                alerts = [a for a in data['alerts'] if not a.get('acknowledged')]
+        
+        if not alerts:
+            return
+        
+        # Deduplicate: if a device has recovery_mode alert, suppress stale_data/extraction_failed
+        recovery_devices = {a['device'] for a in alerts if a.get('type') == 'recovery_mode'}
+        if recovery_devices:
+            alerts = [a for a in alerts if not (
+                a.get('device') in recovery_devices and 
+                a.get('type') in ('stale_data', 'extraction_failed')
+            )]
+            # Also clean up the file
+            data['alerts'] = [a for a in data.get('alerts', []) if not (
+                a.get('device') in recovery_devices and 
+                a.get('type') in ('stale_data', 'extraction_failed')
+            )]
+            with open(alerts_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        
+        # Suppress ALL extraction alerts for GI-mode devices. After system delete:
+        # - mgmt IP is invalid (DHCP reassigns, another device may now have it)
+        # - hostname_mismatch is expected (wrong device at old IP)
+        # - serial_changed is expected (wrong device at old IP)
+        # - stale_data / extraction_failed are expected (SSH won't work)
+        _gi_alert_types = ('stale_data', 'extraction_failed', 'hostname_mismatch', 'serial_changed')
+        gi_devices = set()
+        for a in alerts:
+            dev = a.get('device', '')
+            if a.get('type') in _gi_alert_types and dev:
+                op_path = Path(f"db/configs/{dev}/operational.json")
+                if op_path.exists():
+                    try:
+                        with open(op_path) as of:
+                            op = json.load(of)
+                        if op.get('device_state') in ('GI', 'RECOVERY', 'DEPLOYING', 'BASEOS_SHELL', 'DN_RECOVERY'):
+                            gi_devices.add(dev)
+                    except Exception:
+                        pass
+        if gi_devices:
+            alerts = [a for a in alerts if not (
+                a.get('device') in gi_devices and
+                a.get('type') in _gi_alert_types
+            )]
+            data['alerts'] = [a for a in data.get('alerts', []) if not (
+                a.get('device') in gi_devices and
+                a.get('type') in _gi_alert_types
+            )]
+            with open(alerts_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        
+        if not alerts:
+            return
+        
+        critical = [a for a in alerts if a['severity'] == 'CRITICAL']
+        warnings = [a for a in alerts if a['severity'] == 'WARNING']
+        
+        fixable_devices = []
+        
+        if critical:
+            console.print()
+            for a in critical:
+                if a.get('type') == 'recovery_mode':
+                    console.print(f"  [bold red]🔴 {a['device']}:[/bold red] [red]{a['message']}[/red]")
+                else:
+                    console.print(f"  [bold red]⛔ {a['device']}:[/bold red] [red]{a['message']}[/red]")
+                    if a.get('type') in ('stale_data', 'extraction_failed', 'hostname_mismatch', 'serial_changed'):
+                        if a['device'] not in fixable_devices:
+                            fixable_devices.append(a['device'])
+        if warnings:
+            if not critical:
+                console.print()
+            for a in warnings:
+                console.print(f"  [yellow]⚠ {a['device']}:[/yellow] [dim]{a['message']}[/dim]")
+                if a.get('type') in ('stale_data', 'extraction_failed', 'ip_changed'):
+                    if a['device'] not in fixable_devices:
+                        fixable_devices.append(a['device'])
+        
+        # Show context-aware action prompt
+        has_recovery = bool(recovery_devices)
+        has_fixable = bool(fixable_devices)
+        
+        if has_recovery or has_fixable:
+            console.print()
+            options = []
+            if has_recovery:
+                options.append("[R] Recover device (System Restore)")
+            if has_fixable:
+                options.append("[A] Auto-recover IP (Network Mapper)")
+                options.append("[I] Change IP manually")
+            options.append("[N] Skip")
+            console.print(f"  [bold]{' | '.join(options)}[/bold]")
+            
+            choice = Prompt.ask("  [bold]Action[/bold]", default="n").strip().lower()
+            
+            if choice == 'r' and has_recovery:
+                from .device_manager import DeviceManager
+                from .wizard.system_restore import run_system_restore_wizard
+                dm = DeviceManager()
+                for rdev_name in recovery_devices:
+                    device = dm.get_device(rdev_name)
+                    if device:
+                        console.print(f"\n[bold red]  Launching System Restore for {rdev_name}...[/bold red]")
+                        try:
+                            run_system_restore_wizard(device, None)
+                        except Exception as e:
+                            console.print(f"[red]  Error restoring {rdev_name}: {e}[/red]")
+                    else:
+                        console.print(f"[red]  Device '{rdev_name}' not found in database[/red]")
+            elif choice == 'a' and has_fixable:
+                _auto_recover_device_ip(fixable_devices)
+            elif choice == 'i' and has_fixable:
+                hostname = Prompt.ask(
+                    f"  [bold]Enter hostname[/bold] ({', '.join(fixable_devices)})",
+                    default=fixable_devices[0] if len(fixable_devices) == 1 else ""
+                ).strip()
+                if hostname:
+                    matched = None
+                    for d in fixable_devices:
+                        if hostname.lower() in d.lower() or d.lower() in hostname.lower():
+                            matched = d
+                            break
+                    if matched:
+                        _update_device_ip_interactive(matched)
+                    else:
+                        console.print(f"[dim]  No match. Available: {', '.join(fixable_devices)}[/dim]")
+    except Exception:
+        pass
+
+
+def _auto_recover_device_ip(fixable_devices: list) -> None:
+    """Auto-recover device IP(s) via Network Mapper serial number discovery."""
+    from .recover_device_ip import recover_device_ip
+
+    if len(fixable_devices) == 1:
+        targets = fixable_devices
+        console.print(f"  [cyan]Attempting auto-recovery for {targets[0]}...[/cyan]")
+    else:
+        hostname = Prompt.ask(
+            f"  [bold]Enter hostname or 'all'[/bold] ({', '.join(fixable_devices)})",
+            default="all" if len(fixable_devices) <= 3 else fixable_devices[0]
+        ).strip()
+
+        if hostname.lower() == 'all':
+            targets = fixable_devices
+        else:
+            matched = None
+            for d in fixable_devices:
+                if hostname.lower() in d.lower() or d.lower() in hostname.lower():
+                    matched = d
+                    break
+            if not matched:
+                console.print(f"  [dim]No match. Available: {', '.join(fixable_devices)}[/dim]")
+                return
+            targets = [matched]
+
+    for target in targets:
+        console.print(f"  [cyan]Recovering {target} via Network Mapper...[/cyan]", end=" ")
+        try:
+            new_ip = recover_device_ip(target)
+            if new_ip:
+                console.print(f"[green]✓ New IP: {new_ip}[/green]")
+            else:
+                console.print(f"[yellow]✗ Could not recover (no SN or device unreachable)[/yellow]")
+                console.print(f"  [dim]  Use [I] Change IP to set it manually.[/dim]")
+        except Exception as e:
+            console.print(f"[red]✗ Error: {e}[/red]")
+
+
+def _update_device_ip_interactive(hostname: str) -> None:
+    """Let user update a device's management IP from the wizard."""
+    new_ip = Prompt.ask(f"  [cyan]Enter new management IP for {hostname}[/cyan]").strip()
+    
+    if not new_ip:
+        return
+    
+    # Validate IP format
+    import re
+    if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', new_ip):
+        console.print(f"  [red]Invalid IP format: {new_ip}[/red]")
+        return
+    
+    try:
+        # Update devices.json
+        devices_file = Path("db/devices.json")
+        with open(devices_file) as f:
+            devices_data = json.load(f)
+        
+        old_ip = None
+        for dev in devices_data.get("devices", []):
+            if dev.get("hostname") == hostname:
+                old_ip = dev.get("ip")
+                dev["ip"] = new_ip
+                break
+        
+        with open(devices_file, 'w') as f:
+            json.dump(devices_data, f, indent=2)
+        
+        # Update operational.json
+        ops_file = Path(f"db/configs/{hostname}/operational.json")
+        if ops_file.exists():
+            with open(ops_file) as f:
+                ops_data = json.load(f)
+            ops_data['mgmt_ip'] = new_ip
+            ops_data['ssh_host'] = new_ip
+            with open(ops_file, 'w') as f:
+                json.dump(ops_data, f, indent=4)
+        
+        # Clear related alerts
+        alerts_file = Path("db/alerts.json")
+        if alerts_file.exists():
+            with open(alerts_file) as f:
+                alert_data = json.load(f)
+            alert_data['alerts'] = [
+                a for a in alert_data.get('alerts', [])
+                if a.get('device') != hostname or a.get('type') not in 
+                   ('stale_data', 'extraction_failed', 'ip_changed', 'hostname_mismatch')
+            ]
+            with open(alerts_file, 'w') as f:
+                json.dump(alert_data, f, indent=2)
+        
+        console.print(f"  [green]✓ {hostname}: IP updated {old_ip} → {new_ip}[/green]")
+        console.print(f"  [dim]Next extraction cycle will use the new IP.[/dim]")
+    except Exception as e:
+        console.print(f"  [red]Failed to update IP: {e}[/red]")
+
+
 def _print_db_status_header(dm: DeviceManager) -> None:
     """Print DB/configs status line: device count and per-device status with specific recovery types."""
     devices = dm.list_devices()
@@ -11033,8 +13852,20 @@ def _print_db_status_header(dm: DeviceManager) -> None:
             try:
                 with open(op_file) as f:
                     op_data = json.load(f)
-                    in_recovery = op_data.get("recovery_mode_detected", False)
+                    dev_state = op_data.get("device_state", "")
+                    in_recovery = (
+                        op_data.get("recovery_mode_detected", False) or
+                        dev_state in ("GI", "RECOVERY", "DEPLOYING", "BASEOS_SHELL", "DN_RECOVERY")
+                    )
                     recovery_type = op_data.get("recovery_type", "")
+                    if not recovery_type and dev_state == "GI":
+                        recovery_type = "GI"
+                    elif not recovery_type and dev_state in ("RECOVERY", "DN_RECOVERY"):
+                        recovery_type = "DN_RECOVERY"
+                    elif not recovery_type and dev_state == "BASEOS_SHELL":
+                        recovery_type = "BASEOS_SHELL"
+                    elif not recovery_type and dev_state == "DEPLOYING":
+                        recovery_type = "GI"
             except Exception:
                 pass
         
@@ -11058,6 +13889,9 @@ def _print_db_status_header(dm: DeviceManager) -> None:
     # Format: "db/configs: 4 device(s) — PE-1 ✓  RR-SA-2 ✓  PE-4 ✓  eCdnos-RR ✓"
     device_list = "  ".join(parts)
     console.print(f"\n[dim]db/configs:[/dim] [bold]{len(devices)}[/bold] device(s) — {device_list}")
+    
+    # Show integrity alerts from extraction monitoring
+    _show_device_alerts()
     console.print()
 
 
@@ -11731,8 +14565,68 @@ def select_multiple_devices(dm: DeviceManager) -> Optional[List[Device]]:
                         if stored_mgmt_ip:
                             mgmt_ip = stored_mgmt_ip.split('/')[0] if '/' in stored_mgmt_ip else stored_mgmt_ip
                         
+                        # Dynamic connection method resolution based on device state.
+                        # Non-DNOS states prefer virsh/console; DNOS prefers SSH.
+                        _dev_state_for_conn = (op_data.get('device_state', '') or '').upper()
+                        _is_limited_mode = _dev_state_for_conn in ('GI', 'BASEOS_SHELL', 'ONIE', 'DN_RECOVERY', 'RECOVERY', 'DEPLOYING')
+                        _is_dnos_mode = _dev_state_for_conn in ('DNOS', '')
+                        _sys_type = (op_data.get('system_type', '') or '').upper()
+                        _is_cluster = _sys_type.startswith('CL-')
+                        _ncc_type = (op_data.get('ncc_type', '') or '').lower()
+                        
+                        if _is_limited_mode:
+                            if _is_cluster and _ncc_type == 'kvm' and op_data.get('kvm_host'):
+                                _kvm_host = op_data['kvm_host']
+                                conn_method = f"virsh->NCC ({_kvm_host})"
+                                op_data['connection_method'] = conn_method
+                                try:
+                                    with open(op_file, 'w') as fw:
+                                        json.dump(op_data, fw, indent=4)
+                                except IOError:
+                                    pass
+                            elif 'SSH' in conn_method if conn_method else bool(stored_mgmt_ip):
+                                try:
+                                    from .connection_strategy import get_console_config_for_device
+                                    _console_cfg = get_console_config_for_device(dev.hostname)
+                                    if _console_cfg and _console_cfg.get('port'):
+                                        _srv = _console_cfg.get('console_server_name', 'console')
+                                        _port = _console_cfg['port']
+                                        _suffix = " NCP" if _is_cluster and _ncc_type == 'kvm' else ""
+                                        conn_method = f"Console ({_srv} p{_port}{_suffix})"
+                                        op_data['connection_method'] = conn_method
+                                        try:
+                                            with open(op_file, 'w') as fw:
+                                                json.dump(op_data, fw, indent=4)
+                                        except IOError:
+                                            pass
+                                except ImportError:
+                                    pass
+                        elif _is_dnos_mode and conn_method and 'SSH' not in conn_method:
+                            _resolved = False
+                            _sn = op_data.get('serial_number', '')
+                            _mgmt = (stored_mgmt_ip or '').split('/')[0] if stored_mgmt_ip else ''
+                            _ncc_hosts = op_data.get('ncc_hosts', []) if _ncc_type == 'kvm' else []
+                            if _sn and _sn not in ('N/A', ''):
+                                conn_method = f"SSH->SN ({dev.username or 'dnroot'})"
+                                _resolved = True
+                            elif _mgmt:
+                                conn_method = f"SSH->MGMT ({_mgmt})"
+                                _resolved = True
+                            elif _ncc_hosts:
+                                conn_method = f"SSH->NCC ({_ncc_hosts[0]})"
+                                _resolved = True
+                            if _resolved:
+                                op_data['connection_method'] = conn_method
+                                try:
+                                    with open(op_file, 'w') as fw:
+                                        json.dump(op_data, fw, indent=4)
+                                except IOError:
+                                    pass
+                        
                         if conn_method:
-                            if 'SSH' in conn_method:
+                            if 'virsh' in conn_method:
+                                connection_method = f"[magenta]{conn_method}[/magenta]"
+                            elif 'SSH' in conn_method:
                                 connection_method = f"[green]{conn_method}[/green]"
                             elif 'Console' in conn_method:
                                 connection_method = f"[yellow]{conn_method}[/yellow]"
@@ -11741,43 +14635,57 @@ def select_multiple_devices(dm: DeviceManager) -> Optional[List[Device]]:
                         elif stored_mgmt_ip:
                             connection_method = "[dim]SSH (cached)[/dim]"
                         
-                        if op_data.get('recovery_mode_detected'):
+                        # Check device_state directly (primary) and recovery_mode_detected (secondary)
+                        cached_state = op_data.get('device_state', '')
+                        delete_ts = op_data.get('delete_initiated', '')
+                        last_verified = op_data.get('last_verified', '')
+                        
+                        # Auto-detect: if delete was initiated after last verification,
+                        # device must be in GI regardless of what state says
+                        if cached_state == 'DNOS' and delete_ts and delete_ts > last_verified:
+                            cached_state = 'GI'
+                            op_data['device_state'] = 'GI'
+                            op_data['recovery_mode_detected'] = True
+                            op_data['recovery_type'] = 'GI'
+                            try:
+                                with open(op_file, 'w') as fw:
+                                    json.dump(op_data, fw, indent=4)
+                            except IOError:
+                                pass
+                        
+                        if op_data.get('recovery_mode_detected') or cached_state in ('GI', 'BASEOS_SHELL', 'ONIE', 'DN_RECOVERY', 'RECOVERY', 'DEPLOYING'):
                             in_recovery = True
-                            recovery_type = op_data.get('recovery_type', '')
-                            # Show specific recovery type
+                            recovery_type = op_data.get('recovery_type', '') or cached_state
                             if recovery_type == 'DN_RECOVERY':
                                 status_str = "[bold red]DN_RECOVERY[/bold red]"
                             elif recovery_type == 'BASEOS_SHELL':
                                 status_str = "[yellow]BASEOS_SHELL[/yellow]"
                             elif recovery_type == 'ONIE':
                                 status_str = "[bold red]ONIE[/bold red]"
-                            elif recovery_type == 'GI':
+                            elif recovery_type in ('GI', 'DEPLOYING'):
                                 status_str = "[cyan]GI_MODE[/cyan]"
                             elif recovery_type == 'STANDALONE':
                                 status_str = "[yellow]STANDALONE[/yellow]"
                             else:
                                 status_str = "[bold red]RECOVERY[/bold red]"
                         elif dnos_version in ('N/A', '', None) or not dnos_version:
-                            # DNOS version N/A but not detected as recovery - likely GI mode
                             status_str = "[cyan]? GI/No DNOS[/cyan]"
-                            in_recovery = True  # Treat as non-configurable
+                            in_recovery = True
                             recovery_type = "GI"
             except:
                 pass
             
-            # Grey out devices in recovery (except GI and STANDALONE which are semi-operational)
-            configurable_states = ['GI', 'STANDALONE', '']  # Empty means not in recovery
+            configurable_states = ['GI', 'STANDALONE', 'DEPLOYING', '']
             is_configurable = not in_recovery or recovery_type in configurable_states
             
             if not is_configurable:
-                # Grey out: dim all columns for non-configurable devices
                 table.add_row(
-                    f"[dim]{i}[/dim]",
-                    f"[dim strike]{dev.hostname}[/dim]",
-                    f"[dim]{loopback}[/dim]",
-                    f"[dim]{connection_method}[/dim]",
-                    f"[dim]{mgmt_ip}[/dim]",
-                    f"[dim]{status_str}[/dim]"
+                    f"[dim]{i}[/]",
+                    f"[dim strike]{dev.hostname}[/]",
+                    f"[dim]{loopback}[/]",
+                    f"[dim]{connection_method}[/]",
+                    f"[dim]{mgmt_ip}[/]",
+                    f"[dim]{status_str}[/]"
                 )
             else:
                 # Normal display for configurable devices
@@ -11793,7 +14701,7 @@ def select_multiple_devices(dm: DeviceManager) -> Optional[List[Device]]:
         
         # Selection prompt
         console.print("\n[bold]Selection Options:[/bold]")
-        console.print("  Enter device numbers separated by commas (e.g., 1,2)")
+        console.print("  Enter device numbers: commas (1,3,5) or ranges (1-4) or both (1-3,5)")
         console.print("  Or 'all' to select all [green]available[/green] devices")
         console.print("  Or 'd' to [red]delete[/red] device(s) from cache")
         console.print("  Or 'b' to go back\n")
@@ -11806,20 +14714,63 @@ def select_multiple_devices(dm: DeviceManager) -> Optional[List[Device]]:
         # Handle delete
         if selection.lower() == 'd':
             delete_devices_from_cache(dm)
-            # Loop back to show updated device list
             continue
         
         selected = []
         if selection.lower() == 'all':
-            # Select only configurable devices
             selected = [d for d in devices if not _is_device_in_recovery(d) or _is_device_configurable(d)]
         else:
+            max_num = len(devices)
+            requested_nums = set()
+            bad_input = False
             try:
-                indices = [int(x.strip()) - 1 for x in selection.split(',')]
-                selected = [devices[i] for i in indices if 0 <= i < len(devices)]
-            except:
-                console.print("[red]Invalid selection[/red]")
+                for part in selection.replace(' ', '').split(','):
+                    if not part:
+                        continue
+                    if '-' in part:
+                        range_parts = part.split('-')
+                        nums = [p for p in range_parts if p]
+                        if len(nums) != 2 or not nums[0].isdigit() or not nums[1].isdigit():
+                            console.print(f"[red]'{part}' is not a valid range. Use N-M format (e.g., 1-{max_num})[/red]")
+                            bad_input = True
+                            continue
+                        start, end = int(nums[0]), int(nums[1])
+                        if start > end:
+                            console.print(f"[red]Invalid range '{part}': start must be <= end[/red]")
+                            bad_input = True
+                            continue
+                        if start < 1 or start > max_num:
+                            console.print(f"[red]Range start {start} is out of bounds. Valid devices: 1-{max_num}[/red]")
+                            bad_input = True
+                            continue
+                        if end > max_num:
+                            console.print(f"[red]Range end {end} exceeds available devices. Valid: 1-{max_num}[/red]")
+                            bad_input = True
+                            continue
+                        for n in range(start, end + 1):
+                            requested_nums.add(n)
+                    elif part.isdigit():
+                        n = int(part)
+                        if 1 <= n <= max_num:
+                            requested_nums.add(n)
+                        else:
+                            console.print(f"[red]Device #{n} does not exist. Valid: 1-{max_num}[/red]")
+                            bad_input = True
+                    else:
+                        console.print(f"[red]'{part}' is not a valid number[/red]")
+                        bad_input = True
+            except Exception:
+                console.print(f"[red]Invalid input. Enter numbers 1-{max_num}, commas, or ranges (e.g., 1-{min(3,max_num)})[/red]")
                 continue
+            
+            if bad_input:
+                continue
+            
+            if not requested_nums:
+                console.print(f"[red]No devices selected. Choose from 1-{max_num}[/red]")
+                continue
+            
+            selected = [devices[n - 1] for n in sorted(requested_nums)]
         
         # Filter out non-configurable devices
         invalid_devices = [d for d in selected if _is_device_in_recovery(d) and not _is_device_configurable(d)]
@@ -13297,6 +16248,24 @@ def delete_devices_from_cache(dm: DeviceManager) -> bool:
                 else:
                     console.print(f"  [dim]  No history found[/dim]")
             
+            # 4. Clear any alerts for this device
+            alerts_file = Path("/home/dn/SCALER/db/alerts.json")
+            try:
+                if alerts_file.exists():
+                    with open(alerts_file) as af:
+                        alert_data = json.load(af)
+                    before = len(alert_data.get('alerts', []))
+                    alert_data['alerts'] = [
+                        a for a in alert_data.get('alerts', [])
+                        if a.get('device') != hostname
+                    ]
+                    if len(alert_data['alerts']) < before:
+                        with open(alerts_file, 'w') as af:
+                            json.dump(alert_data, af, indent=2)
+                        console.print(f"  [green]✓[/green] Cleared alerts for {hostname}")
+            except Exception:
+                pass
+            
             deleted_count += 1
         
         # Save hostname history for future re-discovery
@@ -13941,7 +16910,8 @@ def add_device_interactive(dm: DeviceManager) -> Optional[List[Device]]:
                 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 
                 try:
-                    ssh.connect(target, username=username, password=password, timeout=30)
+                    ssh.connect(target, username=username, password=password, timeout=30,
+                                allow_agent=False, look_for_keys=False)
                     add_line("✓ SSH connection established", "green")
                     live.update(render_discovery_panel())
                 except Exception as conn_err:
@@ -14224,8 +17194,25 @@ def add_device_interactive(dm: DeviceManager) -> Optional[List[Device]]:
             if system_type.lower() == 'b':
                 continue
             
-            # NCC ID
-            ncc_id = Prompt.ask("  NCC ID", default="0")
+            # NCC ID (auto-detect from operational.json if available)
+            _gi_default_ncc = "0"
+            try:
+                _gi_op = Path(f"/home/dn/SCALER/db/configs/{system_name}/operational.json")
+                if _gi_op.exists():
+                    with open(_gi_op) as _gf:
+                        _gi_od = json.load(_gf)
+                        _gi_vms = _gi_od.get('ncc_vms', [])
+                        for _gv in _gi_vms:
+                            _gvm = re.search(r'ncc(\d+)', _gv)
+                            if _gvm:
+                                _gi_default_ncc = _gvm.group(1)
+                                break
+                        _gi_saved = _gi_od.get('deploy_ncc_id')
+                        if _gi_saved is not None and str(_gi_saved).isdigit():
+                            _gi_default_ncc = str(_gi_saved)
+            except:
+                pass
+            ncc_id = Prompt.ask("  NCC ID", default=_gi_default_ncc)
             
             # Show the deploy command that will be used
             deploy_cmd = f"request system deploy system-type {system_type} name {system_name} ncc-id {ncc_id}"
@@ -14528,9 +17515,71 @@ def select_device(dm: DeviceManager) -> Optional[Device]:
                             # Remove CIDR notation if present
                             mgmt_ip = stored_mgmt_ip.split('/')[0] if '/' in stored_mgmt_ip else stored_mgmt_ip
                         
+                        # Dynamic connection method resolution based on device state.
+                        # Non-DNOS states prefer virsh/console; DNOS prefers SSH.
+                        _dev_state_for_conn = (op_data.get('device_state', '') or '').upper()
+                        _is_limited_mode = _dev_state_for_conn in ('GI', 'BASEOS_SHELL', 'ONIE', 'DN_RECOVERY', 'RECOVERY', 'DEPLOYING')
+                        _is_dnos_mode = _dev_state_for_conn in ('DNOS', '')
+                        _sys_type = (op_data.get('system_type', '') or '').upper()
+                        _is_cluster = _sys_type.startswith('CL-')
+                        _ncc_type = (op_data.get('ncc_type', '') or '').lower()
+                        
+                        if _is_limited_mode:
+                            if _is_cluster and _ncc_type == 'kvm' and op_data.get('kvm_host'):
+                                _kvm_host = op_data['kvm_host']
+                                conn_method = f"virsh->NCC ({_kvm_host})"
+                                op_data['connection_method'] = conn_method
+                                try:
+                                    with open(op_file, 'w') as fw:
+                                        json.dump(op_data, fw, indent=4)
+                                except IOError:
+                                    pass
+                            elif 'SSH' in conn_method if conn_method else bool(stored_mgmt_ip):
+                                try:
+                                    from .connection_strategy import get_console_config_for_device
+                                    _console_cfg = get_console_config_for_device(dev.hostname)
+                                    if _console_cfg and _console_cfg.get('port'):
+                                        _srv = _console_cfg.get('console_server_name', 'console')
+                                        _port = _console_cfg['port']
+                                        _suffix = " NCP" if _is_cluster and _ncc_type == 'kvm' else ""
+                                        conn_method = f"Console ({_srv} p{_port}{_suffix})"
+                                        op_data['connection_method'] = conn_method
+                                        try:
+                                            with open(op_file, 'w') as fw:
+                                                json.dump(op_data, fw, indent=4)
+                                        except IOError:
+                                            pass
+                                except ImportError:
+                                    pass
+                        elif _is_dnos_mode and conn_method and 'SSH' not in conn_method:
+                            # DNOS mode but cached method is virsh/Console -- resolve to SSH.
+                            # Priority: SN > MGMT IP > NCC hostname
+                            _resolved = False
+                            _sn = op_data.get('serial_number', '')
+                            _mgmt = (stored_mgmt_ip or '').split('/')[0] if stored_mgmt_ip else ''
+                            _ncc_hosts = op_data.get('ncc_hosts', []) if _ncc_type == 'kvm' else []
+                            if _sn and _sn not in ('N/A', ''):
+                                conn_method = f"SSH->SN ({dev.username or 'dnroot'})"
+                                _resolved = True
+                            elif _mgmt:
+                                conn_method = f"SSH->MGMT ({_mgmt})"
+                                _resolved = True
+                            elif _ncc_hosts:
+                                conn_method = f"SSH->NCC ({_ncc_hosts[0]})"
+                                _resolved = True
+                            if _resolved:
+                                op_data['connection_method'] = conn_method
+                                try:
+                                    with open(op_file, 'w') as fw:
+                                        json.dump(op_data, fw, indent=4)
+                                except IOError:
+                                    pass
+                        
                         # Format connection method with color
                         if conn_method:
-                            if 'SSH' in conn_method:
+                            if 'virsh' in conn_method:
+                                connection_method = f"[magenta]{conn_method}[/magenta]"
+                            elif 'SSH' in conn_method:
                                 connection_method = f"[green]{conn_method}[/green]"
                             elif 'Console' in conn_method:
                                 connection_method = f"[yellow]{conn_method}[/yellow]"
@@ -14551,9 +17600,33 @@ def select_device(dm: DeviceManager) -> Optional[Device]:
                             # Show unique neighbors (most meaningful) with interface count in parentheses
                             lldp_iface_count = f"[green]{unique_neighbors}[/green] [dim]({iface_count} ifs)[/dim]"
                         
-                        if op_data.get('recovery_mode_detected'):
+                        _dev_state = op_data.get('device_state', '').upper()
+                        _upgrade_in_prog = op_data.get('upgrade_in_progress', False)
+                        _install_type = op_data.get('install_type', '')
+                        
+                        # Auto-detect stale DNOS state after system delete
+                        _del_ts = op_data.get('delete_initiated', '')
+                        _last_v = op_data.get('last_verified', '')
+                        if _dev_state == 'DNOS' and _del_ts and _del_ts > _last_v:
+                            _dev_state = 'GI'
+                        
+                        if _dev_state == 'DNOS':
+                            pass
+                        elif _dev_state == 'DEPLOYING':
+                            status_str = "[cyan]DEPLOYING[/cyan]"
+                        elif _dev_state == 'UPGRADING':
+                            status_str = "[yellow]UPGRADING[/yellow]"
+                        elif _dev_state in ('GI', 'BASEOS_SHELL', 'ONIE'):
+                            _state_map = {
+                                'GI': "[cyan]GI_MODE[/cyan]",
+                                'BASEOS_SHELL': "[yellow]BASEOS_SHELL[/yellow]",
+                                'ONIE': "[bold red]ONIE[/bold red]",
+                            }
+                            status_str = _state_map.get(_dev_state, f"[yellow]{_dev_state}[/yellow]")
+                        elif _dev_state in ('RECOVERY', 'DN_RECOVERY'):
+                            status_str = "[bold red]RECOVERY[/bold red]"
+                        elif op_data.get('recovery_mode_detected'):
                             recovery_type = op_data.get('recovery_type', '')
-                            # Show specific recovery type
                             if recovery_type == 'DN_RECOVERY':
                                 status_str = "[bold red]DN_RECOVERY[/bold red]"
                             elif recovery_type == 'BASEOS_SHELL':
@@ -14566,6 +17639,10 @@ def select_device(dm: DeviceManager) -> Optional[Device]:
                                 status_str = "[yellow]STANDALONE[/yellow]"
                             else:
                                 status_str = "[bold red]RECOVERY[/bold red]"
+                        elif _upgrade_in_prog and _install_type == 'gi_deploy':
+                            status_str = "[cyan]DEPLOYING[/cyan]"
+                        elif _upgrade_in_prog:
+                            status_str = "[yellow]UPGRADING[/yellow]"
                         elif dnos_version in ('N/A', '', None) or not dnos_version:
                             status_str = "[cyan]? GI/No DNOS[/cyan]"
             except Exception:
@@ -14688,13 +17765,20 @@ def select_device(dm: DeviceManager) -> Optional[Device]:
                     recovery_type = op_data.get('recovery_type', '')
                     device_state = op_data.get('device_state', recovery_type)
                     
-                    # Console access info (configurable per-device)
-                    CONSOLE_INFO = {
-                        'PE-2': 'ssh dn@console-b15 → [3] Port access → [13] PE-2 → dn/drivenets',
-                        'PE-1': 'ssh dn@console-b15 → [3] Port access → [12] PE-1 → dn/drivenets',
-                        'PE-4': 'ssh dn@console-b15 → [3] Port access → [14] PE-4 → dn/drivenets',
-                    }
-                    console_info = CONSOLE_INFO.get(selected_dev.hostname)
+                    # Console access info -- read from centralized DB
+                    try:
+                        from .connection_strategy import get_console_config_for_device
+                        _ccfg = get_console_config_for_device(selected_dev.hostname)
+                        if _ccfg:
+                            console_info = (
+                                f"ssh {_ccfg['user']}@{_ccfg['host']} -> "
+                                f"[3] Port access -> [{_ccfg['port']}] {selected_dev.hostname} -> "
+                                f"{_ccfg['user']}/drivenets"
+                            )
+                        else:
+                            console_info = None
+                    except Exception:
+                        console_info = None
                     
                     # ═══════════════════════════════════════════════════════════════
                     # ONIE MODE - Need BaseOS installation
@@ -14731,23 +17815,7 @@ def select_device(dm: DeviceManager) -> Optional[Device]:
                             try:
                                 from .wizard.system_restore import run_system_restore_wizard
                                 console.print("")
-                                success = run_system_restore_wizard(selected_dev, None)
-                                
-                                # After System Restore completes successfully, device should be in GI or DNOS
-                                # Offer to continue with Image Upgrade if needed
-                                if success:
-                                    console.print("\n[green]✓ System Restore completed[/green]")
-                                    if Confirm.ask("\n[cyan]Continue to Image Upgrade to deploy DNOS?[/cyan]", default=True):
-                                        try:
-                                            from .wizard.multi_device import MultiDeviceContext
-                                            # run_image_upgrade_wizard is defined in this file
-                                            temp_ctx = MultiDeviceContext([selected_dev])
-                                            temp_ctx.configs = {selected_dev.hostname: ""}
-                                            console.print("")
-                                            run_image_upgrade_wizard(temp_ctx)
-                                        except Exception as e:
-                                            console.print(f"\n[red]Error launching Image Upgrade: {e}[/red]")
-                                
+                                run_system_restore_wizard(selected_dev, None)
                             except Exception as e:
                                 console.print(f"\n[red]Error: {e}[/red]")
                             Prompt.ask("\n[dim]Press Enter to continue[/dim]", default="")
@@ -15092,12 +18160,24 @@ def select_device(dm: DeviceManager) -> Optional[Device]:
                                 # Default name is the hostname
                                 default_name = selected_dev.hostname
                                 
+                                # Auto-detect NCC ID from operational.json
+                                _qd_ncc = 0
+                                _qd_vms = gi_op_data.get('ncc_vms', [])
+                                for _qd_vm in _qd_vms:
+                                    _qd_m = re.search(r'ncc(\d+)', _qd_vm)
+                                    if _qd_m:
+                                        _qd_ncc = int(_qd_m.group(1))
+                                        break
+                                _qd_saved = gi_op_data.get('deploy_ncc_id')
+                                if _qd_saved is not None and str(_qd_saved).isdigit():
+                                    _qd_ncc = int(_qd_saved)
+                                
                                 console.print(f"  [dim]System Type:[/dim] {default_system_type}")
                                 console.print(f"  [dim]System Name:[/dim] {default_name}")
-                                console.print(f"  [dim]NCC ID:[/dim] 0")
+                                console.print(f"  [dim]NCC ID:[/dim] {_qd_ncc} [dim](auto-detected)[/dim]")
                                 
                                 # Build the deploy command
-                                deploy_cmd = f"request system deploy system-type {default_system_type} name {default_name} ncc-id 0"
+                                deploy_cmd = f"request system deploy system-type {default_system_type} name {default_name} ncc-id {_qd_ncc}"
                                 
                                 console.print(f"\n[bold]Deploy Command:[/bold]")
                                 console.print(f"  [yellow]{deploy_cmd}[/yellow]")
@@ -15121,7 +18201,7 @@ def select_device(dm: DeviceManager) -> Optional[Device]:
                                     system_name = Prompt.ask("  System Name", default=default_name)
                                     if system_name.lower() == 'b':
                                         continue
-                                    ncc_id = Prompt.ask("  NCC ID", default="0")
+                                    ncc_id = Prompt.ask("  NCC ID", default=str(_qd_ncc))
                                     if ncc_id.lower() == 'b':
                                         continue
                                     
@@ -15224,16 +18304,53 @@ def select_device(dm: DeviceManager) -> Optional[Device]:
                                             channel = ssh.invoke_shell(width=200, height=50)
                                             channel.settimeout(60)
                                             time.sleep(1)
-                                            _ = channel.recv(10000)
+                                            prompt_out = channel.recv(10000).decode('utf-8', errors='replace')
+                                        else:
+                                            prompt_out = ""
                                         
-                                        # Flush any pending output
-                                        try:
-                                            while channel.recv_ready():
-                                                channel.recv(65535)
-                                        except:
-                                            pass
+                                        # CRITICAL: Multi-layer verification before executing commands
+                                        from .utils import verify_device_hostname, post_connect_verify, sync_device_from_live
+                                        if prompt_out:
+                                            host_ok, actual_h = verify_device_hostname(prompt_out, selected_dev.hostname)
+                                            if not host_ok:
+                                                console.print(f"\n[bold red]⛔ SAFETY ABORT: Prompt shows '{actual_h}' but expected '{selected_dev.hostname}'![/bold red]")
+                                                console.print(f"[red]Wrong device detected. Disconnecting immediately.[/red]")
+                                                ssh.close()
+                                                connected = False
+                                            elif actual_h not in ('GI', 'UNKNOWN'):
+                                                # Layer 2-3: Deep verification + DB sync
+                                                verify_r = post_connect_verify(channel, selected_dev.hostname, prompt_output=prompt_out)
+                                                if verify_r.get('abort_reason'):
+                                                    console.print(f"\n[bold red]⛔ {verify_r['abort_reason']}[/bold red]")
+                                                    ssh.close()
+                                                    connected = False
+                                                else:
+                                                    sync_device_from_live(selected_dev.hostname, verify_r)
+                                                    console.print(f"[green]✓ Device verified: {verify_r['actual_hostname']}[/green]")
+                                            elif actual_h == 'GI':
+                                                # GI mode: verify serial from show system stack
+                                                from .utils import verify_gi_serial
+                                                gi_v = verify_gi_serial(channel, selected_dev.hostname)
+                                                if gi_v.get('abort_reason'):
+                                                    console.print(f"\n[bold red]⛔ {gi_v['abort_reason']}[/bold red]")
+                                                    ssh.close()
+                                                    connected = False
+                                                else:
+                                                    console.print(f"[green]✓ GI device serial verified[/green]")
                                         
+                                        if connected:
+                                            # Flush any pending output
+                                            try:
+                                                while channel.recv_ready():
+                                                    channel.recv(65535)
+                                            except:
+                                                pass
+                                        
+                                    if connected:
                                         # Send the FULL deploy command
+                                        from .utils import audit_log
+                                        _deploy_ip = gi_op_data.get('gi_mgmt_ip') or selected_dev.ip
+                                        audit_log(selected_dev.hostname, _deploy_ip, deploy_cmd, "single-device-deploy")
                                         console.print(f"\n[bold]Executing:[/bold] [yellow]{deploy_cmd}[/yellow]")
                                         channel.send("\r\n")
                                         time.sleep(0.5)
@@ -15382,23 +18499,7 @@ def select_device(dm: DeviceManager) -> Optional[Device]:
                             try:
                                 from .wizard.system_restore import run_system_restore_wizard
                                 console.print("")
-                                success = run_system_restore_wizard(selected_dev, None)
-                                
-                                # After System Restore completes, device should be in GI
-                                # Offer to continue with Image Upgrade
-                                if success:
-                                    console.print("\n[green]✓ System Restore completed - Device is now in GI mode[/green]")
-                                    if Confirm.ask("\n[cyan]Continue to Image Upgrade to load images and deploy DNOS?[/cyan]", default=True):
-                                        try:
-                                            from .wizard.multi_device import MultiDeviceContext
-                                            # run_image_upgrade_wizard is defined in this file
-                                            temp_ctx = MultiDeviceContext([selected_dev])
-                                            temp_ctx.configs = {selected_dev.hostname: ""}
-                                            console.print("")
-                                            run_image_upgrade_wizard(temp_ctx)
-                                        except Exception as e:
-                                            console.print(f"\n[red]Error launching Image Upgrade: {e}[/red]")
-                                
+                                run_system_restore_wizard(selected_dev, None)
                             except Exception as e:
                                 console.print(f"\n[red]Error: {e}[/red]")
                             Prompt.ask("\n[dim]Press Enter to continue[/dim]", default="")
@@ -15452,23 +18553,7 @@ def select_device(dm: DeviceManager) -> Optional[Device]:
                             try:
                                 from .wizard.system_restore import run_system_restore_wizard
                                 console.print("")
-                                success = run_system_restore_wizard(selected_dev, None)
-                                
-                                # After System Restore completes, device should be in GI
-                                # Offer to continue with Image Upgrade
-                                if success:
-                                    console.print("\n[green]✓ System Restore completed - Device is now in GI mode[/green]")
-                                    if Confirm.ask("\n[cyan]Continue to Image Upgrade to load images and deploy DNOS?[/cyan]", default=True):
-                                        try:
-                                            from .wizard.multi_device import MultiDeviceContext
-                                            # run_image_upgrade_wizard is defined in this file
-                                            temp_ctx = MultiDeviceContext([selected_dev])
-                                            temp_ctx.configs = {selected_dev.hostname: ""}
-                                            console.print("")
-                                            run_image_upgrade_wizard(temp_ctx)
-                                        except Exception as e:
-                                            console.print(f"\n[red]Error launching Image Upgrade: {e}[/red]")
-                                
+                                run_system_restore_wizard(selected_dev, None)
                             except Exception as e:
                                 console.print(f"\n[red]Error: {e}[/red]")
                             Prompt.ask("\n[dim]Press Enter to continue[/dim]", default="")
@@ -18698,6 +21783,32 @@ Flowspec can be enabled on: Physical, Bundle, Physical VLAN, Bundle VLAN, IRB in
                     except ValueError:
                         pass
             
+            # Also scan device config for L3 sub-interfaces (have IP addresses)
+            # These MUST be skipped when creating L2-AC interfaces to avoid
+            # "cannot have both ip-addresses and l2-service" errors
+            if state.current_config:
+                for parent in selected_parents:
+                    l3_ids = set()
+                    lines_iter = state.current_config.split('\n')
+                    current_subif_id = None
+                    parent_prefix_str = f"  {parent}."
+                    for cfg_line in lines_iter:
+                        if cfg_line.startswith(parent_prefix_str) and not cfg_line.strip().startswith('!'):
+                            rest = cfg_line[len(parent_prefix_str):].strip()
+                            try:
+                                current_subif_id = int(rest)
+                            except ValueError:
+                                current_subif_id = None
+                        elif cfg_line.strip() == '!' or (cfg_line.startswith('  ') and not cfg_line.startswith('    ') and current_subif_id is not None):
+                            current_subif_id = None
+                        elif current_subif_id is not None and ('ipv4-address' in cfg_line or 'ipv6-address' in cfg_line):
+                            l3_ids.add(current_subif_id)
+                    if l3_ids:
+                        if parent not in used_vlans_by_parent:
+                            used_vlans_by_parent[parent] = set()
+                        used_vlans_by_parent[parent] |= l3_ids
+                        console.print(f"[yellow]⚠ {parent}: {len(l3_ids)} existing L3 sub-interface(s) with IP addresses (will skip to avoid L2/L3 conflict)[/yellow]")
+            
             # Also parse QinQ outer/inner VLAN tags from KEPT interfaces only
             # Track: outer_tag -> max_inner_tag for suggestion
             # Only suggest based on VLANs that will remain (kept interfaces)
@@ -19614,6 +22725,80 @@ Flowspec can be enabled on: Physical, Bundle, Physical VLAN, Bundle VLAN, IRB in
                         # Persist the preference
                         if hasattr(state, 'interface_prefs'):
                             state.interface_prefs['interface_mode'] = iface_mode
+                        
+                        # L2/L3 conflict warning when user selects L2 mode
+                        if enable_l2_service and state.current_config:
+                            l3_overlap_found = False
+                            for _chk_parent in selected_parents:
+                                _l3_ids = set()
+                                _pfx = f"  {_chk_parent}."
+                                _cur_id = None
+                                for _cl in state.current_config.split('\n'):
+                                    if _cl.startswith(_pfx) and not _cl.strip().startswith('!'):
+                                        try:
+                                            _cur_id = int(_cl[len(_pfx):].strip())
+                                        except ValueError:
+                                            _cur_id = None
+                                    elif _cl.strip() == '!' or (_cl.startswith('  ') and not _cl.startswith('    ') and _cur_id is not None):
+                                        _cur_id = None
+                                    elif _cur_id is not None and ('ipv4-address' in _cl or 'ipv6-address' in _cl):
+                                        _l3_ids.add(_cur_id)
+                                
+                                if not _l3_ids:
+                                    continue
+                                
+                                # Check if configured VLAN range overlaps
+                                _planned_vlans = set()
+                                if per_interface_vlans:
+                                    _planned_vlans = set(per_interface_vlans)
+                                else:
+                                    _step = vlan_step if vlan_step > 0 else 1
+                                    for _vi in range(subif_per_parent):
+                                        _planned_vlans.add(vlan_start + _vi * _step)
+                                
+                                _overlap = _l3_ids & _planned_vlans
+                                if _overlap:
+                                    l3_overlap_found = True
+                                    _sorted = sorted(_overlap)
+                                    _display = ', '.join(str(v) for v in _sorted[:8])
+                                    if len(_sorted) > 8:
+                                        _display += f"... (+{len(_sorted) - 8} more)"
+                                    console.print(f"\n[red bold]⚠ L2/L3 OVERLAP on {_chk_parent}:[/red bold]")
+                                    console.print(f"[red]  Sub-interfaces .{_display} already have IP addresses on device[/red]")
+                                    console.print(f"[red]  Adding l2-service to these will FAIL:[/red]")
+                                    console.print(f"[red]  'cannot have both ip-addresses and l2-service'[/red]")
+                            
+                            if l3_overlap_found:
+                                console.print(f"\n[yellow]Options:[/yellow]")
+                                console.print(f"  [A] Auto-skip conflicting VLANs (recommended)")
+                                console.print(f"  [C] Change VLAN start to avoid overlap")
+                                console.print(f"  [I] Ignore and continue (will be skipped at generation)")
+                                console.print(f"  [B] Back")
+                                _l3_choice = Prompt.ask("Select", choices=["a", "A", "c", "C", "i", "I", "b", "B"], default="a").lower()
+                                if _l3_choice == "b":
+                                    continue
+                                elif _l3_choice == "c":
+                                    # Suggest a safe start
+                                    _all_l3 = set()
+                                    for _p in selected_parents:
+                                        _pfx2 = f"  {_p}."
+                                        _cid = None
+                                        for _cl2 in state.current_config.split('\n'):
+                                            if _cl2.startswith(_pfx2) and not _cl2.strip().startswith('!'):
+                                                try:
+                                                    _cid = int(_cl2[len(_pfx2):].strip())
+                                                except ValueError:
+                                                    _cid = None
+                                            elif _cl2.strip() == '!' or (_cl2.startswith('  ') and not _cl2.startswith('    ') and _cid is not None):
+                                                _cid = None
+                                            elif _cid is not None and ('ipv4-address' in _cl2 or 'ipv6-address' in _cl2):
+                                                _all_l3.add(_cid)
+                                    safe_start = max(_all_l3) + 1 if _all_l3 else vlan_start
+                                    new_start = IntPrompt.ask(f"New VLAN start", default=safe_start)
+                                    vlan_start = new_start
+                                    console.print(f"[green]✓ VLAN start changed to {vlan_start}[/green]")
+                                elif _l3_choice == "a":
+                                    console.print(f"[green]✓ Conflicting VLANs will be auto-skipped during generation[/green]")
                     
                     # IP Configuration for L3 mode
                     if not enable_l2_service:
@@ -20825,82 +24010,39 @@ def _configure_single_interface_type(
         pct = round(counts['subinterfaces'] / subif_limit * 100, 1) if subif_limit > 0 else 0
         console.print(f"\n[green]✓ Validation passed: {counts['subinterfaces']}/{subif_limit} sub-interfaces ({pct}%)[/green]")
     
-    # Generate configuration with correct DNOS CLI syntax
+    # Generate configuration using shared config_builders
     expansion = parser.parse_interface_pattern(pattern_input, vlan_type.value)
-    
-    config_lines = ["interfaces"]
-    
-    # Group sub-interfaces by parent for correct ordering
-    # DNOS requires: parent -> its sub-ifs -> next parent -> its sub-ifs
+
     from collections import OrderedDict
-    subifs_by_parent = OrderedDict()
-    for subif in expansion.subinterfaces:
-        parts = subif.split('.')
-        parent_name = parts[0] if len(parts) > 1 else subif
-        if parent_name not in subifs_by_parent:
-            subifs_by_parent[parent_name] = []
-        subifs_by_parent[parent_name].append(subif)
-    
-    # Generate interfaces in correct order: each parent followed by its sub-interfaces
-    global_subif_idx = 0
-    for parent_idx, parent in enumerate(expansion.parents):
-        # Generate parent interface first
-        config_lines.append(f"  {parent}")
-        config_lines.append("    admin-state enabled")
-        config_lines.append("  !")
-        
-        # Generate all sub-interfaces for this parent immediately after
-        parent_subifs = subifs_by_parent.get(parent, [])
-        for subif_within_parent, subif in enumerate(parent_subifs):
-            config_lines.append(f"  {subif}")
-            config_lines.append("    admin-state enabled")
-            
-            if vlan_type == VlanType.QINQ:
-                # QinQ: outer + inner vlan-tags on single line
-                if outer_vlan_step == -1:
-                    outer = outer_vlan_start + parent_idx
-                elif outer_vlan_step == 0:
-                    outer = outer_vlan_start
-                else:
-                    outer = outer_vlan_start + (global_subif_idx * outer_vlan_step)
-                
-                # Inner VLAN calculation
-                if inner_vlan_step == -2:
-                    # Per parent stepping
-                    inner = inner_vlan_start + parent_idx
-                else:
-                    # Per sub-interface within parent
-                    inner = inner_vlan_start + (subif_within_parent * inner_vlan_step)
-                outer = min(max(outer, 1), 4094)
-                inner = min(max(inner, 1), 4094)
-                config_lines.append(f"    vlan-tags outer-tag {outer} inner-tag {inner} outer-tpid 0x8100")
-            else:
-                # Single vlan-id
-                vlan = outer_vlan_start + (global_subif_idx * outer_vlan_step)
-                vlan = min(max(vlan, 1), 4094)
-                config_lines.append(f"    vlan-id {vlan}")
-            
-            # Add IP addresses if configured
-            if configure_ip:
-                if ip_version in ["ipv4", "dual"] and ipv4_start:
-                    ipv4_addr = calculate_next_ip(
-                        ipv4_start, global_subif_idx, ip_mode, ipv4_prefix,
-                        parent_idx, subif_within_parent, ipv4_step
-                    )
-                    config_lines.append(f"    ipv4-address {ipv4_addr}/{ipv4_prefix}")
-                
-                if ip_version in ["ipv6", "dual"] and ipv6_start:
-                    ipv6_addr = calculate_next_ip(
-                        ipv6_start, global_subif_idx, ip_mode, ipv6_prefix,
-                        parent_idx, subif_within_parent, ipv6_step
-                    )
-                    config_lines.append(f"    ipv6-address {ipv6_addr}/{ipv6_prefix}")
-            
-            config_lines.append("  !")
-            created_interfaces.append(subif)
-            global_subif_idx += 1
-    
-    config_lines.append("!")
+    _subifs_by_parent = OrderedDict()
+    for _s in expansion.subinterfaces:
+        _parts = _s.split('.')
+        _pname = _parts[0] if len(_parts) > 1 else _s
+        if _pname not in _subifs_by_parent:
+            _subifs_by_parent[_pname] = []
+        _subifs_by_parent[_pname].append(_s)
+
+    from scaler.wizard.config_builders import build_from_expansion
+    _cfg_text, _created = build_from_expansion(
+        parents=expansion.parents,
+        subifs_by_parent=_subifs_by_parent,
+        vlan_type=vlan_type.value,
+        outer_vlan_start=outer_vlan_start,
+        outer_vlan_step=outer_vlan_step,
+        inner_vlan_start=inner_vlan_start,
+        inner_vlan_step=inner_vlan_step,
+        configure_ip=configure_ip,
+        ip_version=ip_version,
+        ip_mode=ip_mode,
+        ipv4_start=ipv4_start,
+        ipv4_prefix=ipv4_prefix,
+        ipv4_step=ipv4_step,
+        ipv6_start=ipv6_start,
+        ipv6_prefix=ipv6_prefix,
+        ipv6_step=ipv6_step,
+    )
+    config_lines = _cfg_text.split('\n')
+    created_interfaces.extend(_created)
     
     # =========================================================================
     # BUNDLE-SPECIFIC: Configure bundle members
@@ -31423,12 +34565,14 @@ def configure_flowspec_policies(
     - Redirect traffic to a next-hop (scrubbing center)
     
     DNOS Syntax (from CLI documentation - VERIFIED via FSVPN Wizard):
+    VRF match-class support: SW-182546 (DP enabler), SW-226319.
     
     ! Step 1: Define match-class and policy (routing-policy)
     routing-policy
       flowspec-local-policies
         ipv4
           match-class <name>
+            vrf <vrf-name>                ← Optional (SW-226319): restrict to VRF; omit = match any
             dest-ip <A.B.C.D/x>           ← MANDATORY: dest-ip or source-ip!
             source-ip <A.B.C.D/x>
             dest-port eq <port>           ← Use 'eq' for single port
@@ -31899,18 +35043,60 @@ Multiple templates can be selected.[/dim]
     include_ipv4 = ip_version_choice in ["1", "3"]
     include_ipv6 = ip_version_choice in ["2", "3"]
     
+    # === VRF Match Selection (SW-182546, SW-226319 - DP enabler) ===
+    # Optional vrf in match-class: restricts rule to traffic from that VRF. Default=any (backward compatible).
+    # Sources: (1) VRFs created in this wizard session (services hierarchy), (2) device config
+    selected_vrf = None  # None = match any VRF
+    config_for_vrf_detection = state.current_config or ""
+    # Add VRFs from wizard-created services (network-services vrf instance <name>)
+    if hasattr(state, 'hierarchies') and state.hierarchies:
+        svc_cfg = state.hierarchies.get('services')
+        if svc_cfg and getattr(svc_cfg, 'new_config', None):
+            config_for_vrf_detection += "\n" + (svc_cfg.new_config or "")
+    if multi_ctx:
+        for dev in multi_ctx.devices:
+            config_for_vrf_detection += "\n" + (multi_ctx.configs.get(dev.hostname, "") or "")
+    vrf_instances = re.findall(r'instance\s+(\S+)', config_for_vrf_detection)
+    user_vrfs = sorted(set(v for v in vrf_instances if v not in ['management', 'default', '__base__', 'P']))
+    
+    if user_vrfs:
+        console.print("\n[bold cyan]━━━ VRF Match (optional - SW-182546) ━━━[/bold cyan]")
+        console.print("[dim]Restrict rules to traffic from a specific VRF. Default: match any VRF.[/dim]")
+        console.print("[dim]VRFs from this wizard session (services) and device config are listed.[/dim]")
+        console.print("  [A] Any VRF (match all - default)")
+        for i, vrf in enumerate(user_vrfs[:15], 1):
+            console.print(f"  [{i}] {vrf}")
+        if len(user_vrfs) > 15:
+            console.print(f"  [dim]... +{len(user_vrfs) - 15} more[/dim]")
+        console.print("  [B] Back")
+        vrf_choices = ["a", "A", "b", "B"] + [str(i) for i in range(1, min(16, len(user_vrfs) + 1))]
+        vrf_choice = Prompt.ask("Select VRF to match", choices=vrf_choices, default="a").lower()
+        if vrf_choice == 'b':
+            raise BackException()
+        if vrf_choice != 'a':
+            try:
+                idx = int(vrf_choice)
+                if 1 <= idx <= len(user_vrfs):
+                    selected_vrf = user_vrfs[idx - 1]
+                    console.print(f"[green]Rules will match traffic from VRF [bold]{selected_vrf}[/bold] only[/green]")
+            except ValueError:
+                pass
+    
     # === Generate DNOS config ===
     config_lines.append("routing-policy")
     config_lines.append("  flowspec-local-policies")
     
     # Helper function to generate match-class config for a given IP version
-    def generate_match_classes_config(ip_version: str, indent: str = "    "):
+    def generate_match_classes_config(ip_version: str, indent: str = "    ", vrf_name: Optional[str] = None):
         """Generate match-class and policy config for IPv4 or IPv6."""
         lines = []
         lines.append(f"{indent}{ip_version}")
         
         for mc in match_classes:
             lines.append(f"{indent}  match-class {mc['name']}")
+            # VRF match (SW-226319): optional, restricts to traffic from specific VRF
+            if vrf_name:
+                lines.append(f"{indent}    vrf {vrf_name}")
             # NOTE: dest-ip or source-ip is MANDATORY for FlowSpec local policies
             if mc.get('dest_ip'):
                 lines.append(f"{indent}    dest-ip {mc['dest_ip']}")
@@ -31963,11 +35149,11 @@ Multiple templates can be selected.[/dim]
     
     # Generate IPv4 config if selected
     if include_ipv4:
-        config_lines.extend(generate_match_classes_config("ipv4"))
+        config_lines.extend(generate_match_classes_config("ipv4", vrf_name=selected_vrf))
     
     # Generate IPv6 config if selected
     if include_ipv6:
-        config_lines.extend(generate_match_classes_config("ipv6"))
+        config_lines.extend(generate_match_classes_config("ipv6", vrf_name=selected_vrf))
     
     # Close routing-policy hierarchy
     config_lines.append("  !")
@@ -32006,6 +35192,7 @@ Multiple templates can be selected.[/dim]
     console.print(f"\n[bold]Flowspec Policy Summary:[/bold]")
     console.print(f"  Policy:        [cyan]{policy_name}[/cyan]")
     console.print(f"  IP Version:    [magenta]{ip_version_str}[/magenta]")
+    console.print(f"  VRF match:     [cyan]{selected_vrf or 'any'}[/cyan]")
     console.print(f"  Match-classes: [yellow]{len(match_classes)}[/yellow]")
     
     for mc in match_classes:
@@ -36204,7 +39391,7 @@ def run_wizard(batch_config: Optional[BatchScaleConfig] = None):
         else:
             console.print("\n[bold]Step 1: Select Target Device[/bold]")
             console.print("  [1] Single device configuration")
-            console.print("  [2] [cyan]Multi-device synchronized mode[/cyan] (configure multiple PEs together)")
+            console.print("  [2] [cyan]Multi-device synchronized mode[/cyan] (configure multiple devices together)")
             if NETWORK_MAPPER_AVAILABLE:
                 console.print("  [3] [magenta]📡 Import from Network-Mapper[/magenta] (discover devices from topology)")
             console.print("  [4] [green]➕ Add New Device[/green] (SSH discovery by IP/Serial)")
@@ -36446,6 +39633,20 @@ def run_wizard(batch_config: Optional[BatchScaleConfig] = None):
                 _sync_configs_from_network_mapper(multi_ctx, dm)
             elif multi_action == 'refresh':
                 _refresh_multi_device_configs(multi_ctx)
+            elif multi_action == 'change_ip':
+                console.print("\n[bold]Select device to update IP:[/bold]")
+                for idx, dev in enumerate(multi_ctx.devices, 1):
+                    console.print(f"  [{idx}] {dev.hostname} [dim](current: {dev.ip})[/dim]")
+                console.print("  [B] Cancel")
+                ip_choice = Prompt.ask("Select", default="b").strip().lower()
+                if ip_choice != 'b' and ip_choice.isdigit():
+                    ip_idx = int(ip_choice) - 1
+                    if 0 <= ip_idx < len(multi_ctx.devices):
+                        target = multi_ctx.devices[ip_idx]
+                        _update_device_ip_interactive(target.hostname)
+                        updated = DeviceManager().get_device(target.hostname)
+                        if updated and updated.ip != target.ip:
+                            target.ip = updated.ip
             elif multi_action == 'exit':
                 # Go back to device selection by restarting wizard
                 return run_wizard(batch_config)
@@ -36472,6 +39673,28 @@ def run_wizard(batch_config: Optional[BatchScaleConfig] = None):
                     recovery_detected = op_data.get('recovery_mode_detected', False)
                     recovery_type = op_data.get('recovery_type', '')
                     
+                    # If cached state is non-DNOS, do a quick live SSH probe
+                    if device_state in ('GI', 'DEPLOYING', 'UPGRADING', 'RECOVERY', 'DN_RECOVERY') or recovery_type in ('GI',):
+                        try:
+                            from .connection_strategy import refresh_device_state, DeviceState
+                            console.print(f"[dim]Verifying {device.hostname} state...[/dim]", end=" ")
+                            _live_state, _live_rt, _live_err = refresh_device_state(
+                                device.hostname, update_operational=True)
+                            if _live_state == DeviceState.DNOS:
+                                device_state = 'DNOS'
+                                recovery_type = ''
+                                console.print("[green]DNOS OK[/green]")
+                            elif _live_state == DeviceState.GI:
+                                device_state = 'GI'
+                                console.print("[cyan]GI mode[/cyan]")
+                            elif _live_state == DeviceState.UNREACHABLE:
+                                console.print(f"[yellow]unreachable (using cached: {device_state})[/yellow]")
+                            else:
+                                device_state = _live_state.value if _live_state else device_state
+                                console.print(f"[yellow]{device_state}[/yellow]")
+                        except Exception:
+                            console.print("[dim]using cached state[/dim]")
+                    
                     # Determine if in non-DNOS mode
                     if device_state == 'GI' or recovery_type == 'GI':
                         is_gi_mode = True
@@ -36485,8 +39708,10 @@ def run_wizard(batch_config: Optional[BatchScaleConfig] = None):
                     elif device_state == 'DN_RECOVERY' or recovery_type == 'DN_RECOVERY':
                         is_recovery_mode = True
                         device_state_display = "[red]⚠ DN RECOVERY[/red] - System restore needed"
+                    elif device_state in ('DEPLOYING', 'UPGRADING'):
+                        is_gi_mode = device_state == 'DEPLOYING'
+                        device_state_display = f"[yellow]⏳ {device_state}[/yellow] - Device rebooting"
                     elif dnos_version in ('N/A', '', None) or 'N/A' in str(dnos_version):
-                        # DNOS version N/A likely means GI mode
                         is_gi_mode = True
                         device_state_display = "[cyan]? GI/No DNOS[/cyan] - Use [R] to verify state"
         except Exception:
@@ -36590,6 +39815,7 @@ def run_wizard(batch_config: Optional[BatchScaleConfig] = None):
             else:
                 console.print("  [2] [cyan]Stag Pool Check[/cyan] - QinQ Stag usage")
             console.print("  [R] Refresh - Reload config from device / Verify state")
+            console.print(f"  [I] [cyan]Change IP[/cyan] - Update management IP [dim](current: {device.ip})[/dim]")
             console.print()
             
             console.print("[bold]Configuration Actions:[/bold]")
@@ -36620,16 +39846,34 @@ def run_wizard(batch_config: Optional[BatchScaleConfig] = None):
             
             # System Restore always available
             console.print("  [S] [bold red]🔧 System Restore[/bold red] - Recover device from RECOVERY mode")
+            
+            # Check for config backups
+            _has_backup = False
+            try:
+                _bdir = Path(f"db/configs/{device.hostname}")
+                _bfiles = list(_bdir.glob("pre_delete_backup_*.txt")) + list(_bdir.glob("pre_upgrade_backup_*.txt"))
+                if _bfiles:
+                    _has_backup = True
+                    _newest = max(_bfiles, key=lambda x: x.stat().st_mtime)
+                    _age_h = (time.time() - _newest.stat().st_mtime) / 3600
+                    console.print(f"  [P] [bold cyan]📦 Push Config Backup[/bold cyan] - Restore saved config ({_age_h:.0f}h ago, {_newest.name})")
+            except:
+                pass
+            
             console.print("  [B] Back to device selection")
             
             # Build valid choices based on mode
             if in_limited_mode:
-                # Limited mode: only 6 (Image Upgrade), S (System Restore), R (Refresh), L (LLDP), B (Back)
-                valid_choices = ["6", "s", "S", "r", "R", "l", "L", "b", "B"]
+                # Limited mode: only 6 (Image Upgrade), S (System Restore), R (Refresh), L (LLDP), I (Change IP), B (Back)
+                valid_choices = ["6", "s", "S", "r", "R", "l", "L", "i", "I", "b", "B"]
+                if _has_backup:
+                    valid_choices.extend(["p", "P"])
                 default_choice = "6"  # Default to Image Upgrade in GI mode
             else:
                 # Full mode: all options
-                valid_choices = ["1", "2", "3", "4", "5", "6", "7", "8", "w", "W", "m", "M", "f", "F", "s", "S", "r", "R", "l", "L", "b", "B"]
+                valid_choices = ["1", "2", "3", "4", "5", "6", "7", "8", "w", "W", "m", "M", "f", "F", "s", "S", "r", "R", "i", "I", "l", "L", "b", "B"]
+                if _has_backup:
+                    valid_choices.extend(["p", "P"])
                 default_choice = "3"  # Default to Configure Device
             
             single_action = Prompt.ask("Select", choices=valid_choices, default=default_choice).lower()
@@ -36643,6 +39887,80 @@ def run_wizard(batch_config: Optional[BatchScaleConfig] = None):
                     quick_result = show_quick_load_menu(device, single_ctx)
                 except BackException:
                     continue  # User pressed Back, return to main menu
+                if quick_result is None:
+                    # No history entries -- show available config files in the directory
+                    _cfg_dir = Path(f"/home/dn/SCALER/db/configs/{device.hostname}")
+                    _cfg_files = sorted(
+                        [f for f in _cfg_dir.glob("*.txt") if f.stat().st_size > 50],
+                        key=lambda f: f.stat().st_mtime, reverse=True
+                    ) if _cfg_dir.exists() else []
+                    if _cfg_files:
+                        console.print(f"\n[bold cyan]Configuration Files for {device.hostname}[/bold cyan]")
+                        from rich.table import Table
+                        _ft = Table(box=box.ROUNDED, show_header=True)
+                        _ft.add_column("#", style="dim", width=3)
+                        _ft.add_column("File", style="cyan")
+                        _ft.add_column("Size", style="dim", justify="right")
+                        _ft.add_column("Modified", style="dim")
+                        for _fi, _ff in enumerate(_cfg_files[:10], 1):
+                            _sz = _ff.stat().st_size
+                            _sz_str = f"{_sz/1024:.1f}K" if _sz > 1024 else f"{_sz}B"
+                            _mt = datetime.fromtimestamp(_ff.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+                            _ft.add_row(str(_fi), _ff.name, _sz_str, _mt)
+                        console.print(_ft)
+                        console.print("  [V] View a file")
+                        console.print("  [P] Push a file to device (load-override)")
+                        console.print("  [U] Upload a file to device (SCP, no config load)")
+                        console.print("  [B] Back")
+                        _fc = Prompt.ask("Select", choices=
+                            [str(i) for i in range(1, min(len(_cfg_files)+1, 11))] + ["v","V","p","P","u","U","b","B"],
+                            default="b").lower()
+                        if _fc == "b":
+                            continue
+                        elif _fc == "v":
+                            _vn = Prompt.ask("File # to view", default="1")
+                            if _vn.isdigit() and 1 <= int(_vn) <= len(_cfg_files):
+                                _vf = _cfg_files[int(_vn)-1]
+                                _vc = _vf.read_text()
+                                console.print(Panel(_vc[:3000], title=_vf.name, expand=False))
+                            continue
+                        elif _fc == "u":
+                            _un = Prompt.ask("File # to upload", default="1")
+                            if _un.isdigit() and 1 <= int(_un) <= len(_cfg_files):
+                                _uf = _cfg_files[int(_un)-1]
+                                _remote = f"/config/{_uf.name}"
+                                console.print(f"[yellow]Uploading {_uf.name} to {device.hostname} ({device.ip}) ...[/yellow]")
+                                try:
+                                    import subprocess
+                                    _scp_r = subprocess.run(
+                                        ["sshpass", "-p", "dnroot", "scp",
+                                         "-o", "StrictHostKeyChecking=no",
+                                         "-o", "ConnectTimeout=15",
+                                         str(_uf), f"dnroot@{device.ip}:{_remote}"],
+                                        capture_output=True, text=True, timeout=60
+                                    )
+                                    if _scp_r.returncode == 0:
+                                        console.print(f"[green]Uploaded to {device.hostname}:{_remote} ({_uf.stat().st_size/1024:.1f}K)[/green]")
+                                    else:
+                                        console.print(f"[red]Upload failed: {_scp_r.stderr.strip()}[/red]")
+                                except Exception as _se:
+                                    console.print(f"[red]Upload failed: {_se}[/red]")
+                            continue
+                        elif _fc == "p":
+                            _pn = Prompt.ask("File # to push", default="1")
+                            if _pn.isdigit() and 1 <= int(_pn) <= len(_cfg_files):
+                                _pf = _cfg_files[int(_pn)-1]
+                                quick_result = (_pf.read_text(), False, _pf)
+                        elif _fc.isdigit():
+                            _idx = int(_fc) - 1
+                            if 0 <= _idx < len(_cfg_files):
+                                _sf = _cfg_files[_idx]
+                                quick_result = (_sf.read_text(), False, _sf)
+                        if not quick_result:
+                            continue
+                    else:
+                        console.print(f"\n[yellow]No configuration files found for {device.hostname}[/yellow]")
+                        continue
                 if quick_result:
                     quick_config, already_validated, quick_filepath = quick_result
                     
@@ -36871,6 +40189,13 @@ def run_wizard(batch_config: Optional[BatchScaleConfig] = None):
             elif single_action == "l":
                 # LLDP Status - View and manage LLDP neighbors
                 _show_lldp_status_menu(device, single_ctx)
+            elif single_action == "i":
+                _update_device_ip_interactive(device.hostname)
+                # Reload device object with new IP
+                dm_ip = DeviceManager()
+                updated_dev = dm_ip.get_device(device.hostname)
+                if updated_dev and updated_dev.ip != device.ip:
+                    device.ip = updated_dev.ip
             elif single_action == "4":
                 from .wizard.push import show_delete_hierarchy_menu_multi, execute_delete_hierarchy_multi
                 hierarchy, sub_path = show_delete_hierarchy_menu_multi(single_ctx)
@@ -36916,6 +40241,44 @@ def run_wizard(batch_config: Optional[BatchScaleConfig] = None):
                     run_system_restore_wizard(device, single_ctx)
                 except Exception as e:
                     console.print(f"[red]System Restore error: {e}[/red]")
+            elif single_action == "p":
+                # Push Config Backup
+                try:
+                    _bdir = Path(f"db/configs/{device.hostname}")
+                    _bfiles = list(_bdir.glob("pre_delete_backup_*.txt")) + list(_bdir.glob("pre_upgrade_backup_*.txt"))
+                    _bfiles.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                    
+                    if not _bfiles:
+                        console.print("[yellow]No backup files found.[/yellow]")
+                    else:
+                        console.print(f"\n[bold cyan]📦 Config Backups for {device.hostname}[/bold cyan]\n")
+                        for _bi, _bf in enumerate(_bfiles[:5], 1):
+                            _age = (time.time() - _bf.stat().st_mtime) / 3600
+                            with open(_bf) as f:
+                                _lc = sum(1 for _ in f)
+                            console.print(f"  [{_bi}] {_bf.name} ({_lc} lines, {_age:.1f}h ago)")
+                        console.print("  [B] Back")
+                        
+                        _sel = Prompt.ask("Select", choices=[str(i) for i in range(1, min(6, len(_bfiles)+1))] + ["b", "B"], default="1").lower()
+                        if _sel != "b":
+                            _chosen = _bfiles[int(_sel) - 1]
+                            console.print(f"\n[cyan]Pushing {_chosen.name} to {device.hostname}...[/cyan]")
+                            
+                            from .config_pusher import ConfigPusher
+                            _pusher = ConfigPusher()
+                            with open(_chosen) as f:
+                                _cfg = f.read()
+                            _lines = [l for l in _cfg.strip().split('\n') if not l.startswith('#')]
+                            _cfg_clean = '\n'.join(_lines)
+                            
+                            _ok, _msg = _pusher.push_config(device, _cfg_clean,
+                                config_name=f"restore_{device.hostname}")
+                            if _ok:
+                                console.print(f"[green]✓ Config restored ({len(_lines)} lines)[/green]")
+                            else:
+                                console.print(f"[yellow]⚠ {_msg[:80]}[/yellow]")
+                except Exception as e:
+                    console.print(f"[red]Config restore error: {e}[/red]")
             elif single_action == "3":
                 break  # Continue to config wizard
     
@@ -37554,6 +40917,71 @@ def run_wizard(batch_config: Optional[BatchScaleConfig] = None):
             if not Confirm.ask("\n[yellow]Continue despite validation errors?[/yellow]", default=False):
                 console.print("[yellow]Aborting. Please fix the issues and try again.[/yellow]")
                 return
+    
+    # Step 5c: L2/L3 conflict check - interfaces with both IP addresses and l2-service
+    if state.current_config and generated_config:
+        l2_in_generated = set(re.findall(r'(\S+)\n\s+.*\n?\s*l2-service enabled', generated_config))
+        if not l2_in_generated:
+            l2_in_generated = set()
+            gen_lines = generated_config.split('\n')
+            current_iface = None
+            for gl in gen_lines:
+                stripped = gl.strip()
+                if re.match(r'^(ge|xe|et|bundle)\S+\.\d+$', stripped):
+                    current_iface = stripped
+                elif 'l2-service enabled' in stripped and current_iface:
+                    l2_in_generated.add(current_iface)
+                elif stripped == '!':
+                    current_iface = None
+        
+        if l2_in_generated:
+            l3_conflicts = []
+            cfg_lines = state.current_config.split('\n')
+            curr_if = None
+            has_ip = False
+            for cl in cfg_lines:
+                if_match = re.match(r'^\s{2}(\S+)\s*$', cl)
+                if if_match:
+                    if curr_if and has_ip and curr_if in l2_in_generated:
+                        l3_conflicts.append(curr_if)
+                    curr_if = if_match.group(1)
+                    has_ip = False
+                elif curr_if and ('ipv4-address' in cl or 'ipv6-address' in cl):
+                    has_ip = True
+                elif cl.strip() == '!':
+                    if curr_if and has_ip and curr_if in l2_in_generated:
+                        l3_conflicts.append(curr_if)
+                    curr_if = None
+                    has_ip = False
+            
+            if l3_conflicts:
+                console.print(f"\n[red bold]✗ L2/L3 CONFLICT DETECTED:[/red bold]")
+                console.print(f"[red]  {len(l3_conflicts)} interface(s) already have IP addresses on device[/red]")
+                console.print(f"[red]  but generated config adds l2-service enabled to them.[/red]")
+                console.print(f"[red]  DNOS rejects: 'cannot have both ip-addresses and l2-service'[/red]")
+                for conflict_if in l3_conflicts[:10]:
+                    console.print(f"    [red]• {conflict_if}[/red]")
+                if len(l3_conflicts) > 10:
+                    console.print(f"    [dim]... and {len(l3_conflicts) - 10} more[/dim]")
+                
+                console.print("\n[yellow]Options:[/yellow]")
+                console.print("  [1] Remove conflicting interfaces from generated config")
+                console.print("  [2] Continue anyway (will fail on device)")
+                console.print("  [3] Abort")
+                conflict_choice = Prompt.ask("Select", choices=["1", "2", "3"], default="1")
+                
+                if conflict_choice == "1":
+                    for conflict_if in l3_conflicts:
+                        pattern = re.compile(
+                            rf'^\s{{2}}{re.escape(conflict_if)}\n(?:\s{{4}}.*\n)*?\s{{2}}!',
+                            re.MULTILINE
+                        )
+                        generated_config = pattern.sub('', generated_config)
+                    state.generated_config = generated_config
+                    console.print(f"[green]✓ Removed {len(l3_conflicts)} conflicting interface(s)[/green]")
+                elif conflict_choice == "3":
+                    console.print("[yellow]Aborting.[/yellow]")
+                    return
     
     # Step 6: Save or push
     console.print("\n[bold]Step 6: Apply Configuration[/bold]")
@@ -38224,7 +41652,8 @@ def main():
         run_wizard(batch_config)
     except KeyboardInterrupt:
         console.print("\n[yellow]Wizard cancelled.[/yellow]")
-        sys.exit(0)
+        import os
+        os._exit(130)  # 128 + SIGINT(2), avoids ThreadPoolExecutor join hang
     except BackException as e:
         # Handle BackException gracefully - user wants to go back/exit
         if str(e) == "mode_selection":

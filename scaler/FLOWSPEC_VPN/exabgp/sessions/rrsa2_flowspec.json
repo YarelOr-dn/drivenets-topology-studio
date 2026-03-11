@@ -1,0 +1,23 @@
+{
+  "session_id": "rrsa2_flowspec",
+  "status": "closed",
+  "created": "2026-02-16T07:57:10.540365+00:00",
+  "exabgp_pid": 441566,
+  "exabgp_config": "/tmp/exabgp_rrsa2_flowspec_only.conf",
+  "exabgp_log": "/home/dn/SCALER/FLOWSPEC_VPN/exabgp/logs/rrsa2_flowspec_exabgp.log",
+  "peer_ip": "unknown",
+  "peer_as": "unknown",
+  "exabgp_ip": "100.70.0.32",
+  "applied_configs": {},
+  "injected_routes": [
+    {
+      "route": "announce route 203.0.113.0/24 next-hop 100.64.6.134",
+      "injected_at": "2026-02-16T07:57:47.773958+00:00"
+    },
+    {
+      "route": "announce flow route match { destination 10.0.0.0/24; } then { rate-limit 0; }",
+      "injected_at": "2026-02-16T07:57:50.272997+00:00"
+    }
+  ],
+  "closed_at": "2026-02-16T08:02:16.995630+00:00"
+}

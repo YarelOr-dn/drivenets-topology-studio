@@ -1,0 +1,31 @@
+{
+  "preflight": {
+    "vrfs": "",
+    "bgp": "",
+    "flowspec": "",
+    "ok": true
+  },
+  "tests": {
+    "test1": {
+      "pass": false,
+      "message": "Expected ALPHA, got None"
+    },
+    "test2": {
+      "pass": false,
+      "message": "Failed to re-add RT: Connection lost at 'vrf' (got EOF)"
+    },
+    "test3": {
+      "pass": false,
+      "message": "Failed to create AAA_LIGHT: Not connected"
+    },
+    "test4": {
+      "pass": false,
+      "message": "Redirect not resolved: None"
+    }
+  },
+  "cleanup": {
+    "ok": false,
+    "message": "Cleanup done"
+  },
+  "overall": "FAIL"
+}

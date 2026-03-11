@@ -1,0 +1,44 @@
+{
+  "version": "1.0",
+  "objects": [
+    { "id": "device_0", "type": "device", "deviceType": "router", "x": 120, "y": 320, "radius": 28, "color": "#e67e22", "label": "ExaBGP", "locked": false, "visualStyle": "server" },
+    { "id": "device_1", "type": "device", "deviceType": "router", "x": 380, "y": 320, "radius": 35, "color": "#9b59b6", "label": "RR-SA-2", "locked": false, "visualStyle": "classic" },
+    { "id": "device_2", "type": "device", "deviceType": "router", "x": 660, "y": 190, "radius": 40, "color": "#3498db", "label": "PE-1", "locked": false, "visualStyle": "classic" },
+    { "id": "device_3", "type": "device", "deviceType": "router", "x": 660, "y": 460, "radius": 40, "color": "#3498db", "label": "PE-4", "locked": false, "visualStyle": "classic" },
+    { "id": "device_4", "type": "device", "deviceType": "router", "x": 920, "y": 190, "radius": 25, "color": "#2ecc71", "label": "CE", "locked": false, "visualStyle": "simple" },
+
+    { "id": "link_0", "type": "link", "originType": "QL", "device1": "device_0", "device2": "device_1", "start": {"x": 148, "y": 320}, "end": {"x": 345, "y": 320}, "color": "#2ecc71", "style": "arrow", "width": 3 },
+    { "id": "link_1", "type": "link", "originType": "QL", "device1": "device_1", "device2": "device_2", "start": {"x": 408, "y": 298}, "end": {"x": 628, "y": 210}, "color": "#85c1e9", "style": "solid", "width": 2 },
+    { "id": "link_2", "type": "link", "originType": "QL", "device1": "device_1", "device2": "device_3", "start": {"x": 408, "y": 342}, "end": {"x": 628, "y": 440}, "color": "#85c1e9", "style": "solid", "width": 2 },
+    { "id": "link_3", "type": "link", "originType": "QL", "device1": "device_4", "device2": "device_2", "start": {"x": 895, "y": 190}, "end": {"x": 700, "y": 190}, "color": "#2ecc71", "style": "dashed", "width": 2 },
+
+    { "id": "shape_vrf1", "type": "shape", "shapeType": "rectangle", "x": 820, "y": 72, "width": 290, "height": 85, "rotation": 0, "fillColor": "#2ecc71", "fillOpacity": 0.05, "fillEnabled": true, "strokeColor": "#27ae60", "strokeWidth": 1.5, "strokeEnabled": true, "cornerRadius": 10 },
+    { "id": "shape_vrf2", "type": "shape", "shapeType": "rectangle", "x": 820, "y": 575, "width": 290, "height": 85, "rotation": 0, "fillColor": "#e74c3c", "fillOpacity": 0.05, "fillEnabled": true, "strokeColor": "#c0392b", "strokeWidth": 1.5, "strokeEnabled": true, "cornerRadius": 10 },
+
+    { "id": "text_ip0", "type": "text", "x": 120, "y": 376, "text": "100.64.6.134", "fontSize": 10, "color": "#85929e", "showBackground": false },
+    { "id": "text_ip1", "type": "text", "x": 380, "y": 383, "text": "2.2.2.2", "fontSize": 10, "color": "#85929e", "showBackground": false },
+    { "id": "text_ip2", "type": "text", "x": 660, "y": 258, "text": "1.1.1.1", "fontSize": 10, "color": "#85929e", "showBackground": false },
+    { "id": "text_ip3", "type": "text", "x": 660, "y": 528, "text": "4.4.4.4", "fontSize": 10, "color": "#85929e", "showBackground": false },
+    { "id": "text_ip4", "type": "text", "x": 920, "y": 243, "text": "16.16.16.2", "fontSize": 10, "color": "#85929e", "showBackground": false },
+
+    { "id": "text_link0", "type": "text", "x": 250, "y": 298, "text": "eBGP FlowSpec-VPN\nSAFI 133 + 134", "fontSize": 10, "color": "#2ecc71", "linkId": "link_0", "position": "middle", "_onLinkLine": true, "showBackground": false },
+    { "id": "text_link1", "type": "text", "x": 508, "y": 240, "text": "iBGP FlowSpec-VPN", "fontSize": 10, "color": "#85c1e9", "linkId": "link_1", "position": "middle", "_onLinkLine": true, "showBackground": false },
+    { "id": "text_link2", "type": "text", "x": 508, "y": 400, "text": "iBGP FlowSpec-VPN", "fontSize": 10, "color": "#85c1e9", "linkId": "link_2", "position": "middle", "_onLinkLine": true, "showBackground": false },
+    { "id": "text_link3", "type": "text", "x": 790, "y": 168, "text": "eBGP ipv4-unicast\n10.0.0.230/32 advertised", "fontSize": 10, "color": "#58d68d", "linkId": "link_3", "position": "middle", "_onLinkLine": true, "showBackground": false },
+
+    { "id": "text_route", "type": "text", "x": 120, "y": 170, "text": "Route Injected:\ndst 100.100.100.1/32\nsrc 16.16.16.0/30\nredirect-ip 10.0.0.230\nRD 1.1.1.1:100  RT 1234567:100", "fontSize": 10, "color": "#f0b27a", "showBackground": true, "backgroundColor": "rgba(230,126,34,0.08)", "backgroundOpacity": 60, "showBorder": true, "borderColor": "rgba(230,126,34,0.4)", "borderWidth": 1 },
+
+    { "id": "text_vrf1", "type": "text", "x": 820, "y": 72, "text": "VRF ALPHA on PE-1\n10.0.0.230 via 16.16.16.2 (direct CE)\nshow flowspec ncp: Redirect-ip-nh: 10.0.0.230\nStatus: Installed", "fontSize": 10, "color": "#2ecc71", "showBackground": false },
+    { "id": "text_vrf2", "type": "text", "x": 820, "y": 575, "text": "VRF ALPHA on PE-4\n10.0.0.230 via MPLS tunnel (VPN + LDP labels)\nshow flowspec ncp: Redirect-ip-nh: N/A\nStatus: Installed", "fontSize": 10, "color": "#e74c3c", "showBackground": false },
+
+    { "id": "shape_0", "type": "shape", "shapeType": "checkmark", "x": 978, "y": 40, "width": 24, "height": 24, "rotation": 0, "fillColor": "#2ecc71", "fillOpacity": 1.0, "fillEnabled": true, "strokeColor": "#27ae60", "strokeWidth": 2, "strokeEnabled": true },
+    { "id": "shape_1", "type": "shape", "shapeType": "cross", "x": 978, "y": 543, "width": 26, "height": 26, "rotation": 0, "fillColor": "#e74c3c", "fillOpacity": 1.0, "fillEnabled": true, "strokeColor": "#c0392b", "strokeWidth": 2, "strokeEnabled": true }
+  ],
+  "metadata": {
+    "deviceIdCounter": 5,
+    "linkIdCounter": 4,
+    "textIdCounter": 12,
+    "shapeIdCounter": 4,
+    "description": "FlowSpec redirect-ip: PE-1 (direct L3 NH, works) vs PE-4 (MPLS tunnel NH, Redirect-ip-nh: N/A)"
+  }
+}

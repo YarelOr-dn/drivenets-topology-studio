@@ -1,0 +1,85 @@
+{
+  "id": "test_03",
+  "name": "Route Churn -- Bulk Add/Remove x5",
+  "verdict": "PASS",
+  "cycles_completed": 5,
+  "session_stable": true,
+  "cycle_results": [
+    {
+      "cycle": 1,
+      "action": "inject",
+      "ok": true,
+      "pfxrcd": 9764,
+      "state": "Established",
+      "convergence_sec": 4.5
+    },
+    {
+      "cycle": 1,
+      "action": "withdraw",
+      "ok": true,
+      "pfxrcd": 0,
+      "state": "Established"
+    },
+    {
+      "cycle": 2,
+      "action": "inject",
+      "ok": true,
+      "pfxrcd": 9904,
+      "state": "Established",
+      "convergence_sec": 7.7
+    },
+    {
+      "cycle": 2,
+      "action": "withdraw",
+      "ok": true,
+      "pfxrcd": 0,
+      "state": "Established"
+    },
+    {
+      "cycle": 3,
+      "action": "inject",
+      "ok": true,
+      "pfxrcd": 9438,
+      "state": "Established",
+      "convergence_sec": 4.5
+    },
+    {
+      "cycle": 3,
+      "action": "withdraw",
+      "ok": true,
+      "pfxrcd": 0,
+      "state": "Established"
+    },
+    {
+      "cycle": 4,
+      "action": "inject",
+      "ok": true,
+      "pfxrcd": 9491,
+      "state": "Established",
+      "convergence_sec": 4.5
+    },
+    {
+      "cycle": 4,
+      "action": "withdraw",
+      "ok": true,
+      "pfxrcd": 0,
+      "state": "Established"
+    },
+    {
+      "cycle": 5,
+      "action": "inject",
+      "ok": true,
+      "pfxrcd": 9509,
+      "state": "Established",
+      "convergence_sec": 4.5
+    },
+    {
+      "cycle": 5,
+      "action": "withdraw",
+      "ok": true,
+      "pfxrcd": 0,
+      "state": "Established"
+    }
+  ],
+  "reason": null
+}

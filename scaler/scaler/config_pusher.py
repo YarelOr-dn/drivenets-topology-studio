@@ -1033,29 +1033,31 @@ class ConfigPusher:
         config_text: str,
         config_name: str = None,
         dry_run: bool = False,
-        progress_callback: Callable[[str, int], None] = None
+        progress_callback: Callable[[str, int], None] = None,
+        live_output_callback: Callable[[str], None] = None,
     ) -> Tuple[bool, str]:
         """
         Push a configuration to a device.
-        
+
         Args:
             device: Target device
             config_text: Configuration text to push
             config_name: Name for the config file on device
             dry_run: If True, only run commit check, don't commit
             progress_callback: Optional callback for progress updates
-        
+            live_output_callback: Optional callback for raw SSH output (each chunk)
+
         Returns:
             Tuple of (success, message)
         """
         client = None
         channel = None
-        
+
         try:
             # Progress: Connecting
             if progress_callback:
                 progress_callback("Connecting to device...", 10)
-            
+
             # Connect to device using best available IP
             ssh_host = get_ssh_hostname(device)
             client = paramiko.SSHClient()
@@ -1068,14 +1070,14 @@ class ConfigPusher:
                 look_for_keys=False,
                 allow_agent=False
             )
-            
+
             # Open interactive shell
             channel = client.invoke_shell()
             channel.settimeout(self.timeout)
-            
+
             # Wait for prompt
             time.sleep(1)
-            self._read_until_prompt(channel)
+            self._read_until_prompt(channel, live_output_callback=live_output_callback)
             
             # Generate config filename
             if not config_name:
@@ -1100,36 +1102,37 @@ class ConfigPusher:
             
             # Enable terminal logging to see problems during commit
             channel.send("set logging terminal\n")
-            self._read_until_prompt(channel, timeout=5)
-            
+            self._read_until_prompt(channel, timeout=5, live_output_callback=live_output_callback)
+
             # Progress: Entering configure mode
             if progress_callback:
                 progress_callback("Entering configuration mode...", 30)
-            
+
             # Enter configure mode
             channel.send("configure\n")
-            output = self._read_until_prompt(channel, timeout=10)
-            
+            output = self._read_until_prompt(channel, timeout=10, live_output_callback=live_output_callback)
+
             if "cfg" not in output.lower() and "#" not in output:
                 return False, "Failed to enter configuration mode"
-            
+
             # Clear any dirty candidate config before loading
             if progress_callback:
                 progress_callback("Clearing candidate config...", 35)
             channel.send("rollback 0\n")
-            self._read_until_prompt(channel, timeout=15)
-            
+            self._read_until_prompt(channel, timeout=15, live_output_callback=live_output_callback)
+
             # Progress: Loading configuration
             if progress_callback:
                 progress_callback("Loading configuration...", 40)
-            
+
             # Load the configuration (with real-time progress from device)
             channel.send(f"load override {config_name}\n")
             output = self._read_until_prompt(
-                channel, 
+                channel,
                 timeout=self.load_timeout,
                 progress_callback=progress_callback,
-                progress_prefix="Loading configuration"
+                progress_prefix="Loading configuration",
+                live_output_callback=live_output_callback,
             )
             
             if "error" in output.lower():
@@ -1144,8 +1147,8 @@ class ConfigPusher:
             
             # Run commit check
             channel.send("commit check\n")
-            output = self._read_until_prompt(channel, timeout=self.commit_timeout)
-            
+            output = self._read_until_prompt(channel, timeout=self.commit_timeout, live_output_callback=live_output_callback)
+
             # Check for success - includes "no changes" which means config already on device
             output_lower = output.lower()
             commit_success = any(p in output_lower for p in [
@@ -1159,16 +1162,16 @@ class ConfigPusher:
             if dry_run:
                 # Exit without committing
                 channel.send("exit\n")
-                self._read_until_prompt(channel)
+                self._read_until_prompt(channel, live_output_callback=live_output_callback)
                 return True, "Commit check passed (dry run - no commit)"
-            
+
             # Progress: Committing
             if progress_callback:
                 progress_callback("Committing configuration...", 80)
-            
+
             # Commit the configuration
             channel.send("commit\n")
-            output = self._read_until_prompt(channel, timeout=self.commit_timeout)
+            output = self._read_until_prompt(channel, timeout=self.commit_timeout, live_output_callback=live_output_callback)
             
             if "commit succeeded" not in output.lower():
                 error_msg = self._extract_error(output)
@@ -1180,8 +1183,8 @@ class ConfigPusher:
             
             # Exit configuration mode
             channel.send("exit\n")
-            self._read_until_prompt(channel)
-            
+            self._read_until_prompt(channel, live_output_callback=live_output_callback)
+
             # Save the pushed config locally
             self._save_pushed_config(device.hostname, config_name, config_text)
             
@@ -1220,33 +1223,35 @@ class ConfigPusher:
         config_text: str,
         config_name: str = None,
         dry_run: bool = False,
-        progress_callback: Callable[[str, int], None] = None
+        progress_callback: Callable[[str, int], None] = None,
+        live_output_callback: Callable[[str], None] = None,
     ) -> Tuple[bool, str]:
         """
         Push configuration using 'load merge' - appends to existing config.
-        
+
         Unlike push_config which uses 'load override', this method merges
         the new configuration with the existing running configuration.
         Perfect for adding multihoming, new services, or interface config
         without affecting other parts of the configuration.
-        
+
         Args:
             device: Target device
             config_text: Configuration text to merge
             config_name: Name for the config file on device
             dry_run: If True, only run commit check, don't commit
             progress_callback: Optional callback for progress updates
-        
+            live_output_callback: Optional callback for raw SSH output (each chunk)
+
         Returns:
             Tuple of (success, message)
         """
         client = None
         channel = None
-        
+
         try:
             if progress_callback:
                 progress_callback("Connecting to device...", 10)
-            
+
             # Connect using best available IP from operational.json
             ssh_host = get_ssh_hostname(device)
             client = paramiko.SSHClient()
@@ -1259,13 +1264,13 @@ class ConfigPusher:
                 look_for_keys=False,
                 allow_agent=False
             )
-            
+
             channel = client.invoke_shell()
             channel.settimeout(self.timeout)
-            
+
             time.sleep(1)
-            self._read_until_prompt(channel)
-            
+            self._read_until_prompt(channel, live_output_callback=live_output_callback)
+
             if not config_name:
                 config_name = f"scaler_merge_{timestamp_filename(suffix='')}.txt"
             
@@ -1286,32 +1291,33 @@ class ConfigPusher:
             
             # Enable terminal logging
             channel.send("set logging terminal\n")
-            self._read_until_prompt(channel, timeout=5)
-            
+            self._read_until_prompt(channel, timeout=5, live_output_callback=live_output_callback)
+
             if progress_callback:
                 progress_callback("Entering configuration mode...", 30)
-            
+
             channel.send("configure\n")
-            output = self._read_until_prompt(channel, timeout=10)
-            
+            output = self._read_until_prompt(channel, timeout=10, live_output_callback=live_output_callback)
+
             if "cfg" not in output.lower() and "#" not in output:
                 return False, "Failed to enter configuration mode"
-            
+
             # Clear any dirty candidate config before merging
             channel.send("rollback 0\n")
             time.sleep(0.5)
-            self._read_until_prompt(channel, timeout=10)
+            self._read_until_prompt(channel, timeout=10, live_output_callback=live_output_callback)
 
             if progress_callback:
                 progress_callback("Merging configuration (load merge)...", 40)
-            
+
             # Use LOAD MERGE instead of load override
             channel.send(f"load merge {config_name}\n")
             output = self._read_until_prompt(
-                channel, 
+                channel,
                 timeout=self.load_timeout,
                 progress_callback=progress_callback,
-                progress_prefix="Merging configuration"
+                progress_prefix="Merging configuration",
+                live_output_callback=live_output_callback,
             )
             
             if "error" in output.lower():
@@ -1323,8 +1329,8 @@ class ConfigPusher:
                 progress_callback("Running commit check...", 60)
             
             channel.send("commit check\n")
-            output = self._read_until_prompt(channel, timeout=self.commit_timeout)
-            
+            output = self._read_until_prompt(channel, timeout=self.commit_timeout, live_output_callback=live_output_callback)
+
             # Check for success - includes "no changes" which means config already on device
             output_lower = output.lower()
             commit_success = any(p in output_lower for p in [
@@ -1333,27 +1339,27 @@ class ConfigPusher:
             if not commit_success:
                 error_msg = self._extract_error(output)
                 return False, f"Commit check failed: {error_msg}"
-            
+
             if dry_run:
                 channel.send("exit\n")
-                self._read_until_prompt(channel)
+                self._read_until_prompt(channel, live_output_callback=live_output_callback)
                 return True, "Commit check passed (dry run - no commit)"
-            
+
             if progress_callback:
                 progress_callback("Committing configuration...", 80)
-            
+
             channel.send("commit\n")
-            output = self._read_until_prompt(channel, timeout=self.commit_timeout)
-            
+            output = self._read_until_prompt(channel, timeout=self.commit_timeout, live_output_callback=live_output_callback)
+
             if "commit succeeded" not in output.lower():
                 error_msg = self._extract_error(output)
                 return False, f"Commit failed: {error_msg}"
-            
+
             if progress_callback:
                 progress_callback("Configuration merged successfully!", 100)
-            
+
             channel.send("exit\n")
-            self._read_until_prompt(channel)
+            self._read_until_prompt(channel, live_output_callback=live_output_callback)
             
             self._save_pushed_config(device.hostname, f"merge_{config_name}", config_text)
             
@@ -2204,8 +2210,9 @@ class ConfigPusher:
                         channel.send(stripped + "\n")
                         # Call live_output_callback so external displays can track progress
                         if live_output_callback and stripped.strip() and stripped.strip() != "!":
-                            live_output_callback(f"→ {stripped.strip()}")
-                    time.sleep(0.01)
+                            live_output_callback(f"-> {stripped.strip()}")
+                    # 5ms for small configs (<150 lines), 10ms for larger (reliability)
+                    time.sleep(0.005 if total_lines < 150 else 0.01)
                     
                     # Read device output periodically and forward to callback
                     if i % 50 == 0 and channel.recv_ready():
@@ -2213,7 +2220,7 @@ class ConfigPusher:
                         if live_output_callback and partial.strip():
                             for out_line in partial.strip().split('\n')[-3:]:
                                 if out_line.strip():
-                                    live_output_callback(f"← {out_line.strip()[:60]}")
+                                    live_output_callback(f"<- {out_line.strip()[:60]}")
                     
                     # Buffer drain pause every 500 lines for large configs
                     if i > 0 and i % 500 == 0:
@@ -2221,7 +2228,9 @@ class ConfigPusher:
                         while channel.recv_ready():
                             channel.recv(8192)
                 
-                    if progress_callback and i % 100 == 0:
+                    # Progress: every 10 lines for small configs (<200), else every 100
+                    progress_interval = 10 if total_lines < 200 else 100
+                    if progress_callback and (i % progress_interval == 0 or i == total_lines - 1):
                         pct = 30 + int((i / total_lines) * 30)
                         progress_callback(f"Pasting line {i+1}/{total_lines}...", pct)
             
@@ -2322,6 +2331,9 @@ class ConfigPusher:
                 console.print(f"[green]✓ Commit check passed[/green] [dim]({commit_check_elapsed:.1f}s)[/dim]")
             
             if dry_run:
+                # Explicitly cancel to discard uncommitted candidate before exit
+                channel.send("cancel\n")
+                read_and_show(timeout=10)
                 channel.send("exit\n")
                 read_and_show()
                 if live_output_callback:
@@ -2410,6 +2422,309 @@ class ConfigPusher:
                 try:
                     client.close()
                 except:
+                    pass
+
+    def push_config_terminal_check_and_hold(
+        self,
+        device: Device,
+        config_text: str,
+        progress_callback: Callable[[str, int], None] = None,
+        live_output_callback: Callable[[str], None] = None,
+    ) -> Tuple[bool, str, Optional[Any], Optional[Any]]:
+        """
+        Push config, run commit check, and hold SSH session for commit/cancel.
+        On success: returns (True, "Commit check passed", channel, client).
+        Caller must call commit or cancel on the channel, then close channel and client.
+        On failure: sends cancel+exit, closes SSH, returns (False, error_msg, None, None).
+        """
+        client = None
+        channel = None
+        keep_alive = False
+
+        try:
+            if progress_callback:
+                progress_callback("Connecting to device...", 10)
+
+            ssh_host = get_ssh_hostname(device)
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(
+                hostname=ssh_host,
+                username=device.username,
+                password=device.get_password(),
+                timeout=self.timeout,
+                look_for_keys=False,
+                allow_agent=False
+            )
+
+            channel = client.invoke_shell()
+            channel.settimeout(self.timeout)
+
+            def read_and_show(timeout=30):
+                output = self._read_until_prompt(channel, timeout=timeout)
+                if live_output_callback and output.strip():
+                    live_output_callback(output)
+                return output
+
+            time.sleep(1)
+            read_and_show()
+
+            channel.send("set logging terminal\n")
+            read_and_show(timeout=5)
+
+            if progress_callback:
+                progress_callback("Entering configuration mode...", 20)
+
+            channel.send("configure\n")
+            output = read_and_show(timeout=10)
+            if "cfg" not in output.lower() and "#" not in output:
+                return False, "Failed to enter configuration mode", None, None
+
+            channel.send("rollback 0\n")
+            time.sleep(0.5)
+            read_and_show(timeout=10)
+
+            if progress_callback:
+                progress_callback("Pasting configuration...", 30)
+
+            config_text = config_text.replace('\r\n', '\n').replace('\r', '\n')
+            lines = config_text.strip().split('\n')
+            total_lines = len(lines)
+
+            for i, line in enumerate(lines):
+                stripped = line.rstrip()
+                if stripped:
+                    channel.send(stripped + "\n")
+                    if live_output_callback and stripped.strip() and stripped.strip() != "!":
+                        live_output_callback(f"-> {stripped.strip()}")
+                # 5ms for small configs (<150 lines), 10ms for larger (reliability)
+                time.sleep(0.005 if total_lines < 150 else 0.01)
+
+                if i % 50 == 0 and channel.recv_ready():
+                    partial = channel.recv(8192).decode('utf-8', errors='ignore')
+                    if live_output_callback and partial.strip():
+                        for out_line in partial.strip().split('\n')[-3:]:
+                            if out_line.strip():
+                                live_output_callback(f"<- {out_line.strip()[:60]}")
+
+                if i > 0 and i % 500 == 0:
+                    time.sleep(0.3)
+                    while channel.recv_ready():
+                        channel.recv(8192)
+
+                # Progress: every 10 lines for small configs (<200), else every 100
+                progress_interval = 10 if total_lines < 200 else 100
+                if progress_callback and (i % progress_interval == 0 or i == total_lines - 1):
+                    pct = 30 + int((i / total_lines) * 30)
+                    progress_callback(f"Pasting line {i+1}/{total_lines}...", pct)
+
+            wait_time = max(2, min(10, total_lines // 3000))
+            time.sleep(wait_time)
+
+            while channel.recv_ready():
+                channel.recv(8192)
+                time.sleep(0.1)
+            time.sleep(1)
+            read_and_show(timeout=30)
+
+            channel.send("top\n")
+            time.sleep(0.5)
+            read_and_show(timeout=5)
+
+            if progress_callback:
+                progress_callback("Running commit check...", 65)
+            if live_output_callback:
+                live_output_callback("[INFO] Running commit check...")
+
+            channel.send("commit check\n")
+            output = read_and_show(timeout=self.commit_timeout)
+
+            clean_output = output.lower()
+            clean_output = re.sub(r'local\d\.(info|warning|notice|debug|error)[^\n]*\n?', '', clean_output)
+            clean_output = re.sub(r'if_link_state_change[^\n]*\n?', '', clean_output)
+
+            passed = "commit check passed" in clean_output
+            failed = "commit check failed" in clean_output or "transaction_commit_check_failed" in clean_output
+
+            if failed or (not passed and not failed):
+                error_msg = self._extract_error(output)
+                if error_msg:
+                    if live_output_callback:
+                        live_output_callback(f"[ERROR] Commit check failed: {error_msg[:40]}")
+                    channel.send("cancel\n")
+                    read_and_show(timeout=10)
+                    channel.send("exit\n")
+                    read_and_show(timeout=5)
+                    return False, f"Commit check failed: {error_msg}", None, None
+                elif not passed:
+                    time.sleep(5)
+                    extra_output = read_and_show(timeout=60)
+                    clean_extra = re.sub(r'local\d\.(info|warning|notice|debug|error)[^\n]*\n?', '', extra_output.lower())
+                    if "commit check passed" in clean_extra:
+                        passed = True
+                    elif "commit check failed" in clean_extra:
+                        error_msg = self._extract_error(extra_output)
+                        if live_output_callback:
+                            live_output_callback(f"[ERROR] Commit check failed: {error_msg[:40]}")
+                        channel.send("cancel\n")
+                        read_and_show(timeout=10)
+                        channel.send("exit\n")
+                        read_and_show(timeout=5)
+                        return False, f"Commit check failed: {error_msg}", None, None
+
+            if not passed:
+                has_real_errors = any(err in output.lower() for err in [
+                    'hook failed', 'transaction_commit_check_failed', 'rejected',
+                    'invalid syntax', 'aborting'
+                ])
+                if not has_real_errors:
+                    passed = True
+                else:
+                    channel.send("cancel\n")
+                    read_and_show(timeout=10)
+                    channel.send("exit\n")
+                    read_and_show(timeout=5)
+                    return False, "Commit check status unclear - no pass/fail detected", None, None
+
+            if live_output_callback:
+                live_output_callback("[OK] Commit check passed")
+            if progress_callback:
+                progress_callback("Commit check passed - awaiting decision", 70)
+
+            keep_alive = True
+            return True, "Commit check passed", channel, client
+
+        except paramiko.AuthenticationException:
+            return False, "Authentication failed", None, None
+        except paramiko.SSHException as e:
+            return False, f"SSH error: {str(e)}", None, None
+        except socket.timeout:
+            return False, "Connection timeout", None, None
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            return False, f"Error: {str(e)}\n{tb[-500:]}", None, None
+        finally:
+            if not keep_alive and channel:
+                try:
+                    channel.close()
+                except Exception:
+                    pass
+            if not keep_alive and client:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+
+    def commit_held_session(
+        self,
+        channel,
+        client,
+        live_output_callback: Callable[[str], None] = None,
+    ) -> Tuple[bool, str]:
+        """Send commit on held SSH session, read result, close. Returns (success, message)."""
+        try:
+            def read_and_show(timeout=30):
+                output = self._read_until_prompt(channel, timeout=timeout)
+                if live_output_callback and output.strip():
+                    live_output_callback(output)
+                return output
+
+            channel.send("commit\n")
+            output = read_and_show(timeout=self.commit_timeout)
+            clean = re.sub(r'local\d\.(info|warning|notice|debug|error)[^\n]*\n?', '', output.lower())
+            clean = re.sub(r'if_link_state_change[^\n]*\n?', '', clean)
+            if "commit succeeded" in clean:
+                if live_output_callback:
+                    live_output_callback("[OK] Commit succeeded")
+                channel.send("exit\n")
+                read_and_show(timeout=5)
+                return True, "Commit succeeded"
+            error_msg = self._extract_error(output)
+            channel.send("cancel\n")
+            read_and_show(timeout=10)
+            channel.send("exit\n")
+            read_and_show(timeout=5)
+            return False, error_msg or "Commit failed"
+        finally:
+            try:
+                channel.close()
+            except Exception:
+                pass
+            try:
+                client.close()
+            except Exception:
+                pass
+
+    def cancel_held_session(
+        self,
+        channel,
+        client,
+        live_output_callback: Callable[[str], None] = None,
+    ) -> None:
+        """Send cancel+exit on held SSH session and close."""
+        try:
+            def read_and_show(timeout=10):
+                output = self._read_until_prompt(channel, timeout=timeout)
+                if live_output_callback and output.strip():
+                    live_output_callback(output)
+                return output
+
+            channel.send("cancel\n")
+            read_and_show(timeout=10)
+            channel.send("exit\n")
+            read_and_show(timeout=5)
+        finally:
+            try:
+                channel.close()
+            except Exception:
+                pass
+            try:
+                client.close()
+            except Exception:
+                pass
+
+    def cleanup_device_candidate(self, device: Device) -> Tuple[bool, str]:
+        """Connect to device, enter configure, cancel (discard candidate), exit. For cleanup after failed push."""
+        client = None
+        channel = None
+        try:
+            ssh_host = get_ssh_hostname(device)
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(
+                hostname=ssh_host,
+                username=device.username,
+                password=device.get_password(),
+                timeout=self.timeout,
+                look_for_keys=False,
+                allow_agent=False
+            )
+            channel = client.invoke_shell()
+            channel.settimeout(self.timeout)
+            time.sleep(1)
+            self._read_until_prompt(channel, timeout=5)
+            channel.send("configure\n")
+            out = self._read_until_prompt(channel, timeout=10)
+            if "cfg" not in out.lower():
+                return False, "Failed to enter configure mode"
+            channel.send("cancel\n")
+            self._read_until_prompt(channel, timeout=10)
+            channel.send("exit\n")
+            self._read_until_prompt(channel, timeout=5)
+            return True, "Cleanup complete"
+        except Exception as e:
+            return False, str(e)
+        finally:
+            if channel:
+                try:
+                    channel.close()
+                except Exception:
+                    pass
+            if client:
+                try:
+                    client.close()
+                except Exception:
                     pass
 
     # DriveNets Platform timing profiles based on real-world observations
@@ -3371,39 +3686,43 @@ class ConfigPusher:
                 client.close()
 
     def _read_until_prompt(
-        self, 
-        channel, 
+        self,
+        channel,
         timeout: int = 60,
         progress_callback: Callable[[str, int], None] = None,
-        progress_prefix: str = "Loading"
+        progress_prefix: str = "Loading",
+        live_output_callback: Callable[[str], None] = None,
     ) -> str:
         """Read output until we see a prompt.
-        
+
         Args:
             channel: SSH channel
             timeout: Timeout in seconds
             progress_callback: Optional callback for progress updates
             progress_prefix: Prefix for progress messages
-        
+            live_output_callback: Optional callback for raw output (each chunk as received)
+
         Returns:
             Full output string
         """
         output = ""
         start_time = time.time()
         last_progress = -1
-        
+
         # Safety: ensure timeout is not None
         if timeout is None:
             timeout = 60
-        
+
         while True:
             if time.time() - start_time > timeout:
                 break
-            
+
             if channel.recv_ready():
                 chunk = channel.recv(65535).decode('utf-8', errors='ignore')
                 output += chunk
-                
+                if live_output_callback and chunk:
+                    live_output_callback(chunk)
+
                 # Parse and report device loading progress (e.g., "] 45%")
                 if progress_callback:
                     # Look for percentage in output (DNOS shows: [=====>    ] 45%)

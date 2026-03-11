@@ -3,44 +3,35 @@
     {
       "id": "pe1",
       "hostname": "PE-1",
-      "ip": "wk31d7vv00023",
+      "ip": "100.64.3.9",
       "username": "dnroot",
       "password": "ZG5yb290",
       "platform": "NCP",
-      "last_sync": "2026-02-02T10:50:24.228680+02:00",
-      "description": "PE-1 Router"
+      "last_sync": "2026-03-11T10:58:17.794692+02:00",
+      "description": "PE-1 Router",
+      "connection_method": "SSH\u2192MGMT"
     },
     {
       "id": "rr_sa_2",
       "hostname": "RR-SA-2",
-      "ip": "100.64.4.205",
+      "ip": "100.64.7.242",
       "username": "dnroot",
       "password": "ZG5yb290",
       "platform": "NCP",
-      "last_sync": "2026-02-02T10:50:24.251587+02:00",
+      "last_sync": "2026-03-11T10:58:17.812082+02:00",
       "description": "RR-SA-2",
       "connection_method": "SSH\u2192MGMT"
     },
     {
-      "id": "pe4",
-      "hostname": "PE-4",
-      "ip": "kvm108-cl408d-ncc0",
+      "id": "yor_cl_pe_4",
+      "hostname": "YOR_CL_PE-4",
+      "ip": "100.64.7.197",
       "username": "dnroot",
       "password": "ZG5yb290",
       "platform": "NCP",
-      "last_sync": "2026-02-02T10:50:24.269113+02:00",
-      "description": "PE-4 Cluster"
-    },
-    {
-      "id": "ecdnos_rr",
-      "hostname": "eCdnos-RR",
-      "ip": "100.70.0.32",
-      "username": "dnroot",
-      "password": "ZG5yb290",
-      "platform": "NCP",
-      "last_sync": "2026-02-02T10:50:24.292344+02:00",
-      "description": null,
-      "management_ip": null
+      "last_sync": "2026-03-11T10:58:17.824072+02:00",
+      "description": "PE-4 Cluster",
+      "connection_method": "SSH\u2192MGMT"
     }
   ],
   "settings": {

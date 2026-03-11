@@ -14,7 +14,9 @@ import logging
 import sys
 import io
 import signal
-from typing import Optional, Dict, Any, List
+import time
+import threading
+from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass, field
 
 # Suppress verbose httpx and mcp library errors
@@ -86,128 +88,259 @@ class Topology:
 
 
 class NetworkMapperClient:
-    """Client for interacting with network-mapper MCP server."""
+    """Client for interacting with network-mapper MCP server.
+
+    Thread-safety: a single persistent worker Task on a dedicated event-loop
+    thread owns the SSE session. All MCP calls from any thread are submitted
+    as work items to this worker via an asyncio.Queue, and the caller blocks
+    on a threading.Event until the result is ready.
+
+    This guarantees that sse_client context managers are always entered AND
+    exited inside the same asyncio Task, preventing the anyio
+    'cancel scope in different task' RuntimeError.
+    """
     
     DEFAULT_URL = "http://192.168.174.88:8080/sse"
+    SESSION_TTL = 300   # idle timeout before session is recycled (seconds)
+    KEEPALIVE_SEC = 45  # probe interval when queue is idle
     
     def __init__(self, url: Optional[str] = None):
-        """
-        Initialize the network-mapper client.
-        
-        Args:
-            url: MCP server URL. Defaults to the standard network-mapper URL.
-        """
         self.url = url or self.DEFAULT_URL
-        self._session = None
-        self._read = None
-        self._write = None
+        self._boot_lock = threading.Lock()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._thread: Optional[threading.Thread] = None
+        self._work_queue: Optional[asyncio.Queue] = None
+        self._started = False
+        self._state = 'idle'
+        self._last_success_ts: float = 0
+        self._last_error_msg = ''
+        self._stats = {'calls': 0, 'errors': 0, 'reconnects': 0}
         
         if not MCP_AVAILABLE:
             raise ImportError("mcp library not installed. Install with: pip install mcp")
-    
-    async def _call_tool_async(self, tool_name: str, arguments: Dict[str, Any] = None) -> Any:
-        """
-        Call an MCP tool asynchronously.
         
-        Args:
-            tool_name: Name of the tool to call
-            arguments: Tool arguments
-            
-        Returns:
-            Tool result
-        """
-        max_retries = 3
-        last_error = None
-        for attempt in range(max_retries + 1):
-            # Suppress stderr during MCP calls to hide library tracebacks
-            old_stderr = sys.stderr
-            sys.stderr = io.StringIO()
-            try:
-                async with sse_client(self.url) as (read, write):
-                    async with ClientSession(read, write) as session:
-                        await session.initialize()
-                        result = await session.call_tool(tool_name, arguments or {})
-                        
-                        # Extract text content from result
-                        if hasattr(result, 'content') and result.content:
-                            for item in result.content:
-                                if hasattr(item, 'text'):
-                                    return item.text
-                        return str(result)
-            except Exception as e:
-                last_error = e
-                if attempt < max_retries:
-                    # Exponential backoff
-                    await asyncio.sleep(1.5 * (attempt + 1))
-            finally:
-                sys.stderr = old_stderr
-        raise Exception(f"Network-mapper connection failed after {max_retries + 1} attempts: {last_error}")
+        threading.Thread(target=self._warmup, daemon=True, name="mcp-warmup").start()
     
-    def _call_tool(self, tool_name: str, arguments: Dict[str, Any] = None) -> Any:
-        """
-        Synchronous wrapper for tool calls.
-        
-        Args:
-            tool_name: Name of the tool to call
-            arguments: Tool arguments
-            
-        Returns:
-            Tool result
-        """
+    def _log(self, msg):
+        print(f"[NM-MCP] {msg}")
+    
+    @property
+    def is_connected(self) -> bool:
+        return self._state == 'connected'
+    
+    def health(self) -> Dict[str, Any]:
+        """Connection health and usage stats."""
+        return {
+            'state': self._state,
+            'url': self.url,
+            'calls': self._stats['calls'],
+            'errors': self._stats['errors'],
+            'reconnects': self._stats['reconnects'],
+            'last_error': self._last_error_msg,
+        }
+    
+    def _warmup(self):
+        """Eagerly establish SSE session so first real call is fast."""
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        
-        if loop and loop.is_running():
-            # We're already in an async context - create a new thread
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(
-                    asyncio.run,
-                    self._call_tool_async(tool_name, arguments)
-                )
-                return future.result(timeout=60)
-        else:
-            return asyncio.run(self._call_tool_async(tool_name, arguments))
-    
-    async def _call_tools_batch_async(self, calls: List[tuple]) -> List[Any]:
-        """
-        Call multiple tools in a single session for efficiency.
-        
-        Args:
-            calls: List of (tool_name, arguments) tuples
-            
-        Returns:
-            List of results in the same order as calls
-        """
-        results = []
-        try:
-            async with sse_client(self.url) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    
-                    for tool_name, arguments in calls:
-                        try:
-                            result = await session.call_tool(tool_name, arguments or {})
-                            
-                            if hasattr(result, 'content') and result.content:
-                                for item in result.content:
-                                    if hasattr(item, 'text'):
-                                        results.append(item.text)
-                                        break
-                                else:
-                                    results.append(str(result))
-                            else:
-                                results.append(str(result))
-                        except Exception as e:
-                            results.append(None)
+            self._submit([("list_devices", {}, 1, 10)], timeout=20)
+            self._state = 'connected'
+            self._log("Pre-warmed OK")
         except Exception as e:
-            # Return partial results on connection failure
-            while len(results) < len(calls):
-                results.append(None)
-        
-        return results
+            self._state = 'error'
+            self._last_error_msg = str(e)
+            self._log(f"Pre-warm failed (retry on first call): {e}")
+    
+    def _ensure_worker(self):
+        """Start the dedicated loop + worker task if not running."""
+        with self._boot_lock:
+            if self._started and self._loop is not None and self._loop.is_running():
+                return
+            ready = threading.Event()
+            self._loop = asyncio.new_event_loop()
+            self._thread = threading.Thread(
+                target=self._run_loop, args=(ready,), daemon=True, name="mcp-loop"
+            )
+            self._thread.start()
+            ready.wait(timeout=5)
+            self._started = True
+
+    def _run_loop(self, ready: threading.Event):
+        """Entry point for the dedicated thread."""
+        asyncio.set_event_loop(self._loop)
+        self._work_queue = asyncio.Queue()
+        self._loop.create_task(self._worker())
+        ready.set()
+        self._loop.run_forever()
+
+    async def _worker(self):
+        """Persistent Task that owns the SSE session.
+
+        When no work arrives for KEEPALIVE_SEC, sends a lightweight probe
+        to detect stale connections before a real call hits them.
+        """
+        session = None
+        sse_cm = None
+        session_cm = None
+        last_activity: float = 0
+
+        async def fresh_session():
+            nonlocal session, sse_cm, session_cm, last_activity
+            self._state = 'connecting'
+            self._stats['reconnects'] += 1
+            session = None
+            sse_cm = sse_client(self.url)
+            rd, wr = await sse_cm.__aenter__()
+            session_cm = ClientSession(rd, wr)
+            session = await session_cm.__aenter__()
+            await session.initialize()
+            last_activity = time.monotonic()
+            self._state = 'connected'
+            self._log("Session established")
+
+        async def discard_session():
+            nonlocal session, sse_cm, session_cm, last_activity
+            for cm in (session_cm, sse_cm):
+                if cm is not None:
+                    try:
+                        await cm.__aexit__(None, None, None)
+                    except Exception:
+                        pass
+            session = sse_cm = session_cm = None
+            last_activity = 0
+            self._state = 'disconnected'
+
+        while True:
+            try:
+                item = await asyncio.wait_for(
+                    self._work_queue.get(), timeout=self.KEEPALIVE_SEC
+                )
+            except asyncio.TimeoutError:
+                # Idle -- probe the session so we know it's alive
+                if session is not None:
+                    try:
+                        await asyncio.wait_for(
+                            session.call_tool("list_devices", {}), timeout=10
+                        )
+                        last_activity = time.monotonic()
+                    except Exception:
+                        self._log("Keepalive failed, dropping session")
+                        await discard_session()
+                continue
+
+            if item is None:
+                await discard_session()
+                return
+
+            calls, result_holder, done_event = item
+            try:
+                idle = (time.monotonic() - last_activity) if last_activity else float('inf')
+                if session is None or idle >= self.SESSION_TTL:
+                    await discard_session()
+                    await fresh_session()
+
+                results = []
+                for call_item in calls:
+                    tool_name = call_item[0]
+                    arguments = call_item[1] if len(call_item) > 1 else {}
+                    max_retries = call_item[2] if len(call_item) > 2 else 1
+                    per_call_timeout = call_item[3] if len(call_item) > 3 else 15
+
+                    last_error = None
+                    for attempt in range(max_retries + 1):
+                        try:
+                            if session is None:
+                                await fresh_session()
+                            result = await asyncio.wait_for(
+                                session.call_tool(tool_name, arguments or {}),
+                                timeout=per_call_timeout
+                            )
+                            text = None
+                            if hasattr(result, 'content') and result.content:
+                                for c_item in result.content:
+                                    if hasattr(c_item, 'text'):
+                                        text = c_item.text
+                                        break
+                            results.append(text if text is not None else str(result))
+                            last_error = None
+                            last_activity = time.monotonic()
+                            self._stats['calls'] += 1
+                            self._last_success_ts = time.time()
+                            break
+                        except asyncio.TimeoutError:
+                            last_error = TimeoutError(
+                                f"{tool_name} timed out ({per_call_timeout}s)")
+                            self._log(f"{tool_name} timeout (attempt {attempt+1})")
+                            await discard_session()
+                            if attempt < max_retries:
+                                await asyncio.sleep(1.5 * (attempt + 1))
+                        except Exception as e:
+                            last_error = e
+                            self._log(f"{tool_name} error (attempt {attempt+1}): {e}")
+                            await discard_session()
+                            if attempt < max_retries:
+                                await asyncio.sleep(1.5 * (attempt + 1))
+                    if last_error is not None:
+                        self._stats['errors'] += 1
+                        self._last_error_msg = str(last_error)
+                        results.append(last_error)
+
+                result_holder["results"] = results
+            except Exception as e:
+                result_holder["error"] = e
+                self._stats['errors'] += 1
+                self._last_error_msg = str(e)
+                await discard_session()
+            finally:
+                done_event.set()
+
+    def close(self):
+        """Discard session by telling the worker to recreate on next call."""
+        if self._loop and self._loop.is_running() and self._work_queue is not None:
+            done = threading.Event()
+            holder: Dict[str, Any] = {}
+            asyncio.run_coroutine_threadsafe(
+                self._work_queue.put(([], holder, done)), self._loop
+            )
+            done.wait(timeout=5)
+    
+    def _submit(self, calls, timeout: float = 30) -> List[Any]:
+        """Submit work items to the worker and block until done.
+
+        Each item in *calls* is a tuple:
+            (tool_name, arguments, max_retries[, per_call_timeout])
+        *timeout* is the overall wall-clock limit for the entire batch.
+        """
+        self._ensure_worker()
+        done = threading.Event()
+        holder: Dict[str, Any] = {}
+        asyncio.run_coroutine_threadsafe(
+            self._work_queue.put((calls, holder, done)), self._loop
+        )
+        if not done.wait(timeout=timeout):
+            self._last_error_msg = f"Batch timed out after {timeout}s"
+            raise TimeoutError(self._last_error_msg)
+        if "error" in holder:
+            raise holder["error"]
+        results = holder.get("results", [])
+        out = []
+        for r in results:
+            if isinstance(r, Exception):
+                raise r
+            out.append(r)
+        return out
+
+    def _call_tool(self, tool_name: str, arguments: Dict[str, Any] = None,
+                   timeout: float = 15) -> Any:
+        """Synchronous single-tool call. Safe from any thread.
+
+        *timeout* applies per MCP tool invocation (seconds).
+        The overall submit timeout adds 15s buffer for reconnection/retries.
+        """
+        results = self._submit(
+            [(tool_name, arguments, 3, timeout)],
+            timeout=timeout + 15
+        )
+        return results[0]
     
     def list_topologies(self) -> List[Topology]:
         """
@@ -216,7 +349,7 @@ class NetworkMapperClient:
         Returns:
             List of Topology objects
         """
-        result = self._call_tool("list_topologies")
+        result = self._call_tool("list_topologies", timeout=10)
         return self._parse_topologies_markdown(result)
     
     def list_devices(self) -> List[TopologyDevice]:
@@ -226,7 +359,7 @@ class NetworkMapperClient:
         Returns:
             List of TopologyDevice objects
         """
-        result = self._call_tool("list_devices")
+        result = self._call_tool("list_devices", timeout=10)
         return self._parse_devices_markdown(result)
     
     def get_device_system_info(self, device_name: str) -> Dict[str, Any]:
@@ -252,7 +385,7 @@ class NetworkMapperClient:
         Returns:
             Configuration text (clean DNOS config, no markdown)
         """
-        result = self._call_tool("get_device_config", {"device_name": device_name})
+        result = self._call_tool("get_device_config", {"device_name": device_name}, timeout=20)
         if not result:
             return None
         
@@ -282,7 +415,7 @@ class NetworkMapperClient:
         Returns:
             List of LLDPNeighbor objects
         """
-        result = self._call_tool("get_device_lldp", {"device_name": device_name})
+        result = self._call_tool("get_device_lldp", {"device_name": device_name}, timeout=10)
         return self._parse_lldp_markdown(result)
     
     def batch_get_device_info(self, device_names: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -296,28 +429,12 @@ class NetworkMapperClient:
             Dict mapping device_name to {system_info: ..., config: ...}
         """
         # Build batch of calls - only system info for speed, skip configs initially
-        calls = []
-        for name in device_names:
-            calls.append(("get_device_system_info", {"device_name": name}))
+        calls = [("get_device_system_info", {"device_name": name}, 1, 15) for name in device_names]
         
-        # Execute batch with timeout
         results = []
         try:
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-            
-            if loop and loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(
-                        asyncio.run,
-                        self._call_tools_batch_async(calls)
-                    )
-                    results = future.result(timeout=60)  # Reduced timeout
-            else:
-                results = asyncio.run(self._call_tools_batch_async(calls))
+            raw = self._submit(calls, timeout=60)
+            results = [r if not isinstance(r, Exception) else None for r in raw]
         except Exception as e:
             # Return empty on any error
             return {name: {'system_info': {}, 'config': None} for name in device_names}
@@ -434,7 +551,7 @@ class NetworkMapperClient:
             result = self._call_tool("get_device_interfaces", {
                 "device_name": device_name,
                 "filter_pattern": "mgmt0"
-            })
+            }, timeout=10)
             
             if result:
                 for line in result.split('\n'):
@@ -551,7 +668,7 @@ class NetworkMapperClient:
             True if refresh succeeded
         """
         try:
-            result = self._call_tool("refresh_device", {"device_name": device_name})
+            result = self._call_tool("refresh_device", {"device_name": device_name}, timeout=30)
             return result and "successfully" in result.lower()
         except Exception:
             return False

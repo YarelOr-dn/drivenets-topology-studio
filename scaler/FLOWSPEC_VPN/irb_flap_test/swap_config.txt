@@ -1,0 +1,26 @@
+network-services
+  evpn
+    instance evpn_scale_1
+      no router-interface irb1
+      router-interface irb2
+        host-routes enabled
+      !
+    !
+    instance evpn_scale_2
+      no router-interface irb2
+      router-interface irb1
+        host-routes enabled
+      !
+    !
+  !
+  vrf
+    instance scale_1
+      no interface irb1
+      interface irb2
+    !
+    instance scale_2
+      no interface irb2
+      interface irb1
+    !
+  !
+!

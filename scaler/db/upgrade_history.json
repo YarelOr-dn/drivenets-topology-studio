@@ -1,0 +1,124 @@
+{
+  "entries": [
+    {
+      "timestamp": "2026-03-01T10:36:13.636411",
+      "devices": [
+        "PE-1"
+      ],
+      "flow_type": "delete_deploy",
+      "elapsed_s": 1317,
+      "success_count": 1,
+      "total_count": 1,
+      "post_deploy_s": 761
+    },
+    {
+      "timestamp": "2026-03-01T14:28:25.648413",
+      "devices": [
+        "PE-1"
+      ],
+      "flow_type": "delete_deploy",
+      "elapsed_s": 1635,
+      "success_count": 1,
+      "total_count": 1,
+      "post_deploy_s": 1071
+    },
+    {
+      "timestamp": "2026-03-02T17:46:10.641877",
+      "devices": [
+        "PE-1"
+      ],
+      "flow_type": "delete_deploy",
+      "elapsed_s": 1598,
+      "success_count": 1,
+      "total_count": 1,
+      "post_deploy_s": 1040
+    },
+    {
+      "timestamp": "2026-03-08T08:28:33.492946",
+      "devices": [
+        "PE-1",
+        "RR-SA-2",
+        "YOR_CL_PE-4"
+      ],
+      "flow_type": "delete_deploy",
+      "elapsed_s": 1579,
+      "success_count": 1,
+      "total_count": 3,
+      "post_deploy_s": 1041
+    },
+    {
+      "timestamp": "2026-03-08T12:31:59.745228",
+      "devices": [
+        "PE-1",
+        "RR-SA-2",
+        "YOR_CL_PE-4"
+      ],
+      "flow_type": "delete_deploy",
+      "elapsed_s": 1416,
+      "success_count": 1,
+      "total_count": 1,
+      "post_deploy_s": 0
+    },
+    {
+      "timestamp": "2026-03-08T13:16:37.061550",
+      "devices": [
+        "PE-1",
+        "RR-SA-2",
+        "YOR_CL_PE-4"
+      ],
+      "flow_type": "gi_deploy",
+      "elapsed_s": 724,
+      "success_count": 1,
+      "total_count": 1,
+      "post_deploy_s": 0
+    },
+    {
+      "timestamp": "2026-03-08T13:30:45.292034",
+      "devices": [
+        "PE-1",
+        "RR-SA-2",
+        "YOR_CL_PE-4"
+      ],
+      "flow_type": "gi_deploy",
+      "elapsed_s": 623,
+      "success_count": 1,
+      "total_count": 1,
+      "post_deploy_s": 0
+    },
+    {
+      "timestamp": "2026-03-08T14:11:57.307227",
+      "devices": [
+        "PE-1",
+        "RR-SA-2",
+        "YOR_CL_PE-4"
+      ],
+      "flow_type": "gi_deploy",
+      "elapsed_s": 2009,
+      "success_count": 3,
+      "total_count": 3,
+      "post_deploy_s": 607
+    },
+    {
+      "timestamp": "2026-03-10T08:36:35.734799",
+      "devices": [
+        "PE-1"
+      ],
+      "flow_type": "in_place",
+      "elapsed_s": 1676,
+      "success_count": 1,
+      "total_count": 1,
+      "post_deploy_s": 32
+    },
+    {
+      "timestamp": "2026-03-10T17:18:03.083945",
+      "devices": [
+        "RR-SA-2"
+      ],
+      "flow_type": "delete_deploy",
+      "elapsed_s": 2310,
+      "success_count": 1,
+      "total_count": 1,
+      "post_deploy_s": 1212
+    }
+  ]
+}

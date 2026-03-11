@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-03-04T12:48:49.170596",
+  "port": "//100.64.3.238/6/13",
+  "tx": {
+    "total_frames": "1845359952",
+    "total_bytes": "236206073856",
+    "rate_fps": "0",
+    "rate_bps": "0",
+    "sig_frames": "1845359952"
+  },
+  "rx": {
+    "total_frames": "1845523917",
+    "total_bytes": "228835654442",
+    "rate_fps": "0",
+    "rate_bps": "0",
+    "sig_frames": "1845359952",
+    "dropped_frames": "0",
+    "dropped_pct": "0"
+  },
+  "loss": {
+    "frames": -163965,
+    "percent": -0.0089
+  },
+  "streams": [
+    {
+      "name": "fs_redirect_test",
+      "tx_frames": 1005987215,
+      "tx_rate_bps": 137609520,
+      "rx_frames": 1006464873,
+      "rx_rate_bps": 8378373976,
+      "dropped": 0
+    }
+  ]
+}

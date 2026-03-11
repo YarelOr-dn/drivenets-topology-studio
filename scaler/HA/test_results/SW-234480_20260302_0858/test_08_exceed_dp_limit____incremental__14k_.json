@@ -1,0 +1,17 @@
+{
+  "id": "test_08",
+  "name": "Exceed DP Limit -- Incremental (14K)",
+  "verdict": "PASS",
+  "bgp_accepted": 13514,
+  "dp_installed": 11,
+  "dp_capped": true,
+  "capacity_warning": false,
+  "tcam": {
+    "installed": 12000,
+    "total": 12000,
+    "percent": 100.0,
+    "ipv6_installed": 21,
+    "ipv6_total": 4000
+  },
+  "reason": null
+}

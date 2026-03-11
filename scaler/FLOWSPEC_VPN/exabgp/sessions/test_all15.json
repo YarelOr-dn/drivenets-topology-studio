@@ -1,0 +1,14 @@
+{
+  "session_id": "test_all15",
+  "status": "closed",
+  "created": "2026-02-16T08:12:36.661985+00:00",
+  "exabgp_pid": 447400,
+  "exabgp_config": "/tmp/exabgp_test_all15.conf",
+  "exabgp_log": "/home/dn/SCALER/FLOWSPEC_VPN/exabgp/logs/test_all15_exabgp.log",
+  "peer_ip": "unknown",
+  "peer_as": "unknown",
+  "exabgp_ip": "100.70.0.32",
+  "applied_configs": {},
+  "injected_routes": [],
+  "closed_at": "2026-02-16T08:12:40.618813+00:00"
+}

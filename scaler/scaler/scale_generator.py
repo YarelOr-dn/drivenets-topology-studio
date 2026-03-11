@@ -19,7 +19,7 @@ class ScaleGenerator:
         pass
     
     def generate_interfaces(self, scale: InterfaceScale) -> str:
-        """Generate interface configuration.
+        """Generate interface configuration in correct DNOS hierarchical syntax.
         
         Args:
             scale: Interface scaling parameters
@@ -27,7 +27,7 @@ class ScaleGenerator:
         Returns:
             DNOS configuration string
         """
-        lines = []
+        lines = ["interfaces"]
         interface_type = scale.interface_type.value
         
         for i in range(scale.count):
@@ -36,7 +36,7 @@ class ScaleGenerator:
             if interface_type == "bundle":
                 iface_name = f"bundle-{iface_num}"
             elif interface_type == "ph":
-                iface_name = f"ph{scale.slot}-{scale.bay}/{scale.port_start + i}"
+                iface_name = f"ph{iface_num}"
             elif interface_type == "ge100":
                 iface_name = f"ge100-{scale.slot}/{scale.bay}/{scale.port_start + i}"
             elif interface_type == "ge400":
@@ -44,23 +44,23 @@ class ScaleGenerator:
             else:
                 iface_name = f"{interface_type}{iface_num}"
             
-            lines.append(f"interfaces {iface_name}")
-            lines.append(f"  description \"Scaled interface {i+1}\"")
-            lines.append("  enabled")
-            lines.append("!")
+            lines.append(f"  {iface_name}")
+            lines.append("    admin-state enabled")
+            lines.append(f'    description "Scaled interface {i+1}"')
+            lines.append("  !")
             
-            # Generate sub-interfaces if requested
             if scale.create_subinterfaces:
                 for j in range(scale.subif_count_per_interface):
                     vlan = scale.subif_vlan_start + (i * scale.subif_count_per_interface + j) * scale.subif_vlan_step
                     if vlan > 4094:
                         vlan = 4094
                     
-                    lines.append(f"interfaces {iface_name}.{vlan}")
-                    lines.append(f"  vlan-tags outer-tag vlan-id {vlan}")
-                    lines.append("  enabled")
-                    lines.append("!")
+                    lines.append(f"  {iface_name}.{vlan}")
+                    lines.append("    admin-state enabled")
+                    lines.append(f"    vlan-id {vlan}")
+                    lines.append("  !")
         
+        lines.append("!")
         return "\n".join(lines)
     
     def generate_services(self, scale: ServiceScale) -> str:
@@ -83,17 +83,17 @@ class ScaleGenerator:
                 lines.append(f"network-services evpn-vpws-fxc instance {svc_name}")
                 lines.append(f"  service-id {scale.service_id_start + i}")
                 lines.append(f"  evi {scale.evi_start + i}")
-                lines.append("  enabled")
+                lines.append("  admin-state enabled")
                 lines.append("!")
             elif service_type == "vrf":
                 lines.append(f"network-services vrf {svc_name}")
                 lines.append(f"  rd {scale.rd_base}:{svc_num}")
-                lines.append("  enabled")
+                lines.append("  admin-state enabled")
                 lines.append("!")
             elif service_type == "evpn":
                 lines.append(f"network-services evpn {svc_name}")
                 lines.append(f"  evi {scale.evi_start + i}")
-                lines.append("  enabled")
+                lines.append("  admin-state enabled")
                 lines.append("!")
         
         return "\n".join(lines)
@@ -135,7 +135,7 @@ class ScaleGenerator:
             lines.append(f"    remote-as {peer_as}")
             if scale.peer_group:
                 lines.append(f"    peer-group {scale.peer_group}")
-            lines.append("    enabled")
+            lines.append("    admin-state enabled")
             lines.append("  !")
         
         lines.append("!")

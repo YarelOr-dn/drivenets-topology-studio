@@ -1,0 +1,23 @@
+{
+  "session_id": "rr_sa2",
+  "status": "closed",
+  "created": "2026-02-17T08:00:18.069298+00:00",
+  "exabgp_pid": 945167,
+  "exabgp_config": "/tmp/exabgp_rr_sa2.conf",
+  "exabgp_log": "/home/dn/SCALER/FLOWSPEC_VPN/exabgp/logs/rr_sa2_exabgp.log",
+  "peer_ip": "100.70.0.205",
+  "peer_as": "1234567",
+  "exabgp_ip": "100.70.0.32",
+  "device_ip": "100.70.0.205",
+  "selected_afis": [
+    "ipv4 flow-vpn",
+    "ipv4 flow",
+    "ipv6 flow-vpn"
+  ],
+  "target_device": "RR-SA-2",
+  "dnaas_leaf": null,
+  "applied_configs": {},
+  "injected_routes": [],
+  "closed_at": "2026-02-17T12:55:46.573033+00:00",
+  "cleanup_result": "admin-disabled neighbor + .999 on RR-SA-2 and DNAAS-LEAF-B15"
+}

@@ -1,0 +1,335 @@
+{
+  "4a": {
+    "action": "rate-limit 0",
+    "count": 100,
+    "local_installed": 100,
+    "hw": 113,
+    "ni": 2
+  },
+  "4b": {
+    "action": "rate-limit 64",
+    "count": 100,
+    "local_installed": 100,
+    "hw": 113,
+    "ni": 2
+  },
+  "4c": {
+    "action": "rate-limit 1000",
+    "count": 100,
+    "local_installed": 100,
+    "hw": 113,
+    "ni": 2
+  },
+  "4d": {
+    "action": "redirect-to-vrf ZULU",
+    "count": 100,
+    "local_installed": 100,
+    "hw": 113,
+    "ni": 2
+  },
+  "4e": {
+    "policer_data": [
+      {
+        "mcs": 10,
+        "installed": 10,
+        "hw": 23,
+        "ni": 2
+      },
+      {
+        "mcs": 20,
+        "installed": 20,
+        "hw": 33,
+        "ni": 2
+      },
+      {
+        "mcs": 30,
+        "installed": 30,
+        "hw": 43,
+        "ni": 2
+      },
+      {
+        "mcs": 40,
+        "installed": 40,
+        "hw": 53,
+        "ni": 2
+      },
+      {
+        "mcs": 50,
+        "installed": 50,
+        "hw": 63,
+        "ni": 2
+      },
+      {
+        "mcs": 60,
+        "installed": 60,
+        "hw": 73,
+        "ni": 2
+      },
+      {
+        "mcs": 70,
+        "installed": 70,
+        "hw": 83,
+        "ni": 2
+      },
+      {
+        "mcs": 80,
+        "installed": 80,
+        "hw": 93,
+        "ni": 2
+      },
+      {
+        "mcs": 90,
+        "installed": 90,
+        "hw": 103,
+        "ni": 2
+      },
+      {
+        "mcs": 100,
+        "installed": 100,
+        "hw": 113,
+        "ni": 2
+      },
+      {
+        "mcs": 110,
+        "installed": 110,
+        "hw": 123,
+        "ni": 2
+      },
+      {
+        "mcs": 120,
+        "installed": 120,
+        "hw": 133,
+        "ni": 2
+      },
+      {
+        "mcs": 130,
+        "installed": 130,
+        "hw": 143,
+        "ni": 2
+      },
+      {
+        "mcs": 140,
+        "installed": 140,
+        "hw": 153,
+        "ni": 2
+      },
+      {
+        "mcs": 150,
+        "installed": 150,
+        "hw": 163,
+        "ni": 2
+      },
+      {
+        "mcs": 160,
+        "installed": 160,
+        "hw": 173,
+        "ni": 2
+      },
+      {
+        "mcs": 170,
+        "installed": 170,
+        "hw": 183,
+        "ni": 2
+      },
+      {
+        "mcs": 180,
+        "installed": 180,
+        "hw": 193,
+        "ni": 2
+      },
+      {
+        "mcs": 190,
+        "installed": 190,
+        "hw": 203,
+        "ni": 2
+      },
+      {
+        "mcs": 200,
+        "installed": 200,
+        "hw": 213,
+        "ni": 2
+      },
+      {
+        "mcs": 210,
+        "installed": 210,
+        "hw": 223,
+        "ni": 2
+      },
+      {
+        "mcs": 220,
+        "installed": 220,
+        "hw": 233,
+        "ni": 2
+      },
+      {
+        "mcs": 230,
+        "installed": 230,
+        "hw": 243,
+        "ni": 2
+      },
+      {
+        "mcs": 240,
+        "installed": 240,
+        "hw": 253,
+        "ni": 2
+      },
+      {
+        "mcs": 250,
+        "installed": 250,
+        "hw": 263,
+        "ni": 2
+      },
+      {
+        "mcs": 260,
+        "installed": 260,
+        "hw": 273,
+        "ni": 2
+      },
+      {
+        "mcs": 270,
+        "installed": 270,
+        "hw": 283,
+        "ni": 2
+      },
+      {
+        "mcs": 280,
+        "installed": 280,
+        "hw": 293,
+        "ni": 2
+      },
+      {
+        "mcs": 290,
+        "installed": 290,
+        "hw": 303,
+        "ni": 2
+      },
+      {
+        "mcs": 300,
+        "installed": 300,
+        "hw": 313,
+        "ni": 2
+      },
+      {
+        "mcs": 310,
+        "installed": 310,
+        "hw": 323,
+        "ni": 2
+      },
+      {
+        "mcs": 320,
+        "installed": 320,
+        "hw": 333,
+        "ni": 2
+      },
+      {
+        "mcs": 330,
+        "installed": 330,
+        "hw": 343,
+        "ni": 2
+      },
+      {
+        "mcs": 340,
+        "installed": 340,
+        "hw": 353,
+        "ni": 2
+      },
+      {
+        "mcs": 350,
+        "installed": 350,
+        "hw": 363,
+        "ni": 2
+      },
+      {
+        "mcs": 360,
+        "installed": 360,
+        "hw": 373,
+        "ni": 2
+      },
+      {
+        "mcs": 370,
+        "installed": 370,
+        "hw": 383,
+        "ni": 2
+      },
+      {
+        "mcs": 380,
+        "installed": 380,
+        "hw": 393,
+        "ni": 2
+      },
+      {
+        "mcs": 390,
+        "installed": 390,
+        "hw": 403,
+        "ni": 2
+      },
+      {
+        "mcs": 400,
+        "installed": 400,
+        "hw": 413,
+        "ni": 2
+      },
+      {
+        "mcs": 410,
+        "installed": 410,
+        "hw": 423,
+        "ni": 2
+      },
+      {
+        "mcs": 420,
+        "installed": 420,
+        "hw": 433,
+        "ni": 2
+      },
+      {
+        "mcs": 430,
+        "installed": 430,
+        "hw": 443,
+        "ni": 2
+      },
+      {
+        "mcs": 440,
+        "installed": 440,
+        "hw": 453,
+        "ni": 2
+      },
+      {
+        "mcs": 450,
+        "installed": 450,
+        "hw": 463,
+        "ni": 2
+      },
+      {
+        "mcs": 460,
+        "installed": 460,
+        "hw": 473,
+        "ni": 2
+      },
+      {
+        "mcs": 470,
+        "installed": 470,
+        "hw": 483,
+        "ni": 2
+      },
+      {
+        "mcs": 480,
+        "installed": 480,
+        "hw": 493,
+        "ni": 2
+      },
+      {
+        "mcs": 490,
+        "installed": 0,
+        "hw": 13,
+        "ni": 2
+      }
+    ]
+  },
+  "4f": {
+    "drop": 50,
+    "rate_limit": 50,
+    "local_installed": 100,
+    "hw": 113,
+    "ni": 2
+  }
+}

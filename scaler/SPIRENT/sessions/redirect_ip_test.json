@@ -1,0 +1,15 @@
+{
+  "session_name": "redirect_ip_test",
+  "session_id_on_server": "redirect_ip_test - dn_spirent",
+  "lab_server": "il-auto-containers",
+  "chassis_ip": "100.64.3.238",
+  "port_location": "//100.64.3.238/6/13",
+  "active": false,
+  "created": "2026-03-03T10:11:56.370155",
+  "streams": [],
+  "devices": [],
+  "port_reserved": true,
+  "project_handle": "project1",
+  "port_handle": "port1",
+  "_stale_reason": "server session gone"
+}

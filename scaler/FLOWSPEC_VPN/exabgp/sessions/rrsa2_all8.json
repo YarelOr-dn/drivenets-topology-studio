@@ -1,0 +1,29 @@
+{
+  "session_id": "rrsa2_all8",
+  "status": "closed",
+  "created": "2026-02-16T08:05:13.679364+00:00",
+  "exabgp_pid": 4141066,
+  "exabgp_config": "/tmp/exabgp_rrsa2_all8.conf",
+  "exabgp_log": "/home/dn/SCALER/FLOWSPEC_VPN/exabgp/logs/rrsa2_all8_exabgp.log",
+  "peer_ip": "unknown",
+  "peer_as": "unknown",
+  "exabgp_ip": "100.70.0.32",
+  "applied_configs": {},
+  "injected_routes": [
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; source 16.16.16.0/30; } then { redirect 1234567:300; extended-community [ target:1234567:300 ]; }",
+      "injected_at": "2026-02-16T08:48:34.650656+00:00"
+    },
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; source 16.16.16.0/30; } then { redirect 10.0.0.254; extended-community [ target:1234567:300 ]; }",
+      "injected_at": "2026-02-16T09:59:29.434264+00:00"
+    },
+    {
+      "route": "announce flow route rd 1.1.1.1:100 match { destination 10.0.0.0/24; source 16.16.16.0/30; } then { redirect 10.0.0.254; extended-community [ target:1234567:300 ]; }",
+      "injected_at": "2026-02-16T10:07:36.728172+00:00"
+    }
+  ],
+  "last_watchdog_restart": "2026-03-04T09:41:13.410000+00:00",
+  "watchdog_restarts": 1,
+  "closed_at": "2026-03-04T10:35:43.578129+00:00"
+}

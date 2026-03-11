@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-03-04T12:32:46.321448",
+  "port": "//100.64.3.238/6/13",
+  "tx": {
+    "total_frames": "717452498",
+    "total_bytes": "91833919744",
+    "rate_fps": "8445946",
+    "rate_bps": "8648648496",
+    "sig_frames": "717452498"
+  },
+  "rx": {
+    "total_frames": "714817444",
+    "total_bytes": "88628145628",
+    "rate_fps": "8445920",
+    "rate_bps": "8378352224",
+    "sig_frames": "714655135",
+    "dropped_frames": "0",
+    "dropped_pct": "0"
+  },
+  "loss": {
+    "frames": 2635054,
+    "percent": 0.3673
+  }
+}

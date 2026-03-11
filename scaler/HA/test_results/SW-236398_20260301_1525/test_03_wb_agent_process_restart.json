@@ -1,0 +1,8 @@
+{
+  "id": "test_03",
+  "name": "wb_agent Process Restart",
+  "verdict": "PASS",
+  "recovery_sec": 10.147656917572021,
+  "before_routes": "",
+  "after_routes": ""
+}

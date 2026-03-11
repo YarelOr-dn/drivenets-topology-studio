@@ -1,0 +1,8 @@
+{
+  "id": "test_08",
+  "name": "NCC Switchover",
+  "verdict": "PASS",
+  "recovery_sec": 10.149928331375122,
+  "before_routes": "show bgp ipv4 flowspec-vpn routes\r\n\u001b[1FYOR_CL_PE-4(01-Mar-2026-18:00:54)# show bgp ipv4 flowspec-vpn routes\r\n--------------------------------------------------------------^\r\nERROR: Unknown word: 'rout",
+  "after_routes": "show bgp ipv4 flowspec-vpn routes\r\n\u001b[1FYOR_CL_PE-4(01-Mar-2026-18:02:42)# show bgp ipv4 flowspec-vpn routes\r\n--------------------------------------------------------------^\r\nERROR: Unknown word: 'rout"
+}

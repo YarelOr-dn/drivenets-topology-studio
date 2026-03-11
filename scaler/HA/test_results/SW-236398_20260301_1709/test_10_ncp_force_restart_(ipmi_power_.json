@@ -1,0 +1,9 @@
+{
+  "id": "test_10",
+  "name": "NCP Force Restart (IPMI Power Cycle)",
+  "verdict": "PASS",
+  "recovery_sec": 10.067354202270508,
+  "ha_type": "ncp_force_restart",
+  "before_routes": "",
+  "after_routes": ""
+}

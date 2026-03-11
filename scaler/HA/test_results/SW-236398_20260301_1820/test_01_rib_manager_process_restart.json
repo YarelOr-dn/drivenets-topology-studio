@@ -1,0 +1,20 @@
+{
+  "id": "test_01",
+  "name": "RIB Manager Process Restart",
+  "verdict": "PASS",
+  "recovery_sec": 30.100215196609497,
+  "ha_type": "process_restart",
+  "cp_verdict": "PASS",
+  "dp_verdict": "PASS",
+  "sp_verdict": "N/A",
+  "xray_verdict": "PASS",
+  "xray_packets": 2,
+  "ncp_before": 0,
+  "ncp_after": 0,
+  "tcam_before": 0,
+  "tcam_after": 0,
+  "spirent_loss": 0,
+  "counter_delta": 0,
+  "before_routes": "",
+  "after_routes": ""
+}

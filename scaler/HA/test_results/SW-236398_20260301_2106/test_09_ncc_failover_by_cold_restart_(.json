@@ -1,0 +1,5 @@
+{
+  "id": "test_09",
+  "verdict": "SKIP",
+  "reason": "safety_check_failed: Standby NCC is not in standby-up state (switchover would fail)"
+}

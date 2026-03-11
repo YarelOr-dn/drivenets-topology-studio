@@ -1,0 +1,34 @@
+{
+  "session_name": "test_fix",
+  "session_id_on_server": "test_fix - dn_spirent",
+  "lab_server": "il-auto-containers",
+  "chassis_ip": "100.64.3.238",
+  "port_location": "//100.64.3.238/6/13",
+  "active": false,
+  "created": "2026-03-01T22:14:53.810385",
+  "streams": [
+    {
+      "name": "fs_test",
+      "handle": "streamblock1",
+      "vlan": 219,
+      "inner_vlan": null,
+      "src_mac": "00:10:94:00:00:01",
+      "dst_mac": "e8:c5:7a:39:b6:6a",
+      "src_ip": "10.99.99.1",
+      "dst_ip": "100.100.100.1",
+      "rate": 100.0,
+      "rate_unit": "MEGABITS_PER_SECOND",
+      "frame_size": 128,
+      "protocol": "ipv4",
+      "created": "2026-03-01T22:15:19.635975"
+    }
+  ],
+  "devices": [],
+  "port_reserved": true,
+  "project_handle": "project1",
+  "port_handle": "port1",
+  "traffic_running": false,
+  "traffic_started": "2026-03-01T22:15:22.922673",
+  "traffic_stopped": "2026-03-01T22:16:01.770037",
+  "cleaned_up": "2026-03-01T22:16:12.316731"
+}

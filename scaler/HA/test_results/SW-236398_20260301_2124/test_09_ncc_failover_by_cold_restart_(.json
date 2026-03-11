@@ -1,0 +1,6 @@
+{
+  "id": "test_09",
+  "name": "NCC Failover by Cold Restart (Power Reset)",
+  "verdict": "ERROR",
+  "reason": "[Errno None] Unable to connect to port 22 on 100.64.7.2"
+}

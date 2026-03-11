@@ -1,0 +1,255 @@
+{
+  "jira_key": "SW-234480",
+  "title": "FlowSpec VPN | Scale",
+  "description": "6 quick-win scale test cases for FlowSpec-VPN from Jira SW-234480. Limits from limits.json: IPv4 TCAM 12K/NCP, max BGP routes 20K, max VPN peers 8.",
+  "bgp_session_id": "pe_1",
+  "default_scale_mode": "flowspec-vpn-ipv4",
+  "default_rt": "1234567:301",
+  "default_rd": "1.1.1.1:100",
+  "rt_overrides": {
+    "flowspec-vpn-ipv6": "1234567:401"
+  },
+  "tests": [
+    {
+      "id": "test_01",
+      "name": "Max BGP Routes (20K) + Convergence",
+      "category": "control_plane",
+      "jira_ref": "SW-234480 Test 1",
+      "test_type": "scale",
+      "inject_mode": "stress",
+      "inject_count": 20000,
+      "expected_bgp_accepted": 20000,
+      "expected_dp_installed": 12000,
+      "convergence_limit_sec": 60,
+      "verify_commands": [
+        "show bgp ipv4 flowspec-vpn summary"
+      ],
+      "pass_criteria": {
+        "bgp_pfxrcd_equals": 20000,
+        "session_state": "Established",
+        "convergence_under_sec": 60
+      },
+      "needs_traffic": false,
+      "needs_withdraw": true,
+      "churn_cycles": 0,
+      "flap_command": null
+    },
+    {
+      "id": "test_03",
+      "name": "Route Churn -- Bulk Add/Remove x5",
+      "category": "stability",
+      "jira_ref": "SW-234480 Test 3",
+      "test_type": "scale",
+      "inject_mode": "flowspec-vpn-ipv4",
+      "inject_count": 10000,
+      "expected_bgp_accepted": 10000,
+      "expected_dp_installed": 10000,
+      "convergence_limit_sec": 120,
+      "verify_commands": [
+        "show bgp ipv4 flowspec-vpn summary"
+      ],
+      "pass_criteria": {
+        "session_never_drops": true,
+        "churn_cycles_complete": 5
+      },
+      "needs_traffic": false,
+      "needs_withdraw": true,
+      "churn_cycles": 5,
+      "churn_delay_sec": 5,
+      "flap_command": null
+    },
+    {
+      "id": "test_04",
+      "name": "Max IPv4 DP Rules (12K) + Traffic Enforcement",
+      "category": "data_plane",
+      "jira_ref": "SW-234480 Test 4",
+      "test_type": "scale",
+      "inject_mode": "flowspec-vpn-ipv4",
+      "inject_count": 12000,
+      "expected_bgp_accepted": 12000,
+      "expected_dp_installed": 12000,
+      "convergence_limit_sec": 120,
+      "verify_commands": [
+        "show bgp ipv4 flowspec-vpn summary",
+        "show flowspec ncp {ncp_id}",
+        "show system npu-resources resource-type flowspec",
+        "show flowspec instance vrf ALPHA ipv4"
+      ],
+      "pass_criteria": {
+        "bgp_pfxrcd_equals": 12000,
+        "dp_installed_equals": 12000,
+        "traffic_enforced": true,
+        "traffic_sample_count": 100
+      },
+      "needs_traffic": true,
+      "needs_withdraw": true,
+      "churn_cycles": 0,
+      "flap_command": null
+    },
+    {
+      "id": "test_08",
+      "name": "Exceed DP Limit -- Incremental (14K)",
+      "category": "oversubscription",
+      "jira_ref": "SW-234480 Test 8",
+      "test_type": "scale",
+      "inject_mode": "flowspec-vpn-ipv4",
+      "inject_count": 14000,
+      "inject_phases": [
+        {"count": 12000, "description": "Fill DP to capacity"},
+        {"count": 2000, "description": "Exceed DP limit", "keep_previous": true}
+      ],
+      "expected_bgp_accepted": 14000,
+      "expected_dp_installed": 12000,
+      "convergence_limit_sec": 120,
+      "verify_commands": [
+        "show bgp ipv4 flowspec-vpn summary",
+        "show flowspec ncp {ncp_id}",
+        "show system npu-resources resource-type flowspec",
+        "show logging | include flowspec"
+      ],
+      "pass_criteria": {
+        "bgp_pfxrcd_equals": 14000,
+        "dp_capped_at": 12000,
+        "no_crash": true,
+        "capacity_warning_logged": true
+      },
+      "needs_traffic": false,
+      "needs_withdraw": true,
+      "churn_cycles": 0,
+      "flap_command": null
+    },
+    {
+      "id": "test_09",
+      "name": "Exceed DP Limit -- Bulk (15K)",
+      "category": "oversubscription",
+      "jira_ref": "SW-234480 Test 9",
+      "test_type": "scale",
+      "inject_mode": "stress",
+      "inject_count": 15000,
+      "expected_bgp_accepted": 15000,
+      "expected_dp_installed": 12000,
+      "convergence_limit_sec": 120,
+      "verify_commands": [
+        "show bgp ipv4 flowspec-vpn summary",
+        "show flowspec ncp {ncp_id}",
+        "show system npu-resources resource-type flowspec",
+        "show logging | include flowspec"
+      ],
+      "pass_criteria": {
+        "bgp_pfxrcd_equals": 15000,
+        "dp_capped_at": 12000,
+        "no_crash": true,
+        "capacity_warning_logged": true
+      },
+      "needs_traffic": false,
+      "needs_withdraw": true,
+      "churn_cycles": 0,
+      "flap_command": null
+    },
+    {
+      "id": "test_12",
+      "name": "Session Flap Recovery at Scale (20K < 90s)",
+      "category": "stability",
+      "jira_ref": "SW-234480 Test 12",
+      "test_type": "scale",
+      "inject_mode": "stress",
+      "inject_count": 20000,
+      "expected_bgp_accepted": 20000,
+      "expected_dp_installed": 12000,
+      "convergence_limit_sec": 90,
+      "verify_commands": [
+        "show bgp ipv4 flowspec-vpn summary",
+        "show flowspec ncp {ncp_id}"
+      ],
+      "pass_criteria": {
+        "bgp_pfxrcd_equals": 20000,
+        "dp_installed_equals": 12000,
+        "recovery_under_sec": 90,
+        "session_recovers": true
+      },
+      "needs_traffic": false,
+      "needs_withdraw": true,
+      "churn_cycles": 0,
+      "flap_command": "clear bgp neighbor {peer_ip}"
+    },
+    {
+      "id": "test_02",
+      "name": "IPv4 + IPv6 Combined (12K + 4K)",
+      "category": "data_plane",
+      "jira_ref": "SW-234480 Test 2",
+      "test_type": "scale",
+      "inject_mode": "combined",
+      "inject_count": 16000,
+      "ipv4_count": 12000,
+      "ipv6_count": 4000,
+      "expected_bgp_accepted": 16000,
+      "expected_dp_installed": 12000,
+      "convergence_limit_sec": 120,
+      "verify_commands": [
+        "show bgp ipv4 flowspec-vpn summary",
+        "show bgp ipv6 flowspec-vpn summary",
+        "show system npu-resources resource-type flowspec"
+      ],
+      "pass_criteria": {
+        "ipv4_tcam_installed": 12000,
+        "ipv6_tcam_installed": 4000,
+        "no_crash": true
+      },
+      "needs_traffic": false,
+      "needs_withdraw": true,
+      "churn_cycles": 0,
+      "flap_command": null
+    },
+    {
+      "id": "test_10",
+      "name": "Withdraw All at Once (20K bulk)",
+      "category": "stability",
+      "jira_ref": "SW-234480 Test 10",
+      "test_type": "scale",
+      "inject_mode": "stress",
+      "inject_count": 20000,
+      "expected_bgp_accepted": 20000,
+      "expected_dp_installed": 12000,
+      "convergence_limit_sec": 120,
+      "verify_commands": [
+        "show bgp ipv4 flowspec-vpn summary",
+        "show system npu-resources resource-type flowspec"
+      ],
+      "pass_criteria": {
+        "post_withdraw_pfxrcd": 0,
+        "post_withdraw_tcam": 0,
+        "session_stays_established": true,
+        "no_crash": true
+      },
+      "needs_traffic": false,
+      "needs_withdraw": true,
+      "churn_cycles": 0,
+      "flap_command": null
+    },
+    {
+      "id": "test_11",
+      "name": "Exceed BGP Limit (25K)",
+      "category": "oversubscription",
+      "jira_ref": "SW-234480 Test 11",
+      "test_type": "scale",
+      "inject_mode": "stress",
+      "inject_count": 25000,
+      "expected_bgp_accepted": 20000,
+      "expected_dp_installed": 12000,
+      "convergence_limit_sec": 180,
+      "verify_commands": [
+        "show bgp ipv4 flowspec-vpn summary",
+        "show system npu-resources resource-type flowspec"
+      ],
+      "pass_criteria": {
+        "bgp_accepts_up_to_capacity": true,
+        "no_crash": true,
+        "session_stays_established": true
+      },
+      "needs_traffic": false,
+      "needs_withdraw": true,
+      "churn_cycles": 0,
+      "flap_command": null
+    }
+  ]
+}

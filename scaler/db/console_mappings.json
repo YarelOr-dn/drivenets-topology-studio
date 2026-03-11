@@ -1,0 +1,167 @@
+{
+  "console_servers": {
+    "console-b15": {
+      "host": "console-b15.dev.drivenets.net",
+      "ip": "10.10.2.176",
+      "user": "dn",
+      "password": "drive1234",
+      "model": "ATEN SN9116CO",
+      "total_ports": 16,
+      "rack_hint": "B15",
+      "dnaas_leaf": "DNAAS-LEAF-B15",
+      "ports": {
+        "13": {
+          "hostname": "RR-SA-2",
+          "serial_number": "WKY1BC7400002B2",
+          "previous_hostnames": [
+            "PE-2"
+          ],
+          "description": "RR-SA-2 (was PE-2)",
+          "last_verified": "2026-03-08T08:58:00",
+          "working_credentials": {
+            "username": "dn",
+            "password": "drivenets",
+            "device_state": "GI",
+            "last_success": "2026-03-08T08:58:00"
+          }
+        }
+      }
+    },
+    "console-b10": {
+      "host": "console-b10.dev.drivenets.net",
+      "ip": "10.10.2.215",
+      "user": "dn",
+      "password": "drive1234",
+      "model": "ATEN SN9116CO",
+      "total_ports": 16,
+      "rack_hint": "B10",
+      "dnaas_leaf": "DNAAS-LEAF-B10",
+      "ports": {
+        "5": {
+          "hostname": "YOR_CL_PE-4",
+          "serial_number": "WDY1A17E00011-P3",
+          "hostname_aliases": [
+            "PE-4"
+          ],
+          "description": "YOR_CL_PE-4 NCP (data plane only, NOT NCC brain)",
+          "console_reaches": "NCP",
+          "last_verified": "2026-03-08T09:12:00",
+          "working_credentials": null,
+          "note": "CL-86 cluster: NCCs are KVM VMs, use SSH to kvm108-cl408d-ncc0/ncc1 or virsh console on KVM host for NCC access"
+        }
+      }
+    },
+    "console-d16": {
+      "host": "console-d16.dev.drivenets.net",
+      "ip": "10.10.2.236",
+      "user": "dn",
+      "password": "drive1234",
+      "model": "ATEN SN9116CO",
+      "total_ports": 16,
+      "rack_hint": "D16",
+      "dnaas_leaf": "DNAAS-LEAF-D16",
+      "ports": {
+        "1": {
+          "hostname": "PE-1",
+          "serial_number": "WK31D7VV00023",
+          "hostname_aliases": [
+            "YOR_PE-1"
+          ],
+          "description": "PE-1 (SA-36CD-S, routing_engine prompt - no NCC serial)",
+          "last_verified": "2026-03-08T09:12:00",
+          "verification_method": "ATEN port scan matched routing_engine login + SA standalone has empty NCC serial",
+          "working_credentials": null
+        }
+      }
+    }
+  },
+  "cluster_ncc_access": {
+    "YOR_CL_PE-4": {
+      "system_type": "CL-86",
+      "ncc_type": "kvm",
+      "kvm_host": "kvm108",
+      "kvm_host_ip": "100.64.6.6",
+      "kvm_host_credentials": {
+        "username": "dn",
+        "password": "drive1234!"
+      },
+      "ncc_vms": [
+        "kvm108-cl408d-ncc0",
+        "kvm108-cl408d-ncc1"
+      ],
+      "ncc_console_credentials": {
+        "username": "dn",
+        "password": "drivenets"
+      },
+      "dncli_credentials": {
+        "username": "dnroot",
+        "password": "dnroot"
+      },
+      "mgmt_vip": "100.64.4.98",
+      "console_server_reaches": "NCP only (console-b10 port 5) -- NOT the NCC brain",
+      "gi_mode_access_flow": [
+        "1. SSH dn@kvm108 (password: drive1234!)",
+        "2. virsh list -- find running NCC VM",
+        "3. virsh console <ncc-vm-name> -- serial console to NCC",
+        "4. Login: dn / drivenets -- lands on BaseOS shell",
+        "5. dncli -- enters GI CLI (SSH to localhost as dnroot/dnroot)",
+        "6. GI# prompt ready for target-stack load commands"
+      ],
+      "dnos_mode_access": "SSH dnroot@100.64.4.98 (VIP routes to active NCC)",
+      "note": "In GI mode, VIP is dead. Must go through KVM host virsh console. In DNOS mode, VIP SSH works directly."
+    }
+  },
+  "device_to_console": {
+    "RR-SA-2": {
+      "console_server": "console-b15",
+      "port": "13"
+    },
+    "YOR_CL_PE-4": {
+      "console_server": "console-b10",
+      "port": "5"
+    },
+    "PE-4": {
+      "console_server": "console-b10",
+      "port": "5"
+    },
+    "PE-1": {
+      "console_server": "console-d16",
+      "port": "1"
+    },
+    "YOR_PE-1": {
+      "console_server": "console-d16",
+      "port": "1"
+    }
+  },
+  "serial_to_console": {
+    "WKY1BC7400002B2": {
+      "console_server": "console-b15",
+      "port": "13",
+      "hostname": "RR-SA-2"
+    },
+    "WDY1A17E00011-P3": {
+      "console_server": "console-b10",
+      "port": "5",
+      "hostname": "YOR_CL_PE-4"
+    },
+    "WK31D7VV00023": {
+      "console_server": "console-d16",
+      "port": "1",
+      "hostname": "PE-1"
+    }
+  },
+  "ports": {
+    "13": {
+      "hostname": "RR-SA-2",
+      "description": "RR-SA-2",
+      "serial_number": "WKY1BC7400002B2",
+      "last_verified": "2026-03-10T16:40:23.929259",
+      "working_credentials": {
+        "username": "dn",
+        "password": "drivenets",
+        "device_state": "GI",
+        "last_success": "2026-03-10T16:40:51.753987"
+      }
+    }
+  }
+}

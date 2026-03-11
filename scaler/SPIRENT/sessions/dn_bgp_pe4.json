@@ -1,0 +1,16 @@
+{
+  "session_name": "dn_bgp_pe4",
+  "session_id_on_server": "dn_bgp_pe4 - dn_spirent",
+  "lab_server": "il-auto-containers",
+  "chassis_ip": "100.64.3.238",
+  "port_location": "//100.64.3.238/6/13",
+  "active": false,
+  "created": "2026-03-01T14:21:53.967071",
+  "streams": [],
+  "devices": [],
+  "port_reserved": false,
+  "project_handle": "project1",
+  "port_handle": null,
+  "traffic_running": false,
+  "_stale_reason": "cleaned by fix_spirent session"
+}

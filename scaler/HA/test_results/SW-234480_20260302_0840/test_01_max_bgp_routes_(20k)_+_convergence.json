@@ -1,0 +1,16 @@
+{
+  "id": "test_01",
+  "name": "Max BGP Routes (20K) + Convergence",
+  "verdict": "PASS",
+  "inject_time_sec": 126.9,
+  "convergence_sec": 4.7,
+  "final_pfxrcd": 19973,
+  "dp_installed": 11,
+  "tcam": {
+    "installed": 0,
+    "total": 0,
+    "percent": 0.0
+  },
+  "session_dropped": false,
+  "reason": null
+}

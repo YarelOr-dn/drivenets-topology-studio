@@ -1,0 +1,20 @@
+{
+  "id": "test_07",
+  "name": "Warm System Restart",
+  "verdict": "PASS",
+  "recovery_sec": 323.5931992530823,
+  "ha_type": "system_restart",
+  "cp_verdict": "PASS",
+  "dp_verdict": "PASS",
+  "sp_verdict": "N/A",
+  "xray_verdict": "PASS",
+  "xray_packets": 2,
+  "ncp_before": 0,
+  "ncp_after": 0,
+  "tcam_before": 0,
+  "tcam_after": 0,
+  "spirent_loss": 0,
+  "counter_delta": 0,
+  "before_routes": "\r                        \rYOR_CL_PE-4# show bgp ipv4 flowspec-vpn summary\r\n\u001b[1FYOR_CL_PE-4(01-Mar-2026-22:25:50)# show bgp ipv4 flowspec-vpn summary\r\n\r\nBGP router identifier 4.4.4.4, local AS number 1",
+  "after_routes": "\r                        \rYOR_CL_PE-4# show bgp ipv4 flowspec-vpn summary\r\n\u001b[1FYOR_CL_PE-4(01-Mar-2026-22:32:00)# show bgp ipv4 flowspec-vpn summary\r\n\r\nBGP router identifier 4.4.4.4, local AS number 1"
+}

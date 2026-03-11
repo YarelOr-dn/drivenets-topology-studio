@@ -238,7 +238,7 @@ def show_lldp_summary(hostname: str):
 @dataclass
 class ServiceScale:
     """Represents a scalable service with its correlated interfaces."""
-    service_type: str  # fxc, l2vpn, evpn, vpws
+    service_type: str  # fxc, l2vpn, evpn, vpws, flowspec-vpn
     service_name: str
     service_number: int  # Extracted number from name
     interfaces: List[str] = field(default_factory=list)
@@ -248,6 +248,9 @@ class ServiceScale:
     vpws_remote_id: Optional[int] = None
     rd: Optional[str] = None  # Route Distinguisher (e.g., "1.1.1.1:1")
     rt: Optional[str] = None  # Route Target (e.g., "1234567:1")
+    # FlowSpec VPN specific
+    flowspec_afs: List[str] = field(default_factory=list)  # e.g., ['ipv4-flowspec', 'ipv6-flowspec']
+    bgp_asn: Optional[str] = None
 
 
 @dataclass
@@ -351,11 +354,85 @@ def _determine_service_type(section: str, instance_name: str) -> str:
         return 'evpn'  # VPLS goes under evpn category
     elif name_upper.startswith('VRF') or name_upper.startswith('L3VPN'):
         return 'vrf'  # VRF/L3VPN as separate category
+    elif name_upper.startswith('FS') or name_upper.startswith('FLOWSPEC'):
+        return 'flowspec-vpn'
     elif name_upper.startswith('BD') or name_upper.startswith('BRIDGE'):
         return 'l2vpn'
     
     # Fall back to section context
-    return section if section in ('fxc', 'vpws', 'evpn', 'l2vpn', 'vrf') else 'l2vpn'
+    return section if section in ('fxc', 'vpws', 'evpn', 'l2vpn', 'vrf', 'flowspec-vpn') else 'l2vpn'
+
+
+def _detect_flowspec_vpn_vrfs(config: str, services: Dict[str, List['ServiceScale']]) -> None:
+    """Scan VRF instances for FlowSpec address-families and populate flowspec-vpn list.
+    
+    FlowSpec VPN in DNOS is configured per-VRF:
+      network-services vrf instance NAME protocols bgp ASN address-family ipv4-flowspec
+    
+    VRFs with flowspec AFs are added to services['flowspec-vpn'].
+    They remain in services['vrf'] too (dual-categorized).
+    """
+    vrf_block_pattern = re.compile(
+        r'instance\s+(\S+)\s*\n(.*?)(?=\n    instance\s+\S+|\n  !\s*\n(?:\s*!\s*\n)?(?:(?:  \S|\S))|\Z)',
+        re.DOTALL
+    )
+    
+    in_vrf_section = False
+    vrf_section_text = ""
+    
+    for line in config.split('\n'):
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        
+        if indent == 2 and stripped == 'vrf':
+            in_vrf_section = True
+            vrf_section_text = ""
+            continue
+        elif in_vrf_section and indent == 0 and stripped and stripped != '!':
+            in_vrf_section = False
+        
+        if in_vrf_section:
+            vrf_section_text += line + '\n'
+    
+    if not vrf_section_text:
+        return
+    
+    for match in vrf_block_pattern.finditer(vrf_section_text):
+        instance_name = match.group(1)
+        block = match.group(2)
+        
+        fs_afs = []
+        if re.search(r'address-family ipv4-flowspec\b(?!-vpn)', block):
+            fs_afs.append('ipv4-flowspec')
+        if re.search(r'address-family ipv6-flowspec\b(?!-vpn)', block):
+            fs_afs.append('ipv6-flowspec')
+        
+        if not fs_afs:
+            continue
+        
+        interfaces = re.findall(
+            r'^\s*interface\s+((?:ph|ge|xe|et|bundle|lag)\S+)',
+            block, re.MULTILINE
+        )
+        
+        rd_match = re.search(r'route-distinguisher\s+(\S+)', block)
+        rt_match = re.search(r'(?:import|export)-vpn\s+route-target\s+(\S+)', block)
+        asn_match = re.search(r'bgp\s+(\d+)', block)
+        
+        svc = ServiceScale(
+            service_type='flowspec-vpn',
+            service_name=instance_name,
+            service_number=extract_service_number(instance_name),
+            interfaces=interfaces,
+            config_block="",
+            rd=rd_match.group(1) if rd_match else None,
+            rt=rt_match.group(1) if rt_match else None,
+            flowspec_afs=fs_afs,
+            bgp_asn=asn_match.group(1) if asn_match else None
+        )
+        services['flowspec-vpn'].append(svc)
+    
+    services['flowspec-vpn'].sort(key=lambda s: s.service_number)
 
 
 def parse_services_from_config(config: str) -> Dict[str, List[ServiceScale]]:
@@ -376,7 +453,8 @@ def parse_services_from_config(config: str) -> Dict[str, List[ServiceScale]]:
         'l2vpn': [],
         'evpn': [],
         'vpws': [],
-        'vrf': []  # VRF as separate category for L3VPN services
+        'vrf': [],  # VRF as separate category for L3VPN services
+        'flowspec-vpn': []  # VRFs with flowspec address-families
     }
     
     lines = config.split('\n')
@@ -466,6 +544,10 @@ def parse_services_from_config(config: str) -> Dict[str, List[ServiceScale]]:
             config_block=""
         )
         services[svc_type].append(svc)
+    
+    # Post-process: detect VRFs with FlowSpec address-families
+    # These become 'flowspec-vpn' entries in addition to (or instead of) 'vrf' entries
+    _detect_flowspec_vpn_vrfs(config, services)
     
     # If state machine found services, return them without regex override
     total_found = sum(len(v) for v in services.values())
@@ -644,6 +726,8 @@ def generate_delete_commands(
             commands.append(f"no network-services evpn evpn-instances evpn-instance {svc.service_name}")
         elif svc.service_type == 'l2vpn':
             commands.append(f"no l2vpn bridge-domains bridge-domain {svc.service_name}")
+        elif svc.service_type == 'flowspec-vpn':
+            commands.append(f"no network-services vrf instance {svc.service_name}")
         
         if include_interfaces:
             for iface in svc.interfaces:
@@ -739,6 +823,7 @@ def show_scale_wizard(multi_ctx: 'MultiDeviceContext', return_config: bool = Fal
     summary_table.add_column("L2VPN", justify="right")
     summary_table.add_column("EVPN", justify="right")
     summary_table.add_column("VPWS", justify="right")
+    summary_table.add_column("VRF", justify="right")
     summary_table.add_column("Total Interfaces", justify="right", style="dim")
     
     for hostname, services in device_services.items():
@@ -753,6 +838,7 @@ def show_scale_wizard(multi_ctx: 'MultiDeviceContext', return_config: bool = Fal
             f"{len(services['l2vpn']):,}",
             f"{len(services['evpn']):,}",
             f"{len(services['vpws']):,}",
+            f"{len(services.get('vrf', [])):,}",
             f"{total_ifaces:,}"
         )
     
@@ -786,16 +872,18 @@ def _scale_down_wizard(multi_ctx: 'MultiDeviceContext', device_services: Dict[st
     console.print("  [2] L2VPN instances + sub-interfaces")
     console.print("  [3] EVPN instances + sub-interfaces")
     console.print("  [4] VPWS instances + sub-interfaces")
+    console.print("  [5] VRF (L3VPN) instances + interfaces")
+    console.print("  [6] FlowSpec VPN (VRFs with FlowSpec address-families)")
     console.print("  [B] Back")
     
-    type_choice = Prompt.ask("Select", choices=["1", "2", "3", "4", "b", "B"], default="b").lower()
+    type_choice = Prompt.ask("Select", choices=["1", "2", "3", "4", "5", "6", "b", "B"], default="b").lower()
     
     if type_choice == "b":
         return False
     
-    svc_type_map = {"1": "fxc", "2": "l2vpn", "3": "evpn", "4": "vpws"}
+    svc_type_map = {"1": "fxc", "2": "l2vpn", "3": "evpn", "4": "vpws", "5": "vrf", "6": "flowspec-vpn"}
     svc_type = svc_type_map.get(type_choice, "fxc")
-    svc_type_name = {"fxc": "FXC", "l2vpn": "L2VPN", "evpn": "EVPN", "vpws": "VPWS"}[svc_type]
+    svc_type_name = {"fxc": "FXC", "l2vpn": "L2VPN", "evpn": "EVPN", "vpws": "VPWS", "vrf": "VRF", "flowspec-vpn": "FlowSpec VPN"}[svc_type]
     
     # Show current services of this type
     console.print(f"\n[bold]Current {svc_type_name} Services:[/bold]")
@@ -814,6 +902,14 @@ def _scale_down_wizard(multi_ctx: 'MultiDeviceContext', device_services: Dict[st
                 total_ifaces = sum(len(s.interfaces) for s in svc_list)
                 pwhe_count = sum(1 for s in svc_list for i in s.interfaces if i.startswith('ph'))
                 console.print(f"  Correlated interfaces: {total_ifaces:,} (PWHE: {pwhe_count:,})")
+                
+                if svc_type == 'flowspec-vpn' and hasattr(svc_list[0], 'flowspec_afs') and svc_list[0].flowspec_afs:
+                    afs = ', '.join(svc_list[0].flowspec_afs)
+                    console.print(f"  FlowSpec AFs: {afs}")
+                    if svc_list[0].rd:
+                        console.print(f"  RD pattern: {svc_list[0].rd}")
+                    if svc_list[0].rt:
+                        console.print(f"  RT pattern: {svc_list[0].rt}")
     
     # Get range to delete
     console.print("\n[bold]Specify Range to Delete:[/bold]")
@@ -1350,8 +1446,10 @@ def _generate_scale_up_suggestions(
             "evpn_count": len(services.get("evpn", [])),
             "l2vpn_count": len(services.get("l2vpn", [])),
             "vpws_count": len(services.get("vpws", [])),
+            "flowspec_vpn_count": len(services.get("flowspec-vpn", [])),
             "last_fxc": services.get("fxc", [])[-1] if services.get("fxc") else None,
             "last_evpn": services.get("evpn", [])[-1] if services.get("evpn") else None,
+            "last_flowspec_vpn": services.get("flowspec-vpn", [])[-1] if services.get("flowspec-vpn") else None,
             "interface_type": None,
             "in_session": hostname in device_services  # Track if in current session
         }
@@ -1540,6 +1638,29 @@ def _generate_scale_up_suggestions(
                             "apply_func": _apply_mh_sync_suggestion,
                         })
     
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SUGGESTION 5: FlowSpec VPN - continue adding VRFs with FlowSpec
+    # ═══════════════════════════════════════════════════════════════════════════
+    if current_hostname:
+        current = device_analysis.get(current_hostname, {})
+        fs_vpn_list = all_device_services.get(current_hostname, {}).get('flowspec-vpn', [])
+        fs_vpn_count = len(fs_vpn_list)
+        
+        if fs_vpn_count > 0:
+            last_fs = fs_vpn_list[-1]
+            suggested = min(100, 512 - fs_vpn_count)  # max 512 VRFs with flowspec
+            if suggested > 0:
+                suggestions.append({
+                    "type": "continue_flowspec_vpn",
+                    "description": f"Add {suggested:,} more FlowSpec VPN VRFs to {current_hostname}",
+                    "details": f"Continue from {last_fs.service_name} "
+                               f"({fs_vpn_count:,} existing, limit 512)",
+                    "service_type": "flowspec-vpn",
+                    "count": suggested,
+                    "start_num": last_fs.service_number + 1,
+                    "apply_func": _apply_flowspec_vpn_suggestion,
+                })
+    
     return suggestions
 
 
@@ -1573,7 +1694,7 @@ def _execute_scale_up(
     
     end_num = start_num + count - 1
     
-    svc_type_name = {"fxc": "FXC", "vpws": "EVPN-VPWS", "evpn": "EVPN", "l2vpn": "L2VPN"}.get(svc_type, svc_type.upper())
+    svc_type_name = {"fxc": "FXC", "vpws": "EVPN-VPWS", "evpn": "EVPN", "l2vpn": "L2VPN", "flowspec-vpn": "FlowSpec VPN"}.get(svc_type, svc_type.upper())
     console.print(f"\n[bold green]━━━ Quick Scale UP: {count:,} {svc_type_name} services ━━━[/bold green]")
     console.print(f"  Range: #{start_num} to #{end_num}")
     console.print(f"  Interface: {interface_type}")
@@ -1699,8 +1820,24 @@ def _execute_scale_up(
                 if "." in last_iface:
                     vpws_parent = last_iface.rsplit(".", 1)[0]
         
-        for i in range(count):
-            svc_num = start_num + i
+        # Scan for L3 sub-interfaces (have IP addresses) that conflict with L2-AC
+        l3_conflict_ids = set()
+        for _parent in [vpws_parent or l2ac_parent, l2ac_parent]:
+            if _parent and device_config:
+                l3_conflict_ids |= _scan_l3_sub_ids(device_config, _parent)
+        if l3_conflict_ids:
+            console.print(f"  [yellow]⚠ {hostname}: {len(l3_conflict_ids)} existing L3 sub-interface(s) "
+                          f"on parent (have IP addresses, will skip)[/yellow]")
+        
+        # Build list of service numbers, skipping L3 conflicts
+        svc_numbers = []
+        candidate = start_num
+        while len(svc_numbers) < count:
+            if candidate not in l3_conflict_ids:
+                svc_numbers.append(candidate)
+            candidate += 1
+        
+        for svc_num in svc_numbers:
             
             # VPWS always uses L2-AC interfaces
             if svc_type == "vpws":
@@ -2355,6 +2492,20 @@ def _apply_continue_fxc_suggestion(
     )
 
 
+def _apply_flowspec_vpn_suggestion(
+    multi_ctx: 'MultiDeviceContext',
+    device_services: Dict[str, Dict[str, List[ServiceScale]]],
+    suggestion: Dict
+) -> bool:
+    """Apply a suggestion to continue adding FlowSpec VPN VRFs."""
+    return _execute_flowspec_vpn_scale_up(
+        multi_ctx=multi_ctx,
+        device_services=device_services,
+        count=suggestion["count"],
+        start_num=suggestion.get("start_num", 1),
+    )
+
+
 def _detect_interface_pattern_from_config(
     config: str,
     parent_interface: str
@@ -2622,6 +2773,693 @@ def _apply_mh_sync_suggestion(
     )
 
 
+def _scan_used_sub_ids(config: str, parent_iface: str) -> Set[int]:
+    """Scan config for existing sub-interface IDs on a parent interface.
+    
+    Returns set of integer sub-IDs already in use (e.g., {1, 2, 5, 100}).
+    """
+    used = set()
+    pattern = re.compile(rf'{re.escape(parent_iface)}\.(\d+)')
+    for m in pattern.finditer(config):
+        try:
+            used.add(int(m.group(1)))
+        except ValueError:
+            pass
+    return used
+
+
+def _scan_l3_sub_ids(config: str, parent_iface: str) -> Set[int]:
+    """Scan config for sub-interfaces that have IP addresses (L3 mode).
+    
+    Returns set of sub-IDs that already have ipv4-address or ipv6-address,
+    which cannot coexist with l2-service enabled on the same interface.
+    """
+    l3_ids = set()
+    lines = config.split('\n')
+    current_subif_id = None
+    parent_prefix = f"  {parent_iface}."
+    
+    for line in lines:
+        if line.startswith(parent_prefix) and not line.strip().startswith('!'):
+            rest = line[len(parent_prefix):].strip()
+            try:
+                current_subif_id = int(rest)
+            except ValueError:
+                current_subif_id = None
+        elif line.strip() == '!' or (line.startswith('  ') and not line.startswith('    ') and current_subif_id is not None):
+            current_subif_id = None
+        elif current_subif_id is not None and ('ipv4-address' in line or 'ipv6-address' in line):
+            l3_ids.add(current_subif_id)
+    
+    return l3_ids
+
+
+def _scan_used_vrf_numbers(config: str, prefix: str = "VRF-") -> Set[int]:
+    """Scan config for existing VRF instance numbers with a given prefix.
+    
+    Returns set of integer VRF numbers already in use.
+    """
+    used = set()
+    pattern = re.compile(rf'instance\s+{re.escape(prefix)}(\d+)')
+    for m in pattern.finditer(config):
+        try:
+            used.add(int(m.group(1)))
+        except ValueError:
+            pass
+    return used
+
+
+def _find_free_numbers(used: Set[int], count: int, start_from: int = 1) -> List[int]:
+    """Find `count` free numbers starting from `start_from`, skipping any in `used`."""
+    result = []
+    n = start_from
+    while len(result) < count:
+        if n not in used:
+            result.append(n)
+        n += 1
+    return result
+
+
+def _scan_used_route_targets(config: str, rt_prefix: str) -> Set[int]:
+    """Scan config for all route-target suffixes matching a given prefix.
+    
+    Finds all RTs like '{prefix}:N' across ALL services (VRF, FXC, EVPN, L2VPN, etc.)
+    and returns the set of N values already in use.
+    
+    This prevents new FlowSpec VPN VRFs from accidentally sharing RTs with
+    existing services, which would cause unintended route leaking.
+    """
+    used = set()
+    pattern = re.compile(rf'route-target\s+{re.escape(rt_prefix)}:(\d+)')
+    for m in pattern.finditer(config):
+        try:
+            used.add(int(m.group(1)))
+        except ValueError:
+            pass
+    return used
+
+
+def _detect_bgp_neighbors(config: str) -> List[Dict[str, str]]:
+    """Detect existing BGP neighbors from config.
+    
+    Returns list of dicts with 'ip', 'remote_as', 'description', and
+    which flowspec-vpn AFs are already enabled on them.
+    """
+    neighbors = []
+    neighbor_pattern = re.compile(
+        r'neighbor\s+(\d+\.\d+\.\d+\.\d+)\s*\n(.*?)(?=\n\s{4}neighbor\s+\d|\n\s{2}!|\Z)',
+        re.DOTALL
+    )
+    
+    bgp_section = ""
+    in_global_bgp = False
+    for line in config.split('\n'):
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if indent == 2 and stripped.startswith('bgp '):
+            in_global_bgp = True
+            bgp_section = ""
+        elif in_global_bgp and indent == 0 and stripped and stripped != '!':
+            in_global_bgp = False
+        if in_global_bgp:
+            bgp_section += line + '\n'
+    
+    for m in neighbor_pattern.finditer(bgp_section):
+        ip = m.group(1)
+        block = m.group(2)
+        
+        desc_m = re.search(r'description\s+"?([^"\n]+)"?', block)
+        ras_m = re.search(r'remote-as\s+(\d+)', block)
+        
+        neighbors.append({
+            'ip': ip,
+            'remote_as': ras_m.group(1) if ras_m else '',
+            'description': desc_m.group(1).strip() if desc_m else '',
+            'has_v4_fs_vpn': 'address-family ipv4-flowspec-vpn' in block,
+            'has_v6_fs_vpn': 'address-family ipv6-flowspec-vpn' in block,
+        })
+    
+    return neighbors
+
+
+def _execute_flowspec_vpn_scale_up(
+    multi_ctx: 'MultiDeviceContext',
+    device_services: Dict[str, Dict[str, List[ServiceScale]]],
+    count: int,
+    start_num: int,
+    return_config: bool = False
+) -> Any:
+    """Generate FlowSpec VPN scale configuration: VRFs with FlowSpec address-families.
+    
+    Generates:
+    1. VRF instances with BGP flowspec AFs (ipv4-flowspec, ipv6-flowspec) and import/export RT
+    2. Sub-interfaces attached to each VRF with flowspec admin-state enabled
+    3. Global BGP address-family ipv4/ipv6-flowspec-vpn (if not already present)
+    4. BGP neighbor flowspec-vpn AF activation with admin-state + send-community extended
+    
+    Smart features:
+    - Scans existing sub-interfaces and VRF names to avoid collisions
+    - Detects existing BGP neighbors for flowspec-vpn AF attachment
+    - Supports dual-stack (ipv4-unicast + ipv6-unicast) VRF AFs
+    
+    Scale targets from SW-206883: ~20K routes, ~8 peers, up to 512 VRFs with flowspec.
+    """
+    from scaler.config_pusher import ConfigPusher, get_learned_timing_by_scale, save_timing_record
+    
+    end_num = start_num + count - 1
+    console.print(f"\n[bold green]━━━ FlowSpec VPN Scale UP: {count:,} VRFs ━━━[/bold green]")
+    
+    hostname = list(device_services.keys())[0]
+    config = multi_ctx.configs.get(hostname, "")
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SMART DETECTION: BGP ASN, router-id, existing patterns
+    # ═══════════════════════════════════════════════════════════════════════════
+    rt_asn = None
+    rt_source = ""
+    
+    existing_fs = device_services.get(hostname, {}).get('flowspec-vpn', [])
+    if existing_fs and existing_fs[-1].bgp_asn:
+        rt_asn = existing_fs[-1].bgp_asn
+        rt_source = "existing FlowSpec VPN VRFs"
+    
+    if not rt_asn:
+        rt_match = re.search(r'route-target\s+(\d+):\d+', config)
+        if rt_match:
+            rt_asn = rt_match.group(1)
+            rt_source = "existing services"
+    
+    if not rt_asn:
+        try:
+            op_path = f"/home/dn/SCALER/db/configs/{hostname}/operational.json"
+            if os.path.exists(op_path):
+                with open(op_path, 'r') as f:
+                    op_data = json.load(f)
+                    if op_data.get('local_as'):
+                        rt_asn = str(op_data['local_as'])
+                        rt_source = "BGP local-as"
+        except Exception:
+            pass
+    
+    if not rt_asn:
+        bgp_as_match = re.search(r'autonomous-system\s+(\d+)', config)
+        if bgp_as_match:
+            rt_asn = bgp_as_match.group(1)
+            rt_source = "BGP config"
+    
+    if not rt_asn:
+        rt_asn = "65000"
+        rt_source = "default"
+    
+    rd_match = re.search(r'router-id\s+(\d+\.\d+\.\d+\.\d+)', config)
+    rd_router_id = rd_match.group(1) if rd_match else None
+    if not rd_router_id:
+        lo_match = re.search(r'loopback-\d+.*?ipv4-address\s+(\d+\.\d+\.\d+\.\d+)', config, re.DOTALL)
+        rd_router_id = lo_match.group(1) if lo_match else "1.1.1.1"
+    
+    # Detect interface parent from existing FlowSpec VPN VRFs
+    detected_parent = None
+    if existing_fs and existing_fs[-1].interfaces:
+        last_iface = existing_fs[-1].interfaces[0]
+        if '.' in last_iface:
+            detected_parent = last_iface.rsplit('.', 1)[0]
+    
+    if not detected_parent:
+        lldp_interfaces = get_interfaces_with_lldp(hostname, dn_only=True) if hostname else []
+        if lldp_interfaces:
+            detected_parent = lldp_interfaces[0].get('interface', 'ge400-0/0/1')
+    
+    existing_rt_base = None
+    if existing_fs and existing_fs[-1].rt:
+        existing_rt_base = existing_fs[-1].rt.split(':')[0] if ':' in existing_fs[-1].rt else rt_asn
+    
+    has_global_fs_vpn_v4 = 'address-family ipv4-flowspec-vpn' in config
+    has_global_fs_vpn_v6 = 'address-family ipv6-flowspec-vpn' in config
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # STEP 1: Address Family Selection
+    # ═══════════════════════════════════════════════════════════════════════════
+    console.print(f"\n[bold]FlowSpec VPN Configuration:[/bold]")
+    console.print(f"  BGP AS: {rt_asn} [dim]({rt_source})[/dim]")
+    console.print(f"  RD Base: {rd_router_id}")
+    console.print(f"  Existing FlowSpec VPN VRFs: {len(existing_fs):,}")
+    console.print(f"  Global BGP flowspec-vpn: {'[green]already configured[/green]' if has_global_fs_vpn_v4 else '[yellow]will be added[/yellow]'}")
+    
+    console.print(f"\n[bold]FlowSpec Address Families (VRF level):[/bold]")
+    console.print(f"  [1] IPv4 FlowSpec only")
+    console.print(f"  [2] IPv6 FlowSpec only")
+    console.print(f"  [3] [green]Both IPv4 + IPv6 FlowSpec[/green] (recommended)")
+    console.print(f"  [B] Back")
+    
+    af_choice = Prompt.ask("Select", choices=["1", "2", "3", "b", "B"], default="3").lower()
+    if af_choice == "b":
+        return False
+    
+    use_ipv4_fs = af_choice in ("1", "3")
+    use_ipv6_fs = af_choice in ("2", "3")
+    af_desc = []
+    if use_ipv4_fs:
+        af_desc.append("ipv4-flowspec")
+    if use_ipv6_fs:
+        af_desc.append("ipv6-flowspec")
+    
+    # VRF unicast AF selection (ipv4-unicast always, optionally ipv6-unicast)
+    console.print(f"\n[bold]VRF Unicast Address Families:[/bold]")
+    console.print(f"  [1] [green]IPv4 unicast only[/green] (standard)")
+    console.print(f"  [2] IPv4 + IPv6 unicast (dual-stack VPN)")
+    
+    unicast_choice = Prompt.ask("Select", choices=["1", "2"], default="1")
+    use_ipv6_unicast = (unicast_choice == "2")
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # STEP 2: Interface Parent Selection
+    # ═══════════════════════════════════════════════════════════════════════════
+    console.print(f"\n[bold]Interface for VRF attachment:[/bold]")
+    if detected_parent:
+        console.print(f"  [green]Detected: {detected_parent}[/green] (from existing FlowSpec VPN VRFs)")
+    
+    lldp_interfaces = get_interfaces_with_lldp(hostname, dn_only=True) if hostname else []
+    if lldp_interfaces:
+        console.print(f"\n  [bold cyan]Physical Interfaces with DN Neighbors:[/bold cyan]")
+        for i, n in enumerate(lldp_interfaces[:5], 1):
+            marker = " [green]← current[/green]" if n.get('interface') == detected_parent else ""
+            console.print(f"    [{i}] {n.get('interface', '?')} → {n.get('neighbor', '?')}{marker}")
+        console.print(f"    [C] Custom interface")
+        console.print(f"    [B] Back")
+        
+        choices = [str(i) for i in range(1, min(len(lldp_interfaces), 5) + 1)] + ["c", "C", "b", "B"]
+        if detected_parent:
+            choices.extend(["d", "D"])
+            console.print(f"    [D] Use detected ({detected_parent})")
+        
+        iface_choice = Prompt.ask("Select parent interface", choices=choices,
+                                   default="d" if detected_parent else "1").lower()
+        if iface_choice == "b":
+            return False
+        elif iface_choice == "c":
+            iface_parent = str_prompt_nav("Enter interface name", default="ge400-0/0/1")
+        elif iface_choice == "d" and detected_parent:
+            iface_parent = detected_parent
+        else:
+            idx = int(iface_choice) - 1
+            iface_parent = lldp_interfaces[idx].get('interface', 'ge400-0/0/1')
+    else:
+        iface_parent = Prompt.ask("Enter parent interface for VRF sub-interfaces",
+                                   default=detected_parent or "ge400-0/0/1")
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # STEP 3: Collision Avoidance - VRF names, sub-interfaces, AND route-targets
+    # ═══════════════════════════════════════════════════════════════════════════
+    rt_base = existing_rt_base or rt_asn
+    
+    used_sub_ids = _scan_used_sub_ids(config, iface_parent)
+    used_vrf_nums = _scan_used_vrf_numbers(config, "VRF-")
+    used_rt_suffixes = _scan_used_route_targets(config, rt_base)
+    
+    # Union of ALL occupied numbers: sub-IDs + VRF names + RT suffixes
+    all_used = used_sub_ids | used_vrf_nums | used_rt_suffixes
+    
+    console.print(f"\n[bold yellow]Collision Check:[/bold yellow]")
+    if used_sub_ids:
+        console.print(f"  Sub-interfaces on {iface_parent}: {len(used_sub_ids):,} "
+                      f"(IDs: {min(used_sub_ids)}-{max(used_sub_ids)})")
+    else:
+        console.print(f"  Sub-interfaces on {iface_parent}: none")
+    
+    if used_vrf_nums:
+        console.print(f"  VRF-N instances: {len(used_vrf_nums):,} "
+                      f"(range: {min(used_vrf_nums)}-{max(used_vrf_nums)})")
+    else:
+        console.print(f"  VRF-N instances: none")
+    
+    if used_rt_suffixes:
+        # Show RT usage across ALL service types
+        rt_only = used_rt_suffixes - used_vrf_nums
+        console.print(f"  Route-targets {rt_base}:N in use: {len(used_rt_suffixes):,} "
+                      f"(range: {min(used_rt_suffixes)}-{max(used_rt_suffixes)})")
+        if rt_only:
+            console.print(f"    [dim]({len(rt_only)} from non-FlowSpec services: "
+                          f"FXC, EVPN, L2VPN, other VRFs)[/dim]")
+    else:
+        console.print(f"  Route-targets {rt_base}:N in use: none")
+    
+    if all_used:
+        max_existing = max(all_used)
+        requested_range = set(range(start_num, start_num + count))
+        conflicts_in_range = all_used & requested_range
+        
+        # Categorize conflicts for clear reporting
+        if conflicts_in_range:
+            iface_conflicts = conflicts_in_range & used_sub_ids
+            vrf_conflicts = conflicts_in_range & used_vrf_nums
+            rt_conflicts = conflicts_in_range & used_rt_suffixes
+            
+            console.print(f"\n  [red]⚠ {len(conflicts_in_range)} conflicts in range "
+                          f"#{start_num}-{start_num + count - 1}:[/red]")
+            if iface_conflicts:
+                console.print(f"    Sub-interface collisions: {len(iface_conflicts)}")
+            if vrf_conflicts:
+                console.print(f"    VRF name collisions: {len(vrf_conflicts)}")
+            if rt_conflicts:
+                rt_only_conflicts = rt_conflicts - iface_conflicts - vrf_conflicts
+                if rt_only_conflicts:
+                    console.print(f"    [yellow]RT collisions (other services): "
+                                  f"{len(rt_only_conflicts)} "
+                                  f"(would leak routes!)[/yellow]")
+            
+            free_nums = _find_free_numbers(all_used, count, start_from=start_num)
+            contiguous_start = max_existing + 1
+            
+            console.print(f"\n  [1] [green]Skip conflicts[/green] - use {count} non-contiguous free IDs")
+            console.print(f"  [2] [green]Start after existing[/green] - begin at #{contiguous_start} "
+                          f"(safe: no name/RT/iface overlap)")
+            console.print(f"  [3] Force original range (may overwrite or leak routes)")
+            console.print(f"  [B] Back")
+            
+            collision_choice = Prompt.ask("Select", choices=["1", "2", "3", "b", "B"], default="2").lower()
+            if collision_choice == "b":
+                return False
+            elif collision_choice == "1":
+                vrf_numbers = free_nums
+                console.print(f"  [green]✓ Using {count} free IDs "
+                              f"(#{free_nums[0]} to #{free_nums[-1]})[/green]")
+            elif collision_choice == "2":
+                start_num = contiguous_start
+                vrf_numbers = list(range(start_num, start_num + count))
+                console.print(f"  [green]✓ Starting from #{start_num}[/green]")
+            else:
+                vrf_numbers = list(range(start_num, start_num + count))
+                console.print(f"  [yellow]⚠ Using original range, may overwrite[/yellow]")
+        else:
+            vrf_numbers = list(range(start_num, start_num + count))
+            console.print(f"\n  [green]✓ No conflicts in range #{start_num}-{start_num + count - 1}[/green]")
+    else:
+        vrf_numbers = list(range(start_num, start_num + count))
+    
+    end_num = vrf_numbers[-1] if vrf_numbers else start_num + count - 1
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # STEP 4: BGP Neighbor FlowSpec-VPN AF Activation
+    # ═══════════════════════════════════════════════════════════════════════════
+    existing_neighbors = _detect_bgp_neighbors(config)
+    neighbors_to_activate = []
+    
+    if existing_neighbors:
+        # Find neighbors that don't yet have flowspec-vpn AFs
+        candidates = []
+        for nbr in existing_neighbors:
+            needs_v4 = use_ipv4_fs and not nbr['has_v4_fs_vpn']
+            needs_v6 = use_ipv6_fs and not nbr['has_v6_fs_vpn']
+            if needs_v4 or needs_v6:
+                candidates.append(nbr)
+        
+        already_active = [n for n in existing_neighbors if n['has_v4_fs_vpn'] or n['has_v6_fs_vpn']]
+        
+        if already_active:
+            console.print(f"\n[bold]BGP Neighbors with FlowSpec-VPN already active:[/bold]")
+            for n in already_active:
+                afs = []
+                if n['has_v4_fs_vpn']:
+                    afs.append("v4")
+                if n['has_v6_fs_vpn']:
+                    afs.append("v6")
+                desc = f" ({n['description']})" if n['description'] else ""
+                console.print(f"  [green]✓[/green] {n['ip']}{desc} [{', '.join(afs)}]")
+        
+        if candidates:
+            console.print(f"\n[bold]BGP Neighbors needing FlowSpec-VPN activation:[/bold]")
+            for i, n in enumerate(candidates[:8], 1):
+                desc = f" ({n['description']})" if n['description'] else ""
+                console.print(f"  [{i}] {n['ip']}{desc} AS{n['remote_as']}")
+            console.print(f"  [A] Activate ALL {len(candidates)} neighbors")
+            console.print(f"  [N] Skip - don't activate any neighbors")
+            
+            nbr_choices = [str(i) for i in range(1, min(len(candidates), 8) + 1)]
+            nbr_choices.extend(["a", "A", "n", "N"])
+            nbr_choice = Prompt.ask("Select neighbors to activate", choices=nbr_choices, default="a").lower()
+            
+            if nbr_choice == "a":
+                neighbors_to_activate = candidates
+            elif nbr_choice != "n":
+                idx = int(nbr_choice) - 1
+                neighbors_to_activate = [candidates[idx]]
+        else:
+            console.print(f"\n[dim]All BGP neighbors already have flowspec-vpn AFs active[/dim]")
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # STEP 5: Options
+    # ═══════════════════════════════════════════════════════════════════════════
+    enable_iface_flowspec = Confirm.ask(
+        "\nEnable flowspec on VRF-attached interfaces?", default=True
+    )
+    
+    console.print(f"\n[bold cyan]━━━ Summary ━━━[/bold cyan]")
+    console.print(f"  VRFs: VRF-{vrf_numbers[0]} to VRF-{vrf_numbers[-1]} ({count:,})")
+    console.print(f"  VRF AFs: ipv4-unicast{', ipv6-unicast' if use_ipv6_unicast else ''}, "
+                  f"{', '.join(af_desc)}")
+    console.print(f"  Interface: {iface_parent}.N")
+    console.print(f"  Interface flowspec: {'enabled' if enable_iface_flowspec else 'disabled'}")
+    console.print(f"  RT: {rt_base}:N | RD: {rd_router_id}:N")
+    if neighbors_to_activate:
+        nbr_ips = ', '.join(n['ip'] for n in neighbors_to_activate[:3])
+        if len(neighbors_to_activate) > 3:
+            nbr_ips += f" +{len(neighbors_to_activate)-3} more"
+        console.print(f"  BGP neighbor activation: {nbr_ips}")
+        console.print(f"    Knobs: admin-state enabled, send-community extended")
+    
+    if not Confirm.ask("\nProceed with FlowSpec VPN Scale UP?", default=True):
+        return False
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CONFIG GENERATION
+    # ═══════════════════════════════════════════════════════════════════════════
+    console.print("\n[cyan]Generating configuration...[/cyan]")
+    
+    configs_by_device = {}
+    
+    for dev_hostname in device_services.keys():
+        config_lines = []
+        device_config = multi_ctx.configs.get(dev_hostname, "")
+        
+        device_rd_match = re.search(r'router-id\s+(\d+\.\d+\.\d+\.\d+)', device_config)
+        device_rd = device_rd_match.group(1) if device_rd_match else rd_router_id
+        
+        # Re-scan collision for this specific device
+        dev_used_sub = _scan_used_sub_ids(device_config, iface_parent)
+        dev_used_vrf = _scan_used_vrf_numbers(device_config, "VRF-")
+        dev_all_used = dev_used_sub | dev_used_vrf
+        
+        if dev_hostname != hostname and dev_all_used:
+            dev_vrf_numbers = _find_free_numbers(dev_all_used, count, start_from=vrf_numbers[0])
+        else:
+            dev_vrf_numbers = vrf_numbers
+        
+        # --- Interfaces: sub-interfaces with flowspec enabled ---
+        config_lines.append("interfaces")
+        for svc_num in dev_vrf_numbers:
+            config_lines.append(f"  {iface_parent}.{svc_num}")
+            config_lines.append(f"    admin-state enabled")
+            
+            vlan_id = svc_num if svc_num <= 4094 else ((svc_num - 1) % 4094) + 1
+            config_lines.append(f"    vlan-id {vlan_id}")
+            
+            if enable_iface_flowspec:
+                config_lines.append(f"    flowspec admin-state enabled")
+            config_lines.append(f"  !")
+        config_lines.append("!")
+        
+        # --- VRF instances with FlowSpec BGP AFs ---
+        config_lines.append("network-services")
+        config_lines.append("  vrf")
+        for svc_num in dev_vrf_numbers:
+            vrf_name = f"VRF-{svc_num}"
+            
+            config_lines.append(f"    instance {vrf_name}")
+            config_lines.append(f"      interface {iface_parent}.{svc_num}")
+            config_lines.append(f"      protocols")
+            config_lines.append(f"        bgp {rt_asn}")
+            config_lines.append(f"          route-distinguisher {device_rd}:{svc_num}")
+            
+            # ipv4-unicast (always)
+            config_lines.append(f"          address-family ipv4-unicast")
+            config_lines.append(f"            export-vpn route-target {rt_base}:{svc_num}")
+            config_lines.append(f"            import-vpn route-target {rt_base}:{svc_num}")
+            config_lines.append(f"          !")
+            
+            # ipv6-unicast (optional dual-stack)
+            if use_ipv6_unicast:
+                config_lines.append(f"          address-family ipv6-unicast")
+                config_lines.append(f"            export-vpn route-target {rt_base}:{svc_num}")
+                config_lines.append(f"            import-vpn route-target {rt_base}:{svc_num}")
+                config_lines.append(f"          !")
+            
+            # ipv4-flowspec
+            if use_ipv4_fs:
+                config_lines.append(f"          address-family ipv4-flowspec")
+                config_lines.append(f"            export-vpn route-target {rt_base}:{svc_num}")
+                config_lines.append(f"            import-vpn route-target {rt_base}:{svc_num}")
+                config_lines.append(f"          !")
+            
+            # ipv6-flowspec
+            if use_ipv6_fs:
+                config_lines.append(f"          address-family ipv6-flowspec")
+                config_lines.append(f"            export-vpn route-target {rt_base}:{svc_num}")
+                config_lines.append(f"            import-vpn route-target {rt_base}:{svc_num}")
+                config_lines.append(f"          !")
+            
+            config_lines.append(f"        !")  # bgp
+            config_lines.append(f"      !")  # protocols
+            config_lines.append(f"    !")  # instance
+        
+        config_lines.append("  !")  # vrf
+        config_lines.append("!")  # network-services
+        
+        # --- Global BGP: AFs + neighbor flowspec-vpn activation ---
+        dev_has_v4 = 'address-family ipv4-flowspec-vpn' in device_config
+        dev_has_v6 = 'address-family ipv6-flowspec-vpn' in device_config
+        
+        need_global_bgp = False
+        global_af_added = []
+        
+        if (use_ipv4_fs and not dev_has_v4) or (use_ipv6_fs and not dev_has_v6) or neighbors_to_activate:
+            need_global_bgp = True
+            config_lines.append("protocols")
+            config_lines.append(f"  bgp {rt_asn}")
+            
+            if use_ipv4_fs and not dev_has_v4:
+                config_lines.append(f"    address-family ipv4-flowspec-vpn")
+                config_lines.append(f"    !")
+                global_af_added.append("ipv4-flowspec-vpn")
+            if use_ipv6_fs and not dev_has_v6:
+                config_lines.append(f"    address-family ipv6-flowspec-vpn")
+                config_lines.append(f"    !")
+                global_af_added.append("ipv6-flowspec-vpn")
+            
+            # Neighbor flowspec-vpn AF activation with proper knobs
+            for nbr in neighbors_to_activate:
+                config_lines.append(f"    neighbor {nbr['ip']}")
+                
+                needs_v4 = use_ipv4_fs and not nbr['has_v4_fs_vpn']
+                needs_v6 = use_ipv6_fs and not nbr['has_v6_fs_vpn']
+                
+                if needs_v4:
+                    config_lines.append(f"      address-family ipv4-flowspec-vpn")
+                    config_lines.append(f"        admin-state enabled")
+                    config_lines.append(f"        send-community extended")
+                    config_lines.append(f"      !")
+                if needs_v6:
+                    config_lines.append(f"      address-family ipv6-flowspec-vpn")
+                    config_lines.append(f"        admin-state enabled")
+                    config_lines.append(f"        send-community extended")
+                    config_lines.append(f"      !")
+                
+                config_lines.append(f"    !")  # neighbor
+            
+            config_lines.append(f"  !")  # bgp
+            config_lines.append("!")  # protocols
+        
+        configs_by_device[dev_hostname] = '\n'.join(config_lines)
+    
+    # --- Preview and summary ---
+    total_lines = sum(len(c.split('\n')) for c in configs_by_device.values())
+    console.print(f"\n[green]✓ Generated {total_lines:,} lines for {len(configs_by_device)} device(s)[/green]")
+    
+    if Confirm.ask("Show config preview?", default=False):
+        for dev_hostname, cfg in configs_by_device.items():
+            console.print(f"\n[bold cyan]─── {dev_hostname} ───[/bold cyan]")
+            preview = cfg[:3000] + "\n..." if len(cfg) > 3000 else cfg
+            console.print(preview)
+    
+    console.print("\n[bold cyan]━━━ Configuration Summary ━━━[/bold cyan]")
+    for dev_hostname, cfg in configs_by_device.items():
+        console.print(f"\n[bold]{dev_hostname}:[/bold]")
+        
+        from rich.table import Table
+        summary_table = Table(box=None, show_header=False, padding=(0, 2))
+        summary_table.add_column("Hierarchy", style="cyan")
+        summary_table.add_column("Count", justify="right", style="green")
+        summary_table.add_column("Details", style="dim")
+        
+        summary_table.add_row("📦 Interfaces", f"{count:,}",
+                              f"{iface_parent}.{vrf_numbers[0]} to .{vrf_numbers[-1]}")
+        summary_table.add_row("🌐 VRFs", f"{count:,}",
+                              f"VRF-{vrf_numbers[0]} to VRF-{vrf_numbers[-1]}")
+        
+        unicast_afs = "ipv4-unicast"
+        if use_ipv6_unicast:
+            unicast_afs += ", ipv6-unicast"
+        fs_detail = ", ".join(af_desc)
+        summary_table.add_row("🔒 VRF AFs", f"{count * (len(af_desc) + 1 + (1 if use_ipv6_unicast else 0)):,}",
+                              f"{unicast_afs}, {fs_detail}")
+        
+        if global_af_added:
+            summary_table.add_row("🔀 Global BGP AFs", f"{len(global_af_added)}",
+                                  ", ".join(global_af_added))
+        
+        if neighbors_to_activate:
+            summary_table.add_row("👥 Neighbor Activation", f"{len(neighbors_to_activate)}",
+                                  "admin-state + send-community extended")
+        
+        summary_table.add_row("📄 Total Lines", f"{len(cfg.split(chr(10))):,}", "")
+        console.print(summary_table)
+    
+    if return_config:
+        combined = '\n'.join(configs_by_device.values())
+        console.print(f"\n[green]✓ Generated {len(combined.split(chr(10))):,} lines[/green]")
+        return combined
+    
+    # --- Push ---
+    console.print("\n[bold cyan]━━━ Push Options ━━━[/bold cyan]")
+    console.print("[bold]Select action:[/bold]")
+    console.print("  [1] Terminal Paste (paste directly into CLI)")
+    console.print("  [2] File Merge (upload file + load merge)")
+    console.print("  [S] Save to file only")
+    console.print("  [B] Cancel")
+    
+    push_choice = Prompt.ask("Select", choices=["1", "2", "s", "S", "b", "B"], default="1").lower()
+    
+    if push_choice == "b":
+        return False
+    
+    if push_choice == "s":
+        save_path = f"/home/dn/SCALER/db/generated/flowspec_vpn_scale_{count}vrfs.txt"
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        with open(save_path, 'w') as f:
+            for dev_hostname, cfg in configs_by_device.items():
+                f.write(f"# === {dev_hostname} ===\n")
+                f.write(cfg)
+                f.write("\n\n")
+        console.print(f"\n[green]✓ Saved to {save_path}[/green]")
+        return True
+    
+    push_method = "paste" if push_choice == "1" else "file_merge"
+    
+    timing_data = get_learned_timing_by_scale(count, "flowspec-vpn")
+    if timing_data:
+        console.print(f"\n[dim]Estimated time: {timing_data.get('avg_seconds', 0):.0f}s "
+                      f"(from {timing_data.get('samples', 0)} previous pushes)[/dim]")
+    
+    start_time = time.time()
+    
+    pusher = ConfigPusher(multi_ctx)
+    
+    success = True
+    for dev_hostname, cfg in configs_by_device.items():
+        console.print(f"\n[bold cyan]Pushing to {dev_hostname}...[/bold cyan]")
+        result = pusher.push_config(dev_hostname, cfg, method=push_method)
+        if not result:
+            console.print(f"[red]✗ Failed to push to {dev_hostname}[/red]")
+            success = False
+    
+    elapsed = time.time() - start_time
+    
+    if success:
+        console.print(f"\n[bold green]✓ FlowSpec VPN scale UP complete! ({elapsed:.1f}s)[/bold green]")
+        save_timing_record(count, "flowspec-vpn", elapsed, push_method)
+    
+    return success
+
+
 def _scale_up_wizard(multi_ctx: 'MultiDeviceContext', device_services: Dict[str, Dict[str, List[ServiceScale]]], return_config: bool = False) -> Any:
     """Wizard for scaling up (adding) services - generates and pushes config directly.
     
@@ -2674,18 +3512,20 @@ def _scale_up_wizard(multi_ctx: 'MultiDeviceContext', device_services: Dict[str,
     console.print("  [2] L2VPN instances + sub-interfaces")
     console.print("  [3] EVPN instances + sub-interfaces")
     console.print("  [4] VPWS instances + sub-interfaces")
+    console.print("  [5] VRF (L3VPN) instances + interfaces")
+    console.print("  [6] FlowSpec VPN (VRFs with FlowSpec address-families)")
     console.print("  [B] Back")
     
     console.print("\n[dim]Note: FXC services can use PWHE (phX.Y) or L2-AC (ge/bundle.Y) interfaces[/dim]")
     
-    type_choice = Prompt.ask("Select", choices=["1", "2", "3", "4", "b", "B"], default="b").lower()
+    type_choice = Prompt.ask("Select", choices=["1", "2", "3", "4", "5", "6", "b", "B"], default="b").lower()
     
     if type_choice == "b":
         return False
     
-    svc_type_map = {"1": "fxc", "2": "l2vpn", "3": "evpn", "4": "vpws"}
+    svc_type_map = {"1": "fxc", "2": "l2vpn", "3": "evpn", "4": "vpws", "5": "vrf", "6": "flowspec-vpn"}
     svc_type = svc_type_map.get(type_choice, "fxc")
-    svc_type_name = {"fxc": "FXC", "l2vpn": "L2VPN", "evpn": "EVPN", "vpws": "VPWS"}[svc_type]
+    svc_type_name = {"fxc": "FXC", "l2vpn": "L2VPN", "evpn": "EVPN", "vpws": "VPWS", "vrf": "VRF", "flowspec-vpn": "FlowSpec VPN"}[svc_type]
     
     # Show current scale and last service
     console.print(f"\n[bold]Current {svc_type_name} Services:[/bold]")
@@ -2718,6 +3558,15 @@ def _scale_up_wizard(multi_ctx: 'MultiDeviceContext', device_services: Dict[str,
                 console.print(f"  Last interface: {iface_str} {iface_type}")
             else:
                 console.print(f"  Last interface: [dim]none detected[/dim]")
+            
+            # FlowSpec VPN specific info
+            if svc_type == 'flowspec-vpn':
+                if hasattr(last, 'flowspec_afs') and last.flowspec_afs:
+                    console.print(f"  FlowSpec AFs: {', '.join(last.flowspec_afs)}")
+                if hasattr(last, 'rd') and last.rd:
+                    console.print(f"  RD pattern: {last.rd}")
+                if hasattr(last, 'rt') and last.rt:
+                    console.print(f"  RT pattern: {last.rt}")
             
             # EVPN-VPWS specific info (show all in one place to avoid redundant prompts)
             if svc_type == 'vpws':
@@ -2953,7 +3802,12 @@ def _scale_up_wizard(multi_ctx: 'MultiDeviceContext', device_services: Dict[str,
     headroom_color = "green" if headroom > 10 else "yellow" if headroom > 0 else "red"
     console.print(f"[dim]After scaling: {final_stags:,} / {STAG_LIMIT:,} Stags ({pct_after}%) | Headroom: [{headroom_color}]{headroom}[/{headroom_color}][/dim]")
     
-    # FXC and VPWS are fully supported
+    # FXC, VPWS, and FlowSpec VPN are fully supported
+    if svc_type == "flowspec-vpn":
+        return _execute_flowspec_vpn_scale_up(
+            multi_ctx, device_services, count, start_num_base, return_config=return_config
+        )
+    
     if svc_type not in ("fxc", "vpws"):
         console.print(f"\n[yellow]⚠ Scale UP for {svc_type_name} requires the full configuration wizard.[/yellow]")
         return False
@@ -3081,12 +3935,28 @@ def _scale_up_wizard(multi_ctx: 'MultiDeviceContext', device_services: Dict[str,
     config = multi_ctx.configs.get(list(device_services.keys())[0], "")
     iface_pattern = _detect_interface_pattern_from_config(config, l2ac_parent) if l2ac_parent else None
     
+    # Scan for L3 sub-interfaces on L2-AC parent (IP addresses conflict with l2-service)
+    l3_conflict_vlans = set()
+    if use_l2ac and l2ac_parent and config:
+        l3_conflict_vlans = _scan_l3_sub_ids(config, l2ac_parent)
+        if l3_conflict_vlans:
+            console.print(f"[yellow]⚠ {len(l3_conflict_vlans)} existing L3 sub-interface(s) on {l2ac_parent} "
+                          f"(have IP addresses, will skip)[/yellow]")
+    
     # Generate interface config based on type
     if use_l2ac:
         # L2-AC interfaces (ge/bundle sub-interfaces with l2-service)
         iface_config = "interfaces\n"
+        vlan_list = []
+        candidate_vlan = l2ac_start_vlan
+        needed = end_num - start_num + 1
+        while len(vlan_list) < needed:
+            if candidate_vlan not in l3_conflict_vlans:
+                vlan_list.append(candidate_vlan)
+            candidate_vlan += 1
+        
         for i, n in enumerate(range(start_num, end_num + 1)):
-            vlan = l2ac_start_vlan + i
+            vlan = vlan_list[i]
             iface_config += f"  {l2ac_parent}.{vlan}\n"
             iface_config += f"    admin-state enabled\n"
             iface_config += f"    l2-service enabled\n"
@@ -3762,12 +4632,26 @@ def generate_quick_scale_config(
         "extra_lines": []
     }
     
+    # Scan for L3 sub-interfaces on L2-AC parent
+    l3_conflict_ids = set()
+    if interface_type.lower() != "pwhe" and l2ac_parent and existing_config:
+        l3_conflict_ids = _scan_l3_sub_ids(existing_config, l2ac_parent)
+        if l3_conflict_ids:
+            console.print(f"[yellow]⚠ {len(l3_conflict_ids)} existing L3 sub-interface(s) on {l2ac_parent} "
+                          f"(have IP addresses, will skip)[/yellow]")
+    
+    # Build service number list, skipping L3 conflicts for L2-AC
+    svc_number_list = []
+    candidate = start_index
+    while len(svc_number_list) < count:
+        if interface_type.lower() == "pwhe" or candidate not in l3_conflict_ids:
+            svc_number_list.append(candidate)
+        candidate += 1
+    
     # Generate interfaces
     config_lines.append("interfaces")
     
-    for i in range(count):
-        svc_num = start_index + i
-        
+    for svc_num in svc_number_list:
         if interface_type.lower() == "pwhe":
             # PWHE parent
             config_lines.append(f"  ph{svc_num}")
@@ -3819,8 +4703,7 @@ def generate_quick_scale_config(
         config_lines.append("network-services")
         config_lines.append("  evpn-vpws-fxc")
         
-        for i in range(count):
-            svc_num = start_index + i
+        for svc_num in svc_number_list:
             svc_name = f"FXC_{svc_num}"
             
             # Interface name

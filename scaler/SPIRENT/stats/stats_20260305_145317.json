@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-03-05T14:53:14.472950",
+  "port": "//100.64.3.238/6/13",
+  "tx": {
+    "total_frames": "204397656891",
+    "total_bytes": "26162900082048",
+    "rate_fps": "8445946",
+    "rate_bps": "8648648672",
+    "sig_frames": "204397656891"
+  },
+  "rx": {
+    "total_frames": "24360044581",
+    "total_bytes": "3041515246909",
+    "rate_fps": "2",
+    "rate_bps": "1200",
+    "sig_frames": "24359723494",
+    "dropped_frames": "0",
+    "dropped_pct": "0"
+  },
+  "loss": {
+    "frames": 180037612310,
+    "percent": 88.082
+  },
+  "streams": [
+    {
+      "name": "fs_zulu_redirect_test",
+      "tx_frames": 0,
+      "tx_rate_bps": 0,
+      "rx_frames": 0,
+      "rx_rate_bps": 0,
+      "dropped": 0
+    }
+  ]
+}

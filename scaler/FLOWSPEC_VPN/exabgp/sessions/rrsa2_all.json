@@ -1,0 +1,14 @@
+{
+  "session_id": "rrsa2_all",
+  "status": "closed",
+  "created": "2026-02-16T07:55:43.473131+00:00",
+  "exabgp_pid": 441293,
+  "exabgp_config": "/tmp/exabgp_rrsa2_all_families.conf",
+  "exabgp_log": "/home/dn/SCALER/FLOWSPEC_VPN/exabgp/logs/rrsa2_all_exabgp.log",
+  "peer_ip": "unknown",
+  "peer_as": "unknown",
+  "exabgp_ip": "100.70.0.32",
+  "applied_configs": {},
+  "injected_routes": [],
+  "closed_at": "2026-02-16T07:56:06.937798+00:00"
+}

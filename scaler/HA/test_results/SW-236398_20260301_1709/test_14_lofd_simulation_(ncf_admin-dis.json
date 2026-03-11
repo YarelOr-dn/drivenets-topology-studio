@@ -1,0 +1,9 @@
+{
+  "id": "test_14",
+  "name": "LOFD Simulation (NCF Admin-Disable)",
+  "verdict": "PASS",
+  "recovery_sec": 35.220067262649536,
+  "ha_type": "lofd",
+  "before_routes": "show bgp ipv4 flowspec-vpn summary\r\n\u001b[1FYOR_CL_PE-4(01-Mar-2026-19:12:25)# show bgp ipv4 flowspec-vpn summary\r\n\r\nBGP router identifier 4.4.4.4, local AS number 1234567\r\nBGP table node count 1\r\n\r\n  Nei",
+  "after_routes": "show bgp ipv4 flowspec-vpn summary\r\n\u001b[1FYOR_CL_PE-4(01-Mar-2026-19:13:31)# show bgp ipv4 flowspec-vpn summary\r\n\r\nBGP router identifier 4.4.4.4, local AS number 1234567\r\nBGP table node count 1\r\n\r\n  Nei"
+}

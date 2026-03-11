@@ -1,0 +1,8 @@
+{
+  "id": "test_01",
+  "name": "RIB Manager Process Restart",
+  "verdict": "PASS",
+  "recovery_sec": 11.00812840461731,
+  "before_routes": "show bgp ipv4 flowspec-vpn routes\r\n\u001b[1FYOR_CL_PE-4(01-Mar-2026-17:07:26)# show bgp ipv4 flowspec-vpn routes\r\n--------------------------------------------------------------^\r\nERROR: Unknown word: 'rout",
+  "after_routes": "show bgp ipv4 flowspec-vpn routes\r\n\u001b[1FYOR_CL_PE-4(01-Mar-2026-17:08:12)# show bgp ipv4 flowspec-vpn routes\r\n--------------------------------------------------------------^\r\nERROR: Unknown word: 'rout"
+}

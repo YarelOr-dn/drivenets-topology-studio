@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "active": false,
+  "flowspec_test_active": false,
+  "flowspec_test_id": "SW-236398",
+  "device": {
+    "network_mapper_name": "PE-4",
+    "system_name": "PE-4"
+  },
+  "device_mode": "cluster",
+  "spirent_session_name": "ha_flowspec_pe4",
+  "flowspec_rules_injected": 200,
+  "traffic_baseline_mbps": 100,
+  "run_dir": "/home/dn/SCALER/HA/test_results/SW-236398_20260301_2237",
+  "system_type": "CL-86,",
+  "system_name": "YOR_CL_PE-4",
+  "convergence_times": {
+    "control_plane_sec": 1.2121961116790771,
+    "overall_sec": 1.2121961116790771
+  },
+  "closed_at": "2026-03-01T22:40:52.340363"
+}

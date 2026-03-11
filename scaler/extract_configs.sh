@@ -15,6 +15,212 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
 }
 
+# ============================================================================
+# DEVICE INTEGRITY ALERTS SYSTEM
+# Detects: hostname mismatch, serial change, IP change, stale data, failures
+# Alerts are saved to db/alerts.json and shown by wizard on startup
+# ============================================================================
+
+ALERTS_FILE="$SCALER_DIR/db/alerts.json"
+
+# Initialize alerts file if missing
+if [ ! -f "$ALERTS_FILE" ]; then
+    echo '{"alerts":[],"last_check":""}' > "$ALERTS_FILE"
+fi
+
+add_alert() {
+    local device="$1"
+    local severity="$2"   # CRITICAL, WARNING, INFO
+    local alert_type="$3" # hostname_mismatch, serial_changed, ip_changed, stale_data, extraction_failed
+    local message="$4"
+    local timestamp=$(date -Iseconds)
+    
+    log "⚠ ALERT [$severity] $device: $message"
+    
+    python3 -c "
+import json, sys, os
+alerts_file = '$ALERTS_FILE'
+try:
+    with open(alerts_file) as f:
+        data = json.load(f)
+except:
+    data = {'alerts': [], 'last_check': ''}
+
+# Remove old alerts of the same type for the same device (keep latest only)
+data['alerts'] = [a for a in data['alerts'] 
+                  if not (a.get('device') == '$device' and a.get('type') == '$alert_type')]
+
+data['alerts'].append({
+    'device': '$device',
+    'severity': '$severity',
+    'type': '$alert_type',
+    'message': '''$message''',
+    'timestamp': '$timestamp',
+    'acknowledged': False
+})
+
+# Keep only last 50 alerts
+data['alerts'] = data['alerts'][-50:]
+data['last_check'] = '$timestamp'
+
+with open(alerts_file, 'w') as f:
+    json.dump(data, f, indent=2)
+" 2>/dev/null
+}
+
+clear_alert() {
+    local device="$1"
+    local alert_type="$2"
+    
+    python3 -c "
+import json
+alerts_file = '$ALERTS_FILE'
+try:
+    with open(alerts_file) as f:
+        data = json.load(f)
+    data['alerts'] = [a for a in data['alerts'] 
+                      if not (a.get('device') == '$device' and a.get('type') == '$alert_type')]
+    with open(alerts_file, 'w') as f:
+        json.dump(data, f, indent=2)
+except:
+    pass
+" 2>/dev/null
+}
+
+verify_extraction_integrity() {
+    local name="$1"
+    local output_file="$2"
+    local config_dir="$3"
+    local expected_ip="$4"
+    
+    # --- CHECK 1: Hostname verification ---
+    # Extract System Name from show system output
+    local live_hostname=$(grep -m1 "System Name:" "$output_file" 2>/dev/null | sed 's/.*System Name:[[:space:]]*//' | cut -d',' -f1 | tr -d ' \r')
+    
+    if [ -n "$live_hostname" ] && [ "$live_hostname" != "N/A" ]; then
+        # Use Python for word-boundary hostname matching (same logic as utils.py)
+        local hostname_ok=$(python3 -c "
+import sys
+a = '${live_hostname}'.lower()
+e = '${name}'.lower().replace(' ', '')
+if a == e:
+    print('yes')
+    sys.exit()
+shorter = e if len(e) <= len(a) else a
+longer = a if len(e) <= len(a) else e
+pos = longer.find(shorter)
+if pos == -1:
+    print('no')
+    sys.exit()
+boundary = {'_', '-', '.'}
+left_ok = (pos == 0) or (longer[pos-1] in boundary)
+end = pos + len(shorter)
+right_ok = (end == len(longer)) or (longer[end] in boundary)
+print('yes' if left_ok and right_ok else 'no')
+" 2>/dev/null)
+        
+        if [ "$hostname_ok" = "no" ]; then
+            add_alert "$name" "CRITICAL" "hostname_mismatch" \
+                "WRONG DEVICE at $expected_ip: device reports '$live_hostname' but DB expects '$name'. Data may belong to wrong device!"
+            return 1
+        else
+            clear_alert "$name" "hostname_mismatch"
+        fi
+    fi
+    
+    # --- CHECK 2: Serial number change detection ---
+    local live_serial=$(awk -F'|' '/^\|[[:space:]]*(NCP|ncp)[[:space:]]*\|/ {
+        oper = $5; gsub(/^[ \t]+|[ \t]+$/, "", oper)
+        if (oper !~ /^up/) next
+        sn = $9; gsub(/^[ \t]+|[ \t]+$/, "", sn)
+        if (sn == "" || sn ~ /^[[:space:]]*$/) { sn = $NF; gsub(/^[ \t]+|[ \t]+$/, "", sn) }
+        if (sn != "" && sn !~ /Serial/ && sn !~ /^[[:space:]]*$/ && sn !~ /^[0-9]+:[0-9]+:[0-9]+$/ && sn !~ /days/) print sn
+    }' "$output_file" | head -1 | tr -d '\r')
+    
+    if [ -n "$live_serial" ] && [ "$live_serial" != "N/A" ] && [ -f "$config_dir/operational.json" ]; then
+        local stored_serial=$(jq -r '.serial_number // "N/A"' "$config_dir/operational.json" 2>/dev/null)
+        if [ "$stored_serial" != "N/A" ] && [ -n "$stored_serial" ] && [ "$live_serial" != "$stored_serial" ]; then
+            add_alert "$name" "CRITICAL" "serial_changed" \
+                "Serial number CHANGED: was '$stored_serial', now '$live_serial'. Device may have been physically replaced or DB points to wrong device!"
+        else
+            clear_alert "$name" "serial_changed"
+        fi
+    fi
+    
+    # --- CHECK 3: Management IP change detection ---
+    local live_mgmt_ip=$(awk -F'|' '/^\|[[:space:]]*mgmt0[[:space:]]*\|/ {
+        ip = $5; gsub(/^[ \t]+|[ \t]+$/, "", ip); gsub(/ *\(d\)/, "", ip); print ip
+    }' "$output_file" | head -1 | tr -d '\r')
+    
+    if [ -n "$live_mgmt_ip" ] && [ "$live_mgmt_ip" != "N/A" ]; then
+        local live_ip_clean=$(echo "$live_mgmt_ip" | cut -d'/' -f1)
+        if [ "$live_ip_clean" != "$expected_ip" ]; then
+            add_alert "$name" "WARNING" "ip_changed" \
+                "Management IP changed: DB has '$expected_ip', device reports '$live_ip_clean'. Updating DB automatically."
+            
+            # Auto-update devices.json with correct IP
+            python3 -c "
+import json
+devices_file = '$SCALER_DIR/db/devices.json'
+with open(devices_file) as f:
+    data = json.load(f)
+for dev in data.get('devices', []):
+    if dev.get('hostname') == '$name':
+        dev['ip'] = '$live_ip_clean'
+        break
+with open(devices_file, 'w') as f:
+    json.dump(data, f, indent=2)
+" 2>/dev/null
+            log "$name: Auto-updated IP in devices.json: $expected_ip -> $live_ip_clean"
+        else
+            clear_alert "$name" "ip_changed"
+        fi
+    fi
+    
+    return 0
+}
+
+track_extraction_result() {
+    local name="$1"
+    local success="$2"  # "true" or "false"
+    local config_dir="$3"
+    
+    local tracker_file="$config_dir/.extraction_tracker.json"
+    
+    python3 -c "
+import json
+from datetime import datetime
+
+tracker_file = '$tracker_file'
+try:
+    with open(tracker_file) as f:
+        tracker = json.load(f)
+except:
+    tracker = {'consecutive_failures': 0, 'last_success': None, 'last_attempt': None, 'total_failures': 0}
+
+tracker['last_attempt'] = datetime.now().isoformat()
+
+if '$success' == 'true':
+    if tracker['consecutive_failures'] > 0:
+        print(f'RECOVERED after {tracker[\"consecutive_failures\"]} failures')
+    tracker['consecutive_failures'] = 0
+    tracker['last_success'] = datetime.now().isoformat()
+else:
+    tracker['consecutive_failures'] += 1
+    tracker['total_failures'] = tracker.get('total_failures', 0) + 1
+    print(f'FAILURE #{tracker[\"consecutive_failures\"]}')
+
+with open(tracker_file, 'w') as f:
+    json.dump(tracker, f, indent=2)
+
+# Alert thresholds
+if tracker['consecutive_failures'] >= 6:  # 30 min (6 x 5min cycles)
+    print('ALERT_STALE')
+elif tracker['consecutive_failures'] >= 3:  # 15 min
+    print('ALERT_FAILING')
+" 2>/dev/null
+}
+
 extract_config() {
     local host=$1
     local name=$2
@@ -28,7 +234,7 @@ extract_config() {
     # Get all info in one session - including show system stack and show system
     expect -c "
 set timeout 180
-spawn sshpass -p dnroot ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null dnroot@$host
+spawn sshpass -p dnroot ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PubkeyAuthentication=no dnroot@$host
 expect \"#\"
 send \"show system stack | no-more\r\"
 expect \"#\"
@@ -71,6 +277,87 @@ expect eof
 " 2>&1 | grep -v "^spawn\|^Warning\|DRIVENETS" > "$config_dir/full_output.txt"
 
     local output="$config_dir/full_output.txt"
+    
+    # Check if we got meaningful output (SSH connected successfully)
+    local output_lines=$(wc -l < "$output" 2>/dev/null || echo 0)
+    if [ "$output_lines" -lt 10 ]; then
+        log "$name: SSH extraction failed - only $output_lines lines of output"
+        local track_result=$(track_extraction_result "$name" "false" "$config_dir")
+        if echo "$track_result" | grep -q "ALERT_STALE"; then
+            add_alert "$name" "CRITICAL" "stale_data" \
+                "Device unreachable for 30+ minutes. Operational data is STALE and may not reflect reality. Last IP: $host"
+        elif echo "$track_result" | grep -q "ALERT_FAILING"; then
+            add_alert "$name" "WARNING" "extraction_failed" \
+                "Extraction failing for 15+ minutes. IP $host may be wrong or device is down."
+        fi
+        return 1
+    fi
+    
+    # ========================================================================
+    # EARLY RECOVERY MODE DETECTION - check SSH prompt BEFORE normal parsing
+    # In RECOVERY mode, most show commands fail, so detect it from the prompt
+    # and update operational.json directly instead of trying normal extraction
+    # ========================================================================
+    if grep -qiE '\(RECOVERY\)#|\(RECOVERY\)>' "$output" 2>/dev/null; then
+        log "$name: 🔴 RECOVERY MODE DETECTED from SSH prompt"
+        
+        local recovery_detected_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        
+        if [ -f "$config_dir/operational.json" ]; then
+            # Update existing operational.json with recovery state
+            local tmp_op=$(mktemp)
+            jq --arg det_at "$recovery_detected_at" '
+                .device_state = "RECOVERY" |
+                .recovery_mode_detected = true |
+                .recovery_type = "DN_RECOVERY" |
+                .recovery_mode_detected_at = $det_at |
+                .upgrade_in_progress = false |
+                .upgrade_status = "RECOVERY" |
+                .upgrade_progress = ""
+            ' "$config_dir/operational.json" > "$tmp_op" 2>/dev/null && \
+                mv "$tmp_op" "$config_dir/operational.json"
+        else
+            # Create minimal operational.json for RECOVERY state
+            cat > "$config_dir/operational.json" <<RECEOF
+{
+    "device_state": "RECOVERY",
+    "recovery_mode_detected": true,
+    "recovery_type": "DN_RECOVERY",
+    "recovery_mode_detected_at": "$recovery_detected_at",
+    "upgrade_in_progress": false,
+    "upgrade_status": "RECOVERY",
+    "ssh_host": "$host",
+    "mgmt_ip": "N/A"
+}
+RECEOF
+        fi
+        
+        add_alert "$name" "CRITICAL" "recovery_mode" \
+            "Device is in RECOVERY mode (dnRouter(RECOVERY)#). DNOS is NOT running. Manual intervention or re-deploy required."
+        clear_alert "$name" "extraction_failed"
+        clear_alert "$name" "stale_data"
+        
+        track_extraction_result "$name" "true" "$config_dir"
+        log "$name: Recovery state saved to operational.json"
+        return 0
+    fi
+    
+    # ========================================================================
+    # INTEGRITY CHECKS - verify we connected to the right device
+    # Must run BEFORE saving any data to prevent poisoning DB with wrong data
+    # ========================================================================
+    if ! verify_extraction_integrity "$name" "$output" "$config_dir" "$host"; then
+        log "$name: ⛔ INTEGRITY CHECK FAILED - skipping data save to prevent DB corruption"
+        track_extraction_result "$name" "false" "$config_dir"
+        rm -f "$output"
+        return 1
+    fi
+    
+    # Extraction succeeded and integrity verified
+    track_extraction_result "$name" "true" "$config_dir"
+    clear_alert "$name" "stale_data"
+    clear_alert "$name" "extraction_failed"
+    clear_alert "$name" "recovery_mode"
     
     # ========================================================================
     # PARSE STACK INFO (show system stack)
@@ -461,11 +748,15 @@ expect eof
         recovery_time="\"$(date -Iseconds)\""
         recovery_type="DN_RECOVERY"
         echo "[WARN] RECOVERY MODE DETECTED: No uptime + all interfaces down - DN_RECOVERY"
-    # If not in recovery now, preserve previous recovery detection if it was set
-    elif [ "$saved_recovery_mode" = "true" ]; then
-        recovery_mode="$saved_recovery_mode"
-        recovery_time=$([ "$saved_recovery_time" != "null" ] && echo "\"$saved_recovery_time\"" || echo "null")
-        recovery_type="$saved_recovery_type"
+    # If none of the current recovery conditions match, clear any stale recovery flags
+    # The device has recovered (NCCs up, interfaces working, uptime exists)
+    else
+        recovery_mode="false"
+        recovery_time="null"
+        recovery_type=""
+        if [ "$saved_recovery_mode" = "true" ]; then
+            echo "[INFO] Recovery flag cleared for $hostname (was: $saved_recovery_type) - device appears healthy"
+        fi
     fi
     
     # Extract config portion (raw config only - Python adds enhanced summary)
@@ -686,7 +977,7 @@ EOF
                 
                 rollback_diff=$(expect -c "
 set timeout 60
-spawn sshpass -p dnroot ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null dnroot@$host
+spawn sshpass -p dnroot ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PubkeyAuthentication=no dnroot@$host
 expect \"#\"
 send \"show config compare rollback 1 | no-more\r\"
 expect \"#\"
@@ -946,11 +1237,108 @@ if [ -f "$DEVICES_FILE" ]; then
             ip=$(jq -r ".devices[$i].ip" "$DEVICES_FILE")
             
             # Skip if no valid IP/hostname
-            if [ -n "$hostname" ] && [ "$hostname" != "null" ] && [ -n "$ip" ] && [ "$ip" != "null" ]; then
-                log "Extracting config for $hostname ($ip)"
-                extract_config "$ip" "$hostname"
+            if [ -z "$hostname" ] || [ "$hostname" = "null" ]; then
+                log "Skipping device $i - missing hostname"
+                continue
+            fi
+            
+            # Skip GI-mode devices -- SSH extraction is pointless (DNOS not running)
+            # These devices are reachable via console/virsh but not via SSH to mgmt IP
+            local op_file="$SCALER_DIR/db/configs/$hostname/operational.json"
+            if [ -f "$op_file" ]; then
+                local dev_state=$(jq -r '.device_state // ""' "$op_file" 2>/dev/null)
+                local del_init=$(jq -r '.delete_initiated // ""' "$op_file" 2>/dev/null)
+                if [ "$dev_state" = "GI" ] || [ "$dev_state" = "RECOVERY" ] || [ "$dev_state" = "DEPLOYING" ] || [ "$dev_state" = "BASEOS_SHELL" ]; then
+                    local conn_method=$(jq -r '.connection_method // "unknown"' "$op_file" 2>/dev/null)
+                    log "$hostname: Skipping SSH extraction -- device is in $dev_state mode (reachable via $conn_method)"
+                    clear_alert "$hostname" "stale_data"
+                    clear_alert "$hostname" "extraction_failed"
+                    continue
+                fi
+                # Also skip if system delete was recently initiated (device is rebooting into GI)
+                if [ -n "$del_init" ] && [ "$del_init" != "null" ]; then
+                    local del_epoch=$(date -d "$del_init" +%s 2>/dev/null || echo 0)
+                    local now_epoch=$(date +%s)
+                    local age=$(( now_epoch - del_epoch ))
+                    if [ "$age" -lt 3600 ]; then
+                        log "$hostname: Skipping SSH extraction -- system delete initiated ${age}s ago, device likely rebooting"
+                        clear_alert "$hostname" "stale_data"
+                        clear_alert "$hostname" "extraction_failed"
+                        continue
+                    fi
+                fi
+            fi
+            
+            # Multi-path IP resolution: try IP, then SN DNS lookup
+            resolved_host=""
+            
+            # 1. Try devices.json IP
+            if [ -n "$ip" ] && [ "$ip" != "null" ]; then
+                if timeout 2 bash -c "echo >/dev/tcp/$ip/22" 2>/dev/null; then
+                    resolved_host="$ip"
+                else
+                    log "$hostname: IP $ip unreachable, trying SN fallback..."
+                fi
+            fi
+            
+            # 2. If IP failed, try serial number DNS resolution
+            if [ -z "$resolved_host" ]; then
+                local op_file="$SCALER_DIR/db/configs/$hostname/operational.json"
+                if [ -f "$op_file" ]; then
+                    local sn=$(jq -r '.serial_number // ""' "$op_file" 2>/dev/null)
+                    if [ -n "$sn" ] && [ "$sn" != "N/A" ] && [ "$sn" != "null" ]; then
+                        local sn_ip=$(getent hosts "$sn" 2>/dev/null | awk '{print $1}' | head -1)
+                        if [ -n "$sn_ip" ]; then
+                            if timeout 2 bash -c "echo >/dev/tcp/$sn_ip/22" 2>/dev/null; then
+                                resolved_host="$sn_ip"
+                                log "$hostname: Resolved via SN $sn -> $sn_ip"
+                            else
+                                # Try connecting directly to SN hostname (SSH handles DNS)
+                                if timeout 2 bash -c "echo >/dev/tcp/$sn/22" 2>/dev/null; then
+                                    resolved_host="$sn"
+                                    log "$hostname: Connecting via SN hostname $sn"
+                                fi
+                            fi
+                        else
+                            # DNS didn't resolve, try SN as hostname directly
+                            if timeout 2 bash -c "echo >/dev/tcp/$sn/22" 2>/dev/null; then
+                                resolved_host="$sn"
+                                log "$hostname: Connecting via SN hostname $sn"
+                            fi
+                        fi
+                    fi
+                fi
+            fi
+            
+            # 3. If both IP and SN DNS failed, try Network Mapper re-discovery
+            if [ -z "$resolved_host" ]; then
+                log "$hostname: IP and SN fallback failed, trying Network Mapper re-discovery..."
+                local nm_ip=$(cd "$SCALER_DIR" && python3 -m scaler.recover_device_ip "$hostname" 2>/dev/null)
+                if [ -n "$nm_ip" ]; then
+                    resolved_host="$nm_ip"
+                    log "$hostname: ✓ Recovered via Network Mapper -> $nm_ip (devices.json updated)"
+                    
+                    # Also update the IP variable so alerts use the new IP
+                    ip="$nm_ip"
+                fi
+            fi
+            
+            if [ -n "$resolved_host" ]; then
+                log "Extracting config for $hostname ($resolved_host)"
+                extract_config "$resolved_host" "$hostname"
             else
-                log "Skipping device $i - missing hostname or IP"
+                log "$hostname: All connection methods failed (IP: $ip)"
+                # Track failure to trigger alerts
+                local config_dir="$SCALER_DIR/db/configs/$hostname"
+                mkdir -p "$config_dir"
+                local track_result=$(track_extraction_result "$hostname" "false" "$config_dir")
+                if echo "$track_result" | grep -q "ALERT_STALE"; then
+                    add_alert "$hostname" "CRITICAL" "stale_data" \
+                        "Device unreachable for 30+ minutes. Operational data is STALE and may not reflect reality. Last IP: $ip"
+                elif echo "$track_result" | grep -q "ALERT_FAILING"; then
+                    add_alert "$hostname" "WARNING" "extraction_failed" \
+                        "Extraction failing for 15+ minutes. IP $ip may be wrong or device is down."
+                fi
             fi
         done
     else
@@ -974,6 +1362,18 @@ for dev in devices:
         print(f'{ip}|{hostname}')
 " 2>/dev/null | while IFS='|' read -r ip hostname; do
             if [ -n "$hostname" ] && [ -n "$ip" ]; then
+                # Skip GI/RECOVERY mode devices (same check as jq path above)
+                local op_file="$SCALER_DIR/db/configs/$hostname/operational.json"
+                if [ -f "$op_file" ]; then
+                    local dev_state=$(jq -r '.device_state // ""' "$op_file" 2>/dev/null)
+                    if [ "$dev_state" = "GI" ] || [ "$dev_state" = "RECOVERY" ] || [ "$dev_state" = "DEPLOYING" ] || [ "$dev_state" = "BASEOS_SHELL" ]; then
+                        local conn_method=$(jq -r '.connection_method // "unknown"' "$op_file" 2>/dev/null)
+                        log "$hostname: Skipping SSH extraction -- device is in $dev_state mode (reachable via $conn_method)"
+                        clear_alert "$hostname" "stale_data"
+                        clear_alert "$hostname" "extraction_failed"
+                        continue
+                    fi
+                fi
                 log "Extracting config for $hostname ($ip)"
                 extract_config "$ip" "$hostname"
             fi

@@ -1,0 +1,33 @@
+{
+  "session_name": "dn_v219_pe4",
+  "session_id_on_server": "dn_v219_pe4 - dn_spirent",
+  "lab_server": "il-auto-containers",
+  "chassis_ip": "100.64.3.238",
+  "port_location": "//100.64.3.238/6/13",
+  "active": false,
+  "created": "2026-03-01T13:23:49.597994",
+  "streams": [
+    {
+      "name": "v219_alpha_test",
+      "handle": "streamblock1",
+      "vlan": 219,
+      "inner_vlan": null,
+      "src_mac": "00:10:94:00:00:01",
+      "dst_mac": "e8:c5:7a:39:b6:6a",
+      "src_ip": "49.49.49.9",
+      "dst_ip": "49.49.49.4",
+      "rate": 10.0,
+      "rate_unit": "MEGABITS_PER_SECOND",
+      "frame_size": 128,
+      "protocol": "ipv4",
+      "created": "2026-03-01T13:24:10.633370"
+    }
+  ],
+  "port_reserved": true,
+  "project_handle": "project1",
+  "port_handle": "port1",
+  "traffic_running": false,
+  "traffic_started": "2026-03-01T13:24:17.921111",
+  "traffic_stopped": "2026-03-01T13:26:32.457947",
+  "cleaned_up": "2026-03-01T13:46:38.979038"
+}

@@ -1,0 +1,15 @@
+{
+  "session_name": "ha_flowspec_pe4",
+  "session_id_on_server": "ha_flowspec_pe4 - dn_spirent",
+  "lab_server": "il-auto-containers",
+  "chassis_ip": "100.64.3.238",
+  "port_location": "//100.64.3.238/6/13",
+  "active": false,
+  "created": "2026-03-03T10:11:30.862870",
+  "streams": [],
+  "devices": [],
+  "port_reserved": false,
+  "project_handle": "project1",
+  "port_handle": null,
+  "_stale_reason": "server session gone"
+}

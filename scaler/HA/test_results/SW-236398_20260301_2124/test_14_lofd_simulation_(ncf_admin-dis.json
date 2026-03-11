@@ -1,0 +1,6 @@
+{
+  "id": "test_14",
+  "name": "LOFD Simulation (NCF Admin-Disable)",
+  "verdict": "FAIL",
+  "reason": "LOFD recovery failed - NCF stuck disabled"
+}

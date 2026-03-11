@@ -1,0 +1,18 @@
+{
+  "session_id": "rr2_redirect",
+  "status": "closed",
+  "created": "2026-02-16T13:47:40.110421+00:00",
+  "exabgp_pid": 565760,
+  "exabgp_config": "/tmp/exabgp_rr_redirect.conf",
+  "exabgp_log": "/home/dn/SCALER/FLOWSPEC_VPN/exabgp/logs/rr2_redirect_exabgp.log",
+  "peer_ip": "100.70.0.205",
+  "peer_as": "1234567",
+  "exabgp_ip": "100.70.0.32",
+  "device_ip": "100.70.0.205",
+  "selected_afis": [],
+  "target_device": null,
+  "dnaas_leaf": null,
+  "applied_configs": {},
+  "injected_routes": [],
+  "closed_at": "2026-02-16T13:48:10.636272+00:00"
+}
