@@ -1,0 +1,68 @@
+# DriveNets Topology Studio - Cursor Rules
+# ==========================================
+# Unified repo: topology editor + scaler configurator.
+
+## Repo Structure
+
+This is a **git subtree** monorepo:
+- `topology/` -- Topology Creator (canvas editor, frontend, backend servers)
+- `scaler/` -- DNOS Scaler library (wizard modules, config builders, pusher)
+
+Both directories have their own git history and can sync back to their original repos.
+
+## NO EMOJIS RULE (CRITICAL)
+
+**NEVER use emojis anywhere in this codebase.** Use SVG icons (defined in `topology/index.html`)
+or text prefixes like `[OK]`, `[WARN]`, `[ERROR]`, `[INFO]`.
+
+## Key Paths (UNIFIED REPO)
+
+| What | Path |
+|------|------|
+| **Repo root** | `/home/dn/drivenets-topology-studio/` |
+| **Topology app** | `topology/` |
+| **Main orchestrator** | `topology/topology.js` (~13K lines) |
+| **HTML entry** | `topology/index.html` |
+| **Styles** | `topology/styles.css` |
+| **Dev guidelines** | `topology/DEVELOPMENT_GUIDELINES.md` |
+| **Scaler GUI** | `topology/scaler-gui.js` |
+| **Scaler API client** | `topology/scaler-api.js` |
+| **Scaler bridge** | `topology/scaler_bridge.py` |
+| **Backend servers** | `topology/serve.py`, `topology/discovery_api.py` |
+| **Scaler library** | `scaler/scaler/` (Python package) |
+| **Wizard modules** | `scaler/scaler/wizard/` |
+| **Config builders** | `scaler/scaler/wizard/config_builders.py` |
+| **Config pusher** | `scaler/scaler/config_pusher.py` |
+
+## What to Read Before Editing
+
+1. **Always:** `topology/DEVELOPMENT_GUIDELINES.md`
+2. **Target module** you're editing
+3. **Skills** based on what you're doing (see topology-alias rule)
+
+## Code Style
+
+- **JS:** ES6+, 4-space indent, no emojis, use SVG icons
+- **Python:** PEP 8, type hints where practical
+- **CSS:** Use CSS variables (`--dn-navy-deep`, `--dn-cyan`, `--dn-orange`, `--dn-cloud`)
+
+## Running
+
+```bash
+cd /home/dn/drivenets-topology-studio
+export PYTHONPATH="$(pwd)/scaler:$(pwd)/topology"
+cd topology && python3 serve.py
+# or: ./start.sh from repo root
+```
+
+## Subtree Sync
+
+```bash
+# Pull from original repos
+git subtree pull --prefix=topology topology-origin feature/brand-ui-refresh --squash
+git subtree pull --prefix=scaler scaler-origin main --squash
+
+# Push back to original repos
+git subtree push --prefix=topology topology-origin feature/brand-ui-refresh
+git subtree push --prefix=scaler scaler-origin main
+```
