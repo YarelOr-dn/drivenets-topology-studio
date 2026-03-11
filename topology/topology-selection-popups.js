@@ -47,6 +47,10 @@ window.SelectionPopups = {
     },
 
     _showLldpInlineSubmenu(editor, lldpBtn, device, serial, sshConfig, toolbar, isDarkMode, iconColor, hoverBg) {
+        // Close the other submenu if open
+        const otherSubmenu = document.getElementById('stack-inline-submenu');
+        if (otherSubmenu) otherSubmenu.remove();
+
         // Remove existing submenu
         const existing = document.getElementById('lldp-inline-submenu');
         if (existing) {
@@ -167,6 +171,8 @@ window.SelectionPopups = {
             hasNewResults
         ));
         
+        submenu.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        submenu.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(submenu);
         
         // Position below the LLDP button
@@ -190,6 +196,156 @@ window.SelectionPopups = {
         // Close on click outside
         const closeHandler = (e) => {
             if (!submenu.contains(e.target) && e.target !== lldpBtn) {
+                submenu.remove();
+                document.removeEventListener('mousedown', closeHandler);
+            }
+        };
+        setTimeout(() => document.addEventListener('mousedown', closeHandler), 10);
+    },
+
+    _showSystemStackInlineSubmenu(editor, stackBtn, device, serial, sshConfig, toolbar, isDarkMode, iconColor, hoverBg) {
+        // Close the other submenu if open
+        const otherSubmenu = document.getElementById('lldp-inline-submenu');
+        if (otherSubmenu) otherSubmenu.remove();
+
+        const existing = document.getElementById('stack-inline-submenu');
+        if (existing) {
+            existing.remove();
+            return;
+        }
+        const submenu = document.createElement('div');
+        submenu.id = 'stack-inline-submenu';
+        const glassBg = isDarkMode ? 'rgba(15, 15, 25, 0.25)' : 'rgba(255, 255, 255, 0.25)';
+        const glassBorder = isDarkMode ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.08)';
+        const glassShadow = isDarkMode
+            ? '0 4px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08)'
+            : '0 4px 30px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.5)';
+        submenu.style.cssText = `
+            position: fixed;
+            z-index: 100001;
+            background: ${glassBg};
+            border: 1px solid ${glassBorder};
+            border-radius: 10px;
+            padding: 4px;
+            box-shadow: ${glassShadow};
+            backdrop-filter: blur(24px) saturate(200%);
+            -webkit-backdrop-filter: blur(24px) saturate(200%);
+            display: flex;
+            gap: 2px;
+            align-items: center;
+            animation: lldpSubmenuFadeIn 0.15s ease forwards;
+        `;
+        const createSubBtn = (icon, tooltip, onClick, isActive = false, isDisabled = false) => {
+            const btn = document.createElement('button');
+            const activeColor = isActive ? '#27ae60' : iconColor;
+            const activeBg = isActive ? 'rgba(39, 174, 96, 0.15)' : 'transparent';
+            btn.style.cssText = `
+                width: 28px; height: 28px; padding: 0; border: none;
+                background: ${activeBg}; border-radius: 6px;
+                cursor: ${isDisabled ? 'default' : 'pointer'};
+                color: ${isDisabled ? 'rgba(128,128,128,0.5)' : activeColor};
+                display: flex; align-items: center; justify-content: center;
+                transition: all 0.12s ease; opacity: ${isDisabled ? '0.5' : '1'};
+            `;
+            btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>`;
+            btn.onmouseenter = () => {
+                if (!isDisabled) { btn.style.background = isActive ? 'rgba(39, 174, 96, 0.25)' : hoverBg; btn.style.transform = 'scale(1.12)'; }
+                editor._showToolbarTooltip(btn, tooltip);
+            };
+            btn.onmouseleave = () => { btn.style.background = activeBg; btn.style.transform = 'scale(1)'; editor._hideToolbarTooltip(); };
+            btn.onmousedown = (e) => { e.stopPropagation(); e.preventDefault(); };
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                if (!isDisabled) { submenu.remove(); onClick(); }
+            };
+            return btn;
+        };
+        submenu.appendChild(createSubBtn(
+            '<rect x="4" y="4" width="16" height="4" rx="1"/><rect x="4" y="10" width="16" height="4" rx="1"/><rect x="4" y="16" width="16" height="4" rx="1"/>',
+            'Stack Table',
+            () => {
+                editor.hideDeviceSelectionToolbar();
+                if (editor.showSystemStackDialog) editor.showSystemStackDialog(device, serial);
+                else if (editor.showToast) editor.showToast('Stack dialog not available', 'error');
+            }
+        ));
+        submenu.appendChild(createSubBtn(
+            '<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+            'Git Commit',
+            async () => {
+                let hash = device._gitCommit;
+                if (hash !== undefined) {
+                    if (editor.showToast) editor.showToast(`Git: ${hash}`, 'info');
+                    return;
+                }
+                const host = sshConfig?.host || serial;
+                if (!host) {
+                    if (editor.showToast) editor.showToast('No SSH address configured', 'error');
+                    return;
+                }
+                if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDeviceContext) {
+                    try {
+                        const ctx = await ScalerAPI.getDeviceContext(device.label || serial || host, false);
+                        if (ctx?.git_commit) {
+                            device._gitCommit = ctx.git_commit;
+                            submenu.remove();
+                            editor.hideDeviceSelectionToolbar();
+                            if (editor.showToast) editor.showToast(`Git: ${ctx.git_commit}`, 'info');
+                            return;
+                        }
+                    } catch (_) {}
+                }
+                submenu.remove();
+                editor.hideDeviceSelectionToolbar();
+                try {
+                    const resp = await fetch('/api/dnaas/device-gitcommit', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            serial: serial || host,
+                            ssh_host: host,
+                            ssh_user: sshConfig?.user || 'dnroot',
+                            ssh_password: sshConfig?.password || 'dnroot'
+                        })
+                    });
+                    const data = await resp.json();
+                    hash = data.git_commit || data.error || 'unknown';
+                    if (data.git_commit) device._gitCommit = data.git_commit;
+                    if (editor.showToast) editor.showToast(`Git: ${hash}`, data.error ? 'error' : 'info');
+                } catch (e) {
+                    if (editor.showToast) editor.showToast(`Git commit fetch failed: ${e.message}`, 'error');
+                }
+            }
+        ));
+        submenu.appendChild(createSubBtn(
+            '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/>',
+            'Upgrade Stack',
+            () => {
+                editor.hideDeviceSelectionToolbar();
+                if (window.ScalerGUI && window.ScalerGUI.openUpgradeWizard) {
+                    window.ScalerGUI.state = window.ScalerGUI.state || {};
+                    window.ScalerGUI.state.selectedDevice = device.label || serial;
+                    window.ScalerGUI.openUpgradeWizard();
+                } else if (editor.showToast) {
+                    editor.showToast('Scaler GUI not available', 'error');
+                }
+            }
+        ));
+        submenu.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        submenu.addEventListener('keyup', (e) => { e.stopPropagation(); });
+        document.body.appendChild(submenu);
+        const btnRect = stackBtn.getBoundingClientRect();
+        const submenuRect = submenu.getBoundingClientRect();
+        let left = btnRect.left + btnRect.width / 2 - submenuRect.width / 2;
+        let top = btnRect.bottom + 6;
+        if (left < 10) left = 10;
+        if (left + submenuRect.width > window.innerWidth - 10) left = window.innerWidth - submenuRect.width - 10;
+        if (top + submenuRect.height > window.innerHeight - 10) top = btnRect.top - submenuRect.height - 6;
+        submenu.style.left = `${left}px`;
+        submenu.style.top = `${top}px`;
+        const closeHandler = (e) => {
+            if (!submenu.contains(e.target) && e.target !== stackBtn) {
                 submenu.remove();
                 document.removeEventListener('mousedown', closeHandler);
             }
@@ -341,6 +497,8 @@ window.SelectionPopups = {
         };
         setTimeout(() => document.addEventListener('mousedown', closeOnOutside), 100);
         
+        popup.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        popup.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(popup);
 
         requestAnimationFrame(() => {
@@ -417,9 +575,10 @@ window.SelectionPopups = {
         popup.appendChild(label);
         popup.appendChild(slider);
         
-        // Prevent clicks from closing toolbar
         popup.addEventListener('mousedown', (e) => e.stopPropagation());
         popup.addEventListener('click', (e) => e.stopPropagation());
+        popup.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        popup.addEventListener('keyup', (e) => { e.stopPropagation(); });
         
         document.body.appendChild(popup);
     },
@@ -499,6 +658,8 @@ window.SelectionPopups = {
         
         popup.addEventListener('mousedown', (e) => e.stopPropagation());
         popup.addEventListener('click', (e) => e.stopPropagation());
+        popup.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        popup.addEventListener('keyup', (e) => { e.stopPropagation(); });
         
         document.body.appendChild(popup);
     },
@@ -636,6 +797,8 @@ window.SelectionPopups = {
             document.addEventListener('mousedown', closePopupOnClickOutside);
         }, 100);
         
+        popup.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        popup.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(popup);
     },
 
@@ -895,6 +1058,8 @@ window.SelectionPopups = {
         };
         setTimeout(() => document.addEventListener('mousedown', closeOnClickOutside), 100);
 
+        popup.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        popup.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(popup);
 
         requestAnimationFrame(() => {

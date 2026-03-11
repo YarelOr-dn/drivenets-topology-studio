@@ -4459,9 +4459,164 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
     from pathlib import Path
     from .jenkins_integration import JenkinsClient, get_stack_from_url, list_dev_branches
     
-    console.print("\n[bold cyan]═══════════════════════════════════════════════════════════════════[/bold cyan]")
-    console.print("[bold cyan]              📦 Image Upgrade Wizard                              [/bold cyan]")
-    console.print("[bold cyan]═══════════════════════════════════════════════════════════════════[/bold cyan]")
+    def _select_build_from_branch(jenkins_client, branch_name, console, skip_to_browse=False):
+        """Show builds for a branch with option to include failed builds + sanitizer detection.
+        
+        Args:
+            skip_to_browse: If True, skip the latest-pure-build search and go straight
+                           to the full build table (used when caller already showed a build).
+        
+        Returns stack dict or None to go back.
+        """
+        from urllib.parse import unquote as _unquote
+        # Normalize branch name: decode any URL-encoded slashes (%2F -> /)
+        # Jenkins API functions handle their own encoding internally
+        raw_branch = _unquote(branch_name)
+        
+        sel = "2" if skip_to_browse else None
+        
+        if not skip_to_browse:
+            console.print(f"\n[dim]Finding latest successful pure build for {raw_branch}...[/dim]")
+            console.print("[dim]   (Excluding NIGHTLY, EMUX, SILICON, NCPL, NCP3, Polaris builds)[/dim]")
+            
+            pure_build = jenkins_client.get_latest_pure_build(raw_branch)
+            
+            if pure_build:
+                build = pure_build['build']
+                age_hours = build.age_hours
+                if age_hours < 1:
+                    age_str = f"{int(age_hours * 60)}m ago"
+                elif age_hours < 24:
+                    hours = int(age_hours)
+                    mins = int((age_hours - hours) * 60)
+                    age_str = f"{hours}h {mins}m ago" if mins > 0 else f"{hours}h ago"
+                else:
+                    days = int(age_hours / 24)
+                    hours = int(age_hours % 24)
+                    age_str = f"{days}d {hours}h ago" if hours > 0 else f"{days}d ago"
+                
+                console.print(f"\n[bold green][OK] Latest Successful Build #{build.build_number}[/bold green]")
+                console.print(f"  [cyan]Display Name:[/cyan] {pure_build['display_name']}")
+                console.print(f"  [cyan]Age:[/cyan]          {age_str}")
+                if build.is_sanitizer:
+                    console.print(f"  [yellow][ASAN] This build includes AddressSanitizer[/yellow]")
+                console.print(f"  [cyan]Artifacts:[/cyan]")
+                console.print(f"    DNOS:   {'[green][OK] Available[/green]' if pure_build['has_dnos'] else '[red][FAIL] Not found[/red]'}")
+                console.print(f"    GI:     {'[green][OK] Available[/green]' if pure_build['has_gi'] else '[red][FAIL] Not found[/red]'}")
+                console.print(f"    BaseOS: {'[green][OK] Available[/green]' if pure_build['has_baseos'] else '[yellow][WARN] Not included[/yellow]'}")
+                
+                if not pure_build['has_baseos']:
+                    console.print("\n[yellow][WARN] This build does NOT include BaseOS.[/yellow]")
+                    console.print("[dim]  BaseOS updates are typically only needed for major version jumps.[/dim]")
+                
+                console.print(f"\n  [1] Use build #{build.build_number} (latest successful)")
+                console.print(f"  [2] Browse all recent builds (includes failed builds with artifacts)")
+                console.print(f"  [B] Back")
+                sel = Prompt.ask("Select", choices=["1", "2", "b", "B"], default="1").lower()
+                
+                if sel == "b":
+                    return None
+                elif sel == "1":
+                    urls = jenkins_client.get_stack_urls(raw_branch, build.build_number)
+                    return {
+                        'branch': raw_branch,
+                        'build': build.build_number,
+                        'dnos_url': urls.get('dnos'),
+                        'gi_url': urls.get('gi'),
+                        'baseos_url': urls.get('baseos') if pure_build['has_baseos'] else None,
+                    }
+            else:
+                console.print(f"[yellow]No successful pure build found for {raw_branch}[/yellow]")
+                console.print("[dim]Searching all recent builds (including failed) for usable images...[/dim]\n")
+                sel = "2"
+        
+        if sel == "2":
+            console.print(f"\n[dim]Scanning recent builds for {raw_branch} (including failed)...[/dim]")
+            all_builds = jenkins_client.get_recent_builds_with_artifacts(raw_branch, limit=15, max_results=10)
+            
+            if not all_builds:
+                console.print("[yellow]No builds with image artifacts found[/yellow]")
+                return None
+            
+            console.print(f"\n[bold]Recent Builds with Image Artifacts:[/bold]")
+            console.print("[dim]Includes failed builds that produced valid DNOS/GI/BaseOS images[/dim]\n")
+            
+            from rich.table import Table as RichTable
+            tbl = RichTable(box=None, pad_edge=False)
+            tbl.add_column("#", width=3, style="dim")
+            tbl.add_column("Build", width=7)
+            tbl.add_column("Status", width=10)
+            tbl.add_column("Age", width=12)
+            tbl.add_column("DNOS", width=5)
+            tbl.add_column("GI", width=5)
+            tbl.add_column("BaseOS", width=6)
+            tbl.add_column("Flags", width=12)
+            
+            for i, bi in enumerate(all_builds, 1):
+                b = bi['build']
+                age_h = b.age_hours
+                if age_h < 1:
+                    a_str = f"{int(age_h * 60)}m"
+                elif age_h < 24:
+                    a_str = f"{int(age_h)}h"
+                else:
+                    a_str = f"{age_h / 24:.1f}d"
+                
+                status_style = "[green]SUCCESS[/green]" if b.result == "SUCCESS" else "[red]FAILURE[/red]"
+                dnos_mark = "[green][OK][/green]" if bi['has_dnos'] else "[red]--[/red]"
+                gi_mark = "[green][OK][/green]" if bi['has_gi'] else "[red]--[/red]"
+                baseos_mark = "[green][OK][/green]" if bi['has_baseos'] else "[dim]--[/dim]"
+                
+                flags = []
+                if bi['is_sanitizer']:
+                    flags.append("[yellow][ASAN][/yellow]")
+                if b.is_expired:
+                    flags.append("[red][EXPIRED][/red]")
+                flag_str = " ".join(flags) if flags else ""
+                
+                tbl.add_row(str(i), f"#{b.build_number}", status_style, a_str,
+                            dnos_mark, gi_mark, baseos_mark, flag_str)
+            
+            console.print(tbl)
+            console.print(f"\n  [B] Back")
+            
+            valid = [str(i) for i in range(1, len(all_builds) + 1)] + ["b", "B"]
+            pick = Prompt.ask("Select build", choices=valid, default="1").lower()
+            
+            if pick == "b":
+                return None
+            
+            selected = all_builds[int(pick) - 1]
+            sb = selected['build']
+            
+            if sb.result != 'SUCCESS':
+                console.print(f"\n[yellow][WARN] Build #{sb.build_number} result: {sb.result}[/yellow]")
+                console.print("[dim]  The build failed on tests, but image artifacts were still created.[/dim]")
+            if selected['is_sanitizer']:
+                console.print(f"[yellow][ASAN] Build #{sb.build_number} includes AddressSanitizer instrumentation[/yellow]")
+                console.print("[dim]  Sanitizer builds are slower but detect memory errors at runtime.[/dim]")
+            if sb.is_expired:
+                console.print(f"[red][WARN] Build #{sb.build_number} artifacts may be expired (>{int(sb.age_hours)}h old)[/red]")
+            
+            if not Confirm.ask(f"\nUse build #{sb.build_number}?", default=True):
+                return None
+            
+            urls = jenkins_client.get_stack_urls(raw_branch, sb.build_number)
+            return {
+                'branch': raw_branch,
+                'build': sb.build_number,
+                'dnos_url': urls.get('dnos'),
+                'gi_url': urls.get('gi'),
+                'baseos_url': urls.get('baseos') if selected['has_baseos'] else None,
+                '_is_sanitizer': selected['is_sanitizer'],
+                '_build_result': sb.result,
+            }
+        
+        return None
+    
+    console.print("\n[bold cyan]═════════════════════════════════════════════════════════════════[/bold cyan]")
+    console.print("[bold cyan]              Image Upgrade Wizard                              [/bold cyan]")
+    console.print("[bold cyan]═════════════════════════════════════════════════════════════════[/bold cyan]")
     
     device_names = ", ".join([d.hostname for d in multi_ctx.devices])
     console.print(f"[dim]Target devices: {device_names}[/dim]\n")
@@ -4997,63 +5152,9 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                 return run_image_upgrade_wizard(multi_ctx)
             
             branch = branches[int(sel) - 1]
-            console.print(f"\n[dim]🔍 Finding latest successful pure build for {branch.name}...[/dim]")
-            console.print("[dim]   (Excluding NIGHTLY, EMUX, SILICON, NCPL, NCP3, Polaris builds)[/dim]")
-            
-            pure_build = jenkins.get_latest_pure_build(branch.name)
-            
-            if not pure_build:
-                console.print(f"[yellow]No successful pure build found for {branch.name}[/yellow]")
-                console.print("[dim]Try entering a specific build number or URL manually[/dim]")
+            stack = _select_build_from_branch(jenkins, branch.name, console)
+            if stack is None:
                 return run_image_upgrade_wizard(multi_ctx)
-            
-            build = pure_build['build']
-            
-            # Show build details
-            console.print(f"\n[bold green]✓ Found Build #{build.build_number}[/bold green]")
-            console.print(f"  [cyan]Display Name:[/cyan] {pure_build['display_name']}")
-            # Format age nicely
-            age_hours = build.age_hours
-            if age_hours < 1:
-                age_str = f"{int(age_hours * 60)}m ago"
-            elif age_hours < 24:
-                hours = int(age_hours)
-                mins = int((age_hours - hours) * 60)
-                age_str = f"{hours}h {mins}m ago" if mins > 0 else f"{hours}h ago"
-            else:
-                days = int(age_hours / 24)
-                hours = int(age_hours % 24)
-                age_str = f"{days}d {hours}h ago" if hours > 0 else f"{days}d ago"
-            console.print(f"  [cyan]Age:[/cyan]          {age_str}")
-            
-            # Debug: show raw artifacts if none detected
-            if not pure_build['has_dnos'] and not pure_build['has_gi']:
-                artifacts_preview = pure_build.get('artifacts', [])[:8]
-                if artifacts_preview:
-                    console.print(f"  [dim]Files found: {', '.join(artifacts_preview)}[/dim]")
-                else:
-                    console.print(f"  [dim]No artifact files in build[/dim]")
-            
-            console.print(f"  [cyan]Artifacts:[/cyan]")
-            console.print(f"    • DNOS:   {'[green]✓ Available[/green]' if pure_build['has_dnos'] else '[red]✗ Not found[/red]'}")
-            console.print(f"    • GI:     {'[green]✓ Available[/green]' if pure_build['has_gi'] else '[red]✗ Not found[/red]'}")
-            console.print(f"    • BaseOS: {'[green]✓ Available[/green]' if pure_build['has_baseos'] else '[yellow]✗ Not included[/yellow]'}")
-            
-            if not pure_build['has_baseos']:
-                console.print("\n[yellow]⚠ This build does NOT include BaseOS.[/yellow]")
-                console.print("[dim]  BaseOS updates are typically only needed for major version jumps.[/dim]")
-            
-            if not Confirm.ask(f"\nUse build #{build.build_number}?", default=True):
-                return run_image_upgrade_wizard(multi_ctx)
-            
-            urls = jenkins.get_stack_urls(branch.name, build.build_number)
-            stack = {
-                'branch': branch.name, 
-                'build': build.build_number,
-                'dnos_url': urls.get('dnos'),
-                'gi_url': urls.get('gi'),
-                'baseos_url': urls.get('baseos') if pure_build['has_baseos'] else None,
-            }
         
         elif choice == "2":
             # Browse release branches
@@ -5074,67 +5175,13 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                 return run_image_upgrade_wizard(multi_ctx)
             
             branch = branches[int(sel) - 1]
-            console.print(f"\n[dim]🔍 Finding latest successful pure build for {branch.name}...[/dim]")
-            console.print("[dim]   (Excluding NIGHTLY, EMUX, SILICON, NCPL, NCP3, Polaris builds)[/dim]")
-            
-            pure_build = jenkins.get_latest_pure_build(branch.name)
-            
-            if not pure_build:
-                console.print(f"[yellow]No successful pure build found for {branch.name}[/yellow]")
-                console.print("[dim]Try entering a specific build number or URL manually[/dim]")
+            stack = _select_build_from_branch(jenkins, branch.name, console)
+            if stack is None:
                 return run_image_upgrade_wizard(multi_ctx)
-            
-            build = pure_build['build']
-            
-            # Show build details
-            console.print(f"\n[bold green]✓ Found Build #{build.build_number}[/bold green]")
-            console.print(f"  [cyan]Display Name:[/cyan] {pure_build['display_name']}")
-            # Format age nicely
-            age_hours = build.age_hours
-            if age_hours < 1:
-                age_str = f"{int(age_hours * 60)}m ago"
-            elif age_hours < 24:
-                hours = int(age_hours)
-                mins = int((age_hours - hours) * 60)
-                age_str = f"{hours}h {mins}m ago" if mins > 0 else f"{hours}h ago"
-            else:
-                days = int(age_hours / 24)
-                hours = int(age_hours % 24)
-                age_str = f"{days}d {hours}h ago" if hours > 0 else f"{days}d ago"
-            console.print(f"  [cyan]Age:[/cyan]          {age_str}")
-            
-            # Debug: show raw artifacts if none detected
-            if not pure_build['has_dnos'] and not pure_build['has_gi']:
-                artifacts_preview = pure_build.get('artifacts', [])[:8]
-                if artifacts_preview:
-                    console.print(f"  [dim]Files found: {', '.join(artifacts_preview)}[/dim]")
-                else:
-                    console.print(f"  [dim]No artifact files in build[/dim]")
-            
-            console.print(f"  [cyan]Artifacts:[/cyan]")
-            console.print(f"    • DNOS:   {'[green]✓ Available[/green]' if pure_build['has_dnos'] else '[red]✗ Not found[/red]'}")
-            console.print(f"    • GI:     {'[green]✓ Available[/green]' if pure_build['has_gi'] else '[red]✗ Not found[/red]'}")
-            console.print(f"    • BaseOS: {'[green]✓ Available[/green]' if pure_build['has_baseos'] else '[yellow]✗ Not included[/yellow]'}")
-            
-            if not pure_build['has_baseos']:
-                console.print("\n[yellow]⚠ This build does NOT include BaseOS.[/yellow]")
-                console.print("[dim]  BaseOS updates are typically only needed for major version jumps.[/dim]")
-            
-            if not Confirm.ask(f"\nUse build #{build.build_number}?", default=True):
-                return run_image_upgrade_wizard(multi_ctx)
-            
-            urls = jenkins.get_stack_urls(branch.name, build.build_number)
-            stack = {
-                'branch': branch.name, 
-                'build': build.build_number,
-                'dnos_url': urls.get('dnos'),
-                'gi_url': urls.get('gi'),
-                'baseos_url': urls.get('baseos') if pure_build['has_baseos'] else None,
-            }
         
         elif choice == "3":
             # Manual branch entry
-            branch = Prompt.ask("Enter branch name (e.g., dev_v25_4_13, rel_v26_1, PR-12345)")
+            branch = Prompt.ask("Enter branch name (e.g., dev_v25_4_13, rel_v26_1, feature/dev_v26_2/my-feature)")
             if not branch:
                 return False
             
@@ -5149,18 +5196,9 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                     console.print(f"[dim]Normalized: {branch} -> {normalized}[/dim]")
                     branch = normalized
                 
-                console.print(f"[dim]Looking up {branch}...[/dim]")
-                build = jenkins.get_build_info(branch)
-                if build:
-                    urls = jenkins.get_stack_urls(branch, build.build_number)
-                    # Map the keys to match expected format (dnos -> dnos_url, etc.)
-                    stack = {
-                        'branch': branch, 
-                        'build': build.build_number,
-                        'dnos_url': urls.get('dnos'),
-                        'gi_url': urls.get('gi'),
-                        'baseos_url': urls.get('baseos'),
-                    }
+                stack = _select_build_from_branch(jenkins, branch, console)
+                if stack is None:
+                    return run_image_upgrade_wizard(multi_ctx)
         
         elif choice == "4":
             # Jenkins URL
@@ -5170,6 +5208,40 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
             
             console.print("[dim]Fetching build info...[/dim]")
             stack = get_stack_from_url(url)
+            
+            if stack and not stack.get('error'):
+                from urllib.parse import unquote as _url_unquote
+                branch_name = _url_unquote(stack.get('branch', ''))
+                build_num = stack.get('build')
+                
+                # Detect sanitizer from the resolved build
+                if build_num and branch_name:
+                    try:
+                        resolved_build = jenkins.get_build_info(branch_name, build_num)
+                        if resolved_build:
+                            stack['_is_sanitizer'] = resolved_build.is_sanitizer
+                            stack['_build_result'] = resolved_build.result
+                            if resolved_build.is_sanitizer:
+                                console.print(f"[yellow][ASAN] Build #{build_num} includes AddressSanitizer[/yellow]")
+                            if resolved_build.result != 'SUCCESS':
+                                console.print(f"[yellow][WARN] Build #{build_num} result: {resolved_build.result}[/yellow]")
+                                console.print("[dim]  Build failed on tests, but image artifacts may still be usable.[/dim]")
+                    except Exception:
+                        pass
+                
+                # Offer to browse all builds for this branch
+                if branch_name:
+                    console.print(f"\n  [1] Use this build (#{build_num})")
+                    console.print(f"  [2] Browse all recent builds for {branch_name}")
+                    console.print(f"  [B] Back")
+                    url_sel = Prompt.ask("Select", choices=["1", "2", "b", "B"], default="1").lower()
+                    if url_sel == "b":
+                        return run_image_upgrade_wizard(multi_ctx)
+                    elif url_sel == "2":
+                        # Skip straight to the build table -- user already saw the resolved build
+                        stack = _select_build_from_branch(jenkins, branch_name, console, skip_to_browse=True)
+                        if stack is None:
+                            return run_image_upgrade_wizard(multi_ctx)
         
         elif choice == "5":
             # Direct Minio URLs
@@ -5377,9 +5449,16 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
             console.print(f"[red]Error: {stack['error']}[/red]")
             return False
         
-        console.print(f"\n[green]✓ Found build:[/green]")
+        console.print(f"\n[green][OK] Found build:[/green]")
         console.print(f"  Branch: {stack.get('branch', 'N/A')}")
-        console.print(f"  Build: #{stack.get('build', 'N/A')}")
+        _build_num_display = f"#{stack.get('build', 'N/A')}"
+        _build_flags = []
+        if stack.get('_is_sanitizer'):
+            _build_flags.append("[yellow][ASAN][/yellow]")
+        if stack.get('_build_result') and stack.get('_build_result') != 'SUCCESS':
+            _build_flags.append(f"[red][{stack.get('_build_result')}][/red]")
+        _flags_str = f" {' '.join(_build_flags)}" if _build_flags else ""
+        console.print(f"  Build: {_build_num_display}{_flags_str}")
         console.print(f"  DNOS: {stack.get('dnos_url', 'N/A')[:60] + '...' if stack.get('dnos_url') else 'N/A'}")
         console.print(f"  GI: {stack.get('gi_url', 'N/A')[:60] + '...' if stack.get('gi_url') else 'N/A'}")
         console.print(f"  BaseOS: {stack.get('baseos_url', 'N/A')[:60] + '...' if stack.get('baseos_url') else 'N/A'}")

@@ -15,27 +15,63 @@
  * @param {KeyboardEvent} e - The keyboard event
  */
 function handleKeyDown(editor, e) {
-    // Debug: Log all Cmd/Ctrl key combinations
-    if (e.metaKey || e.ctrlKey) {
-        console.log('🔑 Key with modifier:', e.key, 'metaKey:', e.metaKey, 'ctrlKey:', e.ctrlKey, 'shiftKey:', e.shiftKey, 'target:', e.target.tagName);
-    }
-    
-    // Track Ctrl/Cmd for marquee selection
-    if (e.key === 'Control' || e.key === 'Meta') {
-        editor.ctrlPressed = true;
-    }
-    
-    // Track Alt/Option for quick link start
-    if (e.key === 'Alt') {
-        editor.altPressed = true;
-    }
-    
-    // Track Shift for continuous paste style mode
-    if (e.key === 'Shift') {
-        editor.shiftPressed = true;
-    }
+    // Track modifier keys regardless of dialogs (needed for multi-select etc.)
+    if (e.key === 'Control' || e.key === 'Meta') { editor.ctrlPressed = true; }
+    if (e.key === 'Alt') { editor.altPressed = true; }
+    if (e.key === 'Shift') { editor.shiftPressed = true; }
     
     if (!e.key) return;
+    
+    // DIALOG GUARD: When ANY floating dialog/modal/popup/overlay is open,
+    // block ALL editor shortcuts except Escape. This prevents accidental
+    // Delete, Ctrl+X, 'R' (reload), etc. from modifying the canvas while
+    // the user is interacting with an overlay.
+    //
+    // Covers: Stack dialog, LLDP dialog, XRAY popup, Scaler panels,
+    // HTML modals, DNAAS dialogs, device/link/text editors, context menu,
+    // style palettes, inline submenus, save/export pickers, recovery modal,
+    // enable-LLDP overlay, and any element with role="dialog".
+    const openDialog = document.querySelector([
+        '#stack-table-dialog',
+        '#lldp-table-dialog',
+        '#xray-capture-popup',
+        '#enable-lldp-dialog-overlay',
+        '#lldp-button-menu',
+        '#lldp-inline-submenu',
+        '#stack-inline-submenu',
+        '#dnaas-topology-dialog',
+        '#dnaas-save-dialog',
+        '#recovery-modal',
+        '#new-topo-domain-picker',
+        '#quick-save-domain-picker',
+        '#png-export-dialog',
+        '#device-style-palette-popup',
+        '#device-label-style-menu',
+        '#link-style-options-popup',
+        '#link-curve-options-popup',
+        '#link-width-slider-popup',
+        '#width-slider-popup',
+        '#color-palette-popup',
+        '#scaler-panel-container:not(:empty)',
+        '#text-editor-modal.show',
+        '#link-editor-modal.show',
+        '#link-details-modal.show',
+        '#device-editor-modal.show',
+        '#shortcuts-modal.show',
+        '[role="dialog"]',
+    ].join(', '));
+    if (openDialog) {
+        if (e.key === 'Escape') {
+            if (openDialog.classList?.contains('show')) {
+                openDialog.classList.remove('show');
+            } else {
+                openDialog.remove();
+            }
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        return;
+    }
     
     // Check if focus is on input/textarea to avoid conflicts
     // Non-text inputs (color, checkbox, radio, range) should not block shortcuts
@@ -275,14 +311,14 @@ function handleKeyDown(editor, e) {
         return;
     }
     
-    // Cmd/Ctrl + X to clear entire canvas (IMMEDIATE CLEAR - no confirmation)
+    // Cmd/Ctrl + X to clear canvas -- REQUIRES CONFIRMATION to prevent data loss
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'x') {
         if (!isInputFocused) {
             e.preventDefault();
+            const count = editor.objects ? editor.objects.length : 0;
+            if (count === 0) return;
+            if (!confirm(`Clear entire canvas? This will delete all ${count} objects. This action can be undone with Ctrl+Z.`)) return;
             editor.performClearCanvas();
-            if (editor.debugger) {
-                editor.debugger.logSuccess('🗑️ Canvas cleared (Cmd+X) - ALL objects deleted');
-            }
         }
         return;
     }

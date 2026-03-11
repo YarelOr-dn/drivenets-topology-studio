@@ -1147,8 +1147,9 @@ to help discover DNAAS neighbors.
             `;
             
             try {
-                // Call API to enable LLDP
-                const result = await editor._enableLldpOnDevice(serial);
+                const device = editor.objects?.find(d => d.label === serial || d.deviceSerial === serial);
+                const sshCfg = device?.sshConfig || {};
+                const result = await editor._enableLldpOnDevice(serial, sshCfg);
                 
                 if (result.success) {
                     if (outputDiv) {
@@ -1203,14 +1204,12 @@ to help discover DNAAS neighbors.
                 return await ScalerAPI.enableDeviceLldp({ serial, ...sshConfig });
             }
             
-            // Always use discovery_api on port 8765 for LLDP operations
-            // Use current hostname for remote access support
-            const apiHost = window.location.hostname || 'localhost';
-            const lldpBase = `http://${apiHost}:8765/api`;
+            // Use serve.py proxy so LLDP works from any browser (local or remote)
+            const lldpBase = '/api/dnaas';
             
-            // Build request with credentials
             const requestBody = {
                 serial,
+                ssh_host: sshConfig.host || serial,
                 username: sshConfig.user || 'dnroot',
                 password: sshConfig.password || 'dnroot',
                 skipHostKey: sshConfig.skipHostKey || false
@@ -1241,31 +1240,39 @@ to help discover DNAAS neighbors.
             
             // Poll for status with real-time feedback
             // Backend can take 2-3 minutes for devices with many interfaces (60+ interfaces)
-            // Wait up to 4 minutes (480 attempts × 500ms = 240 seconds)
-            const maxAttempts = 480; // 4 minutes max
+            const maxAttempts = 480; // 4 minutes max (480 x 500ms)
+            let consecutive404 = 0;
+            const MAX_404 = 10;
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
-                await new Promise(resolve => setTimeout(resolve, 500)); // Poll every 500ms
+                await new Promise(resolve => setTimeout(resolve, 500));
                 
                 const statusResponse = await fetch(`${lldpBase}/enable-lldp/status?job_id=${encodeURIComponent(jobId)}`);
-                if (!statusResponse.ok) continue;
+                if (!statusResponse.ok) {
+                    if (statusResponse.status === 404) {
+                        consecutive404++;
+                        if (consecutive404 >= MAX_404) {
+                            throw new Error('LLDP job not found on server (discovery API may have restarted). Try again.');
+                        }
+                    }
+                    continue;
+                }
+                consecutive404 = 0;
                 
                 const status = await statusResponse.json();
                 
-                // Show new output lines in real-time
                 if (outputDiv && status.output_lines && status.output_lines.length > lastLineCount) {
                     const newLines = status.output_lines.slice(lastLineCount);
                     for (const line of newLines) {
-                        // Color-code the output
-                        let color = '#ecf0f1'; // Default gray
-                        if (line.includes('✓') || line.includes('✅')) color = '#27ae60'; // Green
-                        else if (line.includes('✗') || line.includes('Error')) color = '#e74c3c'; // Red
-                        else if (line.includes('⏳') || line.includes('🔧') || line.includes('📝')) color = '#FF7A33'; // Orange
-                        else if (line.includes('🔌') || line.includes('📋')) color = '#3498db'; // Blue
+                        let color = '#ecf0f1';
+                        if (line.includes('[OK]') || line.includes('enabled')) color = '#27ae60';
+                        else if (line.includes('Error') || line.includes('failed')) color = '#e74c3c';
+                        else if (line.includes('Enabling') || line.includes('Connecting')) color = '#FF7A33';
+                        else if (line.includes('interfaces')) color = '#3498db';
                         
                         outputDiv.innerHTML += `<span style="color: ${color};">${line}</span>\n`;
                     }
                     lastLineCount = status.output_lines.length;
-                    outputDiv.scrollTop = outputDiv.scrollHeight; // Auto-scroll
+                    outputDiv.scrollTop = outputDiv.scrollHeight;
                 }
                 
                 if (status.status === 'completed') {
@@ -1280,7 +1287,7 @@ to help discover DNAAS neighbors.
                 }
             }
             
-            throw new Error('LLDP enable timed out after 4 minutes - device may have many interfaces or slow connection');
+            throw new Error('LLDP enable timed out after 4 minutes');
             
         } catch (error) {
             console.error('[LLDP Enable] Error:', error);
@@ -1307,8 +1314,7 @@ to help discover DNAAS neighbors.
         console.log(`[LLDP] Cancelling job ${jobId}`);
         
         try {
-            const apiHost = window.location.hostname || 'localhost';
-            const response = await fetch(`http://${apiHost}:8765/api/enable-lldp/cancel?job_id=${jobId}`);
+            const response = await fetch(`/api/dnaas/enable-lldp/cancel?job_id=${jobId}`);
             const result = await response.json();
             
             if (result.status === 'cancelled' || result.error === 'Job not found') {
@@ -1374,17 +1380,24 @@ to help discover DNAAS neighbors.
         
         console.log(`[LLDP] Device ${serial} has links: ${hasLinks}`);
         
-        // Start animation on device (call internal method directly)
         this._startLldpAnimation(editor, device, hasLinks);
         
-        // Show initial toast
         editor.showToast(`Enabling LLDP on ${serial}...`, 'info');
         
+        // Safety timeout: force-stop animation if API hangs beyond 5 minutes
+        const animSafetyTimer = setTimeout(() => {
+            if (device._lldpRunning || device._lldpAnimating) {
+                console.warn('[LLDP] Safety timeout: forcing animation stop after 5 minutes');
+                this._stopLldpAnimation(editor, device);
+                device._lldpRunning = false;
+                editor.draw();
+            }
+        }, 5 * 60 * 1000);
+        
         try {
-            // Call the LLDP enable API (internal method)
             const result = await this._enableLldpOnDevice(serial, sshConfig);
             
-            // Stop animation (internal method)
+            clearTimeout(animSafetyTimer);
             this._stopLldpAnimation(editor, device);
             device._lldpRunning = false;
             
@@ -1401,13 +1414,16 @@ to help discover DNAAS neighbors.
                 device._lldpCompletedAt = Date.now();
                 device._lldpNewResults = true;
                 
-                // Brief success glow (internal method)
                 this._showLldpSuccessGlow(editor, device);
                 
-                // Auto-open LLDP table after successful enable
+                // Auto-open LLDP table after successful enable (forceRefresh avoids toggle-close)
                 setTimeout(() => {
-                    editor.showLldpTableDialog(device, serial);
-                }, 800); // Small delay to let success animation play
+                    if (window.LldpDialog) {
+                        window.LldpDialog.showLldpTableDialog(editor, device, serial, { forceRefresh: true });
+                    } else {
+                        editor.showLldpTableDialog(device, serial);
+                    }
+                }, 800);
                 
             } else {
                 editor.showToast(`✗ LLDP failed on ${serial}: ${result.error}`, 'error');
@@ -1416,16 +1432,15 @@ to help discover DNAAS neighbors.
             }
             
         } catch (error) {
-            // Stop animation on error (internal method)
+            clearTimeout(animSafetyTimer);
             this._stopLldpAnimation(editor, device);
             device._lldpRunning = false;
             device._lldpStatus = 'failed';
             
-            editor.showToast(`✗ LLDP error on ${serial}: ${error.message}`, 'error');
+            editor.showToast(`LLDP error on ${serial}: ${error.message}`, 'error');
             this._showLldpFailureGlow(editor, device);
         }
         
-        // Redraw to clear any visual state
         editor.draw();
     },
     
@@ -2244,6 +2259,8 @@ to help discover DNAAS neighbors.
             </div>
         `;
         
+        dialog.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        dialog.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(dialog);
         
         document.getElementById('close-dnaas-selector').onclick = () => dialog.remove();
@@ -2281,8 +2298,8 @@ to help discover DNAAS neighbors.
                             ? `python3 /home/dn/CURSOR/dnaas_path_discovery.py ${serial1} ${serial2}`
                             : `python3 /home/dn/CURSOR/dnaas_path_discovery.py ${serial1}`;
                         
-                        if (navigator.clipboard) {
-                            navigator.clipboard.writeText(cmd).then(() => {
+                        if (window.safeClipboardWrite) {
+                            window.safeClipboardWrite(cmd).then(() => {
                                 editor.showToast('Command copied to clipboard!', 'success');
                             }).catch(() => {});
                         }
@@ -2316,8 +2333,8 @@ to help discover DNAAS neighbors.
                 
                 const discoveryCmd = `python3 /home/dn/CURSOR/dnaas_path_discovery.py ${deviceSerial}`;
                 
-                if (navigator.clipboard) {
-                    navigator.clipboard.writeText(discoveryCmd).then(() => {
+                if (window.safeClipboardWrite) {
+                    window.safeClipboardWrite(discoveryCmd).then(() => {
                         editor.showToast('Discovery command copied!', 'success');
                     }).catch(() => {});
                 }
@@ -2758,6 +2775,8 @@ to help discover DNAAS neighbors.
         `;
         
         overlay.appendChild(dialog);
+        overlay.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        overlay.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(overlay);
         
         const input = overlay.querySelector('[data-role="name"]');

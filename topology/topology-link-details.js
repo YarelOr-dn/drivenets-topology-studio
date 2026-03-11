@@ -678,7 +678,12 @@ window.LinkDetailsHandlers = {
         let filled = false;
 
         try {
-            const resp = await fetch(`/api/dnaas/device/${encodeURIComponent(name1)}/lldp`);
+            const sshHost1 = device1.sshConfig?.host || device1.sshConfig?.hostBackup || '';
+            const url = new URL(`/api/dnaas/device/${encodeURIComponent(name1)}/lldp`, window.location.origin);
+            if (sshHost1 && /^\d+\.\d+\.\d+\.\d+$/.test(sshHost1)) {
+                url.searchParams.set('ssh_host', sshHost1);
+            }
+            const resp = await fetch(url.toString());
             if (!resp.ok) return false;
             const data = await resp.json();
             const neighbors = data.neighbors || data.lldp_neighbors || [];

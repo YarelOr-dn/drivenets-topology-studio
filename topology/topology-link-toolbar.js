@@ -467,6 +467,8 @@ function showLinkSelectionToolbar(editor, link, clickPos = null) {
         e.stopPropagation();
         e.preventDefault();
     });
+    toolbar.addEventListener('keydown', (e) => { e.stopPropagation(); });
+    toolbar.addEventListener('keyup', (e) => { e.stopPropagation(); });
     
     document.body.appendChild(toolbar);
     editor._linkSelectionToolbar = toolbar;

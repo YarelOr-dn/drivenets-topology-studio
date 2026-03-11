@@ -633,7 +633,8 @@ function showShapeSelectionToolbar(editor, shape) {
     content.appendChild(actionsRow);
     toolbar.appendChild(content);
     
-    // Add event listeners
+    toolbar.addEventListener('keydown', (e) => { e.stopPropagation(); });
+    toolbar.addEventListener('keyup', (e) => { e.stopPropagation(); });
     document.body.appendChild(toolbar);
     
     // Fill/Stroke enable checkboxes

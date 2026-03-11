@@ -2111,7 +2111,7 @@ window.ToolbarSetup = {
             copyBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24"><use href="#ico-copy"/></svg>';
             copyBtn.title = 'Copy to clipboard';
             copyBtn.addEventListener('click', () => {
-                navigator.clipboard.writeText(s.script).then(() => {
+                window.safeClipboardWrite(s.script).then(() => {
                     copyBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24"><use href="#ico-check"/></svg>';
                     copyBtn.style.color = '#27ae60';
                     if (editor?.showToast) editor.showToast(`Copied "${s.title}" script`, 'success');

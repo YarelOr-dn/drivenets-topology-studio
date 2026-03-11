@@ -1852,7 +1852,7 @@ class LinkEditorModal {
         markdown += `| DNaaS VLAN | ${link.device1DnaasVlan || '-'} | ${link.device2DnaasVlan || '-'} |\n`;
         
         // Copy to clipboard
-        navigator.clipboard.writeText(markdown).then(() => {
+        window.safeClipboardWrite(markdown).then(() => {
             // Show success toast (delegate to editor)
             if (typeof this.editor.showToast === 'function') {
                 this.editor.showToast('Copied as Markdown!', 'success');

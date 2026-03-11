@@ -922,7 +922,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
     
-    def _enable_lldp_on_device(self, serial: str, job_id: str = None, username: str = 'dnroot', password: str = 'dnroot', skip_host_key: bool = False) -> dict:
+    def _enable_lldp_on_device(self, serial: str, job_id: str = None, username: str = 'dnroot', password: str = 'dnroot', skip_host_key: bool = False, ssh_host: str = None) -> dict:
         """
         Enable LLDP and admin-state on all PHYSICAL interfaces of a device.
         Only enables on ge*, eth*, hu*, ce*, qsfp* - NOT on loopbacks, management, or sub-interfaces.
@@ -930,6 +930,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
         
         If job_id is provided, updates the job's output_lines for real-time feedback.
         If skip_host_key is True, ignores all host key verification (like ssh -o StrictHostKeyChecking=no).
+        If ssh_host is provided (mgmt IP), use it directly instead of resolving serial.
         """
         import paramiko
         import re
@@ -942,33 +943,38 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 jobs[job_id]['output_lines'].append(msg)
         
         try:
-            log(f"🔌 Connecting to {serial}...")
+            log(f"Connecting to {serial}...")
             if skip_host_key:
-                log(f"🔓 Host key verification: DISABLED (lab/test mode)")
+                log(f"Host key verification: DISABLED (lab/test mode)")
             
-            # Resolve hostname to IP - try with domain suffix if bare hostname fails
             import socket
-            connect_host = serial
+            connect_host = None
             resolved_ip = None
             
-            # Common domain suffixes for DNOS devices
-            domain_suffixes = ['', '.dev.drivenets.net', '.drivenets.net', '.local']
-            
-            for suffix in domain_suffixes:
-                try_host = serial + suffix
-                try:
-                    resolved_ip = socket.gethostbyname(try_host)
-                    connect_host = try_host
-                    log(f"📍 Resolved {try_host} → {resolved_ip}")
-                    break
-                except socket.gaierror:
-                    continue
+            # Use ssh_host (mgmt IP) directly when provided
+            if ssh_host and ssh_host.strip():
+                connect_host = ssh_host.strip()
+                resolved_ip = connect_host
+                log(f"Using ssh_host {connect_host} for {serial}")
+            else:
+                # Resolve hostname to IP - try with domain suffix if bare hostname fails
+                connect_host = serial
+                domain_suffixes = ['', '.dev.drivenets.net', '.drivenets.net', '.local']
+                
+                for suffix in domain_suffixes:
+                    try_host = serial + suffix
+                    try:
+                        resolved_ip = socket.gethostbyname(try_host)
+                        connect_host = try_host
+                        log(f"Resolved {try_host} -> {resolved_ip}")
+                        break
+                    except socket.gaierror:
+                        continue
             
             if not resolved_ip:
-                log(f"⚠ DNS lookup failed for {serial} (tried with domain suffixes)")
-                log(f"📍 Trying direct connection to {serial}...")
+                log(f"[WARN] DNS lookup failed for {serial} (tried with domain suffixes)")
+                log(f"Trying direct connection to {serial}...")
             else:
-                # Use resolved IP for connection (more reliable)
                 connect_host = resolved_ip
             
             # Connect to device
@@ -1437,7 +1443,6 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                                 if dev_ip:
                                     print(f"[Resolve] {serial} -> {dev_ip} (Scaler DB)")
                                     return dev_ip
-                                # Try the actual serial (may resolve via DNS)
                                 try:
                                     resolved_ip = socket.gethostbyname(dev_serial)
                                     print(f"[Resolve] {serial} -> {resolved_ip} (DNS via DB serial {dev_serial})")
@@ -1449,20 +1454,171 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                         except Exception:
                             pass
         
+        # Check device_inventory.json for mgmt_ip
+        inventory_file = Path('/home/dn/CURSOR/device_inventory.json')
+        if inventory_file.exists():
+            try:
+                with open(inventory_file, 'r') as f:
+                    inventory = json.load(f)
+                search_lower = serial.lower()
+                for key, dev in inventory.get('devices', {}).items():
+                    dev_hostname = (dev.get('hostname') or key).lower()
+                    dev_mgmt = dev.get('mgmt_ip', '') or ''
+                    if (search_lower == dev_hostname or
+                        search_lower in dev_hostname or
+                        dev_hostname in search_lower or
+                        search_lower == key.lower()):
+                        if dev_mgmt:
+                            print(f"[Resolve] {serial} -> {dev_mgmt} (device_inventory)")
+                            return dev_mgmt
+            except Exception:
+                pass
+        
         return serial
 
-    def _fetch_lldp_neighbors(self, serial: str) -> dict:
+    def _fetch_device_stack_live(self, host: str, username: str = 'dnroot', password: str = 'dnroot') -> dict:
+        """SSH to device, run 'show system stack | no-more', parse and return components."""
+        import paramiko
+        import socket
+
+        connect_host = self._resolve_serial_to_host(host)
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            connect_host, username=username, password=password,
+            timeout=30, look_for_keys=False, allow_agent=False
+        )
+        try:
+            shell = client.invoke_shell(width=250, height=50)
+            shell.settimeout(30)
+            time.sleep(2)
+            while shell.recv_ready():
+                shell.recv(65535)
+                time.sleep(0.1)
+
+            shell.send('show system stack | no-more\n')
+            time.sleep(3)
+            output = ''
+            for _ in range(20):
+                if shell.recv_ready():
+                    output += shell.recv(65535).decode('utf-8', errors='replace')
+                    time.sleep(0.3)
+                else:
+                    time.sleep(0.5)
+            raw = strip_ansi(output)
+
+            components = []
+            for line in raw.split('\n'):
+                if '|' not in line:
+                    continue
+                parts = [p.strip() for p in line.split('|')]
+                if len(parts) < 7:
+                    continue
+                name = parts[1]
+                if not name or name.upper() in ('COMPONENT', '---', ''):
+                    continue
+                if name.startswith('-'):
+                    continue
+                components.append({
+                    'name': name,
+                    'hw_model': parts[2] if len(parts) > 2 else '-',
+                    'revert': parts[4] if len(parts) > 4 else '-',
+                    'current': parts[5] if len(parts) > 5 else '-',
+                    'target': parts[6] if len(parts) > 6 else '-',
+                })
+            return {'components': components, 'raw_output': raw if not components else ''}
+        finally:
+            client.close()
+
+    def _fetch_device_gitcommit(self, host: str, username: str = 'dnroot', password: str = 'dnroot') -> dict:
+        """
+        SSH to device, run 'run start shell' -> password -> 'cat ./gitcommit', return hash.
+        Falls back to direct SSH on port 2222 if run start shell fails.
+        """
+        import paramiko
+
+        connect_host = self._resolve_serial_to_host(host)
+
+        def try_port(port: int, use_cli_shell: bool) -> str | None:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            try:
+                client.connect(
+                    connect_host, port=port, username=username, password=password,
+                    timeout=30, look_for_keys=False, allow_agent=False
+                )
+            except Exception:
+                return None
+            try:
+                shell = client.invoke_shell(width=250, height=50)
+                shell.settimeout(30)
+                time.sleep(2)
+                while shell.recv_ready():
+                    shell.recv(65535)
+                    time.sleep(0.1)
+
+                if use_cli_shell:
+                    shell.send('run start shell\n')
+                    time.sleep(2)
+                    output = ''
+                    for _ in range(15):
+                        if shell.recv_ready():
+                            output += shell.recv(65535).decode('utf-8', errors='replace')
+                            time.sleep(0.2)
+                        else:
+                            time.sleep(0.3)
+                        if 'password' in output.lower() or 'Password' in output:
+                            shell.send(password + '\n')
+                            time.sleep(2)
+                            break
+                    while shell.recv_ready():
+                        output += shell.recv(65535).decode('utf-8', errors='replace')
+                        time.sleep(0.2)
+                    time.sleep(0.5)
+
+                shell.send('cat ./gitcommit\n')
+                time.sleep(2)
+                out = ''
+                for _ in range(15):
+                    if shell.recv_ready():
+                        out += shell.recv(65535).decode('utf-8', errors='replace')
+                        time.sleep(0.2)
+                    else:
+                        time.sleep(0.3)
+                raw = strip_ansi(out)
+                for line in raw.split('\n'):
+                    line = line.strip()
+                    if not line or line.startswith('cat ') or line.endswith('#'):
+                        continue
+                    if re.match(r'^[a-fA-F0-9]{7,40}$', line):
+                        return line
+                    if len(line) <= 64 and not line.startswith('['):
+                        return line
+                return None
+            finally:
+                client.close()
+
+        result = try_port(22, use_cli_shell=True)
+        if result:
+            return {'git_commit': result}
+        result = try_port(2222, use_cli_shell=False)
+        if result:
+            return {'git_commit': result}
+        return {'git_commit': None, 'error': 'Could not fetch gitcommit from device'}
+
+    def _fetch_lldp_neighbors(self, serial: str, ssh_host: str = None) -> dict:
         """
         SSH to device, run 'show lldp neighbors | no-more', parse and return neighbors.
         Returns { lldp_neighbors: [...], error?: str }.
+        When ssh_host is provided, use it directly; otherwise resolve serial to host.
         """
         import paramiko
         import socket
         import time
         serial = (serial or '').strip()
-        if not serial:
-            return {'lldp_neighbors': [], 'error': 'serial is required'}
-        connect_host = self._resolve_serial_to_host(serial)
+        if not serial and not ssh_host:
+            return {'lldp_neighbors': [], 'error': 'serial or ssh_host is required'}
+        connect_host = (ssh_host or '').strip() or self._resolve_serial_to_host(serial)
         try:
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -1742,13 +1898,15 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
 
         elif parsed.path.startswith('/api/device/') and '/lldp' in parsed.path:
             # GET endpoint: /api/device/<serial>/lldp - fetch LLDP from scaler-monitor cache
+            # Optional query: ?ssh_host=IP for direct SSH when serial does not resolve
             # Extract serial from path: /api/device/SERIAL/lldp
             path_parts = parsed.path.split('/')
             # path_parts = ['', 'api', 'device', 'SERIAL', 'lldp']
             if len(path_parts) >= 5:
-                serial = path_parts[3]  # URL-encoded serial
-                from urllib.parse import unquote
-                serial = unquote(serial)
+                from urllib.parse import unquote, parse_qs
+                serial = unquote(path_parts[3])
+                qs = parse_qs(parsed.query or '')
+                ssh_host = (qs.get('ssh_host', [None]) or [None])[0]
                 
                 # Priority: NetworkMapper (freshest) > Scaler DB > device_inventory > SSH
                 found_device = None
@@ -1859,7 +2017,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 if not neighbors and serial:
                     print(f"No cached LLDP for {serial}, trying live SSH + cache update...")
                     try:
-                        live_result = self._fetch_lldp_neighbors(serial)
+                        live_result = self._fetch_lldp_neighbors(serial, ssh_host=ssh_host)
                         if live_result.get('lldp_neighbors'):
                             lldp_list = live_result['lldp_neighbors']
                             
@@ -2300,16 +2458,15 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 return
             
             serial = data.get('serial', '').strip()
-            # SSH credentials from device sshConfig (optional, defaults to dnroot/dnroot)
+            ssh_host = (data.get('ssh_host') or '').strip()
             username = data.get('username', 'dnroot')
             password = data.get('password', 'dnroot')
-            skip_host_key = data.get('skipHostKey', False)  # Skip host key verification
+            skip_host_key = data.get('skipHostKey', False)
             
             if not serial:
                 self._send_json({'error': 'serial is required'}, 400)
                 return
             
-            # Create a job for real-time progress tracking
             _cleanup_old_discovery_jobs()
             with job_lock:
                 job_id = f"lldp_{int(time.time() * 1000)}"
@@ -2325,11 +2482,10 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                     'created_at': time.time()
                 }
             
-            # Run in background thread with credentials
             def run_enable_lldp():
                 job = jobs[job_id]
                 try:
-                    result = self._enable_lldp_on_device(serial, job_id, username, password, skip_host_key)
+                    result = self._enable_lldp_on_device(serial, job_id, username, password, skip_host_key, ssh_host=ssh_host or None)
                     job['status'] = 'completed' if result.get('success') else 'failed'
                     job['progress'] = 100
                     job['interfaces_enabled'] = result.get('interfaces_enabled', 0)
@@ -2347,6 +2503,48 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             
             self._send_json({'job_id': job_id, 'status': 'started', 'message': f'LLDP enable started for {serial}'})
         
+        elif parsed.path == '/api/device-stack-live':
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode()
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._send_json({'error': 'Invalid JSON'}, 400)
+                return
+            serial = (data.get('serial') or '').strip()
+            ssh_host = (data.get('ssh_host') or serial).strip()
+            ssh_user = data.get('ssh_user', 'dnroot')
+            ssh_password = data.get('ssh_password', 'dnroot')
+            if not serial:
+                self._send_json({'error': 'serial is required'}, 400)
+                return
+            try:
+                result = self._fetch_device_stack_live(ssh_host, ssh_user, ssh_password)
+                self._send_json(result)
+            except Exception as e:
+                self._send_json({'error': str(e), 'components': []}, 500)
+
+        elif parsed.path == '/api/device-gitcommit':
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode()
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._send_json({'error': 'Invalid JSON'}, 400)
+                return
+            serial = (data.get('serial') or '').strip()
+            ssh_host = (data.get('ssh_host') or serial).strip()
+            ssh_user = data.get('ssh_user', 'dnroot')
+            ssh_password = data.get('ssh_password', 'dnroot')
+            if not serial:
+                self._send_json({'error': 'serial is required'}, 400)
+                return
+            try:
+                result = self._fetch_device_gitcommit(ssh_host, ssh_user, ssh_password)
+                self._send_json(result)
+            except Exception as e:
+                self._send_json({'error': str(e), 'git_commit': None}, 500)
+
         elif parsed.path == '/api/lldp-neighbors':
             # Fetch LLDP neighbor table from device (show lldp neighbors)
             content_length = int(self.headers.get('Content-Length', 0))
@@ -2357,8 +2555,9 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 self._send_json({'error': 'Invalid JSON'}, 400)
                 return
             serial = (data.get('serial') or '').strip()
-            hostname = (data.get('hostname') or '').strip()  # Also accept hostname
-            use_cache = data.get('use_cache', True)  # Default: use cached data
+            hostname = (data.get('hostname') or '').strip()
+            ssh_host = (data.get('ssh_host') or '').strip()
+            use_cache = data.get('use_cache', True)
             if not serial and not hostname:
                 self._send_json({'error': 'serial or hostname is required'}, 400)
                 return
@@ -2485,7 +2684,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                     return
                 else:
                     target = dev_connection_ip or dev_hostname
-                    result = self._fetch_lldp_neighbors(target)
+                    result = self._fetch_lldp_neighbors(target, ssh_host=ssh_host or None)
                     result['cached'] = False
                     result['hostname'] = dev_hostname
                     result['note'] = f'Fetched live from {target} (cached data was empty)'
@@ -2494,7 +2693,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             
             # No cached data found - try live SSH with original search term
             target = serial or hostname
-            result = self._fetch_lldp_neighbors(target)
+            result = self._fetch_lldp_neighbors(target, ssh_host=ssh_host or None)
             result['cached'] = False
             
             # If live fetch failed and we have similar device names, suggest them
@@ -2545,7 +2744,8 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 print(f"[LLDP-Live] NetworkMapper failed, falling back to SSH: {e}")
             
-            result = self._fetch_lldp_neighbors(serial)
+            ssh_host = (data.get('ssh_host') or '').strip()
+            result = self._fetch_lldp_neighbors(serial, ssh_host=ssh_host or None)
             result['source'] = 'ssh-live'
             self._send_json(result)
         

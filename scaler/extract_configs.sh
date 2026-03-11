@@ -270,6 +270,14 @@ send \"show interfaces management | no-more\r\"
 expect \"#\"
 send \"show lldp neighbor | no-more\r\"
 expect \"#\"
+send \"run start shell\r\"
+expect -re {[Pp]assword|#}
+send \"dnroot\r\"
+expect \"#\"
+send \"cat ./gitcommit\r\"
+expect \"#\"
+send \"exit\r\"
+expect \"#\"
 send \"show config | no-more\r\"
 expect -re {config-end.*#}
 send \"exit\r\"
@@ -389,6 +397,44 @@ RECEOF
     # Keep legacy stack_url for backwards compatibility (first URL found)
     local stack_url=$(grep -m1 "^url:" "$output" 2>/dev/null | sed 's/url:[[:space:]]*//' | tr -d '\r\t')
     stack_url="${stack_url:-N/A}"
+    
+    # ========================================================================
+    # PARSE FULL STACK COMPONENT TABLE (show system stack)
+    # Format: | Component | HW Model | HW Revision | Revert | Current | Target |
+    # Output: JSON array for stack dialog cache
+    # ========================================================================
+    local stack_components_json="[]"
+    stack_components_json=$(awk -F'|' '
+    /Component.*HW Model.*HW Revision/ || /Component.*HW Model.*Revert/ { in_stack=1; next }
+    /^[A-Za-z0-9_.-]+#/ || /^$/ { if (in_stack) in_stack=0 }
+    /^[|][-+]+[|]/ { next }
+    in_stack && NF >= 7 {
+        comp = $2; hw = $3; rev = $4; revert = $5; curr = $6; tgt = $7
+        gsub(/^[ \t]+|[ \t]+$/, "", comp)
+        gsub(/^[ \t]+|[ \t]+$/, "", hw)
+        gsub(/^[ \t]+|[ \t]+$/, "", rev)
+        gsub(/^[ \t]+|[ \t]+$/, "", revert)
+        gsub(/^[ \t]+|[ \t]+$/, "", curr)
+        gsub(/^[ \t]+|[ \t]+$/, "", tgt)
+        if (comp != "" && toupper(comp) !~ /^COMPONENT$|^---$/) {
+            gsub(/"/, "\\\"", comp); gsub(/"/, "\\\"", hw); gsub(/"/, "\\\"", rev)
+            gsub(/"/, "\\\"", revert); gsub(/"/, "\\\"", curr); gsub(/"/, "\\\"", tgt)
+            printf "{\"name\":\"%s\",\"hw_model\":\"%s\",\"hw_revision\":\"%s\",\"revert\":\"%s\",\"current\":\"%s\",\"target\":\"%s\"}\n", comp, hw, rev, revert, curr, tgt
+        }
+    }' "$output" 2>/dev/null | paste -sd, | sed 's/^/[/' | sed 's/$/]/')
+    
+    if [ -z "$stack_components_json" ] || [ "$stack_components_json" = "[]" ]; then
+        stack_components_json="[]"
+    elif ! echo "$stack_components_json" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+        stack_components_json="[]"
+    fi
+    
+    # ========================================================================
+    # PARSE GIT COMMIT (from run start shell + cat ./gitcommit output)
+    # ========================================================================
+    local git_commit=""
+    git_commit=$(sed -n '/cat.*gitcommit/,$p' "$output" 2>/dev/null | grep -oE '^[a-fA-F0-9]{7,40}$' | head -1)
+    git_commit="${git_commit:-}"
     
     # ========================================================================
     # PARSE INSTALLATION TIME (show system install)
@@ -935,6 +981,8 @@ RECEOF
     "vpws_up": ${vpws_up:-0},
     "lldp_neighbor_count": ${lldp_count:-0},
     "lldp_neighbors": $lldp_json,
+    "stack_components": $stack_components_json,
+    "git_commit": $([ -n "$git_commit" ] && echo "\"$git_commit\"" || echo "null"),
     "recovery_mode_detected": $recovery_mode,
     "recovery_type": "$recovery_type",
     "recovery_mode_detected_at": $recovery_time,

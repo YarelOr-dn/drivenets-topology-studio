@@ -769,14 +769,15 @@ window.ObjectDetection = {
     
     // Safe clipboard write that works on HTTP (non-HTTPS) contexts
     _safeClipboardWrite(text) {
-        // Try modern clipboard API first (requires HTTPS or localhost)
+        if (typeof window.safeClipboardWrite === 'function') {
+            return window.safeClipboardWrite(text);
+        }
         if (navigator.clipboard && navigator.clipboard.writeText) {
             return navigator.clipboard.writeText(text).catch((err) => {
                 console.warn('[Clipboard] Modern API failed:', err);
                 return this._legacyClipboardWrite(text);
             });
         }
-        // Fallback to legacy method
         return this._legacyClipboardWrite(text);
     },
     

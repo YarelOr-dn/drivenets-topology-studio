@@ -801,7 +801,7 @@ window.LinkTableManager = {
         markdown += `| Egress Action | ${link.device1EgressAction || '-'} | ${link.device2EgressAction || '-'} |\n`;
         markdown += `| DNaaS VLAN | ${link.device1DnaasVlan || '-'} | ${link.device2DnaasVlan || '-'} |\n`;
         
-        navigator.clipboard.writeText(markdown).then(() => {
+        window.safeClipboardWrite(markdown).then(() => {
             this.showToast(editor, 'Copied as Markdown!', 'success');
         }).catch(err => {
             console.error('Failed to copy:', err);

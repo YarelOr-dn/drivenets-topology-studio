@@ -43,6 +43,8 @@ class JenkinsBuild:
     artifacts: List[Dict] = field(default_factory=list)
     building: bool = False
     duration: int = 0
+    display_name: str = ""
+    build_params: Dict = field(default_factory=dict)
     
     @property
     def build_time(self) -> datetime:
@@ -60,6 +62,23 @@ class JenkinsBuild:
         """Check if build is older than 48 hours (dnpkg-48hrs bucket retention)."""
         return self.age_hours > 48
     
+    @property
+    def is_sanitizer(self) -> bool:
+        """Check if this build was compiled with AddressSanitizer (ASAN).
+        
+        Jenkins parameter TEST_NAMES=ENABLE_SANITIZER indicates a sanitizer build.
+        """
+        test_names = self.build_params.get('TEST_NAMES', '')
+        return 'ENABLE_SANITIZER' in str(test_names).upper()
+    
+    @property
+    def has_image_artifacts(self) -> bool:
+        """Check if this build has DNOS/GI image artifact files (even if build failed)."""
+        artifact_names = [a.get('fileName', '').lower() for a in self.artifacts]
+        has_dnos = any('dnos' in n and 'artifact' in n for n in artifact_names)
+        has_gi = any(('gi_gi' in n or n == 'gi_artifact.txt') and 'artifact' in n for n in artifact_names)
+        return has_dnos or has_gi
+    
     def __str__(self) -> str:
         age = self.age_hours
         if age < 1:
@@ -69,10 +88,11 @@ class JenkinsBuild:
         else:
             age_str = f"{age/24:.1f}days ago"
         
-        status = "🔄" if self.building else ("✅" if self.result == "SUCCESS" else "❌")
-        expired = " ⚠️EXPIRED" if self.is_expired else ""
+        status = "[BUILDING]" if self.building else ("[OK]" if self.result == "SUCCESS" else "[FAIL]")
+        expired = " [EXPIRED]" if self.is_expired else ""
+        sanitizer = " [ASAN]" if self.is_sanitizer else ""
         
-        return f"#{self.build_number} {status} {age_str}{expired}"
+        return f"#{self.build_number} {status} {age_str}{expired}{sanitizer}"
 
 
 def validate_artifact_url(url: str, timeout: int = 10) -> Tuple[bool, str]:
@@ -355,6 +375,8 @@ class JenkinsClient:
         if not data:
             return None
         
+        params = self._extract_build_params(data)
+        
         return JenkinsBuild(
             job_name=branch_name,
             build_number=data.get('number', 0),
@@ -363,8 +385,24 @@ class JenkinsClient:
             url=data.get('url', ''),
             artifacts=data.get('artifacts', []),
             building=data.get('building', False),
-            duration=data.get('duration', 0)
+            duration=data.get('duration', 0),
+            display_name=data.get('displayName', '') or f"#{data.get('number', 0)}",
+            build_params=params,
         )
+    
+    @staticmethod
+    def _extract_build_params(build_data: Dict) -> Dict:
+        """Extract build parameters from Jenkins API actions array."""
+        params = {}
+        for action in build_data.get('actions', []):
+            cls = action.get('_class', '')
+            if 'Parameter' in cls:
+                for p in action.get('parameters', []):
+                    name = p.get('name', '')
+                    value = p.get('value', '')
+                    if name:
+                        params[name] = value
+        return params
     
     def get_last_successful_build(self, branch_name: str) -> Optional[JenkinsBuild]:
         """Get the last successful build for a branch."""
@@ -387,12 +425,16 @@ class JenkinsClient:
         'SANITY',
     ]
     
-    def get_latest_pure_build(self, branch_name: str, limit: int = 30) -> Optional[Dict]:
-        """Get the latest successful "pure" build (no NIGHTLY, platform-specific, etc.).
+    def get_latest_pure_build(self, branch_name: str, limit: int = 30,
+                              include_failed: bool = False) -> Optional[Dict]:
+        """Get the latest "pure" build (no NIGHTLY, platform-specific, etc.).
         
         Args:
             branch_name: The branch to check (e.g., 'dev_v26_1')
             limit: Maximum builds to scan
+            include_failed: If True, also consider FAILED builds that have image artifacts.
+                           Useful for feature branches where builds fail on tests but
+                           produce valid DNOS/GI/BaseOS images.
             
         Returns:
             Dict with:
@@ -401,6 +443,7 @@ class JenkinsClient:
                 'has_dnos': bool
                 'has_gi': bool
                 'artifacts': list of artifact names
+                'is_sanitizer': bool - whether build uses AddressSanitizer
             Or None if no pure build found.
         """
         encoded_branch = quote(quote(branch_name, safe=''), safe='')
@@ -410,32 +453,26 @@ class JenkinsClient:
         if not data or 'builds' not in data:
             return None
         
-        # Scan builds looking for a pure successful one
         for build_ref in data['builds'][:limit]:
             build_num = build_ref.get('number')
             if not build_num:
                 continue
             
-            # Get build details
             build_endpoint = f"{self.CHEETAH_BASE}/job/{encoded_branch}/{build_num}"
             build_data = self._api_get(build_endpoint)
             
             if not build_data:
                 continue
             
-            # Check if still building
             if build_data.get('building', False):
                 continue
             
-            # Check if successful
-            if build_data.get('result') != 'SUCCESS':
+            result = build_data.get('result', '')
+            if not include_failed and result != 'SUCCESS':
                 continue
             
-            # Check display name for excluded patterns
             display_name = build_data.get('displayName', '') or f"#{build_num}"
-            full_url = build_data.get('url', '')
             
-            # Check if this is a NIGHTLY or platform-specific build
             is_excluded = False
             for pattern in self.EXCLUDED_BUILD_PATTERNS:
                 if pattern.upper() in display_name.upper():
@@ -445,15 +482,18 @@ class JenkinsClient:
             if is_excluded:
                 continue
             
-            # Found a pure successful build!
             artifacts = build_data.get('artifacts', [])
             artifact_names = [a.get('fileName', '') for a in artifacts]
             
-            # Check for specific artifact types
-            # Jenkins artifacts are text files containing URLs: gi_DNOS_artifact.txt, gi_GI_artifact.txt, gi_BaseOS_artifact.txt
             has_dnos = any('dnos' in name.lower() and 'artifact' in name.lower() for name in artifact_names)
             has_gi = any(('gi_gi' in name.lower() or name.lower() == 'gi_artifact.txt') and 'artifact' in name.lower() for name in artifact_names)
             has_baseos = any(('baseos' in name.lower() or 'base_os' in name.lower()) and 'artifact' in name.lower() for name in artifact_names)
+            
+            # For failed builds, only include if they have image artifacts
+            if result != 'SUCCESS' and not (has_dnos or has_gi):
+                continue
+            
+            params = self._extract_build_params(build_data)
             
             build = JenkinsBuild(
                 job_name=branch_name,
@@ -463,7 +503,9 @@ class JenkinsClient:
                 url=build_data.get('url', ''),
                 artifacts=artifacts,
                 building=False,
-                duration=build_data.get('duration', 0)
+                duration=build_data.get('duration', 0),
+                display_name=display_name,
+                build_params=params,
             )
             
             return {
@@ -473,9 +515,103 @@ class JenkinsClient:
                 'has_gi': has_gi,
                 'has_baseos': has_baseos,
                 'artifacts': artifact_names,
+                'is_sanitizer': build.is_sanitizer,
             }
         
         return None
+    
+    def get_recent_builds_with_artifacts(self, branch_name: str, limit: int = 15,
+                                          max_results: int = 10) -> List[Dict]:
+        """List recent builds (success AND failed) that have image artifacts.
+        
+        Scans recent builds for a branch and returns all that have DNOS/GI/BaseOS
+        artifact files, regardless of build result. Flags sanitizer builds.
+        
+        Useful for feature branches where builds may fail on tests but still
+        produce valid installable images.
+        
+        Args:
+            branch_name: The branch to check
+            limit: Maximum builds to scan from Jenkins
+            max_results: Maximum results to return
+            
+        Returns:
+            List of dicts, each with:
+                'build': JenkinsBuild, 'display_name': str,
+                'has_dnos': bool, 'has_gi': bool, 'has_baseos': bool,
+                'is_sanitizer': bool, 'artifacts': list
+        """
+        encoded_branch = quote(quote(branch_name, safe=''), safe='')
+        endpoint = f"{self.CHEETAH_BASE}/job/{encoded_branch}"
+        data = self._api_get(endpoint)
+        
+        if not data or 'builds' not in data:
+            return []
+        
+        results = []
+        for build_ref in data['builds'][:limit]:
+            if len(results) >= max_results:
+                break
+                
+            build_num = build_ref.get('number')
+            if not build_num:
+                continue
+            
+            build_endpoint = f"{self.CHEETAH_BASE}/job/{encoded_branch}/{build_num}"
+            build_data = self._api_get(build_endpoint)
+            
+            if not build_data:
+                continue
+            
+            if build_data.get('building', False):
+                continue
+            
+            display_name = build_data.get('displayName', '') or f"#{build_num}"
+            
+            is_excluded = False
+            for pattern in self.EXCLUDED_BUILD_PATTERNS:
+                if pattern.upper() in display_name.upper():
+                    is_excluded = True
+                    break
+            if is_excluded:
+                continue
+            
+            artifacts = build_data.get('artifacts', [])
+            artifact_names = [a.get('fileName', '') for a in artifacts]
+            
+            has_dnos = any('dnos' in name.lower() and 'artifact' in name.lower() for name in artifact_names)
+            has_gi = any(('gi_gi' in name.lower() or name.lower() == 'gi_artifact.txt') and 'artifact' in name.lower() for name in artifact_names)
+            has_baseos = any(('baseos' in name.lower() or 'base_os' in name.lower()) and 'artifact' in name.lower() for name in artifact_names)
+            
+            if not (has_dnos or has_gi):
+                continue
+            
+            params = self._extract_build_params(build_data)
+            
+            build = JenkinsBuild(
+                job_name=branch_name,
+                build_number=build_data.get('number', 0),
+                result=build_data.get('result', 'UNKNOWN'),
+                timestamp=build_data.get('timestamp', 0),
+                url=build_data.get('url', ''),
+                artifacts=artifacts,
+                building=False,
+                duration=build_data.get('duration', 0),
+                display_name=display_name,
+                build_params=params,
+            )
+            
+            results.append({
+                'build': build,
+                'display_name': display_name,
+                'has_dnos': has_dnos,
+                'has_gi': has_gi,
+                'has_baseos': has_baseos,
+                'is_sanitizer': build.is_sanitizer,
+                'artifacts': artifact_names,
+            })
+        
+        return results
     
     def get_console_log(self, branch_name: str, build_number: int, 
                         tail_lines: int = 200) -> Tuple[bool, str]:

@@ -60,6 +60,28 @@ elif single_action == "my_feature":
 
 **When adding a new feature: Add to BOTH menus or explain why it only applies to one mode.**
 
+---
+
+## Terminal-to-GUI Parity Requirement
+
+**CRITICAL: Every scaler/config feature MUST exist in BOTH the terminal wizard AND the GUI with API.**
+
+See Cursor rule: `.cursor/rules/scaler-terminal-gui-parity.mdc` (always-apply).
+
+### 5-Layer Checklist (Every New Config Feature)
+
+| Layer | Location | Required |
+|-------|----------|----------|
+| 1. Builder | `scaler/scaler/wizard/config_builders.py` | `build_{feature}_config()` |
+| 2. Terminal | `scaler/scaler/wizard/*.py` | Wizard path calling the builder |
+| 3. API | `topology/scaler_bridge.py` | `POST /api/config/generate/{feature}` |
+| 4. JS Client | `topology/scaler-api.js` | `ScalerAPI.generate{Feature}()` |
+| 5. GUI | `topology/scaler-gui.js` | `open{Feature}Wizard()` with API preview |
+
+**NEVER:** Add a terminal wizard path without a corresponding API endpoint. Never build DNOS strings in the frontend.
+
+---
+
 ### Checklist for New Features
 
 When adding a new feature, ensure:
@@ -611,6 +633,7 @@ Reference: `/home/dn/SCALER/docs/DNOS_VERSION_STACK.md`
 
 ### Key Classes
 - `JenkinsClient` - API client for Jenkins
+- `JenkinsBuild` - Build dataclass with `is_sanitizer`, `has_image_artifacts`, `is_expired` properties
 - `StackManager` - Stack URL extraction and validation
 - `DeviceUpgrader` - Device upgrade operations
 
@@ -623,6 +646,20 @@ Reference: `/home/dn/SCALER/docs/DNOS_VERSION_STACK.md`
 1. Get DNOS, GI, BaseOS from private branch first
 2. Only fallback to main branch for missing components
 3. Use `stack_mgr.get_stack_with_fallback(branch, prefer_private=True)`
+
+### Failed Build Support (2026-03-11)
+Feature branches often have builds that fail on tests but produce valid DNOS/GI/BaseOS images.
+- `get_latest_pure_build(branch, include_failed=True)` -- returns latest build with artifacts (success OR failed)
+- `get_recent_builds_with_artifacts(branch)` -- lists all recent builds with image artifacts, flags sanitizer
+- The wizard offers `[2] Browse all recent builds` after finding the latest successful build
+- When pasting a Jenkins URL, the wizard offers `[2] Browse all recent builds for <branch>`
+
+### Sanitizer Build Detection (2026-03-11)
+Jenkins parameter `TEST_NAMES=ENABLE_SANITIZER` identifies AddressSanitizer builds.
+- `JenkinsBuild.is_sanitizer` property checks `build_params['TEST_NAMES']`
+- `JenkinsBuild.build_params` extracted from Jenkins API `actions[].parameters[]`
+- Displayed as `[ASAN]` tag in build listings and stack summary
+- Sanitizer builds are slower but detect memory errors at runtime
 
 ---
 

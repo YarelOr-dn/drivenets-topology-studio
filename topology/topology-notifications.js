@@ -457,8 +457,8 @@ window.NotificationManager = {
         
         const installCmd = 'bash <(curl -sL https://raw.githubusercontent.com/YarelOr-dn/topology-creator/v1.1-dev/install-iterm-helper.sh)';
         overlay.querySelector('#copy-install-cmd').addEventListener('click', (e) => {
-            navigator.clipboard.writeText(installCmd).then(() => {
-                e.target.textContent = '✓';
+            window.safeClipboardWrite(installCmd).then(() => {
+                e.target.textContent = '[OK]';
                 setTimeout(() => e.target.textContent = 'Copy', 2000);
             });
         });
@@ -657,7 +657,7 @@ window.NotificationManager = {
     const SUPPRESS_MS = 10000;
     const API_PATTERN = /^\/api\//;
     const _SILENT_404_EXACT = ['/api/dnaas/interface-details'];
-    const _SILENT_404_PREFIX = ['/api/config/', '/api/operations/', '/api/health'];
+    const _SILENT_404_PREFIX = ['/api/config/', '/api/operations/', '/api/health', '/api/dnaas/enable-lldp/status', '/api/dnaas/device-stack-live'];
     const _SILENT_BRIDGE_PREFIX = ['/api/config/', '/api/operations/', '/api/devices/'];
     const _BRIDGE_UNAVAIL_CODES = new Set([404, 501, 502, 503]);
 

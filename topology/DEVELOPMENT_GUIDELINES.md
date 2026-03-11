@@ -20,6 +20,8 @@
 
 The bridge wraps scaler-wizard modules for the topology app. serve.py proxies `/api/config/*`, `/api/operations/*`, `/api/devices/discover`, `/api/devices/{id}/test`, and `/api/devices/{id}/context` to it.
 
+**Terminal-to-GUI parity (see `.cursor/rules/scaler-terminal-gui-parity.mdc`):** Every new API endpoint MUST have a corresponding `ScalerAPI.js` method and `scaler-gui.js` wizard entry point. No terminal-only or GUI-only features. Full chain: `config_builders.py` -> terminal wizard -> `scaler_bridge.py` -> `scaler-api.js` -> `scaler-gui.js`.
+
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/devices/{id}/context` | GET | Unified device context for wizard suggestions. Returns: interfaces (physical, bundle, subinterface, pwhe, free_physical), lldp, config_summary, wan_interfaces, igp, services (fxc_count, vrf_count, next_evi), loopbacks, vrfs, bridge_domains, flowspec_policies, routing_policies, bgp_peers, multihoming, platform_limits. Query `?live=true` for live fetch. |
@@ -51,11 +53,14 @@ The bridge wraps scaler-wizard modules for the topology app. serve.py proxies `/
 | `/api/operations/jobs/{job_id}` | DELETE | Remove job from history |
 | `/api/config/limits/{device_id}` | GET | Platform limits (max_subifs) from limits.json |
 | `/api/devices/discover` | POST | SSH discover device by IP, add to inventory |
-| `/api/config/scan-existing` | POST | Scan device for existing sub-ids, VRFs, EVIs, L3 conflicts. Body: `{ device_id, ssh_host, scan_type: "interfaces"\|"services"\|"vrfs"\|"all" }`. Returns `existing_sub_ids`, `existing_vrfs`, `existing_evis`, `l3_conflicts`, `next_free`. Used by interface wizard collision check. |
-| `/api/config/detect-pattern` | POST | Detect interface pattern (dot1q/qinq, stepping_tag, last_vlan, last_sub_id) from device config. Body: `{ device_id, ssh_host, parent_interface }`. Used for auto-fill in subif flow. |
+| `/api/config/scan-existing` | POST | Scan device for existing sub-ids, VRFs, EVIs, L3 conflicts. Body: `{ device_id, ssh_host, scan_type: "interfaces"\|"services"\|"vrfs"\|"all" }`. Returns `existing_sub_ids`, `l3_conflicts`, `l2_sub_ids`, `outer_inner_map` (QinQ), `sub_id_details`, `next_free`, `config_fetched_at`. Used by interface wizard collision check and encap overlap detection. |
+| `/api/config/detect-pattern` | POST | Detect interface pattern (dot1q/qinq, stepping_tag, last_vlan, last_sub_id, suggested_next_vlan) from device config. Body: `{ device_id, ssh_host, parent_interface }`. Used for auto-fill in subif flow. |
 | `/api/mirror/analyze` | POST | Analyze source vs target config for mirror. Body: `{ source_device_id, target_device_id, ssh_hosts?: [src_ip, tgt_ip] }`. Returns `source_summary`, `target_summary`, `smart_diff`, `interface_map`. |
 | `/api/mirror/generate` | POST | Generate mirrored config. Body: `{ source_device_id, target_device_id, ssh_hosts, interface_map, section_selection?, output_mode: "full"\|"diff_only" }`. Returns `config`, `summary`, `line_count`, `diff_stats`. |
 | `/api/mirror/preview-diff` | POST | Preview diff of proposed mirrored config vs target running. Body: `{ target_device_id, config, ssh_host }`. Returns `diff_text`, `lines_added`, `lines_removed`. |
+| `/api/operations/image-upgrade/builds` | POST | List recent builds with image artifacts for a branch (includes failed + sanitizer). Body: `{ branch, limit?, max_results? }`. Returns `{ branch, builds: [{build_number, result, display_name, age_hours, is_expired, is_sanitizer, has_dnos, has_gi, has_baseos}] }`. |
+| `/api/operations/image-upgrade/resolve-url` | POST | Resolve Jenkins URL to build info. Body: `{ url }`. Returns `{ branch, build_number, dnos_url, gi_url, baseos_url, is_sanitizer, is_expired, result }`. |
+| `/api/operations/image-upgrade/stack` | POST | Get stack URLs for branch + build. Body: `{ branch, build_number }`. Returns `{ dnos_url, gi_url, baseos_url, is_sanitizer, is_expired }`. |
 
 **Config generation**: All `generate/*` endpoints use `scaler.wizard.config_builders` (pure DNOS generators). No frontend DNOS string construction. GUI previews always call backend API with full params. The terminal wizard (`interactive_scale.py`) also calls `config_builders.build_from_expansion()` for config generation, ensuring terminal and GUI produce identical DNOS output.
 
@@ -78,7 +83,7 @@ The bridge wraps scaler-wizard modules for the topology app. serve.py proxies `/
 
 **Mirror Config Wizard**: `openMirrorWizard(prefillSourceId?, prefillTargetId?)` - when source is pre-filled (e.g. from history), only target selector shown. Flow: Analyze (fetch configs, compare) -> Generate Config (diff-only) -> Show diff vs target -> Push to Target. Uses `ScalerAPI.mirrorAnalyze()`, `mirrorGenerate()`, `mirrorPreviewDiff()`.
 
-**Collision check** (Phase 3b): Interface wizard review step, when `interfaceType === 'subif'` and parent exists, calls `ScalerAPI.scanExisting()` before Generate. Shows warning panel with options: Skip conflicts, Start after existing (#N), Override. Auto-adjusts `startNumber`/`vlanStart` based on user choice.
+**Collision check** (Phase 3b): Interface wizard encap step and review step, when `interfaceType === 'subif'` and parent exists, call `ScalerAPI.scanExisting()`. Encap step shows early overlap banner with Continue/Skip/Override. Review step shows final safety-net warning. Options: Skip conflicts (passes `skip_vlans` to generate), Start after existing (auto-sets vlanStart), Override. `config_builders.build_interface_config` accepts `skip_vlans` to skip conflicting VLAN IDs during generation (terminal-style vlan_offset).
 
 **Reusable step components** (Phase 4A): `ScalerGUI._buildPushStep(opts)` returns a Push step with configurable `radioName`, `includeClipboard`, `infoText`. `_buildReviewStep(opts)`, `_buildInterfaceSelector(opts)`, `_buildAddressFamilySelector(opts)` provide shared HTML/collectData for wizard steps. VRF, Bridge Domain, FlowSpec, Routing Policy, and Service wizards use `_buildPushStep`.
 
@@ -92,7 +97,7 @@ The bridge wraps scaler-wizard modules for the topology app. serve.py proxies `/
 
 **Platform limits**: The sub-interfaces step validates total count against `GET /api/config/limits/{device_id}` (sources `limits.json` vlan_pool max_capacity, default 20480). Warning shown if `count * subifCount > max_subifs`.
 
-ScalerAPI (scaler-api.js) methods: getDevices, getDevice, getDeviceContext, testConnection, syncDevice, generateInterfaces, generateServices, generateBGP, generateIGP, batchGenerate, previewConfigDiff, validateConfig, compareConfigs, getConfigDiff, getInterfaces, getTemplates, generateTemplate, discoverDevice, deleteHierarchyOp, pushConfig, commitHeldJob, cancelHeldJob, cleanupHeldJob, connectPushProgress, getJobs, getJob, retryJob, deleteJob, getLimits, scanExisting, detectPattern, mirrorAnalyze, mirrorGenerate, mirrorPreviewDiff.
+ScalerAPI (scaler-api.js) methods: getDevices, getDevice, getDeviceContext, testConnection, syncDevice, syncConfig, generateInterfaces, generateServices, generateBGP, generateIGP, batchGenerate, previewConfigDiff, validateConfig, compareConfigs, getConfigDiff, getInterfaces, getTemplates, generateTemplate, discoverDevice, deleteHierarchyOp, pushConfig, commitHeldJob, cancelHeldJob, cleanupHeldJob, connectPushProgress, getJobs, getJob, retryJob, deleteJob, getLimits, scanExisting, detectPattern, mirrorAnalyze, mirrorGenerate, mirrorPreviewDiff, getBuildsForBranch, resolveJenkinsUrl, getBuildStack.
 
 ### Smart Wizard Suggestions (DeviceContextCache)
 
@@ -150,6 +155,7 @@ The topology editor uses a modular architecture with wrapper modules that provid
 | Module | Class | Property | Purpose |
 |--------|-------|----------|---------|
 | `topology-errors.js` | ErrorBoundary | `window.ErrorBoundary` | Crash protection & recovery |
+| `topology-clipboard-utils.js` | (IIFE) | `window.safeClipboardWrite` | Safe clipboard for HTTP (non-secure) contexts; use instead of `navigator.clipboard` when app is accessed via server IP |
 | `topology-registry.js` | TopologyRegistry | `window.TopologyRegistry` | **Feature routing - check first!** |
 | `topology-events.js` | TopologyEventBus | `editor.events` | Event pub-sub system |
 | `topology-geometry.js` | TopologyGeometry | `window.TopologyGeometry` | Math/geometry utilities |
@@ -502,6 +508,11 @@ this.hideAllSelectionToolbars(); // Hides text, device, and link toolbars
 ---
 
 ## 🐛 Recent Fixes (Jan 2026)
+
+### Remote Access via Server IP (Mar 2026)
+**Problem**: When the app is accessed via `http://<server-ip>:8080/` instead of localhost, `navigator.clipboard.writeText()` fails (requires HTTPS or localhost). Copy-to-clipboard features (config push, link table, SSH command, debugger) silently failed.
+**Fix**: Added `topology-clipboard-utils.js` with `window.safeClipboardWrite(text)` that falls back to `document.execCommand('copy')` when the modern API fails. Replaced all raw `navigator.clipboard.writeText()` calls across 10+ JS files. Added CORS headers to `serve.py` `end_headers()` and `do_OPTIONS` handler. Fixed `bundle.js` hardcoded `localhost:8765` to use `/api/dnaas` proxy path.
+**Files**: topology-clipboard-utils.js (new), index.html, topology-*.js, scaler-gui.js, debugger.js, bundle.js, serve.py.
 
 ### Wizard Smart Features (Mar 2026)
 
@@ -1031,6 +1042,42 @@ The topology app integrates with `/debug-dnos` bug evidence system:
 
 **Debugging**: Run `curl http://localhost:8080/api/health` to see bridge status. If `scaler_bridge.status` is "down", check `journalctl --user -u topology-app.service` for startup errors.
 
+### Dialog Keyboard Isolation & AutoSave Safeguards (Mar 2026)
+
+**Critical bug found and fixed:** The global keyboard handler (`topology-keyboard.js`) is
+attached to `document` in capture phase, meaning ALL keystrokes site-wide are processed --
+even when floating dialogs (Stack, LLDP, XRAY) are open. This caused accidental object
+deletion when the user pressed Delete/Backspace, and full canvas wipe via Ctrl+X, while
+interacting with a dialog. The Stack dialog's refresh button (which fetches SSH data for
+5-10 seconds) was the trigger point -- during the async wait, any keystroke was processed
+by the canvas editor.
+
+**Fixes applied (6 files):**
+- `topology-keyboard.js`: Added dialog guard at top of `handleKeyDown` -- checks for ANY
+  open dialog element (`#stack-table-dialog`, `#lldp-table-dialog`, `#xray-popup`,
+  `.scaler-wizard-overlay`, `[role="dialog"]`, etc.). When a dialog is open, ALL shortcuts
+  are blocked except Escape (which closes the dialog). Also added confirmation prompt to
+  Ctrl+X (clear canvas).
+- `topology-stack-dialog.js`: Added keyboard event isolation (`stopPropagation` on keydown
+  and keyup). Set `tabindex=-1` and auto-focus on open. Defense in depth.
+- `topology-lldp-dialog.js`: Same keyboard isolation pattern.
+- `topology-xray-popup.js`: Same keyboard isolation pattern.
+- `topology.js` (`autoSave`): Added object count sanity check -- refuses to save if object
+  count dropped by more than 70% from last save. Added rotating backup (`topology_autosave_backup`
+  key in localStorage). Added `recoverTopology()` console command for emergency recovery.
+- `topology-files.js` (`saveRecoveryPoint`): Added empty-state guard and same 70% drop check.
+
+**Rule for ALL new dialogs/modals:** Every floating dialog MUST include:
+1. `dialog.addEventListener('keydown', (e) => { e.stopPropagation(); });`
+2. `dialog.addEventListener('keyup', (e) => { e.stopPropagation(); });`
+3. `dialog.tabIndex = -1;` (allows focus)
+4. `dialog.focus();` after appending to document.body
+5. An `id` attribute that matches the selector list in the keyboard handler's dialog guard.
+
+**Recovery commands (browser console):**
+- `checkAutoSave()` -- shows all backup sources with object counts and timestamps
+- `recoverTopology()` -- restores from the backup with the most objects
+
 ### LLDP Animation & Dialog Fixes (Mar 2026)
 
 **Root causes fixed:**
@@ -1038,6 +1085,28 @@ The topology app integrates with `/debug-dnos` bug evidence system:
 - **No link animation**: Same root cause -- wave dots along connected links never rendered because `editor._drawCanvasWaveDots()` was undefined. Fixed with the delegation.
 - **Table format inconsistency**: Initial LLDP load used 300+ lines of inline table HTML while refresh used `_buildLldpTableHtml`. These drifted apart (different grouping, colors, field name priorities). Fixed by unifying both paths through `updateLldpContent` -> `_buildLldpTableHtml`. Also added missing Port Mirror and Snake group support to `_buildLldpTableHtml`.
 - **Safety**: Added try-catch around `_drawLldpEffects` in canvas drawing to prevent canvas corruption on future errors.
+- **SSH host resolution gap (Mar 2026)**: Multiple flows passed only `serial` (device label like "P-SA-2") to APIs without the device's management IP. When the label does not resolve via DNS or Scaler DB, SSH failed silently. Comprehensive fix across all 8 affected call sites:
+
+**Backend (`discovery_api.py`):**
+- `_fetch_lldp_neighbors(serial, ssh_host=None)` -- uses `ssh_host` directly when provided, skipping DNS resolution.
+- `_enable_lldp_on_device(serial, ..., ssh_host=None)` -- same pattern, uses mgmt IP when frontend provides it.
+- `_resolve_serial_to_host(serial)` -- now checks `device_inventory.json` `mgmt_ip` as final fallback after DNS and Scaler DB.
+- `GET /api/device/{serial}/lldp` -- accepts `?ssh_host=IP` query param for SSH fallback.
+- `POST /api/enable-lldp` -- reads `ssh_host` from body and passes to `_enable_lldp_on_device`.
+- `POST /api/lldp-neighbors` -- reads `ssh_host` from body and passes to `_fetch_lldp_neighbors`.
+- `POST /api/lldp-neighbors-live` -- reads `ssh_host` from body and passes to `_fetch_lldp_neighbors`.
+
+**Frontend (JS files):**
+- `topology-lldp-dialog.js`: `_fetchLldpNeighbors(serial, device)` and `_fetchLldpNeighborsLive(serial, device)` pass `device.sshConfig.host` as `ssh_host`.
+- `topology-xray-popup.js`: `_fetchLldpForDevice` and `_fetchDeviceInterfaces` append `?ssh_host=` from `device.sshConfig.host`.
+- `topology-link-details.js`: `autoFillFromLldp` passes `device1.sshConfig.host` as `?ssh_host=`.
+- `topology-dnaas-helpers.js`: `_showNoLldpDialog` enable-LLDP button resolves the device from canvas and passes `sshConfig`.
+- `bundle.js`: `_enableLldpOnDevice(serial, sshConfig)` and `showEnableLldpDialog(serial, sshConfig)` accept and forward `sshConfig`.
+
+**Bridge (`scaler_bridge.py`):**
+- `_build_device_context` LLDP fallback now appends `?ssh_host={mgmt_ip}` when calling discovery_api.
+
+**Resolution priority (unified):** NetworkMapper MCP > Scaler DB > device_inventory.json > `ssh_host` param > DNS with domain suffixes > direct serial.
 
 ### Network Mapper (Mar 2026)
 

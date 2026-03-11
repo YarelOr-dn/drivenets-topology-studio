@@ -302,6 +302,201 @@ const ScalerGUI = {
     _WIZARD_HISTORY_KEY: 'scaler_wizard_history',
     _WIZARD_HISTORY_MAX: 100,
 
+    // WizardBatch: accumulates configs from chained wizards for batch push
+    _wizardBatch: {
+        deviceId: null,
+        configs: [],
+        wizardChain: [],
+        pendingInterfaces: [],
+        pendingLoopback: null,
+        pendingVRFs: [],
+        pendingBGP: null
+    },
+
+    _wizardBatchInit(deviceId) {
+        this._wizardBatch = {
+            deviceId: deviceId || null,
+            configs: [],
+            wizardChain: [],
+            pendingInterfaces: [],
+            pendingLoopback: null,
+            pendingVRFs: [],
+            pendingBGP: null
+        };
+    },
+
+    _wizardBatchAdd(wizardType, config, createdData = {}) {
+        const b = this._wizardBatch;
+        if (!b.deviceId) b.deviceId = createdData.deviceId || null;
+        b.configs.push({ wizardType, config, createdData });
+        b.wizardChain.push(wizardType);
+        if (createdData.interfaces && createdData.interfaces.length) {
+            b.pendingInterfaces = (b.pendingInterfaces || []).concat(createdData.interfaces);
+        }
+        if (createdData.loopback_ip) b.pendingLoopback = createdData.loopback_ip;
+        if (createdData.loopback) b.pendingLoopback = createdData.loopback;
+        if (createdData.vrfs && createdData.vrfs.length) {
+            b.pendingVRFs = (b.pendingVRFs || []).concat(createdData.vrfs);
+        }
+        if (createdData.bgp) b.pendingBGP = createdData.bgp;
+    },
+
+    _wizardBatchClear() {
+        this._wizardBatchInit(null);
+    },
+
+    _getNextWizardSuggestions(currentWizard, batchState) {
+        const b = batchState || this._wizardBatch;
+        const suggestions = [];
+        const hasInterfaces = (b.pendingInterfaces || []).length > 0;
+        const hasLoopback = !!b.pendingLoopback;
+        const hasVRFs = (b.pendingVRFs || []).length > 0;
+        const hasBGP = !!b.pendingBGP;
+
+        if (currentWizard === 'interfaces') {
+            if (hasInterfaces) {
+                suggestions.push({ wizard: 'vrf', reason: 'Attach new sub-interfaces to VRFs', prefill: { attachInterfaces: true, interfaceList: b.pendingInterfaces } });
+                suggestions.push({ wizard: 'service', reason: 'Create FXC/VPWS with these interfaces', prefill: { attachInterfaces: true, interfaceList: b.pendingInterfaces } });
+            }
+            if (hasLoopback || hasInterfaces) {
+                const igpIfaces = hasLoopback ? ['lo0'].concat(b.pendingInterfaces || []) : (b.pendingInterfaces || []);
+                suggestions.push({ wizard: 'igp', reason: 'Add loopback + interfaces to IGP', prefill: { interfaces: igpIfaces, router_ip: b.pendingLoopback } });
+                suggestions.push({ wizard: 'bgp', reason: 'Configure BGP with loopback as update-source', prefill: { update_source: 'lo0', router_id: b.pendingLoopback } });
+            }
+        } else if (currentWizard === 'services' || currentWizard === 'bridge-domain') {
+            if (hasInterfaces) suggestions.push({ wizard: 'multihoming', reason: 'Add multihoming ESI to L2 interfaces', prefill: { interfaces: b.pendingInterfaces } });
+            suggestions.push({ wizard: 'flowspec', reason: 'Add FlowSpec local policy', prefill: {} });
+        } else if (currentWizard === 'vrf') {
+            if (hasVRFs) suggestions.push({ wizard: 'bgp', reason: 'Add BGP VRF instance for new VRFs', prefill: { vrfs: b.pendingVRFs } });
+            suggestions.push({ wizard: 'flowspec-vpn', reason: 'Add FlowSpec VPN policy', prefill: { vrfs: b.pendingVRFs } });
+        } else if (currentWizard === 'igp') {
+            suggestions.push({ wizard: 'bgp', reason: 'Configure BGP peers', prefill: { update_source: 'lo0' } });
+        } else if (currentWizard === 'bgp') {
+            suggestions.push({ wizard: 'flowspec', reason: 'Enable BGP FlowSpec AFI on neighbors', prefill: {} });
+        } else if (currentWizard === 'flowspec' || currentWizard === 'flowspec-vpn') {
+            suggestions.push({ wizard: 'routing-policy', reason: 'Create routing policy for BGP attach', prefill: {} });
+        }
+        return suggestions;
+    },
+
+    _highlightDnosConfig(text) {
+        if (!text || typeof text !== 'string') return '';
+        const hier = ['system', 'interfaces', 'protocols', 'network-services', 'routing-policy', 'forwarding-options', 'access-lists', 'services'];
+        const keys = ['admin-state', 'ipv4-address', 'route-distinguisher', 'route-target', 'address-family', 'neighbor', 'remote-as', 'apply-policy', 'match-class', 'action-type', 'name', 'instance', 'vrf'];
+        let out = this.escapeHtml(text);
+        hier.forEach(h => {
+            out = out.replace(new RegExp(`^(\\s*)(${h})\\b`, 'gm'), '$1<span class="dns-hier">$2</span>');
+        });
+        keys.forEach(k => {
+            out = out.replace(new RegExp(`^(\\s+)(${k.replace(/-/g, '\\-')})\\s+`, 'gm'), '$1<span class="dns-key">$2</span> ');
+        });
+        return out;
+    },
+
+    ipToIsisNet(ipStr, areaId) {
+        if (!ipStr || typeof ipStr !== 'string') return '';
+        const ip = ipStr.split('/')[0].trim();
+        const octets = ip.split('.');
+        if (octets.length !== 4) return (areaId || '49.0001') + '.0000.0000.0001.00';
+        const padded = octets.map(o => String(parseInt(o, 10) || 0).padStart(4, '0'));
+        return `${areaId || '49.0001'}.${padded[0]}.${padded[1]}.${padded[2]}.00`;
+    },
+
+    _WIZARD_SUGGESTION_TO_OPEN: {
+        vrf: 'openVRFWizard',
+        service: 'openServiceWizard',
+        'bridge-domain': 'openBridgeDomainWizard',
+        igp: 'openIGPWizard',
+        bgp: 'openBGPWizard',
+        flowspec: 'openFlowSpecWizard',
+        'flowspec-vpn': 'openFlowSpecVPNWizard',
+        'routing-policy': 'openRoutingPolicyWizard',
+        multihoming: 'openMultihomingWizard'
+    },
+
+    _renderWhatsNextSection(wizardType, data, createdData, generatedConfig) {
+        const deviceId = data.deviceId;
+        if (!deviceId) return null;
+        if (!this._wizardBatch.deviceId || this._wizardBatch.deviceId !== deviceId) {
+            this._wizardBatchInit(deviceId);
+        }
+        const b = this._wizardBatch;
+        const suggestions = this._getNextWizardSuggestions(wizardType, b);
+        const batchCount = b.configs.length;
+        const hasBatch = batchCount > 0;
+
+        const div = document.createElement('div');
+        div.className = 'scaler-whats-next';
+        div.id = 'whats-next-section';
+        let html = '<h4>What\'s Next?</h4><div class="scaler-whats-next-actions">';
+        html += '<button type="button" class="scaler-btn scaler-btn-primary scaler-whats-next-push" data-action="push">Push This Config</button>';
+        if (suggestions.length > 0) {
+            suggestions.slice(0, 3).forEach((s, i) => {
+                const label = s.wizard === 'vrf' ? 'VRF' : s.wizard === 'service' ? 'Service' : s.wizard === 'igp' ? 'IGP' : s.wizard === 'bgp' ? 'BGP' : s.wizard === 'flowspec' ? 'FlowSpec' : s.wizard === 'flowspec-vpn' ? 'FlowSpec VPN' : s.wizard === 'routing-policy' ? 'Policy' : s.wizard === 'bridge-domain' ? 'Bridge Domain' : s.wizard;
+                html += `<button type="button" class="scaler-btn scaler-btn-secondary scaler-whats-next-continue" data-action="continue" data-wizard="${s.wizard}" data-reason="${this.escapeHtml(s.reason || '')}">Continue to ${label}</button>`;
+            });
+            html += '<button type="button" class="scaler-btn scaler-btn-secondary scaler-whats-next-batch" data-action="add-batch">Add to Batch and Continue</button>';
+        }
+        if (hasBatch) {
+            html += `<button type="button" class="scaler-btn scaler-btn-primary scaler-whats-next-push-all" data-action="push-all">Push All (${batchCount + 1} configs)</button>`;
+        }
+        html += '</div>';
+        div.innerHTML = html;
+
+        div.querySelector('.scaler-whats-next-push')?.addEventListener('click', () => {
+            ScalerGUI.WizardController.next();
+        });
+        div.querySelectorAll('.scaler-whats-next-continue').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const targetWizard = btn.getAttribute('data-wizard');
+                const prefill = suggestions.find(s => s.wizard === targetWizard)?.prefill || {};
+                prefill.deviceId = deviceId;
+                this._wizardBatchAdd(wizardType, generatedConfig || '', { ...createdData, deviceId });
+                const openFn = this._WIZARD_SUGGESTION_TO_OPEN[targetWizard];
+                const panelName = this.WizardController?.panelName;
+                if (panelName) this.closePanel(panelName);
+                if (openFn && typeof this[openFn] === 'function') {
+                    this[openFn](deviceId, prefill);
+                }
+            });
+        });
+        div.querySelector('.scaler-whats-next-batch')?.addEventListener('click', () => {
+            const first = suggestions[0];
+            if (!first) return;
+            const prefill = { ...(first.prefill || {}), deviceId };
+            this._wizardBatchAdd(wizardType, generatedConfig || '', { ...createdData, deviceId });
+            const openFn = this._WIZARD_SUGGESTION_TO_OPEN[first.wizard];
+            const panelName = this.WizardController?.panelName;
+            if (panelName) this.closePanel(panelName);
+            if (openFn && typeof this[openFn] === 'function') {
+                this[openFn](deviceId, prefill);
+            }
+        });
+        div.querySelector('.scaler-whats-next-push-all')?.addEventListener('click', async () => {
+            const allConfigs = [...b.configs, { config: generatedConfig || '' }];
+            const combined = allConfigs.map(c => c.config).filter(Boolean).join('\n\n');
+            const ctx = data.deviceContext || {};
+            try {
+                const result = await ScalerAPI.pushConfig({
+                    device_id: deviceId,
+                    config: combined,
+                    hierarchy: 'batch',
+                    mode: 'merge',
+                    dry_run: true,
+                    ssh_host: ctx.mgmt_ip || ctx.ip || '',
+                    job_name: `Batch (${allConfigs.length} configs) on ${deviceId}`
+                });
+                this._wizardBatchClear();
+                const panelName = this.WizardController?.panelName;
+                if (panelName) this.closePanel(panelName);
+                this.showProgress(result.job_id, `Pushing ${allConfigs.length} configs to ${deviceId}`, {});
+            } catch (e) {
+                this.showNotification(`Batch push failed: ${e.message}`, 'error');
+            }
+        });
+        return div;
+    },
+
     _loadWizardHistory() {
         try {
             const raw = localStorage.getItem(this._WIZARD_HISTORY_KEY);
@@ -333,6 +528,7 @@ const ScalerGUI = {
         'vrf-wizard': 'vrf',
         'bridge-domain-wizard': 'bridge-domain',
         'flowspec-wizard': 'flowspec',
+        'flowspec-vpn-wizard': 'flowspec-vpn',
         'routing-policy-wizard': 'routing-policy',
         'bgp-wizard': 'bgp',
         'igp-wizard': 'igp',
@@ -359,6 +555,8 @@ const ScalerGUI = {
                 return `${p.count ?? 1} BD(s)`;
             case 'flowspec':
                 return `Policy ${p.policyName || '?'}`;
+            case 'flowspec-vpn':
+                return `FlowSpec VPN ${p.vrf || '?'} - ${p.policyName || '?'}`;
             case 'routing-policy':
                 return `${p.policyType || 'prefix-list'} ${p.name || '?'}`;
             case 'bgp':
@@ -516,7 +714,9 @@ const ScalerGUI = {
         { key: 'bgp-wizard',       label: 'BGP',        action: 'bgp-wizard' },
         { key: 'igp-wizard',       label: 'IGP',        action: 'igp-wizard' },
         { key: 'flowspec-wizard',  label: 'FlowSpec',   action: 'flowspec-wizard' },
+        { key: 'flowspec-vpn-wizard', label: 'FlowSpec VPN', action: 'flowspec-vpn-wizard' },
         { key: 'routing-policy-wizard', label: 'Policy', action: 'routing-policy-wizard' },
+        { key: 'system-wizard', label: 'System', action: 'system-wizard' },
     ],
 
     _WIZARD_OPEN_MAP: {
@@ -527,7 +727,9 @@ const ScalerGUI = {
         'bgp-wizard':             'openBGPWizard',
         'igp-wizard':             'openIGPWizard',
         'flowspec-wizard':        'openFlowSpecWizard',
+        'flowspec-vpn-wizard':    'openFlowSpecVPNWizard',
         'routing-policy-wizard':  'openRoutingPolicyWizard',
+        'system-wizard':          'openSystemWizard',
     },
 
     _buildWizardQuickNav(activeKey, deviceId) {
@@ -535,10 +737,24 @@ const ScalerGUI = {
             const nav = document.createElement('div');
             nav.className = 'scaler-wizard-quicknav';
             const devId = deviceId || data.deviceId || '';
+            const wizardType = this._WIZARD_NAV_KEY_MAP?.[activeKey];
+            const b = this._wizardBatch;
+            const inBatch = (b?.wizardChain || []);
+            const suggestions = wizardType ? this._getNextWizardSuggestions(wizardType, b) : [];
+            const suggestedKeys = suggestions.map(s => {
+                const openFn = this._WIZARD_SUGGESTION_TO_OPEN?.[s.wizard];
+                return Object.entries(this._WIZARD_OPEN_MAP || {}).find(([, fn]) => fn === openFn)?.[0];
+            }).filter(Boolean);
             this._WIZARD_NAV_ITEMS.forEach(item => {
                 const btn = document.createElement('button');
                 btn.className = 'scaler-quicknav-tab' + (item.key === activeKey ? ' active' : '');
-                btn.textContent = item.label;
+                const wizType = this._WIZARD_NAV_KEY_MAP?.[item.key];
+                const completed = wizType && inBatch.includes(wizType);
+                const suggested = suggestedKeys.includes(item.key);
+                let labelHtml = item.label;
+                if (completed) labelHtml += ' <span class="scaler-quicknav-check" title="In batch">✓</span>';
+                if (suggested) labelHtml += ' <span class="scaler-quicknav-badge" title="Suggested next">•</span>';
+                btn.innerHTML = labelHtml;
                 if (item.key !== activeKey) {
                     btn.onclick = () => {
                         this.closePanel(activeKey);
@@ -876,6 +1092,10 @@ const ScalerGUI = {
                 ${ifaceBar}
                 ${lldpChips ? `<div class="device-context-row"><span class="ctx-lldp-label">LLDP:</span><span class="ctx-lldp-chips">${lldpChips}${lldpCount > 6 ? ` <span class="ctx-lldp-more">+${lldpCount - 6}</span>` : ''}</span></div>` : (isDnaas ? '<div class="device-context-row" style="opacity:0.5">DNAAS device -- LLDP skipped</div>' : '')}
                 ${freeCount ? `<div class="device-context-row" style="font-size:11px;opacity:0.7">${freeCount} free physical</div>` : ''}
+                ${ctx?.policy_suggestions?.length ? `<div class="device-context-row"><span class="ctx-lldp-label">Policies:</span><span class="ctx-lldp-chips">${ctx.policy_suggestions.slice(0, 5).map(p => `<button type="button" class="suggestion-chip suggestion-chip--policy ctx-smart-chip" data-type="policy" data-value="${String(p).replace(/"/g, '&quot;')}" title="Use policy">${p}</button>`).join('')}${ctx.policy_suggestions.length > 5 ? ` <span class="ctx-lldp-more">+${ctx.policy_suggestions.length - 5}</span>` : ''}</span></div>` : ''}
+                ${ctx?.lo0_isis_net ? `<div class="device-context-row"><span class="ctx-lldp-label">ISIS NET:</span><button type="button" class="suggestion-chip suggestion-chip--net ctx-smart-chip" data-type="net" data-value="${ctx.lo0_isis_net}" title="Auto-generated from lo0">${ctx.lo0_isis_net}</button></div>` : ''}
+                ${ctx?.detected_l2ac_parent ? `<div class="device-context-row"><span class="ctx-lldp-label">L2-AC parent:</span><button type="button" class="suggestion-chip suggestion-chip--l2parent ctx-smart-chip" data-type="l2parent" data-value="${ctx.detected_l2ac_parent}" title="Detected from config">${ctx.detected_l2ac_parent}</button></div>` : ''}
+                ${ctx?.scale_suggestions?.length ? `<div class="device-context-row"><span class="ctx-lldp-label">Scale:</span><span class="ctx-lldp-chips">${ctx.scale_suggestions.slice(0, 3).map(s => { const d = (s.description || s.type || 'suggestion').replace(/\[.*?\]/g, '').trim(); return `<button type="button" class="suggestion-chip suggestion-chip--scale ctx-smart-chip" data-type="scale" title="${d.replace(/"/g, '&quot;')}">${d.slice(0, 25)}</button>`; }).join('')}</span></div>` : ''}
                 ${(ctx?._pendingChanges?.length) ? `<div class="device-context-row device-context-pending">[PENDING] ${ctx._pendingChanges.length} change(s) from other wizards</div>` : ''}
                 ${resolvedVia ? `<div class="device-context-row" style="font-size:10px;opacity:0.4">Resolved: ${resolvedVia}</div>` : ''}
                 ${onRefresh ? '<button type="button" class="scaler-btn scaler-btn-sm" id="ctx-refresh-live">Refresh Live</button>' : ''}
@@ -979,6 +1199,8 @@ const ScalerGUI = {
         const container = document.createElement('div');
         container.id = 'scaler-panel-container';
         container.className = 'scaler-panel-container';
+        container.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        container.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(container);
         this.panelContainer = container;
     },
@@ -1197,6 +1419,7 @@ const ScalerGUI = {
             'vrf-wizard': () => this.openVRFWizard(),
             'bridge-domain-wizard': () => this.openBridgeDomainWizard(),
             'flowspec-wizard': () => this.openFlowSpecWizard(),
+            'flowspec-vpn-wizard': () => this.openFlowSpecVPNWizard(),
             'routing-policy-wizard': () => this.openRoutingPolicyWizard(),
             'multihoming-wizard': () => this.openMultihomingWizard(),
             'mirror-wizard': () => this.openMirrorWizard(),
@@ -1336,6 +1559,13 @@ const ScalerGUI = {
                     </svg>
                     FlowSpec Local
                     <span class="scaler-menu-hint">Local policies, match-class, actions</span>
+                </button>
+                <button class="scaler-menu-btn" data-action="flowspec-vpn-wizard">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/>
+                    </svg>
+                    FlowSpec VPN
+                    <span class="scaler-menu-hint">VRF-scoped FlowSpec policies</span>
                 </button>
                 <button class="scaler-menu-btn" data-action="routing-policy-wizard">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1505,11 +1735,13 @@ const ScalerGUI = {
             'vrf-wizard': () => this.openDeviceSelector('VRF / L3VPN Wizard', (id) => this.openVRFWizard(id)),
             'bridge-domain-wizard': () => this.openDeviceSelector('Bridge Domain Wizard', (id) => this.openBridgeDomainWizard(id)),
             'flowspec-wizard': () => this.openDeviceSelector('FlowSpec Wizard', (id) => this.openFlowSpecWizard(id)),
+            'flowspec-vpn-wizard': () => this.openDeviceSelector('FlowSpec VPN Wizard', (id) => this.openFlowSpecVPNWizard(id)),
             'routing-policy-wizard': () => this.openDeviceSelector('Routing Policy Wizard', (id) => this.openRoutingPolicyWizard(id)),
             'multihoming-wizard': () => this.openMultihomingWizard(),
             'mirror-wizard': () => this.openMirrorWizard(),
             'bgp-wizard': () => this.openDeviceSelector('BGP Configuration', (id) => this.openBGPWizard(id)),
             'igp-wizard': () => this.openDeviceSelector('IGP Configuration', (id) => this.openIGPWizard(id)),
+            'system-wizard': () => this.openDeviceSelector('System Config', (id) => this.openSystemWizard(id)),
             'wizard-history': () => this.openWizardHistoryPanel(),
             'commits-panel': () => this.openCommitsPanel(),
             'compare': () => this.openDeviceCompare(),
@@ -1708,6 +1940,21 @@ const ScalerGUI = {
                         <input type="radio" name="iface-type" value="loopback" ${sel === 'loopback' ? 'checked' : ''}>
                         <span class="option-title">Loopback</span>
                         <span class="option-desc">Loopback interfaces (lo0/lo1 for router-id, BGP)</span>
+                    </label>
+                    <label class="scaler-type-option ${sel === 'ge100' ? 'option-active' : ''}" data-type="ge100">
+                        <input type="radio" name="iface-type" value="ge100" ${sel === 'ge100' ? 'checked' : ''}>
+                        <span class="option-title">ge100</span>
+                        <span class="option-desc">100G physical (ge100-slot/bay/port)</span>
+                    </label>
+                    <label class="scaler-type-option ${sel === 'ge400' ? 'option-active' : ''}" data-type="ge400">
+                        <input type="radio" name="iface-type" value="ge400" ${sel === 'ge400' ? 'checked' : ''}>
+                        <span class="option-title">ge400</span>
+                        <span class="option-desc">400G physical (ge400-slot/bay/port)</span>
+                    </label>
+                    <label class="scaler-type-option ${sel === 'ge10' ? 'option-active' : ''}" data-type="ge10">
+                        <input type="radio" name="iface-type" value="ge10" ${sel === 'ge10' ? 'checked' : ''}>
+                        <span class="option-title">ge10</span>
+                        <span class="option-desc">10G physical (ge10-slot/bay/port)</span>
                     </label>
                 </div>
             </div>
@@ -1912,9 +2159,46 @@ const ScalerGUI = {
                 {
                     id: 'location',
                     title: 'Port Location',
-                    skipIf: () => true,
-                    render: () => '<div></div>',
-                    collectData: () => ({})
+                    skipIf: (data) => !['ge100', 'ge400', 'ge10'].includes(data.interfaceType || ''),
+                    render: (data) => {
+                        const ctx = data.deviceContext || {};
+                        const freePhys = ctx.interfaces?.free_physical || [];
+                        let suggestedSlot = data.slot ?? 0, suggestedBay = data.bay ?? 0, suggestedPort = data.portStart ?? 0;
+                        const t = data.interfaceType || 'ge100';
+                        const prefix = t === 'ge400' ? 'ge400' : t === 'ge10' ? 'ge10' : 'ge100';
+                        const match = freePhys.find(n => typeof n === 'string' && n.startsWith(prefix));
+                        if (match) {
+                            const m = match.match(new RegExp(prefix + '-(\\d+)/(\\d+)/(\\d+)'));
+                            if (m) {
+                                suggestedSlot = parseInt(m[1], 10);
+                                suggestedBay = parseInt(m[2], 10);
+                                suggestedPort = parseInt(m[3], 10);
+                            }
+                        }
+                        return `<div class="scaler-form">
+                            <div class="scaler-info-box">Slot, bay, and starting port for ${t} interfaces. Format: ${t}-slot/bay/port</div>
+                            <div class="scaler-form-row">
+                                <div class="scaler-form-group">
+                                    <label>Slot</label>
+                                    <input type="number" id="port-slot" class="scaler-input" value="${suggestedSlot}" min="0" placeholder="0">
+                                </div>
+                                <div class="scaler-form-group">
+                                    <label>Bay</label>
+                                    <input type="number" id="port-bay" class="scaler-input" value="${suggestedBay}" min="0" placeholder="0">
+                                </div>
+                                <div class="scaler-form-group">
+                                    <label>Port Start</label>
+                                    <input type="number" id="port-start" class="scaler-input" value="${suggestedPort}" min="0" placeholder="0">
+                                </div>
+                            </div>
+                            ${freePhys.length ? `<div class="scaler-form-group" style="font-size:11px;opacity:0.7">Next free: ${freePhys.slice(0, 5).join(', ')}</div>` : ''}
+                        </div>`;
+                    },
+                    collectData: () => ({
+                        slot: parseInt(document.getElementById('port-slot')?.value, 10) || 0,
+                        bay: parseInt(document.getElementById('port-bay')?.value, 10) || 0,
+                        portStart: parseInt(document.getElementById('port-start')?.value, 10) || 0
+                    })
                 },
                 {
                     id: 'parent',
@@ -1960,16 +2244,38 @@ const ScalerGUI = {
                             <input type="hidden" id="parent-selected-input" value="${selected.join(',')}">
                         </div>`;
                     },
-                    afterRender: (data) => {
+                    afterRender: async (data) => {
                         const chips = document.querySelectorAll('#parent-bundles .suggestion-chip, #parent-physical .suggestion-chip');
                         const display = document.getElementById('parent-selected-display');
                         const input = document.getElementById('parent-selected-input');
                         const selected = new Set(data.subifParents || []);
 
+                        const fetchDetectedPattern = async (firstParent) => {
+                            if (!firstParent || !data.deviceId) return;
+                            const ctx = data.deviceContext || {};
+                            const sshHost = ctx.mgmt_ip || ctx.ip || '';
+                            try {
+                                const pattern = await ScalerAPI.detectPattern({
+                                    device_id: data.deviceId,
+                                    ssh_host: sshHost,
+                                    parent_interface: firstParent
+                                });
+                                if (ScalerGUI.WizardController?.data) {
+                                    ScalerGUI.WizardController.data.detectedPattern = pattern;
+                                }
+                            } catch (_) {
+                                if (ScalerGUI.WizardController?.data) {
+                                    ScalerGUI.WizardController.data.detectedPattern = null;
+                                }
+                            }
+                        };
+
                         const updateDisplay = () => {
                             const arr = [...selected];
                             if (display) display.textContent = arr.length ? arr.join(', ') : 'None -- click interfaces above';
                             if (input) input.value = arr.join(',');
+                            if (arr.length > 0) fetchDetectedPattern(arr[0]);
+                            else if (ScalerGUI.WizardController?.data) ScalerGUI.WizardController.data.detectedPattern = null;
                         };
 
                         chips.forEach(chip => {
@@ -1985,6 +2291,7 @@ const ScalerGUI = {
                                 updateDisplay();
                             });
                         });
+                        if (selected.size > 0) fetchDetectedPattern([...selected][0]);
                     },
                     collectData: () => {
                         const val = document.getElementById('parent-selected-input')?.value || '';
@@ -2008,7 +2315,7 @@ const ScalerGUI = {
                         const t = data.interfaceType || 'bundle';
                         const isLoopback = t === 'loopback';
                         const isBasic = ['bundle', 'ph', 'irb'].includes(t);
-                        const isPhysical = t === 'subif';
+                        const isPhysical = t === 'subif' || ['ge100', 'ge400', 'ge10'].includes(t);
 
                         if (isLoopback) return `<div class="scaler-form">
                             <div class="scaler-info-box">Loopback interfaces (lo) -- no sub-interfaces.
@@ -2057,7 +2364,8 @@ const ScalerGUI = {
                             <div id="l2-info" style="display:${data.interfaceMode === 'l2' ? 'block' : 'none'}">
                                 <div class="scaler-info-box">L2 mode adds <code>l2-service enabled</code> to each sub-interface.
                                 Cannot combine with IP addressing (DNOS rule).</div>
-                            </div>` : ''}
+                            </div>
+                            <div id="l2l3-conflict-warning" class="scaler-l2l3-conflict" style="display:none"></div>` : ''}
                             <div id="ip-section" style="display:${isPhysical && data.interfaceMode === 'l2' ? 'none' : 'block'}">
                                 <div class="scaler-form-group" style="margin-top:12px">
                                     <label>IP Addressing</label>
@@ -2090,20 +2398,17 @@ const ScalerGUI = {
                                         </div>
                                     </div>
                                     <div class="scaler-form-group">
-                                        <label>IP Step Mode</label>
-                                        ${(() => { const p = data.ipPrefix || defaultPrefix; const autoUnique = !data.ipMode && p <= 30; const mode = data.ipMode || (autoUnique ? 'unique_subnet' : 'per_subif'); return `
-                                        <div class="scaler-radio-group">
-                                            <label class="scaler-radio"><input type="radio" name="ip-mode" value="per_subif" ${mode === 'per_subif' ? 'checked' : ''}><span>Per sub-interface (10.0.0.1, .2, .3...)</span></label>
-                                            <label class="scaler-radio"><input type="radio" name="ip-mode" value="per_parent" ${mode === 'per_parent' ? 'checked' : ''}><span>Per parent (10.0.1.x, 10.0.2.x...)</span></label>
-                                            <label class="scaler-radio"><input type="radio" name="ip-mode" value="unique_subnet" ${mode === 'unique_subnet' ? 'checked' : ''}><span>Unique subnet (step by /prefix size)</span></label>
-                                        </div>`; })()}
+                                        <label>IP Step (per sub-interface)</label>
+                                        <div class="scaler-form-row" style="align-items:center;gap:8px;flex-wrap:wrap">
+                                            <input type="text" id="ip-step-dotted" class="scaler-input" value="${data.ipStepDotted || data.ipStep || '0.0.0.1'}" placeholder="0.0.0.1" style="max-width:120px" pattern="[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+">
+                                            <div class="scaler-step-presets">
+                                                <button type="button" class="scaler-step-chip" data-step="0.0.0.1">+1</button>
+                                                <button type="button" class="scaler-step-chip" data-step="0.0.1.0">+octet3</button>
+                                                <button type="button" class="scaler-step-chip" data-step="auto">/prefix</button>
+                                            </div>
+                                        </div>
+                                        <div id="ip-step-preview" class="scaler-info-box" style="font-size:10px;margin-top:4px">Preview: 10.0.0.1, 10.0.0.2, 10.0.0.3...</div>
                                     </div>
-                                    ${(() => { const p = data.ipPrefix || defaultPrefix; const autoUnique = !data.ipMode && p <= 30; const mode = data.ipMode || (autoUnique ? 'unique_subnet' : 'per_subif'); const autoStep = Math.pow(2, 32 - p); return `
-                                    <div id="ip-step-row" class="scaler-form-group" style="display:${mode === 'unique_subnet' ? 'block' : 'none'}">
-                                        <label>IP Step (for unique subnet)</label>
-                                        <input type="number" id="ip-step" class="scaler-input" value="${data.ipStep || autoStep}" min="1" max="256">
-                                        <div class="scaler-info-box" style="font-size:10px;margin-top:4px">Step between subnets. /31 -> 2, /30 -> 4, /29 -> 8</div>
-                                    </div>`; })()}
                                     <div id="ip-validation-warning" class="scaler-info-box" style="display:none;color:var(--dn-orange,#e67e22);border-color:var(--dn-orange,#e67e22);margin-top:8px"></div>
                                 </div>
                             </div>
@@ -2136,7 +2441,7 @@ const ScalerGUI = {
                     afterRender: (data) => {
                         const t = data.interfaceType || 'bundle';
                         const isLoopback = t === 'loopback';
-                        const isPhysical = t === 'subif';
+                        const isPhysical = t === 'subif' || ['ge100', 'ge400', 'ge10'].includes(t);
                         const parentCount = Math.min(data.count || 10, 2);
                         let debounceTimer;
 
@@ -2179,8 +2484,7 @@ const ScalerGUI = {
                                 ip_prefix: parseInt(document.getElementById('ip-prefix')?.value) || 30,
                                 ipv6_start: document.getElementById('ipv6-start')?.value || '2001:db8::1',
                                 ipv6_prefix: parseInt(document.getElementById('ipv6-prefix')?.value) || 128,
-                                ip_mode: document.querySelector('input[name="ip-mode"]:checked')?.value || 'per_subif',
-                                ip_step: parseInt(document.getElementById('ip-step')?.value) || 2,
+                                ip_step: document.getElementById('ip-step-dotted')?.value || '0.0.0.1',
                                 mpls_enabled: isPhysical ? (document.getElementById('mpls-enabled')?.checked || false) : false,
                                 flowspec_enabled: isPhysical ? (document.getElementById('flowspec-enabled')?.checked || false) : false,
                                 bfd: isPhysical ? (document.getElementById('bfd-enabled')?.checked || false) : false,
@@ -2276,10 +2580,10 @@ const ScalerGUI = {
                                         msgs.push(`${ipStr} is the network address for /${prefix}. Use ${_ipStr(netAddr + 1)} instead.`);
                                     else if (ipInt === bcastAddr)
                                         msgs.push(`${ipStr} is the broadcast address for /${prefix}. Use a host address.`);
-                                    const mode = document.querySelector('input[name="ip-mode"]:checked')?.value || 'per_subif';
-                                    const step = parseInt(document.getElementById('ip-step')?.value) || 2;
+                                    const dotted = document.getElementById('ip-step-dotted')?.value || '0.0.0.1';
+                                    const step = dotted.includes('.') ? (() => { try { const p = dotted.trim().split('.'); if (p.length !== 4) return 1; return (parseInt(p[0]) << 24) + (parseInt(p[1]) << 16) + (parseInt(p[2]) << 8) + parseInt(p[3]); } catch { return 1; } })() : (parseInt(dotted) || 1);
                                     const count = parseInt(document.getElementById('subif-count')?.value) || 1;
-                                    if (mode === 'per_subif' && count > 1) {
+                                    if (count > 1) {
                                         for (let idx = 1; idx < Math.min(count, 10); idx++) {
                                             const nextIp = ipInt + (idx * step);
                                             const nextMask = (0xFFFFFFFF << (32 - prefix)) >>> 0;
@@ -2308,6 +2612,64 @@ const ScalerGUI = {
                         });
                         document.getElementById('subif-count')?.addEventListener('input', updatePreview);
 
+                        const updateL2L3ConflictWarning = async () => {
+                            const warnEl = document.getElementById('l2l3-conflict-warning');
+                            if (!warnEl || !isSubif) return;
+                            const parent = (data.subifParents || [])[0];
+                            if (!parent || !data.deviceId) { warnEl.style.display = 'none'; return; }
+                            const ifaceMode = document.querySelector('input[name="iface-mode"]:checked')?.value || 'l3';
+                            const ctx = data.deviceContext || {};
+                            const sshHost = ctx.mgmt_ip || ctx.ip || '';
+                            try {
+                                const scan = await ScalerAPI.scanExisting({
+                                    device_id: data.deviceId,
+                                    ssh_host: sshHost,
+                                    scan_type: 'interfaces',
+                                    parent_interface: parent
+                                });
+                                const l3Conflicts = scan.l3_conflicts || [];
+                                const l2SubIds = scan.l2_sub_ids || [];
+                                const isL2 = ifaceMode === 'l2';
+                                if (isL2 && l3Conflicts.length > 0) {
+                                    warnEl.style.display = 'block';
+                                    warnEl.innerHTML = `<div class="scaler-l2l3-title">L2/L3 conflict: ${l3Conflicts.length} existing sub-if(s) have IP addresses (L3). Creating L2 here may conflict.</div>
+                                        <button type="button" class="scaler-step-chip" data-action="auto-skip-l2l3" data-ids="${l3Conflicts.join(',')}">Auto-skip conflicting IDs</button>
+                                        <button type="button" class="scaler-step-chip scaler-step-chip--outline" data-action="ignore-l2l3">Ignore</button>`;
+                                    warnEl.querySelector('[data-action="auto-skip-l2l3"]')?.addEventListener('click', () => {
+                                        if (ScalerGUI.WizardController?.data) {
+                                            ScalerGUI.WizardController.data._l2l3SkipIds = l3Conflicts;
+                                        }
+                                        warnEl.style.display = 'none';
+                                        updatePreview();
+                                    });
+                                    warnEl.querySelector('[data-action="ignore-l2l3"]')?.addEventListener('click', () => {
+                                        if (ScalerGUI.WizardController?.data) ScalerGUI.WizardController.data._l2l3SkipIds = null;
+                                        warnEl.style.display = 'none';
+                                    });
+                                } else if (!isL2 && l2SubIds.length > 0) {
+                                    warnEl.style.display = 'block';
+                                    warnEl.innerHTML = `<div class="scaler-l2l3-title">L2/L3 conflict: ${l2SubIds.length} existing sub-if(s) are L2-service. Creating L3 here may conflict.</div>
+                                        <button type="button" class="scaler-step-chip" data-action="auto-skip-l2l3" data-ids="${l2SubIds.join(',')}">Auto-skip conflicting IDs</button>
+                                        <button type="button" class="scaler-step-chip scaler-step-chip--outline" data-action="ignore-l2l3">Ignore</button>`;
+                                    warnEl.querySelector('[data-action="auto-skip-l2l3"]')?.addEventListener('click', () => {
+                                        if (ScalerGUI.WizardController?.data) {
+                                            ScalerGUI.WizardController.data._l2l3SkipIds = l2SubIds;
+                                        }
+                                        warnEl.style.display = 'none';
+                                        updatePreview();
+                                    });
+                                    warnEl.querySelector('[data-action="ignore-l2l3"]')?.addEventListener('click', () => {
+                                        if (ScalerGUI.WizardController?.data) ScalerGUI.WizardController.data._l2l3SkipIds = null;
+                                        warnEl.style.display = 'none';
+                                    });
+                                } else {
+                                    warnEl.style.display = 'none';
+                                }
+                            } catch (_) {
+                                warnEl.style.display = 'none';
+                            }
+                        };
+
                         if (isPhysical) {
                             document.querySelectorAll('input[name="iface-mode"]').forEach(r => r.addEventListener('change', (e) => {
                                 const isL2 = e.target.value === 'l2';
@@ -2319,6 +2681,17 @@ const ScalerGUI = {
                                 if (l2Info) l2Info.style.display = isL2 ? 'block' : 'none';
                                 if (l3Feat) l3Feat.style.display = isL2 ? 'none' : 'flex';
                                 if (mtuRow) mtuRow.style.display = isL2 ? 'none' : 'flex';
+                                if (isL2) {
+                                    const mpls = document.getElementById('mpls-enabled');
+                                    const fs = document.getElementById('flowspec-enabled');
+                                    const bfd = document.getElementById('bfd-enabled');
+                                    if (mpls) mpls.checked = false;
+                                    if (fs) fs.checked = false;
+                                    if (bfd) bfd.checked = false;
+                                    const bfdRow = document.getElementById('bfd-options-row');
+                                    if (bfdRow) bfdRow.style.display = 'none';
+                                }
+                                updateL2L3ConflictWarning();
                                 updatePreview();
                             }));
                             document.getElementById('mpls-enabled')?.addEventListener('change', updatePreview);
@@ -2332,6 +2705,7 @@ const ScalerGUI = {
                             document.getElementById('iface-desc')?.addEventListener('input', updatePreview);
                             document.getElementById('bfd-interval')?.addEventListener('input', updatePreview);
                             document.getElementById('bfd-multiplier')?.addEventListener('input', updatePreview);
+                            updateL2L3ConflictWarning();
                         }
 
                         document.querySelectorAll('input[name="ip-version"]').forEach(r => r.addEventListener('change', (e) => {
@@ -2341,28 +2715,52 @@ const ScalerGUI = {
                             if (v6Row) v6Row.style.display = e.target.value === 'dual' ? 'flex' : 'none';
                             updatePreview(); validateIpAddress();
                         }));
-                        document.getElementById('ip-start')?.addEventListener('input', () => { updatePreview(); validateIpAddress(); });
-                        document.getElementById('ip-prefix')?.addEventListener('input', () => {
-                            const pv = parseInt(document.getElementById('ip-prefix')?.value) || 30;
-                            if (pv <= 30) {
-                                const stepEl = document.getElementById('ip-step');
-                                const stepRow = document.getElementById('ip-step-row');
-                                const autoStep = Math.pow(2, 32 - pv);
-                                if (stepEl) stepEl.value = autoStep;
-                                if (stepRow) stepRow.style.display = 'block';
-                                const uniRadio = document.querySelector('input[name="ip-mode"][value="unique_subnet"]');
-                                if (uniRadio) uniRadio.checked = true;
+                        const dottedStepToInt = (d) => {
+                            try {
+                                const p = d.trim().split('.');
+                                if (p.length !== 4) return 1;
+                                return (parseInt(p[0]) << 24) + (parseInt(p[1]) << 16) + (parseInt(p[2]) << 8) + parseInt(p[3]);
+                            } catch { return 1; }
+                        };
+                        const updateIpStepPreview = () => {
+                            const el = document.getElementById('ip-step-preview');
+                            if (!el) return;
+                            const ipStr = document.getElementById('ip-start')?.value || '10.0.0.1';
+                            const dotted = document.getElementById('ip-step-dotted')?.value || '0.0.0.1';
+                            const step = dottedStepToInt(dotted);
+                            if (!ipStr.includes('.')) return;
+                            const parts = ipStr.split('/')[0].split('.');
+                            if (parts.length !== 4) return;
+                            let ipInt = parts.reduce((a, o) => (a << 8) + (parseInt(o) || 0), 0) >>> 0;
+                            const ips = [];
+                            for (let i = 0; i < 3; i++) {
+                                ips.push([(ipInt >>> 24) & 255, (ipInt >>> 16) & 255, (ipInt >>> 8) & 255, ipInt & 255].join('.'));
+                                ipInt = (ipInt + step) >>> 0;
                             }
-                            updatePreview(); validateIpAddress();
-                        });
+                            el.textContent = `Preview: ${ips.join(', ')}...`;
+                        };
+                        document.getElementById('ip-start')?.addEventListener('input', () => { updatePreview(); validateIpAddress(); updateIpStepPreview(); });
+                        document.getElementById('ip-prefix')?.addEventListener('input', () => { updatePreview(); validateIpAddress(); updateIpStepPreview(); });
                         document.getElementById('ipv6-start')?.addEventListener('input', updatePreview);
                         document.getElementById('ipv6-prefix')?.addEventListener('input', updatePreview);
-                        document.querySelectorAll('input[name="ip-mode"]').forEach(r => r.addEventListener('change', (e) => {
-                            const row = document.getElementById('ip-step-row');
-                            if (row) row.style.display = e.target.value === 'unique_subnet' ? 'block' : 'none';
-                            updatePreview(); validateIpAddress();
-                        }));
-                        document.getElementById('ip-step')?.addEventListener('input', () => { updatePreview(); validateIpAddress(); });
+                        document.getElementById('ip-step-dotted')?.addEventListener('input', () => { updatePreview(); validateIpAddress(); updateIpStepPreview(); });
+                        document.querySelectorAll('.scaler-step-chip').forEach(btn => {
+                            btn.addEventListener('click', () => {
+                                const step = btn.dataset.step;
+                                const el = document.getElementById('ip-step-dotted');
+                                if (!el) return;
+                                if (step === 'auto') {
+                                    const pv = parseInt(document.getElementById('ip-prefix')?.value) || 30;
+                                    const s = Math.pow(2, 32 - Math.min(pv, 31));
+                                    const o4 = s & 255, o3 = (s >> 8) & 255, o2 = (s >> 16) & 255, o1 = (s >> 24) & 255;
+                                    el.value = `${o1}.${o2}.${o3}.${o4}`;
+                                } else {
+                                    el.value = step;
+                                }
+                                updatePreview(); validateIpAddress(); updateIpStepPreview();
+                            });
+                        });
+                        updateIpStepPreview();
                         updatePreview(); validateIpAddress();
                     },
                     collectData: () => {
@@ -2391,8 +2789,7 @@ const ScalerGUI = {
                             ipPrefix: parseInt(document.getElementById('ip-prefix')?.value) || 30,
                             ipv6Start: document.getElementById('ipv6-start')?.value || '2001:db8::1',
                             ipv6Prefix: parseInt(document.getElementById('ipv6-prefix')?.value) || 128,
-                            ipMode: document.querySelector('input[name="ip-mode"]:checked')?.value || 'per_subif',
-                            ipStep: parseInt(document.getElementById('ip-step')?.value) || 2,
+                            ipStepDotted: document.getElementById('ip-step-dotted')?.value || '0.0.0.1',
                             mplsEnabled: isPhysical ? (document.getElementById('mpls-enabled')?.checked || false) : false,
                             flowspecEnabled: isPhysical ? (document.getElementById('flowspec-enabled')?.checked || false) : false,
                             bfdEnabled: isPhysical ? (document.getElementById('bfd-enabled')?.checked || false) : false,
@@ -2409,8 +2806,23 @@ const ScalerGUI = {
                     skipIf: (data) => !data.createSubinterfaces && data.interfaceType !== 'subif',
                     render: (data) => {
                         const isQinQ = data.encapsulation === 'qinq';
+                        const pat = data.detectedPattern || {};
+                        const suggestedVlan = pat.suggested_next_vlan ?? (pat.last_vlan != null ? pat.last_vlan + 1 : 100);
+                        const vlanStartVal = data.vlanStart ?? (pat.last_vlan != null ? suggestedVlan : 100);
+                        const outerStartVal = data.outerVlanStart ?? (pat.last_vlan != null ? suggestedVlan : 100);
                         return `
                         <div class="scaler-form">
+                            <div class="scaler-encap-header" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
+                                <button type="button" id="encap-refresh-btn" class="scaler-btn scaler-btn-secondary scaler-refresh-btn" title="Refresh config from device">Refresh</button>
+                                <span id="encap-config-time" class="scaler-config-time" style="font-size:11px;opacity:0.7"></span>
+                            </div>
+                            ${pat.vlan_mode ? `<div class="scaler-info-box scaler-pattern-detected" style="margin-bottom:10px">
+                                <strong>Detected from device:</strong> ${pat.vlan_mode} mode, last VLAN ${pat.last_vlan ?? '?'}. Suggested start: ${suggestedVlan}
+                                <div style="margin-top:6px;display:flex;gap:8px">
+                                    <button type="button" class="scaler-step-chip" data-action="use-pattern">Use detected</button>
+                                    <button type="button" class="scaler-step-chip scaler-step-chip--outline" data-action="clear-pattern">Custom</button>
+                                </div>
+                            </div>` : ''}
                             <div class="scaler-form-group">
                                 <label>Encapsulation Mode</label>
                                 <div class="scaler-radio-group">
@@ -2429,7 +2841,7 @@ const ScalerGUI = {
                                 <div class="scaler-form-row">
                                     <div class="scaler-form-group">
                                         <label>VLAN Start</label>
-                                        <input type="number" id="vlan-start" class="scaler-input" value="${data.vlanStart || 100}" min="1" max="4094">
+                                        <input type="number" id="vlan-start" class="scaler-input" value="${vlanStartVal}" min="1" max="4094">
                                     </div>
                                     <div class="scaler-form-group">
                                         <label>VLAN Step</label>
@@ -2439,6 +2851,7 @@ const ScalerGUI = {
                                 <div class="scaler-info-box" style="font-size:11px;padding:6px 10px;margin-top:4px">
                                     Sub-if naming: <code>parent.{vlan}</code> where VLAN = start + (index * step).
                                     Step 0 = all sub-ifs share the same VLAN.
+                                    <span class="scaler-inline-hint">VLAN must be 1-4094.</span>
                                 </div>
                             </div>
 
@@ -2450,7 +2863,7 @@ const ScalerGUI = {
                                 <div class="scaler-form-row">
                                     <div class="scaler-form-group">
                                         <label>Outer VLAN Start</label>
-                                        <input type="number" id="outer-vlan-start" class="scaler-input" value="${data.outerVlanStart || 100}" min="1" max="4094">
+                                        <input type="number" id="outer-vlan-start" class="scaler-input" value="${outerStartVal}" min="1" max="4094">
                                     </div>
                                     <div class="scaler-form-group">
                                         <label>Outer VLAN Step</label>
@@ -2483,7 +2896,10 @@ const ScalerGUI = {
                                     Generates <code>vlan-tags outer-tag X inner-tag Y outer-tpid 0x8100</code>.
                                     Outer step -1 = one S-tag per parent. Inner step -2 = reset C-tag per parent.
                                 </div>
+                                <div id="qinq-inner-suggestion" class="scaler-info-box scaler-qinq-suggestion" style="display:none;margin-top:8px"></div>
                             </div>
+
+                            <div id="encap-overlap-warning" class="scaler-collision-warning scaler-overlap-banner" style="display:none"></div>
 
                             <div class="scaler-preview-box" style="margin-top:12px">
                                 <label>DNOS SYNTAX PREVIEW:</label>
@@ -2491,8 +2907,14 @@ const ScalerGUI = {
                             </div>
                         </div>`;
                     },
-                    afterRender: (data) => {
+                    afterRender: async (data) => {
                         let debounceTimer;
+                        let scanDebounceTimer;
+                        let lastScan = null;
+                        const ctx = data.deviceContext || {};
+                        const sshHost = ctx.mgmt_ip || ctx.ip || '';
+                        const parent = (data.subifParents || [])[0];
+
                         const _getEncapParams = () => {
                             const encap = document.querySelector('input[name="encap"]:checked')?.value || 'dot1q';
                             const isQinQ = encap === 'qinq';
@@ -2505,6 +2927,108 @@ const ScalerGUI = {
                             return { encap, isQinQ, vlanStart, vlanStep, outerStart, outerStep, innerStart, innerStep };
                         };
 
+                        const runOverlapScan = async () => {
+                            if (!parent || !data.deviceId) return null;
+                            try {
+                                const scan = await ScalerAPI.scanExisting({
+                                    device_id: data.deviceId,
+                                    ssh_host: sshHost,
+                                    scan_type: 'interfaces',
+                                    parent_interface: parent
+                                });
+                                lastScan = scan;
+                                return scan;
+                            } catch (_) {
+                                return null;
+                            }
+                        };
+
+                        const updateOverlapBanner = async () => {
+                            clearTimeout(scanDebounceTimer);
+                            scanDebounceTimer = setTimeout(async () => {
+                                const warnEl = document.getElementById('encap-overlap-warning');
+                                const qinqSugg = document.getElementById('qinq-inner-suggestion');
+                                if (!warnEl) return;
+                                const ep = _getEncapParams();
+                                const subCount = Math.min(data.subifCount || 1, 4094);
+                                const vStart = ep.isQinQ ? ep.outerStart : ep.vlanStart;
+                                const vStep = Math.max(ep.isQinQ ? (ep.outerStep === -1 || ep.outerStep === 0 ? 1 : ep.outerStep) : ep.vlanStep, 1);
+                                const newIds = [];
+                                for (let si = 0; si < subCount; si++) {
+                                    newIds.push(Math.min(Math.max(vStart + si * vStep, 1), 4094));
+                                }
+                                const scan = lastScan || await runOverlapScan();
+                                if (!scan) {
+                                    warnEl.style.display = 'none';
+                                    if (qinqSugg) qinqSugg.style.display = 'none';
+                                    return;
+                                }
+                                const configTimeEl = document.getElementById('encap-config-time');
+                                if (configTimeEl && scan.config_fetched_at) {
+                                    try {
+                                        const d = new Date(scan.config_fetched_at);
+                                        configTimeEl.textContent = `Config: ${d.toLocaleString()}`;
+                                    } catch (_) {}
+                                }
+                                const existingIds = new Set(scan.existing_sub_ids || []);
+                                const overlaps = newIds.filter(id => existingIds.has(id));
+                                const lastExisting = Math.max(0, ...(scan.existing_sub_ids || []));
+                                const safeStart = lastExisting + 1;
+                                const nonOverlap = newIds.filter(id => !existingIds.has(id)).length;
+
+                                if (ep.isQinQ && scan.outer_inner_map && ep.outerStart) {
+                                    const inners = scan.outer_inner_map[String(ep.outerStart)] || scan.outer_inner_map[ep.outerStart];
+                                    if (inners && inners.length) {
+                                        const maxInner = Math.max(...inners.map(x => parseInt(x, 10)));
+                                        const suggInner = maxInner + 1;
+                                        if (qinqSugg) {
+                                            qinqSugg.innerHTML = `Outer-tag ${ep.outerStart} in use: highest inner = ${maxInner}. <button type="button" class="scaler-step-chip" data-inner-sugg="${suggInner}">Use inner start ${suggInner}</button>`;
+                                            qinqSugg.style.display = 'block';
+                                            qinqSugg.querySelector('button')?.addEventListener('click', () => {
+                                                const el = document.getElementById('inner-vlan-start');
+                                                if (el) { el.value = suggInner; updatePreview(); updateOverlapBanner(); }
+                                            });
+                                        }
+                                    } else if (qinqSugg) qinqSugg.style.display = 'none';
+                                } else if (qinqSugg) qinqSugg.style.display = 'none';
+
+                                if (overlaps.length > 0) {
+                                    warnEl.style.display = 'block';
+                                    const choice = data._collisionChoice || 'override';
+                                    const chk = (v) => v === choice ? ' checked' : '';
+                                    warnEl.innerHTML = `
+                                        <div class="scaler-collision-title">Overlap detected: ${overlaps.length} VLAN(s) already in use</div>
+                                        <div class="scaler-collision-detail-list">${overlaps.slice(0, 10).join(', ')}${overlaps.length > 10 ? '...' : ''}</div>
+                                        <div class="scaler-collision-actions">
+                                            <label><input type="radio" name="encap-collision-choice" value="start-after"${chk('start-after')}> Continue after existing (from .${safeStart})</label>
+                                            <label><input type="radio" name="encap-collision-choice" value="skip"${chk('skip')}> Skip overlaps (create ${nonOverlap} non-conflicting)</label>
+                                            <label><input type="radio" name="encap-collision-choice" value="override"${chk('override')}> Override existing</label>
+                                        </div>`;
+                                    const rbs = warnEl.querySelectorAll('input[name="encap-collision-choice"]');
+                                    rbs.forEach(rb => {
+                                        rb.checked = rb.value === choice;
+                                        rb.addEventListener('change', () => {
+                                            const v = rb.value;
+                                            if (ScalerGUI.WizardController?.data) ScalerGUI.WizardController.data._collisionChoice = v;
+                                            if (v === 'start-after') {
+                                                ScalerGUI.WizardController.data.vlanStart = safeStart;
+                                                ScalerGUI.WizardController.data.outerVlanStart = safeStart;
+                                                const vs = document.getElementById('vlan-start');
+                                                const os = document.getElementById('outer-vlan-start');
+                                                if (vs) vs.value = safeStart;
+                                                if (os) os.value = safeStart;
+                                            }
+                                            updatePreview();
+                                            updateOverlapBanner();
+                                        });
+                                    });
+                                } else {
+                                    warnEl.innerHTML = '<div class="scaler-collision-ok">No overlap with existing config</div>';
+                                    warnEl.style.display = 'block';
+                                }
+                            }, 400);
+                        };
+
                         const updatePreview = async () => {
                             clearTimeout(debounceTimer);
                             debounceTimer = setTimeout(async () => {
@@ -2513,7 +3037,7 @@ const ScalerGUI = {
                                 try {
                                     const ep = _getEncapParams();
                                     const isSubif = data.interfaceType === 'subif';
-                                    const isPhys = data.interfaceType === 'subif';
+                                    const isPhys = data.interfaceType === 'subif' || ['ge100', 'ge400', 'ge10'].includes(data.interfaceType || '');
                                     const subCount = Math.min(data.subifCount || 1, 3);
                                     const parents = isSubif ? (data.subifParents || []) : [];
                                     const result = await ScalerAPI.generateInterfaces({
@@ -2540,8 +3064,7 @@ const ScalerGUI = {
                                         ip_prefix: data.ipPrefix || 30,
                                         ipv6_start: data.ipv6Start || '2001:db8::1',
                                         ipv6_prefix: data.ipv6Prefix || 128,
-                                        ip_mode: data.ipMode || 'per_subif',
-                                        ip_step: data.ipStep ?? 2,
+                                        ip_step: data.ipStepDotted || data.ipStep || '0.0.0.1',
                                         mpls_enabled: isPhys ? (data.mplsEnabled || false) : false,
                                         flowspec_enabled: isPhys ? (data.flowspecEnabled || false) : false,
                                         bfd: isPhys ? (data.bfdEnabled || false) : false,
@@ -2557,6 +3080,7 @@ const ScalerGUI = {
                                 } catch (e) {
                                     preview.textContent = `Error: ${e.message}`;
                                 }
+                                updateOverlapBanner();
                             }, 300);
                         };
 
@@ -2576,6 +3100,44 @@ const ScalerGUI = {
                         document.getElementById('outer-vlan-step')?.addEventListener('change', updatePreview);
                         document.getElementById('inner-vlan-start')?.addEventListener('input', updatePreview);
                         document.getElementById('inner-vlan-step')?.addEventListener('change', updatePreview);
+
+                        document.querySelector('[data-action="use-pattern"]')?.addEventListener('click', () => {
+                            const pat = data.detectedPattern || {};
+                            const v = pat.suggested_next_vlan ?? 100;
+                            const vs = document.getElementById('vlan-start');
+                            const os = document.getElementById('outer-vlan-start');
+                            if (vs) vs.value = v;
+                            if (os) os.value = v;
+                            updatePreview();
+                        });
+                        document.querySelector('[data-action="clear-pattern"]')?.addEventListener('click', () => {
+                            if (ScalerGUI.WizardController?.data) ScalerGUI.WizardController.data.detectedPattern = null;
+                            ScalerGUI.WizardController?.render();
+                        });
+
+                        const refreshBtn = document.getElementById('encap-refresh-btn');
+                        const configTimeEl = document.getElementById('encap-config-time');
+                        refreshBtn?.addEventListener('click', async () => {
+                            if (!data.deviceId) return;
+                            refreshBtn.disabled = true;
+                            refreshBtn.textContent = 'Syncing...';
+                            try {
+                                await ScalerAPI.syncConfig(data.deviceId, sshHost);
+                                lastScan = null;
+                                await runOverlapScan();
+                                if (parent) {
+                                    const pat = await ScalerAPI.detectPattern({ device_id: data.deviceId, ssh_host: sshHost, parent_interface: parent });
+                                    if (ScalerGUI.WizardController?.data) ScalerGUI.WizardController.data.detectedPattern = pat;
+                                }
+                                updateOverlapBanner();
+                                ScalerGUI.WizardController?.render();
+                            } catch (e) {
+                                if (configTimeEl) configTimeEl.textContent = `Sync failed: ${e.message}`;
+                            }
+                            refreshBtn.disabled = false;
+                            refreshBtn.textContent = 'Refresh';
+                        });
+
                         updatePreview();
                     },
                     collectData: () => {
@@ -2597,7 +3159,7 @@ const ScalerGUI = {
                     title: 'Review',
                     render: (data) => {
                         const t = data.interfaceType || 'bundle';
-                        const isPhys = t === 'subif';
+                        const isPhys = t === 'subif' || ['ge100', 'ge400', 'ge10'].includes(t);
                         const isLoop = t === 'loopback';
                         const isSubif = t === 'subif';
                         const hasSubs = (data.createSubinterfaces || isSubif) && !isLoop;
@@ -2625,7 +3187,7 @@ const ScalerGUI = {
                         if (data.ipEnabled) {
                             let ipDesc = `${(data.ipVersion || 'ipv4').toUpperCase()} from ${data.ipStart || '10.0.0.1'}/${data.ipPrefix || 30}`;
                             if (data.ipVersion === 'dual') ipDesc += ` + ${data.ipv6Start || '2001:db8::1'}/${data.ipv6Prefix || 128}`;
-                            ipDesc += ` (${data.ipMode || 'per_subif'})`;
+                            ipDesc += ` (step ${data.ipStepDotted || data.ipStep || '0.0.0.1'})`;
                             rows.push(`<tr><td>IP</td><td>${ipDesc}</td></tr>`);
                         }
                         if (data.description) rows.push(`<tr><td>Description</td><td>${data.description}</td></tr>`);
@@ -2635,7 +3197,11 @@ const ScalerGUI = {
                         if (data.mtu) rows.push(`<tr><td>MTU</td><td>${data.mtu}</td></tr>`);
                         return `
                         <div class="scaler-review">
-                            <h4>Configuration Summary</h4>
+                            <div class="scaler-review-header" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
+                                <h4 style="margin:0;flex:1">Configuration Summary</h4>
+                                <button type="button" id="review-refresh-btn" class="scaler-btn scaler-btn-secondary scaler-refresh-btn" title="Refresh config from device">Refresh</button>
+                                <span id="review-config-time" class="scaler-config-time" style="font-size:11px;opacity:0.7"></span>
+                            </div>
                             <table class="scaler-table scaler-summary-table">
                                 ${rows.join('\n')}
                             </table>
@@ -2649,19 +3215,21 @@ const ScalerGUI = {
                                 <button type="button" id="show-diff-btn" class="scaler-btn scaler-btn-secondary">Show diff vs running</button>
                                 <pre id="config-diff" class="scaler-diff-preview" style="display:none"></pre>
                             </div>
+                            <div id="whats-next-container"></div>
                         </div>`;
                     },
                     afterRender: async (data) => {
                         try {
                             const t = data.interfaceType || 'bundle';
                             const isSubif = t === 'subif';
-                            const isPhys = t === 'subif';
+                            const isPhys = t === 'subif' || ['ge100', 'ge400', 'ge10'].includes(t);
                             const encap = data.encapsulation || 'dot1q';
                             const isQinQ = encap === 'qinq';
                             const parent = isSubif && (data.subifParents || [])[0];
                             const ctx = data.deviceContext || {};
                             const sshHost = ctx.mgmt_ip || ctx.ip || '';
                             let collisionChoice = data._collisionChoice || 'override';
+                            let overlapsForSkip = [];
                             if (parent && data.deviceId) {
                                 try {
                                     const scan = await ScalerAPI.scanExisting({
@@ -2670,39 +3238,90 @@ const ScalerGUI = {
                                         scan_type: 'interfaces',
                                         parent_interface: parent
                                     });
-                                    const existing = scan.existing_sub_ids || [];
-                                    const l3Conflicts = scan.l3_conflicts || [];
+                                    const existingIds = new Set(scan.existing_sub_ids || []);
+                                    const details = scan.sub_id_details || {};
                                     const nextFree = scan.next_free?.sub_id || 1;
-                                    if (existing.length > 0 || l3Conflicts.length > 0) {
-                                        const warnEl = document.getElementById('collision-warning');
-                                        if (warnEl) {
-                                            warnEl.style.display = 'block';
-                                            warnEl.innerHTML = `
-                                                <div class="scaler-collision-header">Existing sub-interfaces detected on ${parent}</div>
-                                                <div class="scaler-collision-detail">${existing.length} sub-ID(s) in use. ${l3Conflicts.length} L3 (have IP, would conflict with l2-service).</div>
-                                                <div class="scaler-collision-actions">
-                                                    <label><input type="radio" name="collision-choice" value="skip"> Skip conflicts (use free IDs only)</label>
-                                                    <label><input type="radio" name="collision-choice" value="start-after"> Start after existing (from #${nextFree})</label>
-                                                    <label><input type="radio" name="collision-choice" value="override" checked> Override (may fail)</label>
-                                                </div>
-                                            `;
-                                            const rbs = warnEl.querySelectorAll('input[name="collision-choice"]');
-                                            rbs.forEach(rb => {
-                                                rb.checked = rb.value === collisionChoice;
-                                                rb.addEventListener('change', () => {
-                                                    collisionChoice = rb.value;
-                                                    ScalerGUI.WizardController.data._collisionChoice = collisionChoice;
-                                                    if (collisionChoice === 'start-after') {
-                                                        ScalerGUI.WizardController.data.vlanStart = nextFree;
-                                                        ScalerGUI.WizardController.data.outerVlanStart = nextFree;
-                                                    }
-                                                    ScalerGUI.WizardController.render();
-                                                });
+
+                                    const vStart = isQinQ ? (data.outerVlanStart || 100) : (data.vlanStart || 100);
+                                    const vStep = isQinQ ? (data.outerVlanStep ?? 1) : (data.vlanStep ?? 1);
+                                    const subCount = data.subifCount || 1;
+                                    const effStep = Math.max(vStep, 0) === 0 ? 1 : vStep;
+                                    const newIds = [];
+                                    for (let si = 0; si < subCount; si++) {
+                                        newIds.push(Math.min(Math.max(vStart + si * effStep, 1), 4094));
+                                    }
+                                    const overlaps = newIds.filter(id => existingIds.has(id));
+                                    const isCreatingL2 = data.l2Service || false;
+                                    if (collisionChoice === 'skip') overlapsForSkip = [...overlaps];
+
+                                    const warnEl = document.getElementById('collision-warning');
+                                    if (warnEl && overlaps.length > 0) {
+                                        const lines = [];
+                                        overlaps.slice(0, 8).forEach(id => {
+                                            const d = details[String(id)] || {};
+                                            let cur = d.has_l2 ? 'L2-service' : d.has_ip ? `L3 (${d.ipv4 || d.ipv6 || 'has IP'})` : 'configured';
+                                            let conflict = '';
+                                            if (isCreatingL2 && d.has_ip) conflict = '  \u2190 mode conflict: existing L3, you want L2';
+                                            else if (!isCreatingL2 && d.has_l2) conflict = '  \u2190 mode conflict: existing L2, you want L3';
+                                            else conflict = '  \u2190 will overwrite';
+                                            lines.push(`  ${parent}.${id}  currently: ${cur}${conflict}`);
+                                        });
+                                        if (overlaps.length > 8) lines.push(`  ... and ${overlaps.length - 8} more`);
+                                        const nonOverlap = subCount - overlaps.length;
+                                        const lastExisting = Math.max(...existingIds, 0);
+                                        const safeStart = lastExisting + 1;
+                                        warnEl.style.display = 'block';
+                                        warnEl.innerHTML = `
+                                            <div class="scaler-collision-header">${overlaps.length} of ${subCount} new sub-interfaces overlap with existing on ${parent}</div>
+                                            <pre class="scaler-collision-detail-list">${this.escapeHtml(lines.join('\n'))}</pre>
+                                            <div class="scaler-collision-detail" style="margin-top:6px;font-size:11px;opacity:0.7">${existingIds.size} sub-ID(s) already exist on this parent (range ${Math.min(...existingIds)}\u2013${lastExisting})</div>
+                                            <div class="scaler-collision-actions">
+                                                <label><input type="radio" name="collision-choice" value="skip"> Skip overlaps (create only ${nonOverlap} non-conflicting)</label>
+                                                <label><input type="radio" name="collision-choice" value="start-after"> Start after existing (from .${safeStart})</label>
+                                                <label><input type="radio" name="collision-choice" value="override" checked> Override existing (may fail on mode conflicts)</label>
+                                            </div>
+                                        `;
+                                        const rbs = warnEl.querySelectorAll('input[name="collision-choice"]');
+                                        rbs.forEach(rb => {
+                                            rb.checked = rb.value === collisionChoice;
+                                            rb.addEventListener('change', () => {
+                                                collisionChoice = rb.value;
+                                                ScalerGUI.WizardController.data._collisionChoice = collisionChoice;
+                                                if (collisionChoice === 'start-after') {
+                                                    ScalerGUI.WizardController.data.vlanStart = safeStart;
+                                                    ScalerGUI.WizardController.data.outerVlanStart = safeStart;
+                                                }
+                                                ScalerGUI.WizardController.render();
                                             });
-                                        }
+                                        });
+                                    } else if (warnEl && existingIds.size > 0 && overlaps.length === 0) {
+                                        warnEl.style.display = 'block';
+                                        warnEl.innerHTML = `<div class="scaler-collision-header" style="color:var(--dn-green,#2ecc71)">No overlap \u2014 ${existingIds.size} existing sub-ID(s) on ${parent} won't conflict with your range (.${newIds[0]}\u2013.${newIds[newIds.length - 1]})</div>`;
+                                    }
+                                    const reviewTimeEl = document.getElementById('review-config-time');
+                                    if (reviewTimeEl && scan.config_fetched_at) {
+                                        try {
+                                            const d = new Date(scan.config_fetched_at);
+                                            reviewTimeEl.textContent = `Config: ${d.toLocaleString()}`;
+                                        } catch (_) {}
                                     }
                                 } catch (_) {}
                             }
+                            const reviewRefreshBtn = document.getElementById('review-refresh-btn');
+                            reviewRefreshBtn?.addEventListener('click', async () => {
+                                if (!data.deviceId) return;
+                                reviewRefreshBtn.disabled = true;
+                                reviewRefreshBtn.textContent = 'Syncing...';
+                                try {
+                                    await ScalerAPI.syncConfig(data.deviceId, sshHost);
+                                    ScalerGUI.WizardController?.render();
+                                } catch (e) {
+                                    const el = document.getElementById('review-config-time');
+                                    if (el) el.textContent = `Sync failed: ${e.message}`;
+                                }
+                                reviewRefreshBtn.disabled = false;
+                                reviewRefreshBtn.textContent = 'Refresh';
+                            });
                             const params = {
                                 interface_type: t,
                                 start_number: data.startNumber,
@@ -2729,8 +3348,7 @@ const ScalerGUI = {
                                 ip_prefix: data.ipPrefix || 30,
                                 ipv6_start: data.ipv6Start || '2001:db8::1',
                                 ipv6_prefix: data.ipv6Prefix || 128,
-                                ip_step: data.ipStep ?? 2,
-                                ip_mode: data.ipMode || 'per_subif',
+                                ip_step: data.ipStepDotted || data.ipStep || '0.0.0.1',
                                 mpls_enabled: isPhys ? (data.mplsEnabled || false) : false,
                                 flowspec_enabled: isPhys ? (data.flowspecEnabled || false) : false,
                                 bfd: isPhys ? (data.bfdEnabled || false) : false,
@@ -2739,6 +3357,8 @@ const ScalerGUI = {
                                 mtu: isPhys ? (data.mtu || null) : null,
                                 description: data.description || '',
                             };
+                            const skipVlans = [...(collisionChoice === 'skip' ? overlapsForSkip : []), ...(data._l2l3SkipIds || [])];
+                            if (skipVlans.length) params.skip_vlans = skipVlans;
                             if (typeof console !== 'undefined' && console.debug) {
                                 console.debug('[Interface Wizard] generateInterfaces params:', JSON.stringify(params));
                             }
@@ -2782,8 +3402,42 @@ const ScalerGUI = {
                                     }
                                 };
                             }
+                            const container = document.getElementById('whats-next-container');
+                            if (container) {
+                                const t = data.interfaceType || 'bundle';
+                                const isSubif = t === 'subif';
+                                const isLoopback = t === 'loopback';
+                                let createdData = { deviceId: data.deviceId };
+                                if (isLoopback) {
+                                    createdData.loopback = data.ipStart || data.ip_start || '10.0.0.1';
+                                    createdData.interfaces = ['lo0'];
+                                } else if (isSubif) {
+                                    const parents = data.subifParents || [];
+                                    const subCount = data.subifCount || 1;
+                                    const ifaces = [];
+                                    parents.forEach(p => { for (let i = 1; i <= subCount; i++) ifaces.push(`${p}.${i}`); });
+                                    createdData.interfaces = ifaces;
+                                } else {
+                                    const start = data.startNumber || 1;
+                                    const count = data.count || 1;
+                                    const subCount = data.createSubinterfaces ? (data.subifCount || 1) : 0;
+                                    const slot = data.slot || 0, bay = data.bay || 0, portStart = data.portStart || 0;
+                                    const prefix = t === 'bundle' ? 'bundle' : t === 'ph' ? 'ph' : t === 'irb' ? 'irb' : t;
+                                    const ifaces = [];
+                                    for (let n = 0; n < count; n++) {
+                                        const base = ['ge100', 'ge400', 'ge10'].includes(t)
+                                            ? `${t}-${slot}/${bay}/${portStart + n}` : `${prefix}-${start + n}`;
+                                        ifaces.push(base);
+                                        for (let s = 1; s <= subCount; s++) ifaces.push(`${base}.${s}`);
+                                    }
+                                    createdData.interfaces = ifaces;
+                                }
+                                const section = ScalerGUI._renderWhatsNextSection('interfaces', data, createdData, result.config);
+                                if (section) { container.innerHTML = ''; container.appendChild(section); }
+                            }
                         } catch (e) {
-                            document.getElementById('config-preview').textContent = `Error: ${e.message}`;
+                            const previewEl = document.getElementById('config-preview');
+                            if (previewEl) previewEl.textContent = `Error: ${e.message}`;
                         }
                     }
                 },
@@ -2852,13 +3506,17 @@ const ScalerGUI = {
                 bundle:   ['type', 'members', 'subifs', 'encap', 'review', 'push'],
                 ph:       ['type', 'subifs', 'encap', 'review', 'push'],
                 irb:      ['type', 'subifs', 'encap', 'review', 'push'],
+                ge100:    ['type', 'location', 'subifs', 'encap', 'review', 'push'],
+                ge400:    ['type', 'location', 'subifs', 'encap', 'review', 'push'],
+                ge10:     ['type', 'location', 'subifs', 'encap', 'review', 'push'],
             };
 
             const _ifaceStepKeyMap = {
                 type:     ['interfaceType', 'startNumber', 'count'],
                 members:  ['bundleMembers', 'lacpMode'],
+                location: ['slot', 'bay', 'portStart'],
                 parent:   ['subifParents'],
-                subifs:   ['createSubinterfaces', 'subifCount', 'interfaceMode', 'l2Service', 'ipEnabled', 'ipVersion', 'ipStart', 'ipPrefix', 'ipv6Start', 'ipv6Prefix', 'ipMode', 'ipStep', 'mplsEnabled', 'flowspecEnabled', 'bfdEnabled', 'bfdInterval', 'bfdMultiplier', 'mtu', 'description'],
+                subifs:   ['createSubinterfaces', 'subifCount', 'interfaceMode', 'l2Service', 'ipEnabled', 'ipVersion', 'ipStart', 'ipPrefix', 'ipv6Start', 'ipv6Prefix', 'ipStepDotted', 'mplsEnabled', 'flowspecEnabled', 'bfdEnabled', 'bfdInterval', 'bfdMultiplier', 'mtu', 'description'],
                 encap:    ['encapsulation', 'vlanStart', 'vlanStep', 'outerVlanStart', 'outerVlanStep', 'innerVlanStart', 'innerVlanStep'],
                 review:   ['generatedConfig'],
                 push:     ['dryRun', 'pushMode'],
@@ -2923,7 +3581,7 @@ const ScalerGUI = {
                 if (data.pushMode === 'clipboard') {
                     const config = data.generatedConfig || '';
                     try {
-                        await navigator.clipboard.writeText(config);
+                        await window.safeClipboardWrite(config);
                     } catch (_) {}
                     const ctx = data.deviceContext || {};
                     const host = ctx.mgmt_ip || ctx.ip || '';
@@ -3080,7 +3738,7 @@ const ScalerGUI = {
                         };
                     },
                     collectData: () => ({
-                        serviceType: document.getElementById('svc-type').value
+                        serviceType: document.getElementById('svc-type')?.value || 'evpn-vpws-fxc'
                     })
                 },
                 {
@@ -3112,9 +3770,9 @@ const ScalerGUI = {
                         const updatePreview = async () => {
                             clearTimeout(debounceTimer);
                             debounceTimer = setTimeout(async () => {
-                                const prefix = document.getElementById('svc-prefix').value || 'FXC_';
-                                const start = parseInt(document.getElementById('svc-start').value) || 1;
-                                const count = Math.min(parseInt(document.getElementById('svc-count').value) || 100, 3); // Preview max 3
+                                const prefix = document.getElementById('svc-prefix')?.value || 'FXC_';
+                                const start = parseInt(document.getElementById('svc-start')?.value) || 1;
+                                const count = Math.min(parseInt(document.getElementById('svc-count')?.value) || 100, 3); // Preview max 3
                                 const preview = document.getElementById('svc-naming-preview');
                                 if (preview) {
                                     try {
@@ -3127,7 +3785,7 @@ const ScalerGUI = {
                                             evi_start: 1000,
                                             rd_base: '65000'
                                         });
-                                        const actualCount = parseInt(document.getElementById('svc-count').value) || 100;
+                                        const actualCount = parseInt(document.getElementById('svc-count')?.value) || 100;
                                         const lines = result.config.split('\n').slice(0, 15);
                                         preview.textContent = lines.join('\n') + (actualCount > 3 ? `\n... (${actualCount} services total)` : '');
                                     } catch (e) {
@@ -3142,9 +3800,9 @@ const ScalerGUI = {
                         updatePreview();
                     },
                     collectData: () => ({
-                        namePrefix: document.getElementById('svc-prefix').value || 'FXC_',
-                        startNumber: parseInt(document.getElementById('svc-start').value) || 1,
-                        count: parseInt(document.getElementById('svc-count').value) || 100
+                        namePrefix: document.getElementById('svc-prefix')?.value || 'FXC_',
+                        startNumber: parseInt(document.getElementById('svc-start')?.value) || 1,
+                        count: parseInt(document.getElementById('svc-count')?.value) || 100
                     })
                 },
                 {
@@ -3338,6 +3996,7 @@ const ScalerGUI = {
                                 <pre id="config-preview">Generating preview...</pre>
                             </div>
                             <div id="config-validation"></div>
+                            <div id="whats-next-container"></div>
                         </div>
                     `,
                     afterRender: async (data) => {
@@ -3372,8 +4031,15 @@ const ScalerGUI = {
                                 const vEl = document.getElementById('config-validation');
                                 if (vEl) vEl.innerHTML = ScalerGUI._renderValidationResults(val.errors, val.warnings, val.suggestions);
                             } catch (_) {}
+                            const container = document.getElementById('whats-next-container');
+                            if (container) {
+                                const createdData = { deviceId: data.deviceId, interfaces: data.interfaceList || [], serviceType: data.serviceType };
+                                const section = ScalerGUI._renderWhatsNextSection('services', data, createdData, result.config);
+                                if (section) { container.innerHTML = ''; container.appendChild(section); }
+                            }
                         } catch (e) {
-                            document.getElementById('config-preview').textContent = `Error: ${e.message}`;
+                            const previewEl = document.getElementById('config-preview');
+                            if (previewEl) previewEl.textContent = `Error: ${e.message}`;
                         }
                     }
                 },
@@ -3628,6 +4294,7 @@ const ScalerGUI = {
                                 <pre id="vrf-config-preview">Generating...</pre>
                             </div>
                             <div id="config-validation"></div>
+                            <div id="whats-next-container"></div>
                         </div>`,
                     afterRender: async (d) => {
                         try {
@@ -3658,6 +4325,14 @@ const ScalerGUI = {
                                 const vEl = document.getElementById('config-validation');
                                 if (vEl) vEl.innerHTML = ScalerGUI._renderValidationResults(val.errors, val.warnings, val.suggestions);
                             } catch (_) {}
+                            const container = document.getElementById('whats-next-container');
+                            if (container) {
+                                const vrfs = [];
+                                for (let i = 0; i < (d.count || 1); i++) vrfs.push(`${d.namePrefix || 'VRF_'}${(d.startNumber || 1) + i}`);
+                                const createdData = { deviceId: d.deviceId, vrfs, interfaces: d.interfaceList || [] };
+                                const section = ScalerGUI._renderWhatsNextSection('vrf', d, createdData, result.config);
+                                if (section) { container.innerHTML = ''; container.appendChild(section); }
+                            }
                         } catch (e) {
                             const el = document.getElementById('vrf-config-preview');
                             if (el) el.textContent = `Error: ${e.message}`;
@@ -3856,6 +4531,7 @@ const ScalerGUI = {
                                 <pre id="bd-config-preview">Generating...</pre>
                             </div>
                             <div id="config-validation"></div>
+                            <div id="whats-next-container"></div>
                         </div>`,
                     afterRender: async (d) => {
                         try {
@@ -3878,6 +4554,12 @@ const ScalerGUI = {
                                 const vEl = document.getElementById('config-validation');
                                 if (vEl) vEl.innerHTML = ScalerGUI._renderValidationResults(val.errors, val.warnings, val.suggestions);
                             } catch (_) {}
+                            const container = document.getElementById('whats-next-container');
+                            if (container) {
+                                const createdData = { deviceId: d.deviceId, interfaces: d.interfaceList || [] };
+                                const section = ScalerGUI._renderWhatsNextSection('bridge-domain', d, createdData, result.config);
+                                if (section) { container.innerHTML = ''; container.appendChild(section); }
+                            }
                         } catch (e) {
                             const el = document.getElementById('bd-config-preview');
                             if (el) el.textContent = `Error: ${e.message}`;
@@ -4074,6 +4756,7 @@ const ScalerGUI = {
                                 <pre id="fs-config-preview">Generating...</pre>
                             </div>
                             <div id="config-validation"></div>
+                            <div id="whats-next-container"></div>
                         </div>`,
                     afterRender: async (d) => {
                         try {
@@ -4093,13 +4776,19 @@ const ScalerGUI = {
                             };
                             const result = await ScalerAPI.generateFlowSpec(params);
                             const el = document.getElementById('fs-config-preview');
-                            if (el) el.textContent = result.config || '(empty)';
+                            if (el) el.innerHTML = result.config ? ScalerGUI._highlightDnosConfig(result.config) : '(empty)';
                             ScalerGUI.WizardController.data.generatedConfig = result.config;
                             try {
                                 const val = await ScalerAPI.validateConfig({ config: result.config, hierarchy: 'flowspec' });
                                 const vEl = document.getElementById('config-validation');
                                 if (vEl) vEl.innerHTML = ScalerGUI._renderValidationResults(val.errors, val.warnings, val.suggestions);
                             } catch (_) {}
+                            const container = document.getElementById('whats-next-container');
+                            if (container) {
+                                const createdData = { deviceId: d.deviceId };
+                                const section = ScalerGUI._renderWhatsNextSection('flowspec', d, createdData, result.config);
+                                if (section) { container.innerHTML = ''; container.appendChild(section); }
+                            }
                         } catch (e) {
                             const el = document.getElementById('fs-config-preview');
                             if (el) el.textContent = `Error: ${e.message}`;
@@ -4143,6 +4832,261 @@ const ScalerGUI = {
             this.getDeviceContext(deviceId).then(c => {
                 if (self.WizardController.data?.deviceId === deviceId) {
                     self.WizardController.data.deviceContext = c;
+                    self.WizardController.render();
+                }
+            }).catch(() => {});
+        }
+    },
+
+    async openFlowSpecVPNWizard(deviceId = null, prefillParams = null) {
+        if (!deviceId) {
+            this.openDeviceSelector('FlowSpec VPN Wizard', (id) => this.openFlowSpecVPNWizard(id, prefillParams));
+            return;
+        }
+        const content = document.createElement('div');
+        content.className = 'scaler-wizard-container';
+        content.innerHTML = '<div class="scaler-loading">Loading...</div>';
+        this.openPanel('flowspec-vpn-wizard', `FlowSpec VPN - ${deviceId}`, content, {
+            width: '520px',
+            parentPanel: 'scaler-menu'
+        });
+        const self = this;
+        const cachedCtx = this._deviceContexts[deviceId];
+        const hasFresh = cachedCtx && (Date.now() - (cachedCtx._fetchedAt || 0)) < this._contextCacheTTL;
+        let ctx = hasFresh ? cachedCtx : null;
+        try {
+            if (!hasFresh) ctx = await this.getDeviceContext(deviceId);
+        } catch (_) {}
+        if (ctx) this._deviceContexts[deviceId] = { ...ctx, _fetchedAt: Date.now() };
+        const vrfs = ctx?.vrfs || [];
+        const vrfNames = vrfs.map(v => (typeof v === 'string' ? v : v?.name || v)).filter(Boolean);
+        const prefillVrf = (prefillParams?.vrfs && prefillParams.vrfs[0]) ? (typeof prefillParams.vrfs[0] === 'string' ? prefillParams.vrfs[0] : prefillParams.vrfs[0]?.name) : null;
+        const existingPolicies = ctx?.flowspec_policies || [];
+        const nextMc = (existingPolicies.length || 0) + 1;
+        ScalerGUI.WizardController.init({
+            panelName: 'flowspec-vpn-wizard',
+            quickNavKey: 'flowspec-vpn-wizard',
+            title: 'FlowSpec VPN',
+            initialData: {
+                deviceId,
+                deviceContext: ctx,
+                vrf: prefillVrf || vrfNames[0] || '',
+                policyName: 'POL-FS-VPN-1',
+                matchClassName: `MC-${nextMc}`,
+                destIp: '10.0.0.0/24',
+                destPort: '',
+                protocol: '6',
+                action: 'drop',
+                rateBps: 1000000,
+                includeIpv4: true,
+                includeIpv6: false,
+                ...(prefillParams || {})
+            },
+            lastRunWizardType: 'flowspec-vpn',
+            onLastRunRerun: (rec) => {
+                if (rec?.params) {
+                    Object.assign(self.WizardController.data, rec.params);
+                    self.WizardController.data.deviceId = deviceId;
+                    self.WizardController.data.deviceContext = ctx;
+                    self.WizardController.currentStep = 0;
+                    self.WizardController._highestStepReached = 0;
+                    self.WizardController.render();
+                }
+            },
+            onLastRunRerunOther: (rec) => {
+                self.closePanel('flowspec-vpn-wizard');
+                self.openMirrorWizard(rec.deviceId);
+            },
+            steps: [
+                {
+                    title: 'VRF Selection',
+                    render: (d) => {
+                        const opts = vrfNames.length ? vrfNames.map(v => `<option value="${v}" ${d.vrf === v ? 'selected' : ''}>${v}</option>`).join('') : '<option value="">No VRFs found - create VRF first</option>';
+                        return `
+                        <div class="scaler-form">
+                            <div class="scaler-form-group">
+                                <label>VRF Instance</label>
+                                <select id="fsvpn-vrf" class="scaler-select">${opts}</select>
+                            </div>
+                            <p class="scaler-hint">FlowSpec policy will be scoped to this VRF.</p>
+                        </div>`;
+                    },
+                    collectData: () => ({
+                        vrf: document.getElementById('fsvpn-vrf')?.value || ''
+                    })
+                },
+                {
+                    title: 'Naming',
+                    render: (d) => `
+                        <div class="scaler-form">
+                            <div class="scaler-form-group">
+                                <label>Policy Name</label>
+                                <input type="text" id="fsvpn-policy" class="scaler-input" value="${d.policyName || 'POL-FS-VPN-1'}" placeholder="POL-FS-VPN-1">
+                            </div>
+                            <div class="scaler-form-group">
+                                <label>Match-Class Name</label>
+                                <input type="text" id="fsvpn-mc" class="scaler-input" value="${d.matchClassName || 'MC-1'}" placeholder="MC-1">
+                            </div>
+                            <div class="scaler-form-group">
+                                <label><input type="checkbox" id="fsvpn-ipv4" ${d.includeIpv4 !== false ? 'checked' : ''}> IPv4</label>
+                                <label style="margin-left:12px"><input type="checkbox" id="fsvpn-ipv6" ${d.includeIpv6 ? 'checked' : ''}> IPv6</label>
+                            </div>
+                        </div>`,
+                    collectData: () => ({
+                        policyName: document.getElementById('fsvpn-policy')?.value || 'POL-FS-VPN-1',
+                        matchClassName: document.getElementById('fsvpn-mc')?.value || 'MC-1',
+                        includeIpv4: document.getElementById('fsvpn-ipv4')?.checked !== false,
+                        includeIpv6: document.getElementById('fsvpn-ipv6')?.checked || false
+                    })
+                },
+                {
+                    title: 'Match Criteria',
+                    render: (d) => `
+                        <div class="scaler-form">
+                            <div class="scaler-form-group">
+                                <label>Destination IP (prefix, required)</label>
+                                <input type="text" id="fsvpn-dest-ip" class="scaler-input" value="${d.destIp || '10.0.0.0/24'}" placeholder="10.0.0.0/24">
+                            </div>
+                            <div class="scaler-form-group">
+                                <label>Destination Port (optional)</label>
+                                <input type="text" id="fsvpn-dest-port" class="scaler-input" value="${d.destPort || ''}" placeholder="53, 80, or 1-1024">
+                            </div>
+                            <div class="scaler-form-group">
+                                <label>Protocol (optional, 6=TCP, 17=UDP)</label>
+                                <input type="text" id="fsvpn-protocol" class="scaler-input" value="${d.protocol || ''}" placeholder="6">
+                            </div>
+                        </div>`,
+                    collectData: () => ({
+                        destIp: document.getElementById('fsvpn-dest-ip')?.value || '10.0.0.0/24',
+                        destPort: document.getElementById('fsvpn-dest-port')?.value || '',
+                        protocol: document.getElementById('fsvpn-protocol')?.value || ''
+                    })
+                },
+                {
+                    title: 'Action',
+                    render: (d) => `
+                        <div class="scaler-form">
+                            <div class="scaler-form-group">
+                                <label>Action</label>
+                                <select id="fsvpn-action" class="scaler-select">
+                                    <option value="drop" ${d.action === 'drop' ? 'selected' : ''}>Drop</option>
+                                    <option value="rate-limit" ${d.action === 'rate-limit' ? 'selected' : ''}>Rate-limit</option>
+                                </select>
+                            </div>
+                            <div class="scaler-form-group" id="fsvpn-rate-row" style="${d.action === 'rate-limit' ? '' : 'display:none'}">
+                                <label>Rate (bps)</label>
+                                <input type="number" id="fsvpn-rate" class="scaler-input" value="${d.rateBps || 1000000}" min="0">
+                            </div>
+                        </div>`,
+                    afterRender: () => {
+                        document.getElementById('fsvpn-action')?.addEventListener('change', (e) => {
+                            const row = document.getElementById('fsvpn-rate-row');
+                            if (row) row.style.display = e.target.value === 'rate-limit' ? 'block' : 'none';
+                        });
+                    },
+                    collectData: () => ({
+                        action: document.getElementById('fsvpn-action')?.value || 'drop',
+                        rateBps: parseInt(document.getElementById('fsvpn-rate')?.value, 10) || 1000000
+                    })
+                },
+                {
+                    title: 'Review',
+                    render: (d) => `
+                        <div class="scaler-review">
+                            <h4>FlowSpec VPN Summary</h4>
+                            <table class="scaler-table scaler-summary-table">
+                                <tr><td>Device</td><td>${d.deviceId}</td></tr>
+                                <tr><td>VRF</td><td>${d.vrf || '(none)'}</td></tr>
+                                <tr><td>Policy</td><td>${d.policyName}</td></tr>
+                                <tr><td>Match-Class</td><td>${d.matchClassName}</td></tr>
+                                <tr><td>Match</td><td>dest-ip ${d.destIp}${d.destPort ? ', dest-port ' + d.destPort : ''}${d.protocol ? ', protocol ' + d.protocol : ''}</td></tr>
+                                <tr><td>Action</td><td>${d.action}${d.action === 'rate-limit' ? ' ' + d.rateBps + ' bps' : ''}</td></tr>
+                            </table>
+                            <div class="scaler-preview-box">
+                                <label>DNOS Preview:</label>
+                                <pre id="fsvpn-config-preview">Generating...</pre>
+                            </div>
+                            <div id="fsvpn-config-validation"></div>
+                            <div id="fsvpn-whats-next-container"></div>
+                        </div>`,
+                    afterRender: async (d) => {
+                        try {
+                            const mc = {
+                                name: d.matchClassName,
+                                dest_ip: d.destIp,
+                                dest_port: d.destPort || undefined,
+                                protocol: d.protocol || undefined,
+                                action: d.action,
+                                rate_bps: d.action === 'rate-limit' ? d.rateBps : undefined
+                            };
+                            const params = {
+                                policy_name: d.policyName,
+                                match_classes: [mc],
+                                include_ipv4: d.includeIpv4 !== false,
+                                include_ipv6: d.includeIpv6 || false,
+                                vrf: d.vrf || undefined
+                            };
+                            const result = await ScalerAPI.generateFlowSpec(params);
+                            const el = document.getElementById('fsvpn-config-preview');
+                            if (el) el.innerHTML = result.config ? ScalerGUI._highlightDnosConfig(result.config) : '(empty)';
+                            ScalerGUI.WizardController.data.generatedConfig = result.config;
+                            try {
+                                const val = await ScalerAPI.validateConfig({ config: result.config, hierarchy: 'flowspec' });
+                                const vEl = document.getElementById('fsvpn-config-validation');
+                                if (vEl) vEl.innerHTML = ScalerGUI._renderValidationResults(val.errors, val.warnings, val.suggestions);
+                            } catch (_) {}
+                            const container = document.getElementById('fsvpn-whats-next-container');
+                            if (container) {
+                                const createdData = { deviceId: d.deviceId, vrf: d.vrf };
+                                const section = ScalerGUI._renderWhatsNextSection('flowspec-vpn', d, createdData, result.config);
+                                if (section) { container.innerHTML = ''; container.appendChild(section); }
+                            }
+                        } catch (e) {
+                            const el = document.getElementById('fsvpn-config-preview');
+                            if (el) el.textContent = `Error: ${e.message}`;
+                        }
+                    }
+                },
+                ScalerGUI._buildPushStep({
+                    radioName: 'fsvpn-push-mode',
+                    includeClipboard: false,
+                    infoText: (d) => `<strong>Config:</strong> Ready to push FlowSpec VPN policy ${d.policyName} (VRF ${d.vrf}) to ${d.deviceId}.`
+                })
+            ],
+            onComplete: async (data) => {
+                try {
+                    const ctx = data.deviceContext || {};
+                    const result = await ScalerAPI.pushConfig({
+                        device_id: data.deviceId,
+                        config: data.generatedConfig,
+                        hierarchy: 'flowspec',
+                        mode: data.pushMode === 'dry_run' ? 'merge' : data.pushMode,
+                        dry_run: data.dryRun,
+                        ssh_host: ctx.mgmt_ip || ctx.ip || '',
+                        job_name: `FlowSpec VPN ${data.policyName} (${data.vrf}) on ${data.deviceId}`
+                    });
+                    this.closePanel('flowspec-vpn-wizard');
+                    this.recordWizardChange(data.deviceId, 'flowspec-vpn', { policyName: data.policyName, vrf: data.vrf, dryRun: data.dryRun }, {
+                        params: { ...data },
+                        generatedConfig: data.generatedConfig,
+                        pushMode: data.pushMode || (data.dryRun ? 'dry_run' : 'commit'),
+                        jobId: result.job_id,
+                    });
+                    this.showProgress(result.job_id, `Pushing FlowSpec VPN to ${data.deviceId}`, {
+                        onComplete: (success) => { this.updateWizardRunResult(result.job_id, success); }
+                    });
+                } catch (e) {
+                    this.showNotification(`Push failed: ${e.message}`, 'error');
+                }
+            }
+        });
+        if (!hasFresh) {
+            this.getDeviceContext(deviceId).then(c => {
+                if (self.WizardController.data?.deviceId === deviceId) {
+                    const vrfs = c?.vrfs || [];
+                    const vrfNames = vrfs.map(v => (typeof v === 'string' ? v : v?.name || v)).filter(Boolean);
+                    self.WizardController.data.deviceContext = c;
+                    if (!self.WizardController.data.vrf && vrfNames[0]) self.WizardController.data.vrf = vrfNames[0];
                     self.WizardController.render();
                 }
             }).catch(() => {});
@@ -4308,6 +5252,7 @@ const ScalerGUI = {
                                 <pre id="rp-config-preview">Generating...</pre>
                             </div>
                             <div id="config-validation"></div>
+                            <div id="whats-next-container"></div>
                         </div>`,
                     afterRender: async (d) => {
                         try {
@@ -4328,6 +5273,12 @@ const ScalerGUI = {
                                 const vEl = document.getElementById('config-validation');
                                 if (vEl) vEl.innerHTML = ScalerGUI._renderValidationResults(val.errors, val.warnings, val.suggestions);
                             } catch (_) {}
+                            const container = document.getElementById('whats-next-container');
+                            if (container) {
+                                const createdData = { deviceId: d.deviceId };
+                                const section = ScalerGUI._renderWhatsNextSection('routing-policy', d, createdData, result.config);
+                                if (section) { container.innerHTML = ''; container.appendChild(section); }
+                            }
                         } catch (e) {
                             const el = document.getElementById('rp-config-preview');
                             if (el) el.textContent = `Error: ${e.message}`;
@@ -4504,21 +5455,92 @@ const ScalerGUI = {
     async openUpgradeWizard() {
         const content = document.createElement('div');
         content.innerHTML = '<div class="scaler-loading">Loading devices...</div>';
-        
+
         this.openPanel('upgrade-wizard', 'Image Upgrade Wizard', content, {
-            width: '550px',
+            width: '650px',
             parentPanel: 'scaler-menu'
         });
-        
+
+        let selectedBuild = null;
+
+        const formatAge = (h) => {
+            if (h < 1) return `${Math.round(h * 60)}m`;
+            if (h < 24) return `${Math.round(h)}h`;
+            return `${(h / 24).toFixed(1)}d`;
+        };
+
+        const renderBuildRow = (b) => {
+            const status = b.result === 'SUCCESS'
+                ? '<span style="color:var(--dn-cyan)">[OK]</span>'
+                : '<span style="color:#e74c3c">[FAIL]</span>';
+            const asan = b.is_sanitizer ? ' <span style="color:#f39c12;font-weight:600">[ASAN]</span>' : '';
+            const expired = b.is_expired ? ' <span style="color:#e74c3c;font-size:0.85em">[EXPIRED]</span>' : '';
+            const dnos = b.has_dnos ? '<span style="color:var(--dn-cyan)">OK</span>' : '<span style="color:#888">--</span>';
+            const gi = b.has_gi ? '<span style="color:var(--dn-cyan)">OK</span>' : '<span style="color:#888">--</span>';
+            const baseos = b.has_baseos ? '<span style="color:var(--dn-cyan)">OK</span>' : '<span style="color:#888">--</span>';
+            return `<tr class="upgrade-build-row" data-build="${b.build_number}" style="cursor:pointer">
+                <td>#${b.build_number}</td><td>${status}${asan}${expired}</td>
+                <td>${formatAge(b.age_hours)}</td><td>${dnos}</td><td>${gi}</td><td>${baseos}</td>
+            </tr>`;
+        };
+
+        const showBuildTable = async (branch) => {
+            const tableArea = content.querySelector('#upgrade-build-area');
+            tableArea.innerHTML = '<div class="scaler-loading">Scanning builds (including failed)...</div>';
+            try {
+                const data = await ScalerAPI.getBuildsForBranch(branch);
+                if (!data.builds || data.builds.length === 0) {
+                    tableArea.innerHTML = '<div class="scaler-info-box" style="color:#f39c12">No builds with image artifacts found for this branch.</div>';
+                    return;
+                }
+                tableArea.innerHTML = `
+                    <div style="font-size:0.85em;color:#888;margin-bottom:6px">
+                        ${data.builds.length} builds with images (includes failed). Click to select.
+                    </div>
+                    <table style="width:100%;border-collapse:collapse;font-size:0.9em">
+                        <thead><tr style="color:#888;text-align:left;border-bottom:1px solid #333">
+                            <th>Build</th><th>Status</th><th>Age</th><th>DNOS</th><th>GI</th><th>BaseOS</th>
+                        </tr></thead>
+                        <tbody>${data.builds.map(renderBuildRow).join('')}</tbody>
+                    </table>
+                    <div id="upgrade-build-detail" style="margin-top:10px"></div>`;
+                tableArea.querySelectorAll('.upgrade-build-row').forEach(row => {
+                    row.addEventListener('click', () => {
+                        tableArea.querySelectorAll('.upgrade-build-row').forEach(r => r.style.background = '');
+                        row.style.background = 'rgba(0,200,255,0.08)';
+                        const bn = parseInt(row.dataset.build);
+                        selectedBuild = data.builds.find(b => b.build_number === bn);
+                        const det = tableArea.querySelector('#upgrade-build-detail');
+                        if (selectedBuild) {
+                            const flags = [];
+                            if (selectedBuild.is_sanitizer) flags.push('[ASAN] AddressSanitizer instrumented');
+                            if (selectedBuild.result !== 'SUCCESS') flags.push(`Build result: ${selectedBuild.result} (images still usable)`);
+                            if (selectedBuild.is_expired) flags.push('Artifacts may be expired (48h retention)');
+                            det.innerHTML = `<div class="scaler-info-box" style="border-color:var(--dn-cyan)">
+                                Selected: <strong>#${selectedBuild.build_number}</strong>
+                                ${flags.length ? '<br>' + flags.map(f => `<span style="color:#f39c12">${f}</span>`).join('<br>') : ''}
+                            </div>`;
+                        }
+                    });
+                });
+                // Auto-select first build
+                const firstRow = tableArea.querySelector('.upgrade-build-row');
+                if (firstRow) firstRow.click();
+            } catch (e) {
+                tableArea.innerHTML = `<div class="scaler-error">${e.message}</div>`;
+            }
+        };
+
         try {
             const data = await ScalerAPI.getDevices();
-            
-        content.innerHTML = `
-            <div class="scaler-form">
+
+            content.innerHTML = `
+                <div class="scaler-form">
                     <div class="scaler-info-box">
-                        Upgrade DNOS, GI, and BaseOS from Jenkins builds.
+                        Browse Jenkins builds including failed builds with valid images.
+                        Sanitizer [ASAN] builds are detected and flagged.
                     </div>
-                <div class="scaler-form-group">
+                    <div class="scaler-form-group">
                         <label>Select Devices</label>
                         <div id="upgrade-devices" class="scaler-checkbox-list">
                             ${data.devices.map(dev => `
@@ -4530,10 +5552,14 @@ const ScalerGUI = {
                         </div>
                     </div>
                     <div class="scaler-form-group">
-                        <label>Branch</label>
-                        <input type="text" id="upgrade-branch" class="scaler-input" value="main" placeholder="main or private branch name">
+                        <label>Source</label>
+                        <div style="display:flex;gap:6px;margin-bottom:8px">
+                            <input type="text" id="upgrade-branch" class="scaler-input" style="flex:1" placeholder="Branch name or Jenkins URL">
+                            <button class="scaler-btn scaler-btn-primary" id="upgrade-search" style="white-space:nowrap">Search Builds</button>
+                        </div>
                     </div>
-                    <div class="scaler-form-group">
+                    <div id="upgrade-build-area"></div>
+                    <div class="scaler-form-group" style="margin-top:12px">
                         <label>Components to Upgrade</label>
                         <div class="scaler-checkbox-list">
                             <label class="scaler-checkbox-item"><input type="checkbox" value="DNOS" checked> DNOS</label>
@@ -4545,49 +5571,70 @@ const ScalerGUI = {
                         <label>Upgrade Type</label>
                         <select id="upgrade-type" class="scaler-select">
                             <option value="normal">Normal (Same Major Version)</option>
-                            <option value="delete_deploy">Delete & Deploy (Major Version Change)</option>
-                    </select>
-                </div>
-                <div class="scaler-form-actions">
+                            <option value="delete_deploy">Delete + Deploy (Major Version Change)</option>
+                        </select>
+                    </div>
+                    <div class="scaler-form-actions">
                         <button class="scaler-btn" id="upgrade-cancel">Cancel</button>
                         <button class="scaler-btn scaler-btn-primary" id="upgrade-start">Start Upgrade</button>
-                </div>
-            </div>
-        `;
-            
+                    </div>
+                </div>`;
+
             document.getElementById('upgrade-cancel').onclick = () => this.closePanel('upgrade-wizard');
+
+            document.getElementById('upgrade-search').onclick = async () => {
+                const input = document.getElementById('upgrade-branch').value.trim();
+                if (!input) { this.showNotification('Enter a branch name or Jenkins URL', 'warning'); return; }
+
+                if (input.startsWith('http')) {
+                    const area = content.querySelector('#upgrade-build-area');
+                    area.innerHTML = '<div class="scaler-loading">Resolving Jenkins URL...</div>';
+                    try {
+                        const resolved = await ScalerAPI.resolveJenkinsUrl(input);
+                        document.getElementById('upgrade-branch').value = resolved.branch || input;
+                        await showBuildTable(resolved.branch);
+                    } catch (e) {
+                        area.innerHTML = `<div class="scaler-error">${e.message}</div>`;
+                    }
+                } else {
+                    await showBuildTable(input);
+                }
+            };
+
+            // Enter key triggers search
+            document.getElementById('upgrade-branch').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') document.getElementById('upgrade-search').click();
+            });
+
             document.getElementById('upgrade-start').onclick = async () => {
-                const deviceCheckboxes = document.querySelectorAll('#upgrade-devices input:checked');
-                const deviceIds = Array.from(deviceCheckboxes).map(cb => cb.value);
-                
-                const componentCheckboxes = content.querySelectorAll('.scaler-checkbox-list input[value="DNOS"], .scaler-checkbox-list input[value="GI"], .scaler-checkbox-list input[value="BaseOS"]');
-                const components = Array.from(componentCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
-                
-                if (deviceIds.length === 0) {
-                    this.showNotification('Select at least one device', 'warning');
-                return;
-            }
-            
-                if (components.length === 0) {
-                    this.showNotification('Select at least one component', 'warning');
-                return;
-            }
-            
-                const branch = document.getElementById('upgrade-branch').value || 'main';
+                const deviceIds = Array.from(content.querySelectorAll('#upgrade-devices input:checked')).map(cb => cb.value);
+                const components = Array.from(content.querySelectorAll('.scaler-checkbox-list input[value="DNOS"], .scaler-checkbox-list input[value="GI"], .scaler-checkbox-list input[value="BaseOS"]'))
+                    .filter(cb => cb.checked).map(cb => cb.value);
+
+                if (deviceIds.length === 0) { this.showNotification('Select at least one device', 'warning'); return; }
+                if (components.length === 0) { this.showNotification('Select at least one component', 'warning'); return; }
+                if (!selectedBuild) { this.showNotification('Search and select a build first', 'warning'); return; }
+
+                const branch = document.getElementById('upgrade-branch').value.trim() || 'main';
                 const upgradeType = document.getElementById('upgrade-type').value;
-                
+
                 this.closePanel('upgrade-wizard');
-                
                 try {
+                    const stack = await ScalerAPI.getBuildStack(branch, selectedBuild.build_number);
                     const result = await ScalerAPI.imageUpgrade({
                         device_ids: deviceIds,
                         branch: branch,
+                        build_number: selectedBuild.build_number,
                         components: components,
                         upgrade_type: upgradeType,
+                        dnos_url: stack.dnos_url,
+                        gi_url: stack.gi_url,
+                        baseos_url: stack.baseos_url,
+                        is_sanitizer: selectedBuild.is_sanitizer,
                         parallel: true
                     });
                     this.showProgress(result.job_id, `Upgrading ${deviceIds.length} devices`);
-            } catch (e) {
+                } catch (e) {
                     this.showNotification(`Upgrade failed: ${e.message}`, 'error');
                 }
             };
@@ -4643,6 +5690,8 @@ const ScalerGUI = {
                                 <option value="l2vpn">L2VPN</option>
                                 <option value="evpn">EVPN</option>
                                 <option value="vpws">VPWS</option>
+                                <option value="vrf">VRF</option>
+                                <option value="flowspec-vpn">FlowSpec VPN</option>
                             </select>
                         </div>
                     </div>
@@ -5107,7 +6156,7 @@ const ScalerGUI = {
         if (sorted.length === 0) {
             listEl.innerHTML = '<div class="scaler-history-empty">No wizard runs yet. Complete a wizard to see history here.</div>';
         } else {
-            const wizardLabels = { interfaces: 'Interface', services: 'Service', vrf: 'VRF', 'bridge-domain': 'Bridge Domain', flowspec: 'FlowSpec', 'routing-policy': 'Routing Policy', bgp: 'BGP', igp: 'IGP' };
+            const wizardLabels = { interfaces: 'Interface', services: 'Service', vrf: 'VRF', 'bridge-domain': 'Bridge Domain', flowspec: 'FlowSpec', 'flowspec-vpn': 'FlowSpec VPN', 'routing-policy': 'Routing Policy', bgp: 'BGP', igp: 'IGP' };
             Object.keys(byDate).forEach(date => {
                 const group = document.createElement('div');
                 group.className = 'scaler-history-group';
@@ -5138,7 +6187,7 @@ const ScalerGUI = {
                         const acts = li.querySelector('.scaler-history-actions');
                         if (acts) acts.style.display = acts.style.display === 'none' ? 'flex' : 'none';
                     });
-                    const typeToOpen = { interfaces: 'openInterfaceWizard', services: 'openServiceWizard', vrf: 'openVRFWizard', 'bridge-domain': 'openBridgeDomainWizard', flowspec: 'openFlowSpecWizard', 'routing-policy': 'openRoutingPolicyWizard', bgp: 'openBGPWizard', igp: 'openIGPWizard' };
+                    const typeToOpen = { interfaces: 'openInterfaceWizard', services: 'openServiceWizard', vrf: 'openVRFWizard', 'bridge-domain': 'openBridgeDomainWizard', flowspec: 'openFlowSpecWizard', 'flowspec-vpn': 'openFlowSpecVPNWizard', 'routing-policy': 'openRoutingPolicyWizard', bgp: 'openBGPWizard', igp: 'openIGPWizard' };
                     const openMethod = typeToOpen[rec.wizardType] || 'openInterfaceWizard';
                     li.querySelector('.scaler-history-rerun')?.addEventListener('click', (e) => {
                         e.stopPropagation();
@@ -5280,7 +6329,7 @@ const ScalerGUI = {
                             const job = jobs.find((j) => j.job_id === jid);
                             const text = (job?.terminal_lines || []).join('');
                             try {
-                                await navigator.clipboard.writeText(text);
+                                await window.safeClipboardWrite(text);
                                 this.showNotification('Terminal output copied', 'success');
                             } catch (_) {}
                         };
@@ -5910,13 +6959,30 @@ const ScalerGUI = {
                         const free = d.deviceContext?.interfaces?.free_physical || [];
                         const ifaces = ['loopback0'].concat(wan.filter(i => i !== 'loopback0')).concat(free.slice(0, 8)).filter((v, i, a) => a.indexOf(v) === i);
                         const afList = ['ipv4-unicast','ipv6-unicast','ipv4-vpn','ipv6-vpn','ipv4-flowspec','ipv6-flowspec','ipv4-flowspec-vpn','ipv6-flowspec-vpn'];
+                        const fsAfList = ['ipv4-flowspec','ipv6-flowspec','ipv4-flowspec-vpn','ipv6-flowspec-vpn'];
+                        const baseAfList = afList.filter(af => !fsAfList.includes(af));
+                        const nbrs = d.deviceContext?.detected_bgp_neighbors || [];
+                        const fsHint = nbrs.filter(n => n.has_v4_fs_vpn || n.has_v6_fs_vpn).map(n => {
+                            const parts = [];
+                            if (n.has_v4_fs_vpn) parts.push('ipv4-fs-vpn');
+                            if (n.has_v6_fs_vpn) parts.push('ipv6-fs-vpn');
+                            return `${n.ip} (${parts.join(', ')})`;
+                        });
+                        const fsHintHtml = fsHint.length ? `<div class="scaler-info-box scaler-flowspec-hint" style="margin-top:8px"><strong>FlowSpec on existing neighbors:</strong> ${fsHint.join('; ')}</div>` : '';
                         return `
                         <div class="scaler-form">
                             <div class="scaler-form-group">
                                 <label>Address Families</label>
                                 <div class="scaler-checkbox-group" id="bgp-af-group">
-                                    ${afList.map(af => `<label class="scaler-checkbox"><input type="checkbox" name="bgp-af" value="${af}" ${afs.includes(af) ? 'checked' : ''}> ${af}</label>`).join('')}
+                                    ${baseAfList.map(af => `<label class="scaler-checkbox"><input type="checkbox" name="bgp-af" value="${af}" ${afs.includes(af) ? 'checked' : ''}> ${af}</label>`).join('')}
                                 </div>
+                            </div>
+                            <div class="scaler-form-group">
+                                <label>FlowSpec AFI</label>
+                                <div class="scaler-checkbox-group scaler-flowspec-af-group" id="bgp-fs-af-group">
+                                    ${fsAfList.map(af => `<label class="scaler-checkbox"><input type="checkbox" name="bgp-af" value="${af}" ${afs.includes(af) ? 'checked' : ''}> ${af}</label>`).join('')}
+                                </div>
+                                ${fsHintHtml}
                             </div>
                             <div class="scaler-form-row">
                                 <div class="scaler-form-group"><label>Peer Group</label><input type="text" id="bgp-peer-group" class="scaler-input" value="${d.peer_group || ''}" placeholder="Optional"></div>
@@ -5988,6 +7054,7 @@ const ScalerGUI = {
                                 <pre id="bgp-review-config" class="scaler-syntax-preview">Generating...</pre>
                             </div>
                             <div id="config-validation"></div>
+                            <div id="whats-next-container"></div>
                         </div>`,
                     afterRender: async (d) => {
                         try {
@@ -6010,6 +7077,12 @@ const ScalerGUI = {
                                 const vEl = document.getElementById('config-validation');
                                 if (vEl) vEl.innerHTML = ScalerGUI._renderValidationResults(val.errors, val.warnings, val.suggestions);
                             } catch (_) {}
+                            const container = document.getElementById('whats-next-container');
+                            if (container) {
+                                const createdData = { deviceId: d.deviceId, bgp: { peer_ip: d.peer_ip_start, local_as: d.local_as } };
+                                const section = ScalerGUI._renderWhatsNextSection('bgp', d, createdData, r.config);
+                                if (section) { container.innerHTML = ''; container.appendChild(section); }
+                            }
                         } catch (e) {
                             const el = document.getElementById('bgp-review-config');
                             if (el) el.textContent = `Error: ${e.message}`;
@@ -6068,7 +7141,7 @@ const ScalerGUI = {
             onComplete: async (data) => {
                 if (data.pushMode === 'clipboard') {
                     const config = data.generatedConfig || '';
-                    try { await navigator.clipboard.writeText(config); } catch (_) {}
+                    try { await window.safeClipboardWrite(config); } catch (_) {}
                     const ctx = data.deviceContext || {};
                     const host = ctx.mgmt_ip || ctx.ip || '';
                     if (host) window.open(`ssh://dnroot@${host}`, '_blank');
@@ -6180,7 +7253,12 @@ const ScalerGUI = {
                                 </select>
                             </div>
                             <div class="scaler-form-group"><label>Area ID</label><input type="text" id="igp-area" class="scaler-input" value="${area}"></div>
-                            <div class="scaler-form-group"><label>Router IP</label><input type="text" id="igp-router-ip" class="scaler-input" value="${routerIp}"></div>
+                            <div class="scaler-form-group"><label>Router IP</label><input type="text" id="igp-router-ip" class="scaler-input" value="${routerIp}" placeholder="e.g. 1.1.1.1 (lo0)"></div>
+                            <div id="igp-isis-net-row" class="scaler-form-group" style="display:${prot === 'isis' ? 'block' : 'none'}">
+                                <label>ISIS NET (auto-generated)</label>
+                                <div class="scaler-info-box" style="font-family:monospace;font-size:12px;padding:8px" id="igp-isis-net-display">${ScalerGUI.ipToIsisNet(routerIp, area)}</div>
+                                <div class="scaler-info-box" style="font-size:10px;margin-top:4px;color:rgba(255,255,255,0.6)">Derived from Router IP. Used for ISIS system-id.</div>
+                            </div>
                             <div class="scaler-form-group"><label>Interfaces (comma-separated)</label><input type="text" id="igp-ifaces" class="scaler-input" value="${ifaces}" placeholder="loopback0, ge100-0/0/0"></div>
                             <div id="igp-ifaces-suggestions"></div>
                             <div class="scaler-form-row">
@@ -6203,12 +7281,25 @@ const ScalerGUI = {
                                 input.dispatchEvent(new Event('input'));
                             } }));
                         }
+                        const updateNetDisplay = () => {
+                            const netEl = document.getElementById('igp-isis-net-display');
+                            const netRow = document.getElementById('igp-isis-net-row');
+                            const prot = document.getElementById('igp-protocol')?.value || 'isis';
+                            if (netRow) netRow.style.display = prot === 'isis' ? 'block' : 'none';
+                            if (netEl && prot === 'isis') {
+                                const area = document.getElementById('igp-area')?.value || '49.0001';
+                                const rip = document.getElementById('igp-router-ip')?.value || '1.1.1.1';
+                                netEl.textContent = ScalerGUI.ipToIsisNet(rip, area);
+                            }
+                        };
                         document.getElementById('igp-protocol')?.addEventListener('change', (e) => {
                             const row = document.getElementById('igp-isis-level-row');
                             if (row) row.style.display = e.target.value === 'isis' ? 'block' : 'none';
+                            updateNetDisplay();
                         });
                         let t;
                         const up = async () => {
+                            updateNetDisplay();
                             clearTimeout(t);
                             t = setTimeout(async () => {
                                 try {
@@ -6261,6 +7352,7 @@ const ScalerGUI = {
                                 <pre id="igp-review-config" class="scaler-syntax-preview">Generating...</pre>
                             </div>
                             <div id="config-validation"></div>
+                            <div id="whats-next-container"></div>
                         </div>`,
                     afterRender: async (d) => {
                         try {
@@ -6279,6 +7371,12 @@ const ScalerGUI = {
                                 const vEl = document.getElementById('config-validation');
                                 if (vEl) vEl.innerHTML = ScalerGUI._renderValidationResults(val.errors, val.warnings, val.suggestions);
                             } catch (_) {}
+                            const container = document.getElementById('whats-next-container');
+                            if (container) {
+                                const createdData = { deviceId: d.deviceId, interfaces: d.interfaces || [], loopback_ip: d.router_ip };
+                                const section = ScalerGUI._renderWhatsNextSection('igp', d, createdData, r.config);
+                                if (section) { container.innerHTML = ''; container.appendChild(section); }
+                            }
                         } catch (e) {
                             const el = document.getElementById('igp-review-config');
                             if (el) el.textContent = `Error: ${e.message}`;
@@ -6337,7 +7435,7 @@ const ScalerGUI = {
             onComplete: async (data) => {
                 if (data.pushMode === 'clipboard') {
                     const config = data.generatedConfig || '';
-                    try { await navigator.clipboard.writeText(config); } catch (_) {}
+                    try { await window.safeClipboardWrite(config); } catch (_) {}
                     const ctx = data.deviceContext || {};
                     const host = ctx.mgmt_ip || ctx.ip || '';
                     if (host) window.open(`ssh://dnroot@${host}`, '_blank');
@@ -6394,6 +7492,144 @@ const ScalerGUI = {
             }).catch(() => {});
         }
     },
+
+    async openSystemWizard(deviceId = null, prefillParams = null) {
+        if (!deviceId) {
+            this.openDeviceSelector('System Config', (id) => this.openSystemWizard(id, prefillParams));
+            return;
+        }
+        const content = document.createElement('div');
+        content.innerHTML = '<div class="scaler-loading">Loading...</div>';
+        this.openPanel('system-wizard', `System Config - ${deviceId}`, content, { width: '520px', parentPanel: 'scaler-menu' });
+        const self = this;
+        let ctx = this._deviceContexts[deviceId] || null;
+        const hasFresh = ctx && (Date.now() - (ctx._fetchedAt || 0)) < this._contextCacheTTL;
+        if (!hasFresh) {
+            try {
+                ctx = await this.getDeviceContext(deviceId);
+            } catch (_) {}
+        }
+        const cfg = ctx?.config_summary || {};
+        const sysName = cfg.system_name || cfg.hostname || deviceId;
+        this.WizardController.init({
+            panelName: 'system-wizard',
+            quickNavKey: 'system-wizard',
+            title: `System Config - ${deviceId}`,
+            lastRunWizardType: 'system',
+            initialData: {
+                deviceId,
+                deviceContext: ctx,
+                name: sysName,
+                timezone: cfg.timezone || 'UTC',
+                timing_mode: 'ntp',
+                ntp_servers: [],
+                ssh_admin_state: 'enabled',
+                ...(prefillParams || {})
+            },
+            wizardHeader: (data) => self.renderContextPanel(deviceId, data.deviceContext || {}, {
+                onRefresh: () => self.refreshDeviceContextLive(deviceId).then(c => {
+                    self.WizardController.data.deviceContext = c;
+                    self.WizardController.render();
+                })
+            }),
+            steps: [
+                {
+                    title: 'Hostname & Timezone',
+                    render: (d) => `
+                        <div class="scaler-form">
+                            <div class="scaler-form-group"><label>System Name (hostname)</label><input type="text" id="sys-name" class="scaler-input" value="${d.name || ''}" placeholder="e.g. PE-4"></div>
+                            <div class="scaler-form-group"><label>Timezone</label><input type="text" id="sys-timezone" class="scaler-input" value="${d.timezone || 'UTC'}" placeholder="e.g. Israel, UTC"></div>
+                            <div class="scaler-form-group"><label>Timing Mode</label><select id="sys-timing" class="scaler-select"><option value="ntp" ${(d.timing_mode || 'ntp') === 'ntp' ? 'selected' : ''}>NTP</option><option value="manual" ${d.timing_mode === 'manual' ? 'selected' : ''}>Manual</option></select></div>
+                        </div>`,
+                    collectData: () => ({
+                        name: document.getElementById('sys-name')?.value || '',
+                        timezone: document.getElementById('sys-timezone')?.value || 'UTC',
+                        timing_mode: document.getElementById('sys-timing')?.value || 'ntp'
+                    })
+                },
+                {
+                    title: 'NTP Servers',
+                    render: (d) => {
+                        const srv = (d.ntp_servers || []).map(s => s.address || s.server || s).filter(Boolean);
+                        return `<div class="scaler-form">
+                            <div class="scaler-info-box">NTP server IPs (comma-separated). VRF default used.</div>
+                            <div class="scaler-form-group"><label>NTP Servers</label><input type="text" id="ntp-servers" class="scaler-input" value="${srv.join(', ')}" placeholder="e.g. 100.64.15.2, 100.64.15.3"></div>
+                        </div>`;
+                    },
+                    collectData: () => {
+                        const val = document.getElementById('ntp-servers')?.value || '';
+                        const addrs = val.split(',').map(s => s.trim()).filter(Boolean);
+                        return { ntp_servers: addrs.map(a => ({ address: a, vrf: 'default' })) };
+                    }
+                },
+                {
+                    title: 'Review & Push',
+                    render: (data) => `<div class="scaler-form">
+                        <div class="scaler-form-group"><label>Generated Config</label><pre id="system-config-preview" class="scaler-syntax-preview">Loading...</pre></div>
+                        <div class="scaler-form-group"><label>Push Mode</label><div class="scaler-radio-group">
+                            <label class="scaler-radio"><input type="radio" name="sys-push-mode" value="dry_run" checked><span>Commit Check First</span></label>
+                            <label class="scaler-radio"><input type="radio" name="sys-push-mode" value="commit"><span>Commit</span></label>
+                            <label class="scaler-radio"><input type="radio" name="sys-push-mode" value="clipboard"><span>Copy to Clipboard</span></label>
+                        </div></div>
+                    </div>`,
+                    afterRender: async (data) => {
+                        const pre = document.getElementById('system-config-preview');
+                        if (!pre) return;
+                        try {
+                            const params = {
+                                name: data.name || data.deviceId,
+                                timezone: data.timezone || 'UTC',
+                                timing_mode: data.timing_mode || 'ntp',
+                                ntp_servers: data.ntp_servers || [],
+                                ssh_admin_state: data.ssh_admin_state || 'enabled'
+                            };
+                            const r = await ScalerAPI.generateSystem(params);
+                            self.WizardController.data.generatedConfig = r.config;
+                            pre.textContent = r.config || '(empty)';
+                        } catch (e) {
+                            pre.textContent = `Error: ${e.message}`;
+                        }
+                    },
+                    collectData: () => ({
+                        dryRun: document.querySelector('input[name="sys-push-mode"]:checked')?.value === 'dry_run',
+                        pushMode: document.querySelector('input[name="sys-push-mode"]:checked')?.value || 'dry_run'
+                    })
+                }
+            ],
+            onComplete: async (data) => {
+                const config = data.generatedConfig || '';
+                const mode = data.pushMode || 'dry_run';
+                const ctx = data.deviceContext || {};
+                if (mode === 'clipboard') {
+                    try { await window.safeClipboardWrite(config); } catch (_) {}
+                    this.showNotification('Config copied to clipboard', 'success');
+                    this.closePanel('system-wizard');
+                    return;
+                }
+                try {
+                    const result = await ScalerAPI.pushConfig({
+                        device_id: data.deviceId,
+                        config,
+                        hierarchy: 'system',
+                        mode: 'merge',
+                        dry_run: mode === 'dry_run',
+                        ssh_host: ctx.mgmt_ip || ctx.ip || '',
+                        job_name: `System config on ${data.deviceId}`
+                    });
+                    this.closePanel('system-wizard');
+                    this.showProgress(result.job_id, `System: ${data.deviceId}`, {
+                        onComplete: (success) => {
+                            if (success) this.showNotification(`System config applied on ${data.deviceId}`, 'success');
+                            else this.showNotification(`Push failed on ${data.deviceId}`, 'error');
+                        }
+                    });
+                } catch (e) {
+                    this.showNotification(`Push failed: ${e.message}`, 'error');
+                }
+            }
+        });
+    },
+
     openMirrorWizard(prefillSourceId, prefillTargetId) {
         const devices = this._getCanvasDevices();
         if (devices.length < 2) { this.showNotification('Add at least 2 devices to the canvas to mirror', 'warning'); return; }

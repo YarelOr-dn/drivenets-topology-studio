@@ -168,6 +168,14 @@ class FileManager {
      */
     saveRecoveryPoint() {
         if (this.editor.initializing) return;
+        if (!Array.isArray(this.editor.objects) || this.editor.objects.length === 0) return;
+        
+        // Sanity check: don't overwrite recovery with massively reduced state
+        const prevCount = this._lastRecoveryObjectCount || 0;
+        if (prevCount >= 5 && this.editor.objects.length < Math.ceil(prevCount * 0.3)) {
+            console.warn(`[FileManager] Recovery save blocked: objects dropped from ${prevCount} to ${this.editor.objects.length}`);
+            return;
+        }
         
         try {
             const recoveryData = {
@@ -193,17 +201,13 @@ class FileManager {
             };
             
             localStorage.setItem(this.recoveryKey, JSON.stringify(recoveryData));
+            this._lastRecoveryObjectCount = this.editor.objects.length;
             
             // Update session activity
             const sessionData = JSON.parse(localStorage.getItem(this.sessionKey) || '{}');
             sessionData.lastActive = Date.now();
             sessionData.objectCount = this.editor.objects.length;
             localStorage.setItem(this.sessionKey, JSON.stringify(sessionData));
-            
-            // Silent save - only log in debug mode
-            if (window.DEBUG_MODE) {
-                console.log(`[FileManager] Recovery point saved: ${this.editor.objects.length} objects`);
-            }
         } catch (error) {
             console.error('[FileManager] Recovery point save failed:', error);
         }
@@ -337,6 +341,8 @@ class FileManager {
                 </div>
             `;
             
+            modal.addEventListener('keydown', (e) => { e.stopPropagation(); });
+            modal.addEventListener('keyup', (e) => { e.stopPropagation(); });
             document.body.appendChild(modal);
             
             // Handle buttons

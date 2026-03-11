@@ -350,7 +350,7 @@ function showSSHAddressDialog(editor, device) {
             const sshCommand = `ssh ${user}@${host}`;
             
             // Copy to clipboard
-            navigator.clipboard.writeText(sshCommand).then(() => {
+            window.safeClipboardWrite(sshCommand).then(() => {
                 // Visual feedback
                 helpBtn.textContent = '✓';
                 helpBtn.style.background = 'rgba(39, 174, 96, 0.2)';

@@ -241,8 +241,20 @@ def _build_config_summary(config: str) -> dict:
         return {"error": f"Parser import failed: {e}", "raw_lines": len(config.splitlines())}
 
     as_num = get_as_number_from_config(config)
+    system_name = ""
+    try:
+        from scaler.wizard.parsers import extract_hierarchy_section
+        sys_section = extract_hierarchy_section(config, "system")
+        if sys_section:
+            nm = re.search(r"^\s+name\s+(\S+)", sys_section, re.MULTILINE)
+            if nm:
+                system_name = nm.group(1)
+    except Exception:
+        pass
     summary = {
         "lines": len(config.splitlines()),
+        "system_name": system_name,
+        "hostname": system_name or "",
         "loopback0_ip": get_lo0_ip_from_config(config) or "",
         "as_number": str(as_num) if as_num is not None else "",
         "router_id": get_router_id_from_config(config) or "",
@@ -373,27 +385,53 @@ def scan_existing(body: dict = None):
         from scaler.wizard.scale_operations import (
             _scan_used_sub_ids,
             _scan_l3_sub_ids,
+            _scan_l2_sub_ids,
+            _scan_sub_id_details,
+            _scan_outer_inner_map,
             _scan_used_vrf_numbers,
             _scan_used_route_targets,
             _find_free_numbers,
         )
+        from datetime import datetime
         result = {
             "existing_sub_ids": [],
             "existing_vrfs": [],
             "existing_evis": [],
             "l3_conflicts": [],
+            "l2_sub_ids": [],
+            "sub_id_details": {},
+            "outer_inner_map": {},
             "next_free": {},
+            "config_fetched_at": None,
         }
+        config_path = Path(SCALER_ROOT) / "db" / "configs" / scaler_id / "running.txt"
+        if config_path.exists():
+            try:
+                result["config_fetched_at"] = datetime.fromtimestamp(config_path.stat().st_mtime).isoformat() + "Z"
+            except Exception:
+                result["config_fetched_at"] = datetime.utcnow().isoformat() + "Z"
+        else:
+            result["config_fetched_at"] = datetime.utcnow().isoformat() + "Z"
         if scan_type in ("interfaces", "all") and parent_interface:
             used_sub = _scan_used_sub_ids(config, parent_interface)
             l3_conflicts = _scan_l3_sub_ids(config, parent_interface)
+            l2_sub_ids = _scan_l2_sub_ids(config, parent_interface)
+            details = _scan_sub_id_details(config, parent_interface)
+            outer_inner = _scan_outer_inner_map(config, parent_interface)
             result["existing_sub_ids"] = sorted(used_sub)
             result["l3_conflicts"] = sorted(l3_conflicts)
+            result["l2_sub_ids"] = sorted(l2_sub_ids)
+            result["sub_id_details"] = {str(k): v for k, v in details.items()}
+            result["outer_inner_map"] = {str(k): v for k, v in outer_inner.items()}
             result["next_free"]["sub_id"] = next((n for n in range(1, 65536) if n not in used_sub), 1)
         if scan_type in ("services", "vrfs", "all"):
             vrf_used = _scan_used_vrf_numbers(config, "VRF-")
             result["existing_vrfs"] = [f"VRF-{n}" for n in sorted(vrf_used)]
             result["next_free"]["vrf_num"] = next((n for n in range(1, 65536) if n not in vrf_used), 1)
+            rt_base = body.get("rt_base") or "65000"
+            rt_used = _scan_used_route_targets(config, rt_base)
+            result["existing_rts"] = [f"{rt_base}:{n}" for n in sorted(rt_used)]
+            result["next_free"]["rt"] = next((n for n in range(1, 65536) if n not in rt_used), 1)
         return result
     except HTTPException:
         raise
@@ -430,11 +468,13 @@ def detect_pattern(body: dict = None):
         vlan_mode = "qinq" if pattern.get("uses_vlan_tags") else ("dot1q" if pattern.get("uses_vlan_id") else "dot1q")
         step_mode = pattern.get("step_mode") or "outer"
         last_vlan = last_sub
+        detected_step = 1
         return {
             "vlan_mode": vlan_mode,
             "stepping_tag": step_mode,
             "last_vlan": last_vlan,
             "last_sub_id": last_sub,
+            "suggested_next_vlan": last_vlan + detected_step,
             "interface_type": "l2ac" if "ge" in parent_interface or "bundle" in parent_interface else "pwhe",
             "pattern": {k: v for k, v in pattern.items() if isinstance(v, (str, int, float, bool, type(None)))},
         }
@@ -444,6 +484,172 @@ def detect_pattern(body: dict = None):
         raise HTTPException(status_code=501, detail=f"scale_operations unavailable: {e}")
     except Exception as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/api/config/detect/l2ac-parent")
+def detect_l2ac_parent(body: dict = None):
+    """Detect L2-AC parent interface from device config.
+    Returns parent interface (e.g., ge100-18/0/0) or null if none found."""
+    body = body or {}
+    device_id = body.get("device_id") or ""
+    ssh_host = body.get("ssh_host") or ""
+    if not device_id:
+        raise HTTPException(status_code=400, detail="device_id required")
+    try:
+        mgmt_ip, scaler_id, _ = _resolve_mgmt_ip(device_id, ssh_host)
+        config = _get_cached_config(scaler_id)
+        if not config:
+            user, password = _get_credentials()
+            config = _fetch_config_via_ssh(scaler_id, mgmt_ip, user, password)
+        if not config:
+            raise HTTPException(status_code=404, detail="No config available")
+        from scaler.wizard.scale_operations import _detect_l2ac_parent_from_config_str
+        parent = _detect_l2ac_parent_from_config_str(config)
+        return {"l2ac_parent": parent}
+    except HTTPException:
+        raise
+    except ImportError as e:
+        raise HTTPException(status_code=501, detail=f"scale_operations unavailable: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/api/config/detect/bgp-neighbors")
+def detect_bgp_neighbors(body: dict = None):
+    """Detect existing BGP neighbors from device config.
+    Returns list of dicts with ip, remote_as, description, has_v4_fs_vpn, has_v6_fs_vpn."""
+    body = body or {}
+    device_id = body.get("device_id") or ""
+    ssh_host = body.get("ssh_host") or ""
+    if not device_id:
+        raise HTTPException(status_code=400, detail="device_id required")
+    try:
+        mgmt_ip, scaler_id, _ = _resolve_mgmt_ip(device_id, ssh_host)
+        config = _get_cached_config(scaler_id)
+        if not config:
+            user, password = _get_credentials()
+            config = _fetch_config_via_ssh(scaler_id, mgmt_ip, user, password)
+        if not config:
+            raise HTTPException(status_code=404, detail="No config available")
+        from scaler.wizard.scale_operations import _detect_bgp_neighbors
+        neighbors = _detect_bgp_neighbors(config)
+        return {"neighbors": neighbors}
+    except HTTPException:
+        raise
+    except ImportError as e:
+        raise HTTPException(status_code=501, detail=f"scale_operations unavailable: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/api/config/detect/scale-suggestions")
+def detect_scale_suggestions(body: dict = None):
+    """Detect scale-up suggestions (peer match, continue pattern, MH sync)."""
+    body = body or {}
+    device_id = body.get("device_id") or ""
+    ssh_host = body.get("ssh_host") or ""
+    if not device_id:
+        raise HTTPException(status_code=400, detail="device_id required")
+    try:
+        mgmt_ip, scaler_id, _ = _resolve_mgmt_ip(device_id, ssh_host)
+        config = _get_cached_config(scaler_id)
+        if not config:
+            user, password = _get_credentials()
+            config = _fetch_config_via_ssh(scaler_id, mgmt_ip, user, password)
+        if not config:
+            raise HTTPException(status_code=404, detail="No config available")
+        from scaler.wizard.scale_operations import (
+            _generate_scale_up_suggestions,
+            parse_services_from_config,
+        )
+        device_services = {scaler_id: parse_services_from_config(config)}
+        # Minimal multi_ctx-like object
+        class _MinimalCtx:
+            configs = {scaler_id: config}
+        suggestions = _generate_scale_up_suggestions(_MinimalCtx(), device_services)
+        # Serialize suggestions (remove non-JSON fields like apply_func)
+        out = []
+        for s in suggestions:
+            item = {k: v for k, v in s.items() if k != "apply_func" and not callable(v)}
+            out.append(item)
+        return {"suggestions": out}
+    except HTTPException:
+        raise
+    except ImportError as e:
+        raise HTTPException(status_code=501, detail=f"scale_operations unavailable: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/api/config/generate/system")
+def generate_system(body: dict = None):
+    """Generate system config (hostname, NTP, DNS, SSH, SNMP)."""
+    body = body or {}
+    try:
+        from scaler.wizard.config_builders import build_system_config
+        config = build_system_config(body)
+        return {"config": config}
+    except ImportError:
+        raise HTTPException(status_code=501, detail="config_builders unavailable")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/config/validate/policy")
+def validate_policy(body: dict = None):
+    """Validate routing policy config (old rule-based). Returns validation result."""
+    body = body or {}
+    config_text = body.get("config_text") or body.get("config") or ""
+    device_id = body.get("device_id")
+    ssh_host = body.get("ssh_host") or ""
+    if not config_text and device_id:
+        try:
+            mgmt_ip, scaler_id, _ = _resolve_mgmt_ip(device_id, ssh_host)
+            config = _get_cached_config(scaler_id)
+            if not config:
+                user, password = _get_credentials()
+                config = _fetch_config_via_ssh(scaler_id, mgmt_ip, user, password)
+            if config:
+                config_text = config  # load_policies_from_config extracts routing-policy internally
+        except Exception:
+            pass
+    if not config_text:
+        raise HTTPException(status_code=400, detail="config_text or device_id required")
+    try:
+        from scaler.wizard.parsers import load_policies_from_config
+        from scaler.wizard.policy_validator import validate_policy_manager
+        manager = load_policies_from_config(config_text)
+        result = validate_policy_manager(manager)
+        issues = [
+            {
+                "severity": i.severity.value if hasattr(i.severity, "value") else str(i.severity),
+                "component": i.component,
+                "issue": i.issue,
+                "suggestion": i.suggestion,
+                "location": i.location,
+            }
+            for i in result.issues
+        ]
+        return {"valid": result.valid, "issues": issues}
+    except ImportError as e:
+        raise HTTPException(status_code=501, detail=f"policy modules unavailable: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/config/generate/route-policy-structured")
+def generate_route_policy_structured(body: dict = None):
+    """Generate route-policy config from structured params (new syntax SW-181332)."""
+    body = body or {}
+    try:
+        from scaler.wizard.config_builders import build_routing_policy_config
+        params = {"type": "route-policy", **{k: v for k, v in body.items() if k != "type"}}
+        config = build_routing_policy_config(params)
+        return {"config": config}
+    except ImportError:
+        raise HTTPException(status_code=501, detail="config_builders unavailable")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/config/generate/services")
@@ -580,6 +786,39 @@ def _load_limits(device_id: str) -> dict:
 def get_config_limits(device_id: str):
     """Get platform limits for device. Returns max_subifs from limits.json or default 20480."""
     return _load_limits(device_id)
+
+
+@app.get("/api/config/templates/smart-defaults/{device_id}")
+def get_smart_defaults(device_id: str, ssh_host: str = ""):
+    """Get smart defaults (ASN, router-id) for policy templates from device config."""
+    if not device_id:
+        raise HTTPException(status_code=400, detail="device_id required")
+    try:
+        mgmt_ip, scaler_id, _ = _resolve_mgmt_ip(device_id, ssh_host)
+        config = _get_cached_config(scaler_id)
+        if not config:
+            user, password = _get_credentials()
+            config = _fetch_config_via_ssh(scaler_id, mgmt_ip, user, password)
+        asn = None
+        router_id = None
+        if config:
+            import re
+            asn_match = re.search(r'local-as\s+(\d+)', config) or re.search(r'bgp\s+(\d+)', config)
+            if asn_match:
+                asn = int(asn_match.group(1))
+            rid_match = re.search(r'router-id\s+(\d+\.\d+\.\d+\.\d+)', config)
+            if rid_match:
+                router_id = rid_match.group(1)
+        return {
+            "device_id": device_id,
+            "asn": asn,
+            "router_id": router_id,
+            "defaults": {"asn": asn or 65000, "router_id": router_id or "1.1.1.1"},
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 @app.get("/api/config/templates")
@@ -1489,6 +1728,235 @@ def multihoming_sync(body: dict = None):
         raise HTTPException(status_code=503, detail=str(e))
 
 
+@app.post("/api/operations/scale-updown")
+def scale_updown(body: dict = None):
+    """Scale up or down services. Uses scale_operations for parsing and analysis."""
+    import uuid
+    import threading
+    body = body or {}
+    device_ids = body.get("device_ids") or []
+    operation = body.get("operation", "down")
+    service_type = body.get("service_type", "fxc")
+    range_spec = body.get("range_spec") or "last 100"
+    include_interfaces = body.get("include_interfaces", True)
+    dry_run = body.get("dry_run", True)
+    if not device_ids:
+        raise HTTPException(status_code=400, detail="device_ids required")
+    if operation not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="operation must be 'up' or 'down'")
+    valid_types = ["fxc", "l2vpn", "evpn", "vpws", "vrf", "flowspec-vpn"]
+    if service_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"service_type must be one of {valid_types}")
+    job_id = str(uuid.uuid4())[:8]
+    with _push_jobs_lock:
+        _push_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "pending",
+            "phase": "starting",
+            "message": "Analyzing...",
+            "percent": 0,
+            "success": False,
+            "done": False,
+            "terminal_lines": [],
+            "terminal_cursor": 0,
+            "job_name": f"Scale {operation} {service_type}",
+        }
+
+    def _run():
+        try:
+            from scaler.wizard.scale_operations import parse_services_from_config, parse_range_spec
+            all_services = []
+            all_interfaces = []
+            with _push_jobs_lock:
+                _push_jobs[job_id].update(percent=10, message="Parsing services...", status="running")
+                _push_jobs[job_id]["terminal_lines"].append(f"> Operation: scale {operation}")
+                _push_jobs[job_id]["terminal_lines"].append(f"> Service type: {service_type}")
+                _push_jobs[job_id]["terminal_lines"].append(f"> Range: {range_spec}")
+            for device_id in device_ids:
+                config = _get_cached_config(device_id)
+                if not config:
+                    with _push_jobs_lock:
+                        _push_jobs[job_id]["terminal_lines"].append(f"> [WARN] No cached config for {device_id}")
+                    continue
+                try:
+                    services = parse_services_from_config(config)
+                    svc_list = services.get(service_type, [])
+                    if svc_list:
+                        max_num = max(s.service_number for s in svc_list)
+                        target_nums = parse_range_spec(range_spec, max_num)
+                        for svc in svc_list:
+                            if svc.service_number in target_nums:
+                                all_services.append(svc.service_name)
+                                if include_interfaces:
+                                    all_interfaces.extend(svc.interfaces)
+                except Exception as e:
+                    with _push_jobs_lock:
+                        _push_jobs[job_id]["terminal_lines"].append(f"> [ERROR] {device_id}: {str(e)}")
+            with _push_jobs_lock:
+                _push_jobs[job_id].update(percent=40, message=f"Found {len(all_services)} services")
+                _push_jobs[job_id]["terminal_lines"].append(f"> Services affected: {len(all_services)}")
+                _push_jobs[job_id]["terminal_lines"].append(f"> Interfaces affected: {len(all_interfaces)}")
+            if dry_run:
+                with _push_jobs_lock:
+                    _push_jobs[job_id].update(
+                        percent=100, message="Dry run complete", status="completed",
+                        success=True, done=True
+                    )
+                    _push_jobs[job_id]["terminal_lines"].append("> Dry run - no changes applied")
+            else:
+                if operation == "down":
+                    with _push_jobs_lock:
+                        _push_jobs[job_id].update(percent=60, message="Scale down - use scaler-wizard for full apply")
+                    with _push_jobs_lock:
+                        _push_jobs[job_id].update(
+                            percent=100, message=f"Would delete {len(all_services)} services",
+                            status="completed", success=True, done=True
+                        )
+                        _push_jobs[job_id]["terminal_lines"].append("> Scale down: use scaler-wizard CLI for full apply")
+                else:
+                    with _push_jobs_lock:
+                        _push_jobs[job_id].update(
+                            percent=100, message="Scale up: use scaler-wizard CLI",
+                            status="completed", success=True, done=True
+                        )
+                        _push_jobs[job_id]["terminal_lines"].append("> Scale up: use scaler-wizard CLI for interactive flow")
+            _persist_job_if_done(job_id)
+        except Exception as e:
+            with _push_jobs_lock:
+                if job_id in _push_jobs:
+                    _push_jobs[job_id].update(
+                        success=False, message=str(e), status="failed", done=True, percent=100
+                    )
+                    _push_jobs[job_id]["terminal_lines"].append(f"> [ERROR] {str(e)}")
+            _persist_job_if_done(job_id)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"job_id": job_id, "status": "started", "message": f"Scale {operation} started"}
+
+
+# =========================================================================
+# Image Upgrade - Jenkins Build Browsing
+# =========================================================================
+
+@app.post("/api/operations/image-upgrade/builds")
+def get_builds_for_branch(body: dict):
+    """List recent builds with image artifacts for a branch (includes failed + sanitizer detection)."""
+    branch = body.get("branch", "")
+    if not branch:
+        raise HTTPException(status_code=400, detail="branch is required")
+    
+    limit = body.get("limit", 15)
+    max_results = body.get("max_results", 10)
+    
+    try:
+        from scaler.jenkins_integration import JenkinsClient
+        jenkins = JenkinsClient()
+        builds = jenkins.get_recent_builds_with_artifacts(branch, limit=limit, max_results=max_results)
+        
+        return {
+            "branch": branch,
+            "builds": [
+                {
+                    "build_number": b["build"].build_number,
+                    "result": b["build"].result,
+                    "display_name": b["display_name"],
+                    "age_hours": round(b["build"].age_hours, 1),
+                    "is_expired": b["build"].is_expired,
+                    "is_sanitizer": b["is_sanitizer"],
+                    "has_dnos": b["has_dnos"],
+                    "has_gi": b["has_gi"],
+                    "has_baseos": b["has_baseos"],
+                    "url": b["build"].url,
+                }
+                for b in builds
+            ],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/operations/image-upgrade/resolve-url")
+def resolve_jenkins_url(body: dict):
+    """Resolve a Jenkins URL to build info with sanitizer detection."""
+    url = body.get("url", "")
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+    
+    try:
+        from scaler.jenkins_integration import JenkinsClient, get_stack_from_url
+        stack = get_stack_from_url(url)
+        
+        if stack.get("error"):
+            raise HTTPException(status_code=400, detail=stack["error"])
+        
+        from urllib.parse import unquote
+        branch = unquote(stack.get("branch", ""))
+        build_num = stack.get("build")
+        
+        result = {
+            "branch": branch,
+            "build_number": build_num,
+            "dnos_url": stack.get("dnos_url"),
+            "gi_url": stack.get("gi_url"),
+            "baseos_url": stack.get("baseos_url"),
+            "is_expired": stack.get("is_expired", False),
+            "age_hours": round(stack.get("age_hours", 0), 1) if stack.get("age_hours") else None,
+            "result": stack.get("result"),
+            "is_sanitizer": False,
+        }
+        
+        if build_num and branch:
+            try:
+                jenkins = JenkinsClient()
+                resolved = jenkins.get_build_info(branch, build_num)
+                if resolved:
+                    result["is_sanitizer"] = resolved.is_sanitizer
+                    result["result"] = resolved.result
+            except Exception:
+                pass
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/operations/image-upgrade/stack")
+def get_build_stack(body: dict):
+    """Get DNOS/GI/BaseOS URLs for a specific branch + build number."""
+    branch = body.get("branch", "")
+    build_number = body.get("build_number")
+    if not branch or not build_number:
+        raise HTTPException(status_code=400, detail="branch and build_number are required")
+    
+    try:
+        from scaler.jenkins_integration import JenkinsClient
+        jenkins = JenkinsClient()
+        
+        build = jenkins.get_build_info(branch, int(build_number))
+        if not build:
+            raise HTTPException(status_code=404, detail=f"Build #{build_number} not found")
+        
+        urls = jenkins.get_stack_urls(branch, int(build_number))
+        
+        return {
+            "branch": branch,
+            "build_number": build.build_number,
+            "result": build.result,
+            "is_sanitizer": build.is_sanitizer,
+            "is_expired": build.is_expired,
+            "age_hours": round(build.age_hours, 1),
+            "dnos_url": urls.get("dnos"),
+            "gi_url": urls.get("gi"),
+            "baseos_url": urls.get("baseos"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.api_route("/api/operations/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 def operations_stub(path: str):
     """Stub for operations - use scaler-wizard for full functionality."""
@@ -1587,6 +2055,15 @@ def _get_device_context(device_id: str, live: bool = False, ssh_host: str = "") 
         "bgp_peers": [],
         "multihoming": {},
         "platform_limits": {},
+        "scale_suggestions": [],
+        "policy_suggestions": [],
+        "lo0_isis_net": "",
+        "detected_l2ac_parent": None,
+        "detected_bgp_neighbors": [],
+        "existing_route_targets": [],
+        "next_free": {"vrf_number": 1, "rt": 1},
+        "stack": [],
+        "git_commit": None,
     }
 
     try:
@@ -1644,6 +2121,8 @@ def _get_device_context(device_id: str, live: bool = False, ssh_host: str = "") 
                 continue
             try:
                 url = f"{DISCOVERY_API}/api/device/{urllib.parse.quote(try_name)}/lldp"
+                if mgmt_ip:
+                    url += f"?ssh_host={urllib.parse.quote(mgmt_ip)}"
                 req = urllib.request.Request(url)
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     data = json.loads(resp.read())
@@ -1698,6 +2177,32 @@ def _get_device_context(device_id: str, live: bool = False, ssh_host: str = "") 
                         "neighbor": n.get("neighbor_name", n.get("neighbor", "")),
                         "remote": n.get("neighbor_interface", n.get("remote_port", "")),
                     })
+            except Exception:
+                pass
+
+    for try_id in [scaler_device_id, hostname, device_id]:
+        if not try_id:
+            continue
+        ops_path = Path(SCALER_ROOT) / "db" / "configs" / try_id / "operational.json"
+        if ops_path.exists():
+            try:
+                ops = json.loads(ops_path.read_text())
+                stack_comps = ops.get("stack_components", [])
+                if stack_comps and not ctx["stack"]:
+                    ctx["stack"] = [
+                        {
+                            "name": c.get("name", c.get("component", "")),
+                            "hw_model": c.get("hw_model", "-"),
+                            "revert": c.get("revert", "-"),
+                            "current": c.get("current", "-"),
+                            "target": c.get("target", "-"),
+                        }
+                        for c in stack_comps
+                    ]
+                if ctx["git_commit"] is None and ops.get("git_commit"):
+                    ctx["git_commit"] = ops["git_commit"]
+                if ctx["stack"] or ctx["git_commit"]:
+                    break
             except Exception:
                 pass
 
@@ -1799,12 +2304,132 @@ def _get_device_context(device_id: str, live: bool = False, ssh_host: str = "") 
 
             ctx["platform_limits"] = _load_limits(device_id)
 
+            # Phase 2B: Enhanced context fields
+            try:
+                from scaler.wizard.scale_operations import (
+                    _detect_l2ac_parent_from_config_str,
+                    _detect_bgp_neighbors,
+                    _generate_scale_up_suggestions,
+                    parse_services_from_config,
+                    _scan_used_route_targets,
+                    _scan_used_vrf_numbers,
+                )
+                ctx["detected_l2ac_parent"] = _detect_l2ac_parent_from_config_str(config)
+                ctx["detected_bgp_neighbors"] = _detect_bgp_neighbors(config)
+                rt_used = _scan_used_route_targets(config, "65000")
+                ctx["existing_route_targets"] = [f"65000:{n}" for n in sorted(rt_used)]
+                ctx["next_free"]["rt"] = next((n for n in range(1, 65536) if n not in rt_used), 1)
+                vrf_used = _scan_used_vrf_numbers(config, "VRF-")
+                ctx["next_free"]["vrf_number"] = next((n for n in range(1, 65536) if n not in vrf_used), 1)
+                device_services = {scaler_device_id: parse_services_from_config(config)}
+                class _MinimalCtx:
+                    configs = {scaler_device_id: config}
+                suggestions = _generate_scale_up_suggestions(_MinimalCtx(), device_services)
+                ctx["scale_suggestions"] = [{k: v for k, v in s.items() if k != "apply_func" and not callable(v)} for s in suggestions]
+                lo0_ip = next((lb["ip"] for lb in ctx["loopbacks"] if lb.get("name") == "lo0"), None)
+                if lo0_ip:
+                    from scaler.wizard.igp import ip_to_isis_net
+                    ctx["lo0_isis_net"] = ip_to_isis_net(lo0_ip, "49.0001")
+                rp = ctx.get("routing_policies") or {}
+                policy_names = [p.get("name") for p in rp.get("policies", []) if p.get("name")]
+                ctx["policy_suggestions"] = policy_names
+            except ImportError:
+                pass
+            except Exception:
+                pass
+
         except ImportError as e:
             ctx["config_summary"] = {"error": str(e)}
         except Exception as e:
             ctx["config_summary"] = {"error": str(e)}
 
     return ctx
+
+
+def _compute_wizard_suggestions(device_id: str, completed_wizard: str, created_data: dict, ctx: dict) -> list:
+    """Compute next-wizard suggestions from completed wizard and created data."""
+    suggestions = []
+    interfaces = created_data.get("interfaces") or []
+    loopback_ip = created_data.get("loopback_ip") or created_data.get("loopback")
+    vrfs = created_data.get("vrfs") or []
+    has_interfaces = bool(interfaces)
+    has_loopback = bool(loopback_ip)
+    has_vrfs = bool(vrfs)
+
+    if completed_wizard == "interfaces":
+        if has_interfaces:
+            suggestions.append({
+                "wizard": "vrf",
+                "reason": "Attach new sub-interfaces to VRFs",
+                "prefill": {"attachInterfaces": True, "interfaceList": interfaces},
+            })
+            suggestions.append({
+                "wizard": "service",
+                "reason": "Create FXC/VPWS with these interfaces",
+                "prefill": {"attachInterfaces": True, "interfaceList": interfaces},
+            })
+        if has_loopback or has_interfaces:
+            igp_ifaces = (["lo0"] if has_loopback else []) + list(interfaces)
+            suggestions.append({
+                "wizard": "igp",
+                "reason": "Add loopback + interfaces to IGP",
+                "prefill": {"interfaces": igp_ifaces, "router_ip": loopback_ip},
+            })
+            suggestions.append({
+                "wizard": "bgp",
+                "reason": "Configure BGP with loopback as update-source",
+                "prefill": {"update_source": "lo0", "router_id": loopback_ip},
+            })
+    elif completed_wizard in ("services", "bridge-domain"):
+        if has_interfaces:
+            suggestions.append({
+                "wizard": "multihoming",
+                "reason": "Add multihoming ESI to L2 interfaces",
+                "prefill": {"interfaces": interfaces},
+            })
+        suggestions.append({"wizard": "flowspec", "reason": "Add FlowSpec local policy", "prefill": {}})
+    elif completed_wizard == "vrf":
+        if has_vrfs:
+            suggestions.append({
+                "wizard": "bgp",
+                "reason": "Add BGP VRF instance for new VRFs",
+                "prefill": {"vrfs": vrfs},
+            })
+        suggestions.append({"wizard": "flowspec-vpn", "reason": "Add FlowSpec VPN policy", "prefill": {"vrfs": vrfs}})
+    elif completed_wizard == "igp":
+        suggestions.append({"wizard": "bgp", "reason": "Configure BGP peers", "prefill": {"update_source": "lo0"}})
+    elif completed_wizard == "bgp":
+        suggestions.append({"wizard": "flowspec", "reason": "Enable BGP FlowSpec AFI on neighbors", "prefill": {}})
+    elif completed_wizard in ("flowspec", "flowspec-vpn"):
+        suggestions.append({"wizard": "routing-policy", "reason": "Create routing policy for BGP attach", "prefill": {}})
+
+    return suggestions
+
+
+@app.post("/api/wizard/suggestions")
+def wizard_suggestions(body: dict = None):
+    """Backend-driven next-wizard suggestions with pre-fill data.
+    
+    Request: { device_id, completed_wizard, created_data: { interfaces, loopback_ip, vrfs, ... } }
+    Response: { suggestions: [{ wizard, reason, prefill }, ...] }
+    """
+    body = body or {}
+    device_id = body.get("device_id") or ""
+    completed_wizard = body.get("completed_wizard") or ""
+    created_data = body.get("created_data") or {}
+    ssh_host = body.get("ssh_host") or ""
+
+    if not device_id:
+        raise HTTPException(status_code=400, detail="device_id required")
+
+    try:
+        ctx = _get_device_context(device_id, live=False, ssh_host=ssh_host)
+        suggestions = _compute_wizard_suggestions(device_id, completed_wizard, created_data, ctx)
+        return {"suggestions": suggestions}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 @app.get("/api/devices/{device_id}/context")

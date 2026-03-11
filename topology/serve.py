@@ -38,6 +38,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
         self.send_header('Pragma', 'no-cache')
         self.send_header('Expires', '0')
+        self.send_header('Access-Control-Allow-Origin', '*')
         super().end_headers()
     
     def _send_json(self, data, status=200):
@@ -87,6 +88,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception:
                 result["scaler_bridge"] = {"status": "down", "port": 8766}
         return self._send_json(result)
+
+    def do_OPTIONS(self):
+        """Handle CORS preflight requests."""
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.send_header('Access-Control-Max-Age', '86400')
+        self.end_headers()
     
     def _proxy_to_discovery(self, method="GET", body=None):
         """Proxy /api/dnaas/* and /api/network-mapper/* to discovery_api on port 8765."""
@@ -109,7 +119,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     data = resp.read()
                     self.send_response(resp.status)
                     self.send_header('Content-Type', resp.headers.get('Content-Type', 'application/json'))
-                    self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
                     self.wfile.write(data)
                 return
@@ -636,7 +645,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._proxy_to_discovery("GET")
         if path.startswith("/api/config/push/progress/"):
             return self._proxy_sse_stream()
-        if path.startswith("/api/config/") or path.startswith("/api/operations/"):
+        if path.startswith("/api/config/") or path.startswith("/api/operations/") or path.startswith("/api/wizard/"):
             return self._proxy_to_scaler_bridge("GET")
         if path == "/api/health":
             return self._handle_health()
@@ -780,7 +789,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path.startswith("/api/dnaas/") or path.startswith("/api/network-mapper/"):
             return self._proxy_to_discovery("POST", body)
-        if path.startswith("/api/config/") or path.startswith("/api/operations/"):
+        if path.startswith("/api/config/") or path.startswith("/api/operations/") or path.startswith("/api/wizard/"):
             return self._proxy_to_scaler_bridge("POST", body)
         if path == "/api/devices/discover":
             return self._proxy_to_scaler_bridge("POST", body)

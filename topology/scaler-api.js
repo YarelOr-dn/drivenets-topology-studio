@@ -197,7 +197,23 @@ const ScalerAPI = {
         }
         return response.json();
     },
-    
+
+    /**
+     * Sync (fetch and cache) running config from device.
+     * @param {string} deviceId - Device identifier
+     * @param {string} [sshHost=''] - SSH host override
+     * @returns {Promise<{status: string, message: string, lines: number}>}
+     */
+    async syncConfig(deviceId, sshHost = '') {
+        const url = `/api/config/${encodeURIComponent(deviceId)}/sync${sshHost ? `?ssh_host=${encodeURIComponent(sshHost)}` : ''}`;
+        const response = await fetch(url, { method: 'POST' });
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.detail || 'Config sync failed');
+        }
+        return response.json();
+    },
+
     /**
      * Get configuration summary for a device
      * @param {string} deviceId - Device identifier
@@ -227,6 +243,24 @@ const ScalerAPI = {
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.detail || `Failed to get device context for ${deviceId}`);
+        }
+        return response.json();
+    },
+
+    /**
+     * Get next-wizard suggestions from backend (device_id, completed_wizard, created_data).
+     * @param {Object} params - { device_id, completed_wizard, created_data, ssh_host }
+     * @returns {Promise<{suggestions: Array}>} Suggestions with wizard, reason, prefill
+     */
+    async wizardSuggestions(params) {
+        const response = await fetch('/api/wizard/suggestions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Wizard suggestions failed');
         }
         return response.json();
     },
@@ -358,7 +392,95 @@ const ScalerAPI = {
         }
         return response.json();
     },
-    
+
+    async detectL2ACParent(params) {
+        const response = await fetch('/api/config/detect/l2ac-parent', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'L2-AC parent detection failed');
+        }
+        return response.json();
+    },
+
+    async detectBGPNeighbors(params) {
+        const response = await fetch('/api/config/detect/bgp-neighbors', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'BGP neighbors detection failed');
+        }
+        return response.json();
+    },
+
+    async detectScaleSuggestions(params) {
+        const response = await fetch('/api/config/detect/scale-suggestions', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Scale suggestions failed');
+        }
+        return response.json();
+    },
+
+    async generateSystem(params) {
+        const response = await fetch('/api/config/generate/system', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'System config generation failed');
+        }
+        return response.json();
+    },
+
+    async validatePolicy(params) {
+        const response = await fetch('/api/config/validate/policy', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Policy validation failed');
+        }
+        return response.json();
+    },
+
+    async generateRoutePolicyStructured(params) {
+        const response = await fetch('/api/config/generate/route-policy-structured', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Route policy generation failed');
+        }
+        return response.json();
+    },
+
+    async getSmartDefaults(deviceId, sshHost = '') {
+        const url = `/api/config/templates/smart-defaults/${encodeURIComponent(deviceId)}${sshHost ? `?ssh_host=${encodeURIComponent(sshHost)}` : ''}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Smart defaults failed');
+        }
+        return response.json();
+    },
+
     /**
      * Generate service configuration using SCALER's DNOS syntax
      * @param {Object} params - Service parameters
@@ -1221,7 +1343,50 @@ const ScalerAPI = {
             
             poll();
         });
-    }
+    },
+
+    // =====================================================================
+    // Image Upgrade - Jenkins Build Browsing
+    // =====================================================================
+
+    async getBuildsForBranch(branch, opts = {}) {
+        const resp = await fetch('/api/operations/image-upgrade/builds', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ branch, ...opts }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to fetch builds (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async resolveJenkinsUrl(url) {
+        const resp = await fetch('/api/operations/image-upgrade/resolve-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to resolve URL (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async getBuildStack(branch, buildNumber) {
+        const resp = await fetch('/api/operations/image-upgrade/stack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ branch, build_number: buildNumber }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to get stack (${resp.status})`);
+        }
+        return resp.json();
+    },
 };
 
 // Export for module systems if available

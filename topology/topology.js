@@ -2679,8 +2679,8 @@ class TopologyEditor {
         if (window.ObjectDetection && window.ObjectDetection._safeClipboardWrite) {
             return window.ObjectDetection._safeClipboardWrite(text);
         }
-        // Fallback
-        return navigator.clipboard.writeText(text).catch(() => {});
+        // Fallback (safeClipboardWrite works on HTTP; raw API requires HTTPS/localhost)
+        return (window.safeClipboardWrite || (() => Promise.reject(new Error('Clipboard not available'))))(text).catch(() => {});
     }
     
     _checkLinkHit(x, y, obj) {
@@ -5938,6 +5938,13 @@ class TopologyEditor {
     _showLldpInlineSubmenu(lldpBtn, device, serial, sshConfig, toolbar, isDarkMode, iconColor, hoverBg) {
         if (window.SelectionPopups) {
             return window.SelectionPopups._showLldpInlineSubmenu(this, lldpBtn, device, serial, sshConfig, toolbar, isDarkMode, iconColor, hoverBg);
+        }
+    }
+
+    // System Stack inline submenu - appears below System Stack button with Stack Table + Git Commit
+    _showSystemStackInlineSubmenu(stackBtn, device, serial, sshConfig, toolbar, isDarkMode, iconColor, hoverBg) {
+        if (window.SelectionPopups) {
+            return window.SelectionPopups._showSystemStackInlineSubmenu(this, stackBtn, device, serial, sshConfig, toolbar, isDarkMode, iconColor, hoverBg);
         }
     }
     
@@ -9564,9 +9571,15 @@ class TopologyEditor {
      * Show LLDP neighbors table dialog - fetches from scaler-monitor cache
      * Delegated to topology-lldp-dialog.js
      */
-    showLldpTableDialog(device, serial) {
+    showLldpTableDialog(device, serial, options) {
         if (window.LldpDialog) {
-            return window.LldpDialog.showLldpTableDialog(this, device, serial);
+            return window.LldpDialog.showLldpTableDialog(this, device, serial, options);
+        }
+    }
+    
+    showSystemStackDialog(device, serial) {
+        if (window.StackDialog) {
+            return window.StackDialog.showSystemStackDialog(this, device, serial);
         }
     }
     
@@ -11716,24 +11729,30 @@ class TopologyEditor {
     
     autoSave() {
         if (this.initializing) return;
-        // Never overwrite an existing save with an empty topology
         if (!Array.isArray(this.objects) || this.objects.length === 0) {
-            console.warn('Auto-save skipped: empty topology');
+            console.warn('[AutoSave] Skipped: empty topology');
             return;
         }
+        
+        // Sanity check: refuse to overwrite a save that had significantly more
+        // objects. This catches accidental mass-deletion (Ctrl+X, Delete key
+        // while dialog open, etc.) and prevents the corrupted state from being
+        // persisted. The user can still undo and the previous save survives.
+        const prevCount = this._lastSavedObjectCount || 0;
+        if (prevCount >= 5 && this.objects.length < Math.ceil(prevCount * 0.3)) {
+            console.warn(`[AutoSave] BLOCKED: object count dropped from ${prevCount} to ${this.objects.length} (>70% loss). Previous save preserved.`);
+            return;
+        }
+        
         try {
-            console.log('=== AUTO-SAVE START ===');
-            console.log('Auto-saving topology with', this.objects.length, 'objects...');
-            console.log('Objects being saved:', this.objects);
             const data = {
                 version: '1.0',
-                // Preserve link geometry so reload can render immediately without recomputation
                 objects: this.objects.map(obj => ({ ...obj })),
                 metadata: {
                     deviceIdCounter: this.deviceIdCounter,
                     linkIdCounter: this.linkIdCounter,
                     textIdCounter: this.textIdCounter,
-                    shapeIdCounter: this.shapeIdCounter,  // CRITICAL FIX: Save shape ID counter
+                    shapeIdCounter: this.shapeIdCounter,
                     deviceCounters: this.deviceCounters,
                     linkCurveMode: this.linkCurveMode,
                     globalCurveMode: this.globalCurveMode,
@@ -11751,13 +11770,19 @@ class TopologyEditor {
             };
 
             const jsonData = JSON.stringify(data);
-            console.log('Auto-save data size:', jsonData.length, 'characters');
+            
+            // Rotating backup: preserve the previous good save before overwriting
+            try {
+                const prev = localStorage.getItem('topology_autosave');
+                if (prev) {
+                    localStorage.setItem('topology_autosave_backup', prev);
+                }
+            } catch (_) {}
+            
             localStorage.setItem('topology_autosave', jsonData);
-            console.log('Auto-save completed successfully');
+            this._lastSavedObjectCount = this.objects.length;
         } catch (error) {
-            console.error('Auto-save failed:', error);
-            console.error('Error details:', error.stack);
-            // Don't alert - auto-save failures shouldn't interrupt workflow
+            console.error('[AutoSave] Failed:', error);
         }
     }
     
@@ -11775,6 +11800,7 @@ class TopologyEditor {
 
                 if (data.objects && Array.isArray(data.objects)) {
                     this.objects = data.objects;
+                    this._lastSavedObjectCount = this.objects.length;
                     console.log('Successfully assigned objects array with', this.objects.length, 'items');
                 } else {
                     console.warn('No valid objects array in saved data');
@@ -12654,21 +12680,57 @@ window.addEventListener('DOMContentLoaded', () => {
     
     // Debug function to check localStorage - call from browser console
     window.checkAutoSave = () => {
-        const saved = localStorage.getItem('topology_autosave');
-        console.log('=== AUTO-SAVE CHECK ===');
-        console.log('Data exists:', !!saved);
-        console.log('Data length:', saved ? saved.length : 0);
-        if (saved) {
-            try {
-                const data = JSON.parse(saved);
-                console.log('Objects in save:', data.objects?.length || 0);
-                console.log('Full data:', data);
-            } catch (e) {
-                console.error('Parse error:', e);
-            }
-        }
+        const keys = ['topology_autosave', 'topology_autosave_backup', 'topology_recovery', 'topology_current'];
+        console.log('=== TOPOLOGY BACKUP STATUS ===');
         console.log('Current editor objects:', editor.objects.length);
-        return saved;
+        for (const key of keys) {
+            const raw = localStorage.getItem(key);
+            if (!raw) { console.log(`  ${key}: [empty]`); continue; }
+            try {
+                const data = JSON.parse(raw);
+                const objs = data.objects || [];
+                const ts = data.timestamp ? new Date(data.timestamp).toLocaleString() : 'N/A';
+                console.log(`  ${key}: ${objs.length} objects, saved ${ts}, ${(raw.length / 1024).toFixed(1)}KB`);
+            } catch (e) { console.log(`  ${key}: parse error`); }
+        }
+    };
+    
+    // Recovery: restore from best available backup source
+    window.recoverTopology = (source) => {
+        const keys = ['topology_autosave', 'topology_autosave_backup', 'topology_recovery', 'topology_current'];
+        if (source && typeof source === 'string') {
+            keys.unshift(source);
+        }
+        let best = null;
+        let bestKey = null;
+        for (const key of keys) {
+            try {
+                const raw = localStorage.getItem(key);
+                if (!raw) continue;
+                const data = JSON.parse(raw);
+                const objs = data.objects || [];
+                if (objs.length > 0 && (!best || objs.length > best.objects.length)) {
+                    best = data;
+                    bestKey = key;
+                }
+            } catch (_) {}
+        }
+        if (!best) {
+            console.error('No backup found with objects. Try loading from server: Topologies menu -> domain -> file');
+            return false;
+        }
+        console.log(`Recovering from ${bestKey}: ${best.objects.length} objects`);
+        editor.objects = best.objects;
+        if (best.metadata || best.counters) {
+            const m = best.metadata || best.counters || {};
+            editor.deviceIdCounter = m.deviceIdCounter || m.device || 0;
+            editor.linkIdCounter = m.linkIdCounter || m.link || 0;
+            editor.textIdCounter = m.textIdCounter || m.text || 0;
+        }
+        editor.draw();
+        editor.saveState();
+        console.log('Recovery complete. Objects:', editor.objects.length);
+        return true;
     };
     
     // Debug helper to check history state
@@ -12719,8 +12781,8 @@ window.addEventListener('DOMContentLoaded', () => {
     window.FileOps._ensureBugsSection().catch(() => {}).then(() => editor.loadCustomSections());
     
     console.log('Topology Editor initialized.');
-    console.log('Commands: window.checkAutoSave() | window.checkHistory() | window.syncToggles() | window.checkModes()');
-    console.log('Toggle debugger: Press D key or click Hide/Show button');
+    console.log('Commands: checkAutoSave() | recoverTopology() | checkHistory() | syncToggles() | checkModes()');
+    console.log('Recovery: recoverTopology() restores from best backup. checkAutoSave() shows all backup sources.');
     
     // ============================================================================
     // TOPOLOGIES BUTTON & DROPDOWN - Wire up events
@@ -12856,7 +12918,7 @@ window.addEventListener('DOMContentLoaded', () => {
             tableText += '\n═══ Total Connections: ' + table.rows.length + ' ═══';
             
             // Copy to clipboard
-            navigator.clipboard.writeText(tableText).then(() => {
+            window.safeClipboardWrite(tableText).then(() => {
                 // Visual feedback
                 const original = copyLinkTableBtn.innerHTML;
                 const originalBg = copyLinkTableBtn.style.background;

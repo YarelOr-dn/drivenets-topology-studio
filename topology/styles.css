@@ -6481,7 +6481,7 @@ body:not(.dark-mode) .lt-validation-msg {
     max-width: calc(100vw - 20px); /* Prevent panel from exceeding viewport width */
     transform: translateX(100%);
     opacity: 0;
-    transition: transform 0.3s ease, opacity 0.3s ease;
+    transition: transform 0.2s ease, opacity 0.2s ease;
     overflow: hidden;
 }
 
@@ -6730,6 +6730,46 @@ body:not(.dark-mode) .lt-validation-msg {
 .suggestion-chip--smart:hover {
     background: rgba(155,89,182,0.25);
     border-color: #9b59b6;
+}
+
+.suggestion-chip--policy {
+    border-color: rgba(241,196,15,0.5);
+    background: rgba(241,196,15,0.15);
+}
+
+.suggestion-chip--policy:hover {
+    background: rgba(241,196,15,0.25);
+    border-color: #f1c40f;
+}
+
+.suggestion-chip--scale {
+    border-color: rgba(155,89,182,0.5);
+    background: rgba(155,89,182,0.15);
+}
+
+.suggestion-chip--scale:hover {
+    background: rgba(155,89,182,0.25);
+    border-color: #9b59b6;
+}
+
+.suggestion-chip--net {
+    border-color: rgba(0,180,216,0.5);
+    background: rgba(0,180,216,0.15);
+}
+
+.suggestion-chip--net:hover {
+    background: rgba(0,180,216,0.25);
+    border-color: #00b4d8;
+}
+
+.suggestion-chip--l2parent {
+    border-color: rgba(230,126,34,0.5);
+    background: rgba(230,126,34,0.15);
+}
+
+.suggestion-chip--l2parent:hover {
+    background: rgba(230,126,34,0.25);
+    border-color: #e67e22;
 }
 
 .suggestion-chip.chip-selected,
@@ -7903,6 +7943,26 @@ body:not(.dark-mode) .lt-validation-msg {
     white-space: pre-wrap;
 }
 
+.scaler-step-presets {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.scaler-step-chip {
+    padding: 4px 10px;
+    font-size: 11px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.9);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+.scaler-step-chip:hover {
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(255,255,255,0.35);
+}
+
 .scaler-info-box {
     background: rgba(52, 152, 219, 0.15);
     border-left: 3px solid #3498db;
@@ -8127,6 +8187,77 @@ body:not(.dark-mode) .lt-validation-msg {
     align-items: center;
     gap: 8px;
     cursor: pointer;
+}
+.scaler-collision-detail-list {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: rgba(255,255,255,0.85);
+    background: rgba(0,0,0,0.25);
+    padding: 8px 10px;
+    border-radius: 6px;
+    margin: 6px 0 10px;
+    white-space: pre-wrap;
+    max-height: 140px;
+    overflow-y: auto;
+}
+
+/* Overlap banner (encap step) */
+.scaler-overlap-banner {
+    margin-top: 12px;
+}
+.scaler-collision-ok {
+    color: var(--dn-green, #2ecc71);
+    font-weight: 500;
+}
+.scaler-collision-title {
+    font-weight: 600;
+    color: var(--dn-orange, #FF5E1F);
+    margin-bottom: 6px;
+}
+
+/* Pattern detected / QinQ suggestion */
+.scaler-pattern-detected {
+    border-left: 3px solid var(--dn-cyan, #3498db);
+}
+.scaler-qinq-suggestion {
+    border-left: 3px solid var(--dn-cyan, #3498db);
+}
+.scaler-qinq-suggestion button {
+    margin-top: 6px;
+}
+
+/* L2/L3 conflict warning */
+.scaler-l2l3-conflict {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: rgba(255, 94, 31, 0.08);
+    border: 1px solid rgba(255, 94, 31, 0.3);
+    border-radius: 8px;
+}
+.scaler-l2l3-conflict .scaler-l2l3-title {
+    font-size: 12px;
+    color: var(--dn-orange, #FF5E1F);
+    margin-bottom: 8px;
+}
+.scaler-l2l3-conflict .scaler-step-chip {
+    margin-right: 8px;
+}
+
+/* Refresh button */
+.scaler-refresh-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+.scaler-config-time {
+    font-size: 11px;
+    opacity: 0.7;
+}
+
+/* Outline chip variant */
+.scaler-step-chip--outline {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.3);
 }
 
 /* Wizard Step Indicator */
@@ -8354,6 +8485,13 @@ body:not(.dark-mode) .lt-validation-msg {
 .scaler-form-hint {
     display: block;
     margin-top: 5px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+}
+
+.scaler-inline-hint {
+    display: inline;
+    margin-left: 8px;
     font-size: 11px;
     color: rgba(255,255,255,0.4);
 }
@@ -8667,6 +8805,30 @@ body:not(.dark-mode) .lt-validation-msg {
     margin-bottom: 15px;
     color: #ecf0f1;
     font-size: 15px;
+}
+
+/* What's Next (wizard progression) */
+.scaler-whats-next {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+}
+.scaler-whats-next h4 {
+    margin-bottom: 12px;
+    color: #ecf0f1;
+    font-size: 13px;
+}
+.scaler-whats-next-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.scaler-whats-next-actions .scaler-btn {
+    font-size: 12px;
+    padding: 6px 12px;
+}
+.scaler-whats-next-push-all {
+    background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%) !important;
 }
 
 /* Loading State */
@@ -9039,6 +9201,28 @@ body:not(.dark-mode) .lt-validation-msg {
     padding: 8px 0;
     background: transparent;
 }
+
+/* DNOS syntax highlighting (when using _highlightDnosConfig) */
+.scaler-syntax-preview .dns-hier { color: #e74c3c; }
+.scaler-syntax-preview .dns-key { color: #3498db; }
+.scaler-syntax-preview .dns-val { color: #2ecc71; }
+.scaler-syntax-preview .dns-comment { color: #95a5a6; }
+
+/* Quick-nav badges */
+.scaler-quicknav-badge {
+    font-size: 10px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--primary-color, #7c3aed);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 4px;
+}
+.scaler-quicknav-check { color: #2ecc71; margin-left: 4px; }
 
 
 

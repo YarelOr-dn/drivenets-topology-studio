@@ -318,9 +318,10 @@ function showTextSelectionToolbar(editor, textObj) {
         }
     }, { isDestructive: true }));
     
-    // Prevent clicks from propagating
     toolbar.addEventListener('mousedown', (e) => e.stopPropagation());
     toolbar.addEventListener('click', (e) => e.stopPropagation());
+    toolbar.addEventListener('keydown', (e) => { e.stopPropagation(); });
+    toolbar.addEventListener('keyup', (e) => { e.stopPropagation(); });
     
     document.body.appendChild(toolbar);
     

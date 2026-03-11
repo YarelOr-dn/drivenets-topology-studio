@@ -2655,6 +2655,20 @@ def _detect_interface_pattern_from_config(
     return pattern
 
 
+def _detect_l2ac_parent_from_config_str(config: str) -> Optional[str]:
+    """
+    Detect L2-AC parent interface from config text using regex.
+    E.g., if config has ge100-18/0/0.1, ge100-18/0/0.2, returns 'ge100-18/0/0'
+    """
+    l2ac_match = re.search(r'interface\s+((?:ge|xe|et)\d+-[\d/]+)\.\d+', config)
+    if l2ac_match:
+        return l2ac_match.group(1)
+    l2ac_matches = re.findall(r'((?:ge|xe|et)\d+-[\d/]+)\.(\d+)', config)
+    if l2ac_matches:
+        return l2ac_matches[0][0]
+    return None
+
+
 def _detect_l2ac_parent_from_config(
     multi_ctx: 'MultiDeviceContext',
     device_services: Dict[str, Dict[str, List[ServiceScale]]]
@@ -2812,6 +2826,118 @@ def _scan_l3_sub_ids(config: str, parent_iface: str) -> Set[int]:
             l3_ids.add(current_subif_id)
     
     return l3_ids
+
+
+def _scan_l2_sub_ids(config: str, parent_iface: str) -> Set[int]:
+    """Scan config for sub-interfaces that have l2-service enabled (L2 mode).
+    
+    Returns set of sub-IDs that already have l2-service enabled,
+    which cannot coexist with IP addresses on the same interface.
+    """
+    l2_ids = set()
+    lines = config.split('\n')
+    current_subif_id = None
+    parent_prefix = f"  {parent_iface}."
+
+    for line in lines:
+        if line.startswith(parent_prefix) and not line.strip().startswith('!'):
+            rest = line[len(parent_prefix):].strip()
+            try:
+                current_subif_id = int(rest)
+            except ValueError:
+                current_subif_id = None
+        elif line.strip() == '!' or (line.startswith('  ') and not line.startswith('    ') and current_subif_id is not None):
+            current_subif_id = None
+        elif current_subif_id is not None and 'l2-service' in line:
+            l2_ids.add(current_subif_id)
+
+    return l2_ids
+
+
+def _scan_outer_inner_map(config: str, parent_iface: str) -> Dict[int, List[int]]:
+    """Scan config for QinQ outer/inner tag mappings on a parent interface.
+    
+    Returns dict mapping outer_tag -> [inner_tags...] for sub-interfaces
+    that use vlan-tags. Used for QinQ inner-tag continuation suggestions.
+    """
+    result: Dict[int, List[int]] = {}
+    lines = config.split('\n')
+    current_subif_id = None
+    parent_prefix = f"  {parent_iface}."
+
+    for line in lines:
+        if line.startswith(parent_prefix) and not line.strip().startswith('!'):
+            rest = line[len(parent_prefix):].strip()
+            try:
+                current_subif_id = int(rest)
+            except ValueError:
+                current_subif_id = None
+        elif current_subif_id is not None and 'vlan-tags' in line:
+            # Parse: vlan-tags outer-tag X inner-tag Y ...
+            m = re.search(r'outer-tag\s+(\d+).*?inner-tag\s+(\d+)', line)
+            if m:
+                outer = int(m.group(1))
+                inner = int(m.group(2))
+                if outer not in result:
+                    result[outer] = []
+                result[outer].append(inner)
+        elif line.strip() == '!' or (line.startswith('  ') and not line.startswith('    ') and current_subif_id is not None):
+            current_subif_id = None
+
+    return result
+
+
+def _scan_sub_id_details(config: str, parent_iface: str) -> Dict[int, dict]:
+    """Scan config and return per-sub-ID metadata for a parent interface.
+
+    Returns dict mapping sub-ID -> {has_ip, has_l2, ipv4, ipv6, vlan_id, vlan_tags}.
+    """
+    details: Dict[int, dict] = {}
+    lines = config.split('\n')
+    current_subif_id: Optional[int] = None
+    parent_prefix = f"  {parent_iface}."
+    current_info: dict = {}
+
+    def _flush():
+        nonlocal current_subif_id, current_info
+        if current_subif_id is not None:
+            details[current_subif_id] = current_info
+        current_subif_id = None
+        current_info = {}
+
+    for line in lines:
+        if line.startswith(parent_prefix) and not line.strip().startswith('!'):
+            _flush()
+            rest = line[len(parent_prefix):].strip()
+            try:
+                current_subif_id = int(rest)
+                current_info = {"has_ip": False, "has_l2": False, "ipv4": None, "ipv6": None,
+                                "vlan_id": None, "vlan_tags": None}
+            except ValueError:
+                current_subif_id = None
+        elif current_subif_id is not None:
+            stripped = line.strip()
+            if stripped == '!' or (line.startswith('  ') and not line.startswith('    ')):
+                _flush()
+            elif 'ipv4-address' in stripped:
+                current_info["has_ip"] = True
+                parts = stripped.split()
+                if len(parts) >= 2:
+                    current_info["ipv4"] = parts[1]
+            elif 'ipv6-address' in stripped:
+                current_info["has_ip"] = True
+                parts = stripped.split()
+                if len(parts) >= 2:
+                    current_info["ipv6"] = parts[1]
+            elif 'l2-service' in stripped:
+                current_info["has_l2"] = True
+            elif stripped.startswith('vlan-id '):
+                current_info["vlan_id"] = stripped.split()[-1]
+            elif stripped.startswith('vlan-tags '):
+                current_info["vlan_tags"] = stripped
+
+    _flush()
+    return details
 
 
 def _scan_used_vrf_numbers(config: str, prefix: str = "VRF-") -> Set[int]:

@@ -430,6 +430,8 @@ window.FileOps = {
         card.querySelector('.nt-cancel').onclick = () => overlay.remove();
 
         overlay.appendChild(card);
+        overlay.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        overlay.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(overlay);
         overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
         const escHandler = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); } };
@@ -625,6 +627,8 @@ window.FileOps = {
             input.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') doSave(); if (ev.key === 'Escape') overlay.remove(); });
         };
 
+        overlay.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        overlay.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(overlay);
         overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
         renderStep1();
@@ -736,6 +740,8 @@ window.FileOps = {
         `;
 
         overlay.appendChild(panel);
+        overlay.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        overlay.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(overlay);
 
         const dimSpan = panel.querySelector('#png-dim-span');
@@ -2681,6 +2687,8 @@ window.FileOps = {
         };
         
         render();
+        panel.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        panel.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(panel);
         
         const clickOutside = (e) => { if (!panel.contains(e.target) && e.target.id !== 'btn-topologies') { panel.remove(); cleanup(); } };

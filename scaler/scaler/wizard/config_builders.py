@@ -22,6 +22,23 @@ def _is_unusable_ip(ip_int: int, prefix_len: int, is_v6: bool) -> bool:
         return False
 
 
+def _dotted_step_to_int(dotted: str) -> int:
+    """Convert Spirent-style dotted step (e.g. 0.0.0.1, 0.0.1.0) to integer.
+    0.0.0.1 -> 1, 0.0.1.0 -> 256, 0.1.0.0 -> 65536."""
+    try:
+        parts = dotted.strip().split(".")
+        if len(parts) != 4:
+            return 1
+        return (
+            (int(parts[0]) << 24)
+            + (int(parts[1]) << 16)
+            + (int(parts[2]) << 8)
+            + int(parts[3])
+        )
+    except (ValueError, IndexError):
+        return 1
+
+
 def _calculate_next_ip(
     base_ip: str,
     index: int,
@@ -72,6 +89,9 @@ def _calculate_next_ip(
                 if custom_step is not None
                 else (2 ** (128 - prefix_len) if is_v6 else 2 ** (32 - prefix_len))
             )
+            new_ip_int = ip_int + (index * step)
+        elif mode == "octet_step":
+            step = custom_step if custom_step is not None else 1
             new_ip_int = ip_int + (index * step)
         else:
             step = custom_step if custom_step is not None else 1
@@ -213,6 +233,13 @@ def build_interface_config(params: Dict[str, Any]) -> str:
     outer_vlan_step = int(params.get("outer_vlan_step", vlan_step))
     inner_vlan_step = int(params.get("inner_vlan_step", vlan_step))
     subif_count = int(params.get("subif_count_per_interface", 1))
+    skip_vlans_raw = params.get("skip_vlans") or []
+    skip_vlans = set()
+    for x in skip_vlans_raw:
+        try:
+            skip_vlans.add(int(x))
+        except (TypeError, ValueError):
+            pass
 
     is_basic = itype in BASIC_TYPES
     is_physical = itype in PHYSICAL_TYPES or itype == "subif"
@@ -222,8 +249,13 @@ def build_interface_config(params: Dict[str, Any]) -> str:
     ip_version = (params.get("ip_version") or "ipv4").lower()
     ip_start = params.get("ip_start", "10.0.0.1")
     ip_prefix = int(params.get("ip_prefix", 24))
-    ip_step = int(params.get("ip_step", 1))
-    ip_mode = (params.get("ip_mode") or "per_subif").lower()
+    ip_step_raw = params.get("ip_step", "0.0.0.1")
+    if isinstance(ip_step_raw, str) and "." in ip_step_raw:
+        ip_step = _dotted_step_to_int(ip_step_raw)
+        ip_mode = "octet_step"
+    else:
+        ip_step = int(ip_step_raw) if ip_step_raw is not None else 1
+        ip_mode = (params.get("ip_mode") or "per_subif").lower()
     ipv6_start = params.get("ipv6_start", "2001:db8::1")
     ipv6_prefix = int(params.get("ipv6_prefix", 128))
     mpls_enabled = bool(params.get("mpls_enabled", False)) and is_physical
@@ -316,20 +348,31 @@ def build_interface_config(params: Dict[str, Any]) -> str:
                 lines.append("    !")
         lines.append("  !")
 
-        # Sub-interfaces
+        # Sub-interfaces (with skip_vlans: terminal-style vlan_offset to skip conflicting IDs)
         if create_sub:
+            vlan_offset = 0
             for j in range(subif_count):
                 sub_idx = i * subif_count + j
-                vlan = min(max(vlan_start + sub_idx * vlan_step, 1), 4094)
+                # Find next free vlan (not in skip_vlans)
+                found_free = False
+                for _ in range(4095):
+                    vlan = min(max(vlan_start + (sub_idx + vlan_offset) * vlan_step, 1), 4094)
+                    if vlan not in skip_vlans:
+                        found_free = True
+                        break
+                    vlan_offset += 1
+                if not found_free:
+                    continue
 
                 if outer_vlan_step == -1:
                     outer = outer_vlan_start + i
                 elif outer_vlan_step == 0:
                     outer = outer_vlan_start
                 else:
-                    outer = outer_vlan_start + sub_idx * outer_vlan_step
+                    outer = outer_vlan_start + (sub_idx + vlan_offset) * outer_vlan_step
                 outer = min(max(outer, 1), 4094)
 
+                # Inner stays sequential for eth-tag matching (terminal behavior)
                 if inner_vlan_step == -2:
                     inner = inner_vlan_start + i
                 elif inner_vlan_step == 0:
@@ -352,15 +395,16 @@ def build_interface_config(params: Dict[str, Any]) -> str:
 
                 # IP addressing
                 if ip_enabled and not l2_service:
-                    ip_idx = sub_idx if ip_mode == "per_subif" else i
+                    ip_idx = sub_idx
+                    step_arg = ip_step if ip_mode in ("unique_subnet", "octet_step") else None
                     if ip_version in ("v4", "ipv4", "dual"):
                         v4addr = _calculate_next_ip(
-                            ip_start, ip_idx, ip_mode, ip_prefix, i, j, ip_step
+                            ip_start, ip_idx, ip_mode, ip_prefix, i, j, step_arg
                         )
                         lines.append(f"    ipv4-address {v4addr}/{ip_prefix}")
                     if ip_version in ("v6", "ipv6", "dual"):
                         v6addr = _calculate_next_ip(
-                            ipv6_start, ip_idx, ip_mode, ipv6_prefix, i, j, ip_step
+                            ipv6_start, ip_idx, ip_mode, ipv6_prefix, i, j, step_arg
                         )
                         lines.append(f"    ipv6-address {v6addr}/{ipv6_prefix}")
 
@@ -716,6 +760,84 @@ def build_flowspec_config(params: Dict[str, Any]) -> str:
     out.append("  !")
     out.append("!")
     return "\n".join(out)
+
+
+def build_system_config(params: Dict[str, Any]) -> str:
+    """Build DNOS system config (hostname, NTP, DNS, SSH, SNMP). Pure function.
+
+    Params:
+        name: System name (hostname)
+        timezone: Timezone (e.g., Israel, UTC)
+        timing_mode: ntp | manual
+        ntp_servers: List of {address, vrf?, prefer?, iburst?}
+        dns_servers: List of {address, vrf?}
+        ssh_admin_state: enabled | disabled
+        snmp_community: Community string
+        snmp_trap_servers: List of {address, community?}
+    """
+    lines = ["system"]
+    name = params.get("name") or params.get("hostname")
+    if name:
+        lines.append(f"  name {name}")
+    timezone = params.get("timezone")
+    if timezone:
+        lines.append(f"  timezone {timezone}")
+    timing_mode = params.get("timing_mode", "ntp")
+    lines.append(f"  timing-mode {timing_mode}")
+    ntp_servers = params.get("ntp_servers") or []
+    if ntp_servers:
+        lines.append("  ntp")
+        for srv in ntp_servers:
+            addr = srv.get("address") or srv.get("server")
+            if not addr:
+                continue
+            vrf = srv.get("vrf", "default")
+            lines.append(f"    server {addr} vrf {vrf}")
+            lines.append("      admin-state enabled")
+            if srv.get("iburst"):
+                lines.append("      iburst")
+            if srv.get("prefer"):
+                lines.append("      prefer")
+            lines.append("    !")
+        lines.append("  !")
+    dns_servers = params.get("dns_servers") or []
+    if dns_servers:
+        lines.append("  dns")
+        for i, srv in enumerate(dns_servers, start=1):
+            addr = srv.get("address") or srv.get("server")
+            if addr:
+                vrf = srv.get("vrf", "default")
+                lines.append(f"    server priority {i} ip-address {addr}")
+                lines.append(f"      vrf {vrf}")
+                lines.append("      admin-state enabled")
+                lines.append("    !")
+        lines.append("  !")
+    ssh_admin = params.get("ssh_admin_state", "enabled")
+    if ssh_admin == "enabled":
+        lines.append("  ssh")
+        lines.append("    server")
+        lines.append("      admin-state enabled")
+        lines.append("    !")
+        lines.append("  !")
+    snmp_community = params.get("snmp_community")
+    if snmp_community:
+        lines.append("  snmp")
+        lines.append(f"    community {snmp_community}")
+        lines.append("      admin-state enabled")
+        lines.append("      access read-write")
+        lines.append("    !")
+        trap_servers = params.get("snmp_trap_servers") or []
+        for ts in trap_servers:
+            addr = ts.get("address") or ts.get("server")
+            if addr:
+                lines.append(f"    trap-server {addr}")
+                lines.append("      admin-state enabled")
+                if ts.get("community"):
+                    lines.append(f"      community {ts['community']}")
+                lines.append("    !")
+        lines.append("  !")
+    lines.append("!")
+    return "\n".join(lines)
 
 
 def build_routing_policy_config(params: Dict[str, Any]) -> str:

@@ -7,13 +7,17 @@
 'use strict';
 
 window.LldpDialog = {
-    showLldpTableDialog(editor, device, serial) {
+    showLldpTableDialog(editor, device, serial, options = {}) {
         const self = this;
-        // Toggle behavior - close if already open for same device
+        const forceRefresh = options.forceRefresh || false;
         const existingDialog = document.getElementById('lldp-table-dialog');
         if (existingDialog && existingDialog.dataset.serial === serial) {
-            existingDialog.remove();
-            return;
+            if (forceRefresh) {
+                existingDialog.remove();
+            } else {
+                existingDialog.remove();
+                return;
+            }
         }
         if (existingDialog) existingDialog.remove();
         
@@ -129,7 +133,15 @@ window.LldpDialog = {
         
         dialog.appendChild(header);
         dialog.appendChild(content);
+        
+        // Keyboard isolation: prevent key events from reaching the global
+        // editor keyboard handler while this dialog is open.
+        dialog.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        dialog.addEventListener('keyup', (e) => { e.stopPropagation(); });
+        dialog.tabIndex = -1;
+        
         document.body.appendChild(dialog);
+        dialog.focus();
         
         // Position dialog in center
         dialog.style.left = '50%';
@@ -234,7 +246,7 @@ window.LldpDialog = {
             `;
             
             try {
-                const data = await self._fetchLldpNeighborsLive(serial);
+                const data = await self._fetchLldpNeighborsLive(serial, device);
                 updateLldpContent(data);
                 editor.showToast('LLDP data refreshed (live SSH)', 'success');
             } catch (err) {
@@ -256,7 +268,8 @@ window.LldpDialog = {
         });
         
         // Fetch LLDP data from API (cached) -- uses same updateLldpContent as refresh
-        self._fetchLldpNeighbors(serial).then(data => {
+        // Pass ssh_host from device so API can SSH when serial does not resolve (e.g. P-SA-2 -> 100.64.4.205)
+        self._fetchLldpNeighbors(serial, device).then(data => {
             updateLldpContent(data);
             const src = data.source || (data.live ? 'live-ssh' : 'cached');
             editor.showToast(`LLDP loaded (${src})`, 'info');
@@ -480,11 +493,17 @@ window.LldpDialog = {
     },
     
     /**
-     * Fetch LLDP neighbors from scaler-monitor cache via API
+     * Fetch LLDP neighbors from scaler-monitor cache via API.
+     * When device has sshConfig.host, pass it as ssh_host so API can SSH when serial does not resolve.
      */
-    async _fetchLldpNeighbors(serial) {
+    async _fetchLldpNeighbors(serial, device = null) {
+        const sshHost = device?.sshConfig?.host || device?.sshConfig?.hostBackup || '';
+        const url = new URL(`/api/dnaas/device/${encodeURIComponent(serial)}/lldp`, window.location.origin);
+        if (sshHost && /^\d+\.\d+\.\d+\.\d+$/.test(sshHost)) {
+            url.searchParams.set('ssh_host', sshHost);
+        }
         try {
-            const response = await fetch(`/api/dnaas/device/${encodeURIComponent(serial)}/lldp`);
+            const response = await fetch(url.toString());
             if (response.ok) {
                 return await response.json();
             }
@@ -517,14 +536,20 @@ window.LldpDialog = {
     
     /**
      * Fetch LLDP neighbors LIVE via SSH (bypasses cache)
-     * Used by refresh button to get fresh data
+     * Used by refresh button to get fresh data.
+     * When device has sshConfig.host, pass ssh_host so API can connect when serial does not resolve.
      */
-    async _fetchLldpNeighborsLive(serial) {
+    async _fetchLldpNeighborsLive(serial, device = null) {
+        const sshHost = device?.sshConfig?.host || device?.sshConfig?.hostBackup || '';
+        const body = { serial };
+        if (sshHost && /^\d+\.\d+\.\d+\.\d+$/.test(sshHost)) {
+            body.ssh_host = sshHost;
+        }
         try {
             const response = await fetch('/api/dnaas/lldp-neighbors-live', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ serial })
+                body: JSON.stringify(body)
             });
             if (response.ok) {
                 const data = await response.json();
@@ -905,6 +930,19 @@ window.LldpDialog = {
             hasNewResults
         ));
         
+        // System Stack option
+        menu.appendChild(createOption(
+            '<rect x="4" y="4" width="16" height="4" rx="1"/><rect x="4" y="10" width="16" height="4" rx="1"/><rect x="4" y="16" width="16" height="4" rx="1"/>',
+            'System Stack',
+            () => {
+                if (editor.showSystemStackDialog) {
+                    editor.showSystemStackDialog(device, serial);
+                }
+            }
+        ));
+        
+        menu.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        menu.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(menu);
         
         // Position menu, keeping within viewport
@@ -1027,6 +1065,8 @@ window.LldpDialog = {
         `;
         
         overlay.appendChild(dialog);
+        overlay.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        overlay.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(overlay);
         
         const statusDiv = dialog.querySelector('#lldp-status');

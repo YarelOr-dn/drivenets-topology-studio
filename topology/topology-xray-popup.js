@@ -258,6 +258,10 @@ window.XrayPopup = {
             <div class="xray-status" id="xray-status" style="background: ${isDark ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.05)'}; color: ${isDark ? '#aaa' : '#555'};"></div>
         `;
 
+        // Keyboard isolation: prevent key events from reaching the global editor handler
+        popup.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        popup.addEventListener('keyup', (e) => { e.stopPropagation(); });
+        
         document.body.appendChild(popup);
         this._popup = popup;
         this._state = st;
@@ -579,13 +583,18 @@ window.XrayPopup = {
             console.log('[XRAY lldp] Cache hit for', cacheKey);
             return this._lldpDeviceCache[cacheKey];
         }
+        const sshHost = device?.sshConfig?.host || device?.sshConfig?.hostBackup || '';
         for (const name of unique) {
             if (signal?.aborted) return [];
             try {
                 const ctrl = new AbortController();
                 const timer = setTimeout(() => ctrl.abort(), 15000);
                 if (signal) signal.addEventListener('abort', () => ctrl.abort());
-                const resp = await fetch(`/api/dnaas/device/${encodeURIComponent(name)}/lldp`, { signal: ctrl.signal });
+                const url = new URL(`/api/dnaas/device/${encodeURIComponent(name)}/lldp`, window.location.origin);
+                if (sshHost && /^\d+\.\d+\.\d+\.\d+$/.test(sshHost)) {
+                    url.searchParams.set('ssh_host', sshHost);
+                }
+                const resp = await fetch(url.toString(), { signal: ctrl.signal });
                 clearTimeout(timer);
                 if (resp.ok) {
                     const data = await resp.json();
@@ -616,12 +625,17 @@ window.XrayPopup = {
             device?.label
         ].filter(Boolean);
         const unique = [...new Set(candidates)];
+        const sshHost = device?.sshConfig?.host || device?.sshConfig?.hostBackup || '';
         let interfaces = [];
         for (const name of unique) {
             try {
                 const ctrl = new AbortController();
                 const timer = setTimeout(() => ctrl.abort(), 15000);
-                const resp = await fetch(`/api/dnaas/device/${encodeURIComponent(name)}/interfaces`, { signal: ctrl.signal });
+                const url = new URL(`/api/dnaas/device/${encodeURIComponent(name)}/interfaces`, window.location.origin);
+                if (sshHost && /^\d+\.\d+\.\d+\.\d+$/.test(sshHost)) {
+                    url.searchParams.set('ssh_host', sshHost);
+                }
+                const resp = await fetch(url.toString(), { signal: ctrl.signal });
                 clearTimeout(timer);
                 if (resp.ok) {
                     const data = await resp.json();

@@ -248,6 +248,14 @@ function showDeviceSelectionToolbar(editor, device) {
             }
         };
         toolbar.appendChild(lldpBtn);
+        
+        // System Stack button (opens submenu with Stack Table + Git Commit)
+        const stackBtn = createButton('layers', 'System Stack', () => {
+            if (editor._showSystemStackInlineSubmenu) {
+                editor._showSystemStackInlineSubmenu(stackBtn, device, serial, sshConfig, toolbar, isDarkMode, defaultIconColor, defaultHoverBg);
+            }
+        });
+        toolbar.appendChild(stackBtn);
     }
     
     toolbar.appendChild(createSeparator());
@@ -299,7 +307,7 @@ function showDeviceSelectionToolbar(editor, device) {
         if (editor.deleteSelected) editor.deleteSelected();
     }, { isDestructive: true }));
     
-    // Prevent clicks from propagating to canvas
+    // Prevent ALL events from propagating to canvas/keyboard handler
     toolbar.addEventListener('mousedown', (e) => {
         e.stopPropagation();
         e.preventDefault();
@@ -308,6 +316,8 @@ function showDeviceSelectionToolbar(editor, device) {
         e.stopPropagation();
         e.preventDefault();
     });
+    toolbar.addEventListener('keydown', (e) => { e.stopPropagation(); });
+    toolbar.addEventListener('keyup', (e) => { e.stopPropagation(); });
     
     document.body.appendChild(toolbar);
     editor._deviceSelectionToolbar = toolbar;
