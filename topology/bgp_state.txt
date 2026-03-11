@@ -1,0 +1,58 @@
+=== EXABGP VERIFY ===
+{
+  "session_id": "pe_4",
+  "exabgp_pid": 3290674,
+  "exabgp_alive": false,
+  "tcp_state": "DEAD",
+  "healthy": false,
+  "routes_tracked": 4,
+  "scale_modes": [],
+  "action": "ExaBGP process dead. Restart with --preload."
+}
+
+=== EXABGP PROCESSES ===
+
+=== PING INBAND ===
+PING 100.70.0.206 (100.70.0.206) 56(84) bytes of data.
+64 bytes from 100.70.0.206: icmp_seq=1 ttl=63 time=0.399 ms
+64 bytes from 100.70.0.206: icmp_seq=2 ttl=63 time=0.385 ms
+
+--- 100.70.0.206 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1029ms
+rtt min/avg/max/mdev = 0.385/0.392/0.399/0.007 ms
+
+=== PE-4 BGP SUMMARY ===
+Warning: Permanently added '100.64.7.197' (ED25519) to the list of known hosts.
+Invalid command
+
+=== PE-4 VRF ALPHA BGP ===
+Warning: Permanently added '100.64.7.197' (ED25519) to the list of known hosts.
+Invalid command
+
+=== PE-4 VRF ZULU BGP ===
+Warning: Permanently added '100.64.7.197' (ED25519) to the list of known hosts.
+Invalid command
+
+=== SPIRENT BGP STATUS ===
+[
+  {
+    "device": "ALPHA_CE_0",
+    "state": "N/A",
+    "routes_advertised": "0",
+    "routes_received": "0",
+    "updates_sent": "0",
+    "updates_received": "0"
+  },
+  {
+    "device": "ZULU_CE_0",
+    "state": "N/A",
+    "routes_advertised": "0",
+    "routes_received": "0",
+    "updates_sent": "0",
+    "updates_received": "0"
+  }
+]
+
+=== PE-4 BUNDLE-100 SUBIFS ===
+Warning: Permanently added '100.64.7.197' (ED25519) to the list of known hosts.
+Invalid command

@@ -272,6 +272,9 @@ window.MouseDownHandler = {
             editor.canvas.style.cursor = 'move';
             // Close all menus/toolbars when panning starts
             editor.hideAllPopups();
+            if (window.XrayPopup && window.XrayPopup.temporaryHide) {
+                window.XrayPopup.temporaryHide();
+            }
             e.preventDefault();
             return;
         }
@@ -1447,20 +1450,6 @@ window.MouseDownHandler = {
                                 } else if (clickedObject.type === 'device') {
                                     editor.showDeviceSelectionToolbar(clickedObject);
                                 } else if (clickedObject.type === 'link' || clickedObject.type === 'unbound') {
-                                    // Check if XRAY icon was clicked
-                                    if (editor._xrayIconClicked === clickedObject && window.XrayPopup) {
-                                        const rect = editor.canvas.getBoundingClientRect();
-                                        const ip = clickedObject._xrayIconPos;
-                                        if (ip) {
-                                            const sx = ip.x * editor.zoom + editor.panOffset.x + rect.left;
-                                            const sy = ip.y * editor.zoom + editor.panOffset.y + rect.top;
-                                            window.XrayPopup.show(editor, clickedObject, { x: sx, y: sy });
-                                            editor._xrayIconClicked = null;
-                                            return;
-                                        }
-                                    }
-                                    editor._xrayIconClicked = null;
-                                    // Pass click position so toolbar appears near where user clicked
                                     editor.showLinkSelectionToolbar(clickedObject, clickPosForToolbar);
                                 } else if (clickedObject.type === 'shape') {
                                     editor.showShapeSelectionToolbar(clickedObject);

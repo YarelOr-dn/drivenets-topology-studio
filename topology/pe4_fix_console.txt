@@ -1,0 +1,82 @@
+Step 1: Show BGP summary on PE-4
+----
+BGP router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 0
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  2.2.2.2         4    1234567       1642       1696    0     0       0 23:47:58  (NoNeg)
+
+Total number of established neighbors with L2vpn EVPN 0/1
+
+Total number of NSR capable BGP sessions 0
+
+Total number of established neighbors 1/101
+
+YOR_CL_PE-4# exit
+[FYOR_CL_PE-4(09-Mar-2026-18:50:27)# exit
+
+
+Step 2: Check ExaBGP neighbor state
+DRIVENETS CLI Loading...                        YOR_CL_PE-4# show bgp neighbor 100.64.6.134 | no-more
+[FYOR_CL_PE-4(09-Mar-2026-18:50:31)# show bgp neighbor 100.64.6.134 | no-more
+
+% No such neighbor
+
+YOR_CL_PE-4# exit
+[FYOR_CL_PE-4(09-Mar-2026-18:50:33)# exit
+
+
+Step 3: Admin-disable ExaBGP neighbor
+min-state disabled
+YOR_CL_PE-4(cfg)# commit
+[FYOR_CL_PE-4(cfg 09-Mar-2026-18:50:41)# commit
+ERROR: Missing remote-as value for BGP neighbor 'neighbor 100.64.6.134'.
+[0mYOR_CL_PE-4(cfg)# exit
+[FYOR_CL_PE-4(cfg 09-Mar-2026-18:50:42)# exit
+Warning: Configuration includes uncommitted changes, would you like to commit them before exiting (yes/no/cancel) [cancel]? exit
+Warning: Configuration includes uncommitted changes, would you like to commit them before exiting (yes/no/cancel) [cancel]? 
+
+Step 4: Show VRF ALPHA BGP
+router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 3
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  49.49.49.9      4      65100       2867       2896    0     0       0 01:05:00   Connect         
+
+Total number of established neighbors with IPv6 Unicast 0/1
+
+Total number of NSR capable BGP sessions 0
+
+Total number of established neighbors 0/1
+
+YOR_CL_PE-4# exit
+[FYOR_CL_PE-4(09-Mar-2026-18:50:50)# exit
+
+
+Step 5: Show VRF ZULU BGP
+router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 3
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  50.50.50.2      4       4500       2867       2885    0     0       0 01:05:07   Connect         
+
+Total number of established neighbors with IPv6 Unicast 0/1
+
+Total number of NSR capable BGP sessions 0
+
+Total number of established neighbors 0/1
+
+YOR_CL_PE-4# exit
+[FYOR_CL_PE-4(09-Mar-2026-18:50:56)# exit
+
+
+Step 6: Show bundle-100 sub-interfaces
+DRIVENETS CLI Loading...                        YOR_CL_PE-4# show interfaces bundle-100 | no-more
+[FYOR_CL_PE-4(09-Mar-2026-18:51:01)# show interfaces bundle-100 | no-more
+---------------------------------------------------^
+ERROR: Unknown word: 'bundle-100'.
+[0mYOR_CL_PE-4# exit
+[FYOR_CL_PE-4(09-Mar-2026-18:51:03)# exit
+
+
+All results saved to /home/dn/CURSOR/pe4_fix_result.txt

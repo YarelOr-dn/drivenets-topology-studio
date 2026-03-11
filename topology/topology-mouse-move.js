@@ -320,16 +320,6 @@ window.MouseMoveHandler = {
             }
         }
 
-        // XRAY icon hover detection
-        if (window.ObjectDetection && window.ObjectDetection.checkXrayIconHover) {
-            const wasHovered = editor._hoveredXrayIcon;
-            window.ObjectDetection.checkXrayIconHover(editor, pos.x, pos.y);
-            if (editor._hoveredXrayIcon !== wasHovered) {
-                editor.canvas.style.cursor = editor._hoveredXrayIcon ? 'pointer' : '';
-                editor.draw();
-            }
-        }
-
         // If in device placement with a pending click and the user drags, start marquee selection instead of placing
         if (editor.placingDevice && editor.placementPending && editor.selectionRectStart) {
             const dx = Math.abs(pos.x - editor.placementPending.startPos.x);

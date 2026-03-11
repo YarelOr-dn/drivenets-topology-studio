@@ -694,24 +694,25 @@ window.BDLegend = {
     },
 
     _reconstructBDMetadataFromCanvas(editor) {
-        const palette = [
-            '#00bcd4', '#ff9800', '#4caf50', '#e91e63', '#9c27b0',
-            '#03a9f4', '#ff5722', '#8bc34a', '#673ab7', '#ffc107',
-            '#009688', '#f44336', '#2196f3', '#cddc39', '#ff6f00'
+        const fallbackPalette = [
+            '#3498db', '#e74c3c', '#2ecc71', '#9b59b6', '#f39c12',
+            '#1abc9c', '#e91e63', '#00bcd4', '#ff5722', '#8bc34a'
         ];
         const seen = new Map();
         editor.objects.forEach(obj => {
             if (obj.type !== 'link' && obj.type !== 'unbound') return;
             const bdName = obj.linkDetails?.bd_name || obj._bdName;
-            if (!bdName || seen.has(bdName)) return;
-            const vlan = obj.linkDetails?.vlan_id || obj.linkDetails?.vlan || obj.linkDetails?.global_vlan || null;
-            seen.set(bdName, vlan);
+            if (!bdName) return;
+            if (!seen.has(bdName)) {
+                const vlan = obj.linkDetails?.vlan_id || obj.linkDetails?.vlan || obj.linkDetails?.global_vlan || null;
+                seen.set(bdName, { vlan, color: obj.color || null });
+            }
         });
         if (seen.size === 0) return;
         const bds = [];
         let idx = 0;
-        for (const [name, vlan] of seen) {
-            bds.push({ name, bd_name: name, vlan, color: palette[idx % palette.length] });
+        for (const [name, info] of seen) {
+            bds.push({ name, bd_name: name, vlan: info.vlan, color: info.color || fallbackPalette[idx % fallbackPalette.length] });
             idx++;
         }
         editor._multiBDMetadata = { bridge_domains: bds, view_mode: 'separate' };
@@ -763,23 +764,15 @@ window.BDLegend = {
     },
 
     restoreBDPanelIfNeeded(editor) {
-        const state = this._loadBDPanelState(editor);
-
-        if (state.visible && state.bridgeDomains && state.bridgeDomains.length > 0) {
-            editor._bdVisibility = state.bdVisibility || {};
-            editor._multiBDMetadata = {
-                bridge_domains: state.bridgeDomains,
-                view_mode: state.viewMode || 'separate'
-            };
-
-            this.showBDLegend(editor, state.bridgeDomains);
-
-            if (editor._bdVisibility) {
-                for (const [bdName, visible] of Object.entries(editor._bdVisibility)) {
-                    if (!visible) this.toggleBDVisibility(editor, bdName, false);
-                }
-            }
+        let isDnaas = false;
+        try {
+            const info = JSON.parse(localStorage.getItem('topo_active'));
+            isDnaas = info && info.domain && info.domain.toLowerCase() === 'dnaas';
+        } catch (_) {}
+        if (isDnaas && (!editor._multiBDMetadata || !editor._multiBDMetadata.bridge_domains?.length)) {
+            this._reconstructBDMetadataFromCanvas(editor);
         }
+        this.updateBDHierarchyButton(editor);
     },
 
     _updateBDPanelTheme(editor) {

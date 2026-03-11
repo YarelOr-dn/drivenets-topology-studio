@@ -16,6 +16,10 @@ const ScalerAPI = {
     // Active WebSocket connections
     _websockets: {},
     
+    // Bridge availability tracking -- prevents console 501 spam
+    _bridgeUp: true,
+    _bridgeRetryAfter: 0,
+    
     // =========================================================================
     // DEVICE OPERATIONS
     // =========================================================================
@@ -127,14 +131,37 @@ const ScalerAPI = {
      * @param {string} deviceId - Device identifier
      * @returns {Promise<{status: string, message: string}>}
      */
-    async testConnection(deviceId) {
-        const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/test`, {
+    async testConnection(deviceId, sshHost = '') {
+        if (!this._bridgeUp && Date.now() < this._bridgeRetryAfter) {
+            try {
+                const h = await this.checkHealth();
+                if (h?.scaler_bridge?.status === 'ok') {
+                    this._bridgeUp = true;
+                } else {
+                    throw new Error('Config service unavailable. Start the app with ./start.sh or python3 serve.py.');
+                }
+            } catch (_) {
+                throw new Error('Config service unavailable. Start the app with ./start.sh or python3 serve.py.');
+            }
+        }
+        const params = sshHost ? `?ssh_host=${encodeURIComponent(sshHost)}` : '';
+        const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/test${params}`, {
             method: 'POST'
         });
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Connection test failed');
+            let detail = 'Connection test failed';
+            try {
+                const err = await response.json();
+                detail = err.detail || detail;
+                if ((response.status === 501 || response.status === 502 || response.status === 503) &&
+                    typeof detail === 'string' && detail.toLowerCase().includes('scaler bridge unavailable')) {
+                    this._bridgeUp = false;
+                    this._bridgeRetryAfter = Date.now() + 15000;
+                }
+            } catch (_) {}
+            throw new Error(detail);
         }
+        this._bridgeUp = true;
         return response.json();
     },
     
@@ -184,6 +211,26 @@ const ScalerAPI = {
         return response.json();
     },
     
+    /**
+     * Get unified device context for wizard suggestions (interfaces, LLDP, config summary, free interfaces).
+     * @param {string} deviceId - Device identifier
+     * @param {boolean} [live=false] - If true, fetch live config from device
+     * @returns {Promise<Object>} Device context with interfaces, lldp, config_summary, wan_interfaces, services, etc.
+     */
+    async getDeviceContext(deviceId, live = false, sshHost = '') {
+        const params = new URLSearchParams();
+        if (live) params.set('live', 'true');
+        if (sshHost) params.set('ssh_host', sshHost);
+        const qs = params.toString();
+        const url = `/api/devices/${encodeURIComponent(deviceId)}/context${qs ? '?' + qs : ''}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || `Failed to get device context for ${deviceId}`);
+        }
+        return response.json();
+    },
+
     /**
      * Get interfaces configuration for a device
      * @param {string} deviceId - Device identifier
@@ -285,6 +332,32 @@ const ScalerAPI = {
         }
         return response.json();
     },
+
+    async scanExisting(params) {
+        const response = await fetch('/api/config/scan-existing', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Scan failed');
+        }
+        return response.json();
+    },
+
+    async detectPattern(params) {
+        const response = await fetch('/api/config/detect-pattern', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Pattern detection failed');
+        }
+        return response.json();
+    },
     
     /**
      * Generate service configuration using SCALER's DNOS syntax
@@ -300,6 +373,183 @@ const ScalerAPI = {
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.detail || 'Failed to generate services');
+        }
+        return response.json();
+    },
+    async generateBGP(params) {
+        const response = await fetch('/api/config/generate/bgp', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to generate BGP');
+        }
+        return response.json();
+    },
+    async generateRoutingPolicy(params) {
+        const response = await fetch('/api/config/generate/routing-policy', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Routing policy generation failed');
+        }
+        return response.json();
+    },
+    async generateFlowSpec(params) {
+        const response = await fetch('/api/config/generate/flowspec', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'FlowSpec generation failed');
+        }
+        return response.json();
+    },
+    async generateIGP(params) {
+        const response = await fetch('/api/config/generate/igp', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to generate IGP');
+        }
+        return response.json();
+    },
+    async batchGenerate(items) {
+        const response = await fetch('/api/config/generate/batch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ items })
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Batch generation failed');
+        }
+        return response.json();
+    },
+    async previewConfigDiff(deviceId, config, sshHost = '') {
+        const response = await fetch('/api/config/preview-diff', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ device_id: deviceId, config, ssh_host: sshHost })
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Diff preview failed');
+        }
+        return response.json();
+    },
+    async mirrorAnalyze(params) {
+        const response = await fetch('/api/mirror/analyze', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Mirror analyze failed');
+        }
+        return response.json();
+    },
+    async mirrorGenerate(params) {
+        const response = await fetch('/api/mirror/generate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Mirror generate failed');
+        }
+        return response.json();
+    },
+    async mirrorPreviewDiff(params) {
+        const response = await fetch('/api/mirror/preview-diff', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Mirror preview failed');
+        }
+        return response.json();
+    },
+    async compareConfigs(deviceIds) {
+        const response = await fetch('/api/config/compare', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ device_ids: deviceIds })
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Compare failed');
+        }
+        return response.json();
+    },
+    async getConfigDiff(deviceId) {
+        const response = await fetch(`/api/config/${encodeURIComponent(deviceId)}/diff`);
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Diff failed');
+        }
+        return response.json();
+    },
+    async getInterfaces(deviceId) {
+        const response = await fetch(`/api/config/${encodeURIComponent(deviceId)}/interfaces`);
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to get interfaces');
+        }
+        return response.json();
+    },
+    async getTemplates() {
+        const response = await fetch('/api/config/templates');
+        if (!response.ok) throw new Error('Failed to get templates');
+        return response.json();
+    },
+    async generateTemplate(templateName, values) {
+        const response = await fetch('/api/config/templates/generate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ template_name: templateName, values: values || {} })
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Template generation failed');
+        }
+        return response.json();
+    },
+    async discoverDevice(ip) {
+        const response = await fetch('/api/devices/discover', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ ip })
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Discovery failed');
+        }
+        return response.json();
+    },
+    async deleteHierarchyOp(deviceId, hierarchy, dryRun = true) {
+        const response = await fetch('/api/operations/delete-hierarchy', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ device_id: deviceId, hierarchy, dry_run: dryRun })
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Delete failed');
         }
         return response.json();
     },
@@ -324,6 +574,116 @@ const ScalerAPI = {
             const error = await response.json();
             throw new Error(error.detail || 'Push failed');
         }
+        return response.json();
+    },
+
+    /**
+     * Commit held config on same SSH session (after dry_run push when check passed).
+     * @param {string} jobId - Job ID from pushConfig
+     * @returns {Promise<{status: string, success: boolean, message: string}>}
+     */
+    async commitHeldJob(jobId) {
+        const response = await fetch(`/api/operations/push/${encodeURIComponent(jobId)}/commit`, {
+            method: 'POST'
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Commit failed');
+        }
+        return response.json();
+    },
+
+    /**
+     * Cancel held config (discard candidate) and close SSH session.
+     * @param {string} jobId - Job ID from pushConfig
+     * @returns {Promise<{status: string, success: boolean, message: string}>}
+     */
+    async cancelHeldJob(jobId) {
+        const response = await fetch(`/api/operations/push/${encodeURIComponent(jobId)}/cancel`, {
+            method: 'POST'
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Cancel failed');
+        }
+        return response.json();
+    },
+
+    /**
+     * Cleanup dirty candidate on device after failed commit check.
+     * @param {string} jobId - Job ID from pushConfig
+     * @returns {Promise<{status: string, success: boolean, message: string}>}
+     */
+    async cleanupHeldJob(jobId) {
+        const response = await fetch(`/api/operations/push/${encodeURIComponent(jobId)}/cleanup`, {
+            method: 'POST'
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Cleanup failed');
+        }
+        return response.json();
+    },
+
+    async getJobs() {
+        if (!this._bridgeUp && Date.now() < this._bridgeRetryAfter) return { jobs: [] };
+        const response = await fetch('/api/operations/jobs');
+        if (!response.ok) {
+            if (response.status === 501 || response.status === 502 || response.status === 503) {
+                this._bridgeUp = false;
+                this._bridgeRetryAfter = Date.now() + 15000;
+                return { jobs: [] };
+            }
+            throw new Error('Failed to fetch jobs');
+        }
+        this._bridgeUp = true;
+        return response.json();
+    },
+
+    async getJob(jobId) {
+        const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}`);
+        if (!response.ok) {
+            if (response.status === 404) return null;
+            throw new Error('Failed to fetch job');
+        }
+        return response.json();
+    },
+
+    async retryJob(jobId) {
+        const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.detail || 'Retry failed');
+        }
+        return response.json();
+    },
+
+    async deleteJob(jobId) {
+        const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Failed to delete job');
+        return response.json();
+    },
+
+    /**
+     * Get platform limits for a device (max_subifs, etc.)
+     * @param {string} deviceId - Device identifier
+     * @returns {Promise<{max_subifs: number}>}
+     */
+    async getLimits(deviceId) {
+        if (!this._bridgeUp && Date.now() < this._bridgeRetryAfter) return { max_subifs: 20480 };
+        const response = await fetch(`/api/config/limits/${encodeURIComponent(deviceId)}`);
+        if (!response.ok) {
+            if (response.status === 404) {
+                return { max_subifs: 20480 };
+            }
+            if (response.status === 501 || response.status === 502 || response.status === 503) {
+                this._bridgeUp = false;
+                this._bridgeRetryAfter = Date.now() + 15000;
+                return { max_subifs: 20480 };
+            }
+            throw new Error('Failed to fetch limits');
+        }
+        this._bridgeUp = true;
         return response.json();
     },
     
@@ -683,8 +1043,49 @@ const ScalerAPI = {
      * @param {Function} [callbacks.onClose] - Called when connection closes
      * @returns {WebSocket} The WebSocket instance
      */
+    /**
+     * Connect to push progress via SSE (EventSource). Use for config push jobs.
+     * @param {string} jobId - Job identifier from pushConfig
+     * @param {Object} callbacks - Same as connectProgress
+     * @returns {EventSource} The EventSource instance
+     */
+    connectPushProgress(jobId, callbacks) {
+        const url = (this.baseUrl || '') + `/api/config/push/progress/${encodeURIComponent(jobId)}`;
+        const es = new EventSource(url || `/api/config/push/progress/${encodeURIComponent(jobId)}`);
+        es.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                const terminal = data.terminal || [];
+                if (Array.isArray(terminal) && terminal.length && callbacks.onTerminal) {
+                    terminal.forEach((chunk) => callbacks.onTerminal(chunk));
+                }
+                if (data.done) {
+                    es.close();
+                    callbacks.onProgress?.(data.success ? 100 : 0, data.message);
+                    callbacks.onComplete?.(data.success, { message: data.message, terminal_full: data.terminal_full, cancelled: data.cancelled });
+                } else if (data.awaiting_decision || data.status === 'awaiting_decision') {
+                    callbacks.onAwaitingDecision?.(data);
+                } else {
+                    const pct = data.percent || 0;
+                    callbacks.onProgress?.(pct, data.message || data.phase);
+                }
+            } catch (e) {
+                console.error('[ScalerAPI] Failed to parse SSE message:', e);
+            }
+        };
+        es.onerror = () => {
+            es.close();
+            callbacks.onError?.('Progress stream error');
+        };
+        return es;
+    },
+
     connectProgress(jobId, callbacks) {
-        // Use secure WebSocket if page is served over HTTPS
+        // Prefer SSE for push jobs (scaler_bridge implements push progress via SSE)
+        if (typeof EventSource !== 'undefined') {
+            return this.connectPushProgress(jobId, callbacks);
+        }
+        // Fallback: WebSocket (if serve.py ever adds WS support)
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/progress/${jobId}`;
         
@@ -774,7 +1175,11 @@ const ScalerAPI = {
         if (!response.ok) {
             throw new Error('API server is not healthy');
         }
-        return response.json();
+        const data = await response.json();
+        if (data?.scaler_bridge?.status === 'ok') {
+            this._bridgeUp = true;
+        }
+        return data;
     },
     
     // =========================================================================

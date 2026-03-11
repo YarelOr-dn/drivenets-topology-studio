@@ -14,9 +14,8 @@ window.ToolbarSetup = {
             const element = document.getElementById(id);
             if (element) {
                 element.addEventListener(event, handler);
-            } else {
-                console.warn(`Element ${id} not found, skipping event listener`);
             }
+            // Silently skip missing elements (toolbar may be in different layout/panel)
         };
         
         safeAddListener('btn-base', 'click', () => editor.setMode('base'));
@@ -76,6 +75,8 @@ window.ToolbarSetup = {
         } else {
             console.warn('[WARN] device-styles-box not found');
         }
+
+        setTimeout(() => ToolbarSetup._renderDeviceStylePreviews(editor), 200);
         
         // Device Label Font buttons
         const deviceFontGrid = document.getElementById('device-font-grid');
@@ -1037,10 +1038,12 @@ window.ToolbarSetup = {
             if (saveDnaasTopoBtn) {
                 saveDnaasTopoBtn.addEventListener('click', () => {
                     if (editor.objects.length === 0) {
-                        editor.showToast('Canvas is empty — run a discovery first', 'warning');
+                        editor.showToast('Canvas is empty -- run a discovery first', 'warning');
                         return;
                     }
-                    editor.saveAsDnaasTopology();
+                    const deviceName = window._dnaasDiscoveryData?.metadata?.source
+                        || '';
+                    editor.saveAsDnaasTopology(deviceName);
                     dnaasPanel.style.display = 'none';
                 });
             }
@@ -1102,13 +1105,8 @@ window.ToolbarSetup = {
                 });
             }
             
-            // Save as DNAAS Topology button
-            const saveAsDnaasBtn = document.getElementById('dnaas-save-as-dnaas');
-            if (saveAsDnaasBtn) {
-                saveAsDnaasBtn.addEventListener('click', () => {
-                    editor.saveAsDnaasTopology();
-                });
-            }
+            // dnaas-save-as-dnaas handler is set by startMultiBDDiscovery
+            // (topology-dnaas-helpers.js) — no duplicate listener here
             
             // Dismiss Result button - closes panel without loading, resets button state
             const dismissResultBtn = document.getElementById('dnaas-dismiss-result');
@@ -1765,8 +1763,6 @@ window.ToolbarSetup = {
                 console.log('Close link details button 2 clicked');
                 editor.forceHideLinkDetails(); // Force close even with invalid fields
             });
-        } else {
-            console.warn('Close link details button 2 not found during setup');
         }
         // Link Table Action Buttons
         const resetLinkTableBtn = document.getElementById('btn-reset-link-table');
@@ -1800,10 +1796,351 @@ window.ToolbarSetup = {
             const rotationValue = document.getElementById('editor-rotation-value');
             if (rotationValue) rotationValue.textContent = e.target.value + '°';
         });
-    }
-    
+
+        // XRAY Settings - Mac / Wireshark config
+        const xraySection = document.getElementById('xray-settings-section');
+        if (xraySection) {
+            const loadXrayConfig = async () => {
+                try {
+                    const resp = await fetch('/api/xray/config');
+                    if (resp.ok) {
+                        const cfg = await resp.json();
+                        const mac = cfg.mac || {};
+                        const ipInput = document.getElementById('xray-mac-ip');
+                        const userInput = document.getElementById('xray-mac-user');
+                        const passInput = document.getElementById('xray-mac-password');
+                        const wsInput = document.getElementById('xray-wireshark-path');
+                        const dirInput = document.getElementById('xray-pcap-dir');
+                        if (ipInput) ipInput.value = mac.ip_vpn || '';
+                        if (userInput) userInput.value = mac.user || '';
+                        if (passInput) passInput.value = mac.password || '';
+                        if (wsInput) wsInput.value = mac.wireshark_path || '/Applications/Wireshark.app/Contents/MacOS/Wireshark';
+                        if (dirInput) dirInput.value = mac.pcap_directory || '~/Desktop/Packet-captures';
+                    }
+                } catch (e) {
+                    console.warn('[XRAY] Failed to load config:', e);
+                }
+            };
+            loadXrayConfig();
+
+            const saveBtn = document.getElementById('xray-save-config');
+            if (saveBtn) {
+                saveBtn.addEventListener('click', async () => {
+                    const mac = {
+                        ip_vpn: document.getElementById('xray-mac-ip')?.value?.trim() || null,
+                        user: document.getElementById('xray-mac-user')?.value?.trim() || null,
+                        password: document.getElementById('xray-mac-password')?.value || null,
+                        wireshark_path: document.getElementById('xray-wireshark-path')?.value?.trim() || null,
+                        pcap_directory: document.getElementById('xray-pcap-dir')?.value?.trim() || null
+                    };
+                    try {
+                        const resp = await fetch('/api/xray/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ mac })
+                        });
+                        const result = await resp.json();
+                        if (result.error) {
+                            editor.showToast('XRAY config save failed: ' + result.error, 'error');
+                            return;
+                        }
+                        editor.showToast('XRAY config saved', 'success');
+                    } catch (e) {
+                        editor.showToast('Failed to save XRAY config: ' + e.message, 'error');
+                    }
+                });
+            }
+
+            const verifyBtn = document.getElementById('xray-verify-mac');
+            const verifyStatus = document.getElementById('xray-verify-status');
+            if (verifyBtn && verifyStatus) {
+                verifyBtn.addEventListener('click', async () => {
+                    const ip = document.getElementById('xray-mac-ip')?.value?.trim();
+                    const user = document.getElementById('xray-mac-user')?.value?.trim();
+                    const pass = document.getElementById('xray-mac-password')?.value;
+                    if (!ip) {
+                        editor.showToast('Enter Mac IP first', 'warning');
+                        return;
+                    }
+                    verifyStatus.style.display = 'block';
+                    verifyStatus.textContent = 'Verifying...';
+                    verifyStatus.className = 'xray-verify-status';
+                    try {
+                        const resp = await fetch('/api/xray/verify-mac', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ip, user: user || undefined, password: pass || undefined })
+                        });
+                        const data = await resp.json();
+                        if (data.reachable) {
+                            verifyStatus.textContent = 'Mac reachable (SSH OK)';
+                            verifyStatus.className = 'xray-verify-status ok';
+                        } else if (data.ping && !data.ssh) {
+                            verifyStatus.innerHTML = '';
+                            const line1 = document.createElement('div');
+                            line1.textContent = 'Ping OK but SSH failed';
+                            line1.style.fontWeight = '600';
+                            const line2 = document.createElement('div');
+                            line2.textContent = data.error || 'Enable Remote Login on Mac';
+                            line2.style.cssText = 'font-size:10px;opacity:0.85;margin-top:2px;';
+                            verifyStatus.appendChild(line1);
+                            verifyStatus.appendChild(line2);
+                            verifyStatus.className = 'xray-verify-status fail';
+                        } else {
+                            verifyStatus.textContent = data.error || 'Mac not reachable';
+                            verifyStatus.className = 'xray-verify-status fail';
+                        }
+                    } catch (e) {
+                        verifyStatus.textContent = 'Verify failed: ' + e.message;
+                        verifyStatus.className = 'xray-verify-status fail';
+                    }
+                });
+            }
+
+            const passToggle = document.getElementById('xray-password-toggle');
+            if (passToggle) {
+                passToggle.addEventListener('click', () => {
+                    const input = document.getElementById('xray-mac-password');
+                    if (!input) return;
+                    if (input.type === 'password') {
+                        input.type = 'text';
+                        passToggle.textContent = 'Hide';
+                    } else {
+                        input.type = 'password';
+                        passToggle.textContent = 'Show';
+                    }
+                });
+            }
+        }
+    },
+
     // LAYER SYSTEM COMPLETELY REMOVED
-    
+
+    _renderDeviceStylePreviews(editor) {
+        const DS = window.DeviceStyles;
+        if (!DS) {
+            console.warn('[DeviceStylePreview] DeviceStyles not loaded, retrying in 500ms');
+            setTimeout(() => ToolbarSetup._renderDeviceStylePreviews(editor), 500);
+            return;
+        }
+
+        const styles = [
+            { btnId: 'btn-style-circle', id: 'circle', name: 'Circle' },
+            { btnId: 'btn-style-classic', id: 'classic', name: 'Cylinder' },
+            { btnId: 'btn-style-simple', id: 'simple', name: 'Simple' },
+            { btnId: 'btn-style-hex', id: 'hex', name: 'Hexagon' },
+            { btnId: 'btn-style-server', id: 'server', name: 'Tower' }
+        ];
+        const isDark = editor.darkMode;
+        const color = '#3498db';
+        const dpr = window.devicePixelRatio || 1;
+        const w = 40, h = 28;
+        const r = 11;
+
+        styles.forEach(style => {
+            const btn = document.getElementById(style.btnId);
+            if (!btn) return;
+            btn.innerHTML = '';
+
+            const canvas = document.createElement('canvas');
+            canvas.width = w * dpr;
+            canvas.height = h * dpr;
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            canvas.style.display = 'block';
+            canvas.style.pointerEvents = 'none';
+
+            const ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+            ctx.clearRect(0, 0, w, h);
+
+            const fakeDevice = { x: w / 2, y: h / 2, radius: r, color, rotation: 0, visualStyle: style.id, deviceType: 'router' };
+            const fakeEditor = { ctx, darkMode: isDark, defaultDeviceFontFamily: 'Inter, sans-serif' };
+            try {
+                switch (style.id) {
+                    case 'circle': DS.drawDeviceCircle(fakeEditor, fakeDevice, false); break;
+                    case 'classic': DS.drawDeviceClassicRouter(fakeEditor, fakeDevice, false); break;
+                    case 'simple': DS.drawDeviceSimpleRouter(fakeEditor, fakeDevice, false); break;
+                    case 'server': DS.drawDeviceServerTower(fakeEditor, fakeDevice, false); break;
+                    case 'hex': DS.drawDeviceHexRouter(fakeEditor, fakeDevice, false); break;
+                }
+            } catch (err) {
+                console.warn('[DeviceStylePreview] Failed to render', style.id, err);
+            }
+
+            const label = document.createElement('span');
+            label.className = 'style-label';
+            label.textContent = style.name;
+
+            btn.appendChild(canvas);
+            btn.appendChild(label);
+        });
+    },
+
+    buildHelpersSection(editor) {
+        const dk = document.body.classList.contains('dark-mode');
+        const scriptsContainer = document.getElementById('helpers-setup-scripts');
+        const tipsContainer = document.getElementById('helpers-usage-tips');
+        if (!scriptsContainer || !tipsContainer) return;
+
+        const SETUP_SCRIPTS = [
+            {
+                id: 'server',
+                icon: 'ico-rocket',
+                title: 'Start App Server',
+                env: 'H263 (Linux)',
+                tooltip: 'Starts both the frontend server (port 8080) and the discovery API (port 8765). Run this on the H263 Linux server where the app is deployed. The frontend serves index.html + JS, and the discovery API handles DNAAS, Network Mapper, and device inventory.',
+                script: 'cd ~/CURSOR && python3 serve.py &\ncd ~/CURSOR && python3 discovery_api.py &',
+                check: '/api/xray/config'
+            },
+            {
+                id: 'scaler-bridge',
+                icon: 'ico-layers',
+                title: 'Start Scaler Bridge',
+                env: 'H263 (Linux)',
+                tooltip: 'The Scaler Bridge exposes scaler-wizard config fetch, sync, and summary via REST. Enables Device Manager Sync, config viewing, and config comparison in the CONFIG panel. Requires serve.py and discovery_api.py running.',
+                script: 'cd ~/CURSOR && python3 scaler_bridge.py &',
+                noCheck: true
+            },
+            {
+                id: 'mac-remote-login',
+                icon: 'ico-target',
+                title: 'Enable Remote Login (Mac)',
+                env: 'MacBook',
+                tooltip: 'Packet Capture needs SSH access to your Mac to deliver .pcap files and open them in Wireshark. This enables the built-in SSH server on macOS. After enabling, configure your Mac IP in the Packet-Capture section above.',
+                script: 'sudo systemsetup -setremotelogin on\nsudo launchctl load -w /System/Library/LaunchDaemons/ssh.plist',
+                noCheck: true
+            },
+            {
+                id: 'mac-wireshark',
+                icon: 'ico-search',
+                title: 'Install Wireshark (Mac)',
+                env: 'MacBook',
+                tooltip: 'Wireshark is required on the Mac to auto-open captured packets. Install via Homebrew or download from wireshark.org. The app auto-detects Wireshark at /Applications/Wireshark.app.',
+                script: 'brew install --cask wireshark',
+                noCheck: true
+            },
+            {
+                id: 'xray-deps',
+                icon: 'ico-bug',
+                title: 'Install Capture Dependencies',
+                env: 'H263 (Linux)',
+                tooltip: 'Installs Python packages needed for all packet capture modes (CP, DP, DNAAS-DP). paramiko for SSH sessions, scp for file transfer, scapy for packet analysis, sshpass for non-interactive SSH auth to Mac and Arista, tshark for protocol decoding.',
+                script: 'pip3 install paramiko scp scapy\nsudo apt install -y sshpass tshark',
+                check: '/api/xray/config'
+            },
+            {
+                id: 'network-mapper',
+                icon: 'ico-network',
+                title: 'Start Network Mapper MCP',
+                env: 'H263 (Linux)',
+                tooltip: 'The Network Mapper MCP server enables recursive LLDP-based network discovery. It walks device neighbors to build a full topology map automatically. The MCP server must be running for the Network Mapper panel to work.',
+                script: 'cd ~/network-mapper && npm start &',
+                noCheck: true
+            },
+            {
+                id: 'scaler-db',
+                icon: 'ico-layers',
+                title: 'Sync Scaler Device DB',
+                env: 'H263 (Linux)',
+                tooltip: 'The Scaler DB (operational.json) caches device serials, hostnames, management IPs, and last-seen timestamps. DNAAS discovery and NCC resolution rely on it. This pulls the latest device inventory from the Scaler system.',
+                script: 'cd ~/SCALER && python3 -m scaler.wizard inventory --refresh',
+                noCheck: true
+            }
+        ];
+
+        const USAGE_TIPS = [
+            { icon: 'ico-hand', title: 'Keyboard Shortcuts', desc: '<span class="helper-key">R</span> Refresh <span class="helper-key">D</span> DNAAS <span class="helper-key">B</span> BD Panel <span class="helper-key">T</span> Topologies <span class="helper-key">M</span> Minimap <span class="helper-key">G</span> Grid <span class="helper-key">L</span> Light/Dark <span class="helper-key">F</span> Fit View <span class="helper-key">C</span> Copy Style <span class="helper-key">Del</span> Delete' },
+            { icon: 'ico-router', title: 'Place Devices', desc: 'Select a device type from the toolbar, then click on the canvas to place it. Hold Shift and click multiple times for continuous placement.' },
+            { icon: 'ico-link', title: 'Create Links', desc: 'Click "Link" mode, then click the first device and then the second. Use the Link Table to fill in interface details. Hold Alt + click a device to quick-start link mode.' },
+            { icon: 'ico-search', title: 'Packet Capture', desc: 'Click the magnifying glass icon on any link to open capture popup. Set your Mac IP, user, and password in the Packet-Capture section above. Enable "Remote Login" on Mac.' },
+            { icon: 'ico-discover', title: 'DNAAS Discovery', desc: 'Press D or click DNAAS to open the discovery panel. Enter device name and run discovery to auto-populate the topology with real device data.' },
+            { icon: 'ico-save', title: 'Save / Load', desc: 'Ctrl+S to quick-save. Use the Topologies dropdown (T key) to manage saved topologies across domains. Export as JSON or PNG.' },
+            { icon: 'ico-palette', title: 'Style & Customize', desc: 'Click a device to open its per-device toolbar. Change colors, styles, labels, and fonts. Copy a style with C and paste it onto other devices with Shift+Click.' }
+        ];
+
+        scriptsContainer.innerHTML = '';
+        const header = document.createElement('div');
+        header.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;opacity:0.5;margin-bottom:6px;padding-left:4px;';
+        header.textContent = 'Setup Scripts';
+        scriptsContainer.appendChild(header);
+
+        for (const s of SETUP_SCRIPTS) {
+            const item = document.createElement('div');
+            item.className = 'helper-item helper-script-item';
+
+            const titleRow = document.createElement('div');
+            titleRow.className = 'helper-title';
+            titleRow.style.cssText = 'justify-content:space-between;';
+
+            const left = document.createElement('span');
+            left.style.cssText = 'display:flex;align-items:center;gap:5px;';
+            left.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24"><use href="#${s.icon}"/></svg> ${s.title}`;
+
+            const right = document.createElement('span');
+            right.style.cssText = 'display:flex;align-items:center;gap:4px;';
+
+            const envBadge = document.createElement('span');
+            envBadge.className = 'helper-env-badge';
+            envBadge.textContent = s.env;
+            right.appendChild(envBadge);
+
+            const helpBtn = document.createElement('span');
+            helpBtn.className = 'helper-tooltip-trigger';
+            helpBtn.textContent = '?';
+            helpBtn.setAttribute('tabindex', '0');
+            const tip = document.createElement('span');
+            tip.className = 'helper-tooltip-text';
+            tip.textContent = s.tooltip;
+            helpBtn.appendChild(tip);
+            right.appendChild(helpBtn);
+
+            titleRow.appendChild(left);
+            titleRow.appendChild(right);
+            item.appendChild(titleRow);
+
+            const codeRow = document.createElement('div');
+            codeRow.className = 'helper-code-row';
+
+            const code = document.createElement('code');
+            code.className = 'helper-code';
+            code.textContent = s.script;
+
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'helper-copy-btn';
+            copyBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24"><use href="#ico-copy"/></svg>';
+            copyBtn.title = 'Copy to clipboard';
+            copyBtn.addEventListener('click', () => {
+                navigator.clipboard.writeText(s.script).then(() => {
+                    copyBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24"><use href="#ico-check"/></svg>';
+                    copyBtn.style.color = '#27ae60';
+                    if (editor?.showToast) editor.showToast(`Copied "${s.title}" script`, 'success');
+                    setTimeout(() => {
+                        copyBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24"><use href="#ico-copy"/></svg>';
+                        copyBtn.style.color = '';
+                    }, 2000);
+                });
+            });
+
+            codeRow.appendChild(code);
+            codeRow.appendChild(copyBtn);
+            item.appendChild(codeRow);
+            scriptsContainer.appendChild(item);
+        }
+
+        tipsContainer.innerHTML = '';
+        const tipsHeader = document.createElement('div');
+        tipsHeader.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;opacity:0.5;margin-bottom:6px;padding-left:4px;';
+        tipsHeader.textContent = 'Usage Tips';
+        tipsContainer.appendChild(tipsHeader);
+
+        for (const t of USAGE_TIPS) {
+            const item = document.createElement('div');
+            item.className = 'helper-item';
+            item.innerHTML = `<div class="helper-title"><svg width="12" height="12" viewBox="0 0 24 24"><use href="#${t.icon}"/></svg> ${t.title}</div><div class="helper-desc">${t.desc}</div>`;
+            tipsContainer.appendChild(item);
+        }
+    }
 
 };
 

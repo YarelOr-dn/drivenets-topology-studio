@@ -1511,7 +1511,401 @@
           "encapsulation": "ethernet"
         }
       }
+    },
+    "100.64.4.205": {
+      "serial": "100.64.4.205",
+      "hostname": "RR-SA-2",
+      "mgmt_ip": "",
+      "mgmt_ipv6": "",
+      "system_type": "SA-36CD-S, Family: NCR",
+      "dnos_version": "DNOS [25.4.13] build [146_dev], Copyright 2025 DRIVENETS LTD.",
+      "last_seen": "2026-03-10T14:32:52.240679",
+      "dnaas_interfaces": [
+        "ge400-0/0/2",
+        "ge400-0/0/0"
+      ],
+      "lldp_neighbors": [
+        {
+          "local_interface": "ge400-0/0/0",
+          "neighbor_name": "DNAAS-LEAF-B15",
+          "neighbor_interface": "ge100-0/0/6",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/2",
+          "neighbor_name": "DNAAS-LEAF-B15",
+          "neighbor_interface": "ge100-0/0/7",
+          "ttl": 120,
+          "is_dnaas": true
+        }
+      ],
+      "all_mgmt_interfaces": [],
+      "interface_details": {
+        "ge400-0/0/2": {
+          "interface": "ge400-0/0/2",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "100",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/0": {
+          "interface": "ge400-0/0/0",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "100",
+          "description": "",
+          "encapsulation": "ethernet"
+        }
+      }
+    },
+    "kvm108-cl408d-ncc1": {
+      "serial": "kvm108-cl408d-ncc1",
+      "hostname": "YOR_CL_PE-4",
+      "mgmt_ip": "",
+      "mgmt_ipv6": "",
+      "system_type": "CL-86, Family: NCR",
+      "dnos_version": "DNOS [25.4.13] build [146_dev], Copyright 2025 DRIVENETS LTD.",
+      "last_seen": "2026-03-10T12:51:50.820361",
+      "dnaas_interfaces": [
+        "ge100-18/0/1",
+        "ge100-18/0/0",
+        "ge100-18/0/6",
+        "ge100-18/0/5"
+      ],
+      "lldp_neighbors": [
+        {
+          "local_interface": "ge100-6/0/2",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/3",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/3",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/2",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/4",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/5",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/5",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/4",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/6",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/7",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/7",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/6",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/8",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/9",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/9",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/8",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/10",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/11",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/11",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/10",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/12",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/13",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/13",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/12",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/14",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/15",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/15",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/14",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/20",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/21",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/21",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/20",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/22",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/23",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/23",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/22",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/24",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/25",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/25",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/24",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/26",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/27",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/27",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/26",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/28",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/29",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/29",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/28",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/30",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/31",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/31",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/30",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/32",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/33",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/33",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/32",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/34",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/35",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/35",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/34",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-18/0/0",
+          "neighbor_name": "DNAAS-LEAF-B10",
+          "neighbor_interface": "ge100-0/0/3",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge100-18/0/1",
+          "neighbor_name": "DNAAS-LEAF-B10",
+          "neighbor_interface": "ge100-0/0/4",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge100-18/0/5",
+          "neighbor_name": "DN-LEAF1.dev.drivenets.net",
+          "neighbor_interface": "Ethernet8/5/1",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge100-18/0/6",
+          "neighbor_name": "DNAAS-LEAF-B10",
+          "neighbor_interface": "ge100-0/0/5",
+          "ttl": 120,
+          "is_dnaas": true
+        }
+      ],
+      "all_mgmt_interfaces": [],
+      "interface_details": {
+        "ge100-18/0/1": {
+          "interface": "ge100-18/0/1",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge100-18/0/0": {
+          "interface": "ge100-18/0/0",
+          "sub_interfaces": [
+            {
+              "name": "ge100-18/0/0.14",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "14.14.14.4/29",
+              "vlan": 14,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge100-18/0/0.24",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "24.24.24.4/29",
+              "vlan": 24,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge100-18/0/0.34",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "34.34.34.4/29",
+              "vlan": 34,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge100-18/0/0.45",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "45.45.45.4/29",
+              "vlan": 45,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge100-18/0/0.219",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "49.49.49.4/28",
+              "vlan": 219,
+              "mtu": 9220,
+              "service": "VRF (ALPHA)"
+            }
+          ],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge100-18/0/6": {
+          "interface": "ge100-18/0/6",
+          "sub_interfaces": [
+            {
+              "name": "ge100-18/0/6.999",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "100.70.0.206/24",
+              "vlan": 999,
+              "mtu": 1518,
+              "service": "VRF (default)"
+            }
+          ],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge100-18/0/5": {
+          "interface": "ge100-18/0/5",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        }
+      }
     }
   },
-  "last_updated": "2026-03-01T13:06:30.987832"
+  "last_updated": "2026-03-10T14:32:52.241021"
 }

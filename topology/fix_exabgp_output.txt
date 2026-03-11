@@ -1,0 +1,3 @@
++ echo '=== Kill ExaBGP ==='
+=== Kill ExaBGP ===
++ pkill -f exabgp

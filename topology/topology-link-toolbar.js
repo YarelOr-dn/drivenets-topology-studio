@@ -175,6 +175,43 @@ function showLinkSelectionToolbar(editor, link, clickPos = null) {
     
     // === LINK TOOLBAR BUTTONS ===
     
+    // XRAY Capture button (only for device-to-device links)
+    if (link.device1 && link.device2 && window.XrayPopup) {
+        const xrayBtn = document.createElement('button');
+        xrayBtn.className = 'link-tb-btn';
+        xrayBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>`;
+        const xrayColor = editor._xrayCapturing === link.id ? '#FF5E1F' : '#0066FA';
+        xrayBtn.style.cssText = `
+            width: 30px; height: 30px; border: none;
+            background: ${xrayColor}; color: #fff;
+            cursor: pointer; border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.12s ease;
+        `;
+        xrayBtn.onmouseenter = () => {
+            xrayBtn.style.transform = 'scale(1.12)';
+            xrayBtn.style.opacity = '0.9';
+            if (editor._showToolbarTooltip) editor._showToolbarTooltip(xrayBtn, 'Packet Capture');
+        };
+        xrayBtn.onmouseleave = () => {
+            xrayBtn.style.transform = 'scale(1)';
+            xrayBtn.style.opacity = '1';
+            if (editor._hideToolbarTooltip) editor._hideToolbarTooltip();
+        };
+        xrayBtn.onmousedown = (e) => { e.stopPropagation(); e.preventDefault(); };
+        xrayBtn.onclick = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            const linkTb = document.getElementById('link-selection-toolbar');
+            const rect = linkTb ? linkTb.getBoundingClientRect() : xrayBtn.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const bottomY = rect.bottom;
+            window.XrayPopup.show(editor, link, { x: centerX, y: bottomY, anchor: 'center' });
+        };
+        toolbar.appendChild(xrayBtn);
+        toolbar.appendChild(createSeparator());
+    }
+    
     // Add Adjacent Text button
     toolbar.appendChild(createButton('text', 'Add Text', () => {
         hideLinkSelectionToolbar(editor);
@@ -467,6 +504,10 @@ function hideLinkSelectionToolbar(editor) {
     if (stylePopup) stylePopup.remove();
     const curvePopup = document.getElementById('link-curve-options-popup');
     if (curvePopup) curvePopup.remove();
+    // Sync XRAY popup -- hide it when its parent toolbar hides (unless panning)
+    if (window.XrayPopup && !window.XrayPopup._temporarilyHidden) {
+        window.XrayPopup.hide();
+    }
 }
 
 // Export functions

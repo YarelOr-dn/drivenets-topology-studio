@@ -35,6 +35,8 @@ function handleKeyDown(editor, e) {
         editor.shiftPressed = true;
     }
     
+    if (!e.key) return;
+    
     // Check if focus is on input/textarea to avoid conflicts
     // Non-text inputs (color, checkbox, radio, range) should not block shortcuts
     const nonTextInputTypes = new Set(['color', 'checkbox', 'radio', 'range', 'button', 'submit', 'reset']);
@@ -43,7 +45,7 @@ function handleKeyDown(editor, e) {
     
     // 'R' key for refresh (when no input is focused)
     // Note: beforeunload in index.html suppresses "Save As" dialog
-    if (e.key && e.key.toLowerCase() === 'r' && !isInputFocused) {
+    if (e.key.toLowerCase() === 'r' && !isInputFocused) {
         console.log('R key pressed - refreshing...');
         e.preventDefault();
         e.stopPropagation();
@@ -57,6 +59,9 @@ function handleKeyDown(editor, e) {
         return false;
     }
     
+    // Guard: some key events (dead keys, IME) have undefined e.key
+    if (!e.key) return;
+
     // Toggle DNAAS panel with 'D' key (when no input is focused)
     if (e.key.toLowerCase() === 'd' && !isInputFocused && !e.metaKey && !e.ctrlKey) {
         const dnaasBtn = document.getElementById('btn-dnaas');

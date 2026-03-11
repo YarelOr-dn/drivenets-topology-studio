@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Link Style Button Test</title>
+    <style>
+        body { font-family: system-ui, sans-serif; padding: 20px; background: #1a1a2e; color: #eee; }
+        #results { background: #0f0f1a; padding: 16px; border-radius: 8px; margin-top: 16px; white-space: pre-wrap; font-family: monospace; font-size: 13px; }
+        .pass { color: #2ecc71; }
+        .fail { color: #e74c3c; }
+        .info { color: #00b4d8; }
+        iframe { width: 100%; height: 80vh; border: 1px solid #333; border-radius: 8px; }
+        button { padding: 10px 20px; background: #0066FA; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+        button:hover { background: #0052c9; }
+        h2 { margin-top: 0; }
+    </style>
+</head>
+<body>
+    <h2>Link Style Arrow Button Test</h2>
+    <p>This page loads the topology editor and runs the link style button test.</p>
+    <button id="run-test">Run Test</button>
+    <div id="results">Click "Run Test" after the editor has loaded below.</div>
+    <iframe id="editor-frame" src="index.html" style="margin-top: 16px;"></iframe>
+
+    <script>
+        const iframe = document.getElementById('editor-frame');
+        const resultsEl = document.getElementById('results');
+        const runBtn = document.getElementById('run-test');
+
+        function log(msg, cls) {
+            resultsEl.innerHTML += (cls ? '<span class="' + cls + '">' + msg + '</span>' : msg) + '\n';
+        }
+
+        function runTest() {
+            resultsEl.innerHTML = '';
+            const win = iframe.contentWindow;
+            if (!win) {
+                log('[FAIL] Cannot access iframe content (cross-origin?)', 'fail');
+                return;
+            }
+            const editor = win.topologyEditor;
+            if (!editor) {
+                log('[FAIL] window.topologyEditor not found. Is the app fully loaded?', 'fail');
+                return;
+            }
+
+            const before = editor.linkStyle;
+            log('1. linkStyle BEFORE click: ' + JSON.stringify(before), 'info');
+
+            const arrowBtn = win.document.getElementById('btn-link-style-arrow');
+            if (!arrowBtn) {
+                log('[FAIL] btn-link-style-arrow not found', 'fail');
+                return;
+            }
+            log('2. Arrow button found: ' + (arrowBtn ? 'yes' : 'no'), 'info');
+
+            const hadActiveBefore = arrowBtn.classList.contains('active');
+            log('3. Arrow button had "active" class BEFORE click: ' + hadActiveBefore, 'info');
+
+            arrowBtn.click();
+
+            setTimeout(() => {
+                const after = editor.linkStyle;
+                const hasActiveAfter = arrowBtn.classList.contains('active');
+                log('4. linkStyle AFTER click: ' + JSON.stringify(after), 'info');
+                log('5. Arrow button has "active" class AFTER click: ' + hasActiveAfter, 'info');
+
+                const solidChanged = before !== after;
+                const expectedArrow = after === 'arrow' || after === 'double-arrow' || after === 'dashed-arrow' || after === 'dashed-double-arrow';
+                log('', '');
+                if (solidChanged && expectedArrow) {
+                    log('[PASS] linkStyle changed from "' + before + '" to "' + after + '"', 'pass');
+                } else if (!solidChanged && before === 'solid') {
+                    log('[PASS] linkStyle changed from "solid" to "' + after + '" (arrow variant)', 'pass');
+                } else {
+                    log('[INFO] linkStyle: ' + before + ' -> ' + after, 'info');
+                }
+                if (hasActiveAfter) {
+                    log('[PASS] Arrow button correctly shows active state', 'pass');
+                } else {
+                    log('[FAIL] Arrow button should have "active" class when arrow style is selected', 'fail');
+                }
+
+                const errors = win.console?.errors || [];
+                if (errors.length) {
+                    log('[WARN] Console errors: ' + errors.join('; '), 'fail');
+                } else {
+                    log('[INFO] No console errors captured (check DevTools manually)', 'info');
+                }
+            }, 100);
+        }
+
+        runBtn.addEventListener('click', runTest);
+
+        iframe.addEventListener('load', () => {
+            resultsEl.innerHTML = 'Editor iframe loaded. Wait 2-3 seconds for topology canvas to initialize, then click "Run Test".\n';
+        });
+    </script>
+</body>
+</html>

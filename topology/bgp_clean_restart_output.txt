@@ -1,0 +1,160 @@
+=== NUCLEAR KILL: All BGP processes ===
+Killing ALL: watchdog, exabgp, socat, bgp_tool...
+
+=== Verify ALL killed ===
+[OK] No BGP processes running
+
+=== Start 5-minute silence (300s) ===
+Zero TCP/179 traffic must cross FortiGate for quarantine to expire.
+  10s / 300s
+  20s / 300s
+  30s / 300s
+[ALERT] Something restarted ExaBGP! Killing: dn       3336769  0.0  0.0   2892  1044 ?        Ss   17:22   0:00 /bin/sh -c sleep 30 && cd /home/dn/SCALER/FLOWSPEC_VPN/exabgp && python3 bgp_watchdog.py --auto-restart 2>> logs/watchdog.log # bgp_watchdog_30
+  40s / 300s
+  50s / 300s
+  60s / 300s
+  70s / 300s
+  80s / 300s
+  90s / 300s
+[ALERT] Something restarted ExaBGP! Killing: dn       3337327  0.0  0.0   2892   972 ?        Ss   17:23   0:00 /bin/sh -c sleep 30 && cd /home/dn/SCALER/FLOWSPEC_VPN/exabgp && python3 bgp_watchdog.py --auto-restart 2>> logs/watchdog.log # bgp_watchdog_30
+  100s / 300s
+  110s / 300s
+  120s / 300s
+  130s / 300s
+  140s / 300s
+[ALERT] Something restarted ExaBGP! Killing: dn       3338003  0.0  0.0   2892  1000 ?        Ss   17:24   0:00 /bin/sh -c sleep 30 && cd /home/dn/SCALER/FLOWSPEC_VPN/exabgp && python3 bgp_watchdog.py --auto-restart 2>> logs/watchdog.log # bgp_watchdog_30
+  150s / 300s
+  160s / 300s
+  170s / 300s
+  180s / 300s
+  190s / 300s
+  200s / 300s
+  210s / 300s
+  220s / 300s
+  230s / 300s
+  240s / 300s
+  250s / 300s
+  260s / 300s
+  270s / 300s
+  280s / 300s
+  290s / 300s
+  300s / 300s
+300s silence complete.
+
+=== Test TCP/179 ===
+[FAIL] TCP/179 still blocked after 5 minutes.
+Checking if any process sent SYNs during the wait...
+
+=== Start ExaBGP ===
+Terminated
+
+=== Wait 45s for BGP establish ===
+
+=== Verify ===
+{
+  "session_id": "pe_4",
+  "exabgp_pid": 3339975,
+  "exabgp_alive": false,
+  "tcp_state": "DEAD",
+  "healthy": false,
+  "routes_tracked": 4,
+  "scale_modes": [],
+  "action": "ExaBGP process dead. Restart with --preload."
+}
+
+=== ExaBGP log ===
+welcome         Thank you for using ExaBGP
+cli control     named pipes for the cli are:
+cli control     to send commands  /run/exabgp/exabgp.in
+cli control     to read responses /run/exabgp/exabgp.out
+outgoing-1      outgoing-1 100.64.6.134-100.70.0.206, closing connection
+outgoing-1      connection to 100.70.0.206 closed
+outgoing-2      outgoing-2 100.64.6.134-100.70.0.206, closing connection
+outgoing-2      connection to 100.70.0.206 closed
+outgoing-3      outgoing-3 100.64.6.134-100.70.0.206, closing connection
+outgoing-3      connection to 100.70.0.206 closed
+outgoing-4      outgoing-4 100.64.6.134-100.70.0.206, closing connection
+outgoing-4      connection to 100.70.0.206 closed
+outgoing-5      outgoing-5 100.64.6.134-100.70.0.206, closing connection
+outgoing-5      connection to 100.70.0.206 closed
+outgoing-6      outgoing-6 100.64.6.134-100.70.0.206, closing connection
+outgoing-6      connection to 100.70.0.206 closed
+
+=== PE-4 neighbor state ===
+show bgp neighbor 100.64.6.134 | no-more
+[FYOR_CL_PE-4(09-Mar-2026-19:27:25)# show bgp neighbor 100.64.6.134 | no-more
+
+BGP neighbor is 100.64.6.134, remote AS 65200, local AS 1234567, external link
+ Description: "ExaBGP-server"
+  BGP version 4, remote router ID 0.0.0.0
+  BGP state = Active (passive)
+  Last read 00:18:09, hold time is 180, keepalive interval is 60 seconds
+  Configured hold time is 180, keepalive interval is 60 seconds
+  Graceful restart configuration: enable
+  Local Restart timer is 2 minutes 
+  Local Stalepath timer is 6 minutes 
+  Local Purge timer is 7 minutes 
+  Long Lived Graceful restart configuration: 
+    Address families by peer:
+      none
+  Message statistics:
+    Inq depth is 0
+    Outq depth is 0
+                         Sent       Rcvd
+    Opens:                  0          0
+    Notifications:          0          0
+    Updates:                0          0
+    Keepalives:             0          0
+    Route Refresh:          0          0
+    Capability:             0          0
+    Total:                  0          0
+  Minimum time between advertisement runs is 30 seconds
+  Update source is ge100-18/0/6.999
+
+ For address family: IPv4 Unicast
+  Inbound soft reconfiguration allowed
+  Community attribute sent to this neighbor(both)
+  AS loop detection is enabled
+  0 prefixes accepted
+  0 prefixes out
+
+ For address family: IPv4 Vpn
+  Inbound soft reconfiguration allowed
+  Community attribute sent to this neighbor(both)
+  allowas-in 1
+  AS loop detection is enabled
+  0 prefixes accepted
+  0 prefixes out
+
+ For address family: IPv4 Flowspec
+  Inbound soft reconfiguration allowed
+  Community attribute sent to this neighbor(both)
+  allowas-in 1
+  AS loop detection is enabled
+  0 prefixes accepted
+  0 prefixes out
+
+ For address family: IPv6 Vpn
+  Inbound soft reconfiguration allowed
+  Community attribute sent to this neighbor(both)
+  allowas-in 1
+  AS loop detection is enabled
+  0 prefixes accepted
+  0 prefixes out
+
+ For address family: IPv6 Flowspec
+  Inbound soft reconfiguration allowed
+  Community attribute sent to this neighbor(both)
+  allowas-in 1
+  AS loop detection is enabled
+  0 prefixes accepted
+  0 prefixes out
+
+  Connections established 0; dropped 0
+  Last reset never
+  External BGP neighbor may be up to 10 hops away.
+Read thread: off  Write thread: off
+
+YOR_CL_PE-4# 
+
+=== DONE ===

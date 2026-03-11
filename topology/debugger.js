@@ -3240,6 +3240,7 @@ window.createDebugger = function(editor) {
 
 // Global shortcut: Press Shift+D+D (double D) to toggle debugger from anywhere
 window.addEventListener('keydown', (e) => {
+    if (!e.key) return;
     if (e.key.toLowerCase() === 'd' && e.shiftKey && window.debugger) {
         window.debugger.toggle();
         e.preventDefault();

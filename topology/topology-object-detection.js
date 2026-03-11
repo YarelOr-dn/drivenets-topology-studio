@@ -220,56 +220,10 @@ window.ObjectDetection = {
                 }
             }
             
-            // Check XRAY icon hit on the selected link before returning
-            if (closestLink._xrayIconPos && editor.selectedObject === closestLink) {
-                const ip = closestLink._xrayIconPos;
-                const dx = x - ip.x;
-                const dy = y - ip.y;
-                if (Math.sqrt(dx * dx + dy * dy) <= ip.r * 1.5) {
-                    editor._xrayIconClicked = closestLink;
-                    return closestLink;
-                }
-            }
-            editor._xrayIconClicked = null;
             return closestLink;
-        }
-        
-        // Check XRAY icon on the currently selected link even if no link body was hit
-        if (editor.selectedObject && (editor.selectedObject.type === 'link' || editor.selectedObject.type === 'unbound')) {
-            const sel = editor.selectedObject;
-            if (sel._xrayIconPos && sel.device1 && sel.device2) {
-                const ip = sel._xrayIconPos;
-                const dx = x - ip.x;
-                const dy = y - ip.y;
-                if (Math.sqrt(dx * dx + dy * dy) <= ip.r * 1.5) {
-                    editor._xrayIconClicked = sel;
-                    return sel;
-                }
-            }
         }
 
         return null; // Nothing found
-    },
-
-    checkXrayIconHover(editor, x, y) {
-        const sel = editor.selectedObject;
-        if (!sel || (sel.type !== 'link' && sel.type !== 'unbound')) {
-            editor._hoveredXrayIcon = null;
-            return false;
-        }
-        if (!sel._xrayIconPos || !sel.device1 || !sel.device2) {
-            editor._hoveredXrayIcon = null;
-            return false;
-        }
-        const ip = sel._xrayIconPos;
-        const dx = x - ip.x;
-        const dy = y - ip.y;
-        if (Math.sqrt(dx * dx + dy * dy) <= ip.r * 1.5) {
-            editor._hoveredXrayIcon = sel;
-            return true;
-        }
-        editor._hoveredXrayIcon = null;
-        return false;
     },
     
     // Find specifically a TEXT object at the given position
@@ -722,39 +676,23 @@ window.ObjectDetection = {
         const isIPAddress = /^\d+\.\d+\.\d+\.\d+$/.test(host);
         const isValidSshHost = /^[a-zA-Z0-9._-]+$/.test(host) || isIPAddress;
         
-        // If host is a hostname (not IP), try to resolve to IP from managed devices
         if (!isIPAddress && isValidSshHost) {
             try {
-                // Look up device IP from SCALER managed devices
-                if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDevices) {
-                    const result = await ScalerAPI.getDevices();
-                    const managedDevices = result.devices || [];
-                    
-                    // Clean hostname for matching
-                    const cleanHost = (host || '').split('(')[0].trim().toLowerCase();
-                    const deviceLabel = (device.label || '').split('(')[0].trim().toLowerCase();
-                    
-                    for (const managed of managedDevices) {
-                        const managedHostname = (managed.hostname || '').toLowerCase();
-                        const managedId = (managed.id || '').toLowerCase();
-                        
-                        if (managedHostname === cleanHost || managedId === cleanHost ||
-                            managedHostname === deviceLabel || managedId === deviceLabel ||
-                            cleanHost.includes(managedHostname) || cleanHost.includes(managedId)) {
-                            if (managed.ip) {
-                                console.log(`[Terminal] Resolved "${host}" → "${managed.ip}" via managed devices`);
-                                host = managed.ip;
-                                // Also update the sshConfig for future use
-                                device.sshConfig = device.sshConfig || {};
-                                device.sshConfig.host = managed.ip;
-                                device.sshConfig.hostBackup = host;
-                                break;
-                            }
-                        }
+                const lookupName = device.label || host;
+                if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDevice) {
+                    const resolved = await ScalerAPI.getDevice(lookupName);
+                    if (resolved && resolved.ip) {
+                        console.log(`[Terminal] Resolved "${host}" -> "${resolved.ip}" via Network Mapper`);
+                        const oldHost = host;
+                        host = resolved.ip;
+                        device.sshConfig = device.sshConfig || {};
+                        device.sshConfig.host = resolved.ip;
+                        device.sshConfig.hostBackup = oldHost;
+                        if (resolved.serial) device.deviceSerial = resolved.serial;
                     }
                 }
             } catch (e) {
-                console.warn('[Terminal] Could not lookup managed device IP:', e.message);
+                console.warn('[Terminal] Could not resolve device IP:', e.message);
             }
         }
         
@@ -917,70 +855,35 @@ window.ObjectDetection = {
                 return;
             }
             
-            // macOS: Use multiple methods to open SSH URL in iTerm
+            // macOS: Trigger ssh:// URL scheme to open iTerm/Terminal
             console.log(`[Terminal] Opening SSH URL for macOS: ${url}`);
             
-            // Extract SSH command for clipboard fallback
             const sshMatch = url.match(/ssh:\/\/([^@]+)@(.+)/);
             const sshCommand = sshMatch ? `ssh ${sshMatch[1]}@${sshMatch[2]}` : url;
             
-            // Method 1: Try window.open with _self to trigger URL scheme handler
-            // Using _self prevents the browser from treating it as a navigation
+            // Use an anchor element with click() -- avoids Chrome's iframe credential block
+            // and reliably triggers the OS URL scheme handler (iTerm, Terminal.app)
             try {
-                // Create an iframe to attempt the URL scheme (doesn't navigate main page)
-                const iframe = document.createElement('iframe');
-                iframe.style.display = 'none';
-                iframe.src = url;
-                document.body.appendChild(iframe);
-                
-                // Remove after a short delay
+                const link = document.createElement('a');
+                link.href = url;
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
                 setTimeout(() => {
-                    if (document.body.contains(iframe)) {
-                        document.body.removeChild(iframe);
-                    }
-                }, 1000);
-                
-                console.log(`[Terminal] Attempted iframe method for: ${url}`);
+                    if (document.body.contains(link)) document.body.removeChild(link);
+                }, 200);
+                console.log(`[Terminal] Triggered URL scheme via anchor click: ${url}`);
             } catch (e) {
-                console.warn('[Terminal] Iframe method failed:', e);
+                console.warn('[Terminal] Anchor click failed, trying window.open:', e);
+                window.open(url, '_blank', 'noopener,noreferrer');
             }
             
-            // Method 2: Also copy SSH command to clipboard as reliable fallback
+            // Copy SSH command to clipboard as reliable fallback
             editor._safeClipboardWrite(sshCommand).then(() => {
-                editor.showNotification(`📋 SSH command copied! Open Terminal and paste: ${sshCommand}`, 'success', 8000);
+                editor.showNotification(`Terminal opening to ${sshMatch ? sshMatch[2] : url}. Command also copied.`, 'success', 5000);
             }).catch(() => {
-                editor.showNotification(`🖥️ Run: ${sshCommand}`, 'info', 8000);
+                editor.showNotification(`Run: ${sshCommand}`, 'info', 8000);
             });
-            
-            // Method 3: Try direct location assign as last resort
-            // This might navigate the page but should trigger the URL handler
-            setTimeout(() => {
-                try {
-                    // Use an anchor with proper attributes
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.setAttribute('target', '_blank');
-                    link.setAttribute('rel', 'noopener noreferrer');
-                    link.style.display = 'none';
-                    document.body.appendChild(link);
-                    
-                    // Dispatch a trusted click event
-                    const clickEvent = new MouseEvent('click', {
-                        view: window,
-                        bubbles: true,
-                        cancelable: true
-                    });
-                    link.dispatchEvent(clickEvent);
-                    
-                    setTimeout(() => {
-                        if (document.body.contains(link)) {
-                            document.body.removeChild(link);
-                        }
-                    }, 100);
-                } catch (e) {
-                    console.warn('[Terminal] Anchor click failed:', e);
-                }
-            }, 100);
         } catch (error) {
             console.error('[Terminal] Error in _openSshUrl:', error);
             editor.showNotification(`SSH error: ${error.message}`, 'error');

@@ -56,6 +56,7 @@ window.SelectionPopups = {
         
         const isLldpRunning = device._lldpRunning || device._lldpAnimating;
         const hasLldpData = device.lldpEnabled || device.lldpDiscoveryComplete;
+        const hasNewResults = device._lldpNewResults;
         
         // Create submenu with same styling as toolbar
         const submenu = document.createElement('div');
@@ -151,7 +152,7 @@ window.SelectionPopups = {
                     editor.showToast('No SSH address configured', 'error');
                 }
             },
-            hasLldpData && !isLldpRunning,
+            hasNewResults && !isLldpRunning,
             isLldpRunning
         ));
         
@@ -160,11 +161,10 @@ window.SelectionPopups = {
             '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>',
             'LLDP Table',
             () => {
-                // submenu.remove() is already called by createSubBtn
                 editor.hideDeviceSelectionToolbar();
                 editor.showLldpTableDialog(device, serial);
             },
-            hasLldpData
+            hasNewResults
         ));
         
         document.body.appendChild(submenu);

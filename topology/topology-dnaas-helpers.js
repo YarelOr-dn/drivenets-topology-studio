@@ -13,7 +13,62 @@ window.DnaasHelpers = {
     _getEditor() {
         return this._editor || window.app;
     },
-    
+
+    _findActiveNcc(inventory, deviceKey) {
+        if (!deviceKey || !inventory?.devices) return null;
+        const deviceName = deviceKey.split('(')[0].trim();
+        
+        // Strategy 1: NCC serial prefix matching (e.g. kvm108-cl408d-ncc0)
+        const nccMatch = deviceName.match(/^(.+)-ncc\d+$/i);
+        if (nccMatch) {
+            const prefix = nccMatch[1].toLowerCase();
+            const candidates = [];
+            for (const [key, info] of Object.entries(inventory.devices)) {
+                if (key.toLowerCase().startsWith(prefix + '-ncc') && key !== deviceKey) {
+                    const h = (info.hostname || '');
+                    const hasDateSuffix = /\(\d{2}-\w{3}-\d{4}/.test(h);
+                    candidates.push({ key, lastSeen: info.last_seen || '', hasDateSuffix });
+                }
+            }
+            if (candidates.length > 0) {
+                candidates.sort((a, b) => {
+                    if (a.hasDateSuffix !== b.hasDateSuffix) return a.hasDateSuffix ? 1 : -1;
+                    return b.lastSeen.localeCompare(a.lastSeen);
+                });
+                const current = inventory.devices[deviceKey];
+                const currentHasDate = /\(\d{2}-\w{3}-\d{4}/.test(current?.hostname || '');
+                const best = candidates[0];
+                console.log(`[DNAAS] NCC resolve: current=${deviceKey} (date=${currentHasDate}), best=${best.key} (date=${best.hasDateSuffix}, seen=${best.lastSeen})`);
+                // Return best if: (1) best has clean hostname, OR
+                // (2) both have date suffixes and best is more recently seen
+                if (!best.hasDateSuffix) return best.key;
+                if (currentHasDate && best.lastSeen > (current?.last_seen || '')) return best.key;
+                return null;
+            }
+        }
+        
+        // Strategy 2: hostname matching (e.g. YOR_CL_PE-4)
+        const candidates = [];
+        for (const [key, info] of Object.entries(inventory.devices)) {
+            if (key === deviceKey) continue;
+            const h = (info.hostname || '').split('(')[0].trim();
+            if (h === deviceName) {
+                const hasDateSuffix = /\(\d{2}-\w{3}-\d{4}/.test(info.hostname || '');
+                candidates.push({ key, lastSeen: info.last_seen || '', hasDateSuffix });
+            }
+        }
+        if (candidates.length === 0) return null;
+        // Sort: clean hostname first, then by most recent last_seen
+        candidates.sort((a, b) => {
+            if (a.hasDateSuffix !== b.hasDateSuffix) return a.hasDateSuffix ? 1 : -1;
+            return b.lastSeen.localeCompare(a.lastSeen);
+        });
+        console.log(`[DNAAS] NCC candidates for ${deviceName}:`,
+            candidates.map(c => `${c.key} (seen=${c.lastSeen}, date=${c.hasDateSuffix})`).join(', '));
+        // No "current" to compare against -- just pick the best (clean hostname or most recent)
+        return candidates[0].key;
+    },
+
     async _ensureDnaasSection() {
         if (this._dnaasSectionId) return this._dnaasSectionId;
         try {
@@ -39,18 +94,16 @@ window.DnaasHelpers = {
         }
     },
     
-    populateDnaasSuggestions(editor) {
-        this._editor = editor; // Store for internal use
+    async populateDnaasSuggestions(editor) {
+        this._editor = editor;
         const suggestionsSection = document.getElementById('dnaas-suggestions-section');
         const suggestionsList = document.getElementById('dnaas-suggestions-list');
         const noTerminationMsg = document.getElementById('dnaas-no-termination-msg');
         
         if (!suggestionsSection || !suggestionsList) return;
         
-        // Clear previous suggestions
         suggestionsList.innerHTML = '';
         
-        // Find all devices on grid with sshConfig or deviceSerial
         const devicesWithAddr = editor.objects.filter(obj => {
             if (obj.type !== 'device') return false;
             const hasSSH = obj.sshConfig && (obj.sshConfig.host || obj.sshConfig.hostBackup);
@@ -58,7 +111,6 @@ window.DnaasHelpers = {
             return hasSSH || hasSN;
         });
         
-        // Filter to only termination devices (exclude DNAAS routers)
         const terminationDevices = devicesWithAddr.filter(device => editor.isTerminationDevice(device));
         const dnaasRouters = devicesWithAddr.filter(device => !editor.isTerminationDevice(device));
         
@@ -67,10 +119,8 @@ window.DnaasHelpers = {
             return;
         }
         
-        // Show the section
         suggestionsSection.style.display = 'block';
         
-        // Show warning if no termination devices but there are DNAAS routers
         if (noTerminationMsg) {
             if (terminationDevices.length === 0 && dnaasRouters.length > 0) {
                 noTerminationMsg.style.display = 'block';
@@ -79,7 +129,6 @@ window.DnaasHelpers = {
             }
         }
         
-        // Deduplicate by label (case-insensitive) — same device name = same device
         const seenLabels = new Set();
         const uniqueTerminationDevices = terminationDevices.filter(device => {
             const label = (device.label || device.id || '').trim().toLowerCase();
@@ -88,11 +137,17 @@ window.DnaasHelpers = {
             return true;
         });
         
-        // Update device count badge
         const countEl = document.getElementById('dnaas-suggestions-count');
         if (countEl) countEl.textContent = uniqueTerminationDevices.length;
         
-        // Create suggestion buttons only for unique termination devices
+        // Pre-fetch inventory once for NCC resolution during button creation
+        let inventory = null;
+        try {
+            inventory = await ScalerAPI.getDeviceInventory();
+        } catch (e) {
+            console.warn('[DNAAS] Could not fetch inventory for NCC resolution:', e);
+        }
+        
         uniqueTerminationDevices.forEach((device) => {
             const hostBackup = device.sshConfig?.hostBackup || '';
             const host = device.sshConfig?.host || '';
@@ -116,6 +171,33 @@ window.DnaasHelpers = {
                 displayAddr = addr;
             }
             
+            // Resolve active NCC at button creation time for cluster devices
+            let resolvedAddr = addr;
+            if (inventory && inventory.devices) {
+                const invKey = inventory.devices[addr] ? addr
+                    : inventory.devices[addr.toUpperCase()] ? addr.toUpperCase()
+                    : null;
+                if (invKey) {
+                    const activeNcc = DnaasHelpers._findActiveNcc(inventory, invKey);
+                    if (activeNcc) {
+                        resolvedAddr = activeNcc;
+                        console.log(`[DNAAS] Button ${label}: resolved ${addr} -> active NCC ${activeNcc}`);
+                    }
+                } else {
+                    // Try hostname match to find inventory serial
+                    const normalizedLabel = (label || '').split('(')[0].trim();
+                    for (const [invSerial, info] of Object.entries(inventory.devices)) {
+                        const invHostname = (info.hostname || '').split('(')[0].trim();
+                        if (invHostname === normalizedLabel || invHostname === addr) {
+                            const activeNcc = DnaasHelpers._findActiveNcc(inventory, invSerial);
+                            resolvedAddr = activeNcc || invSerial;
+                            console.log(`[DNAAS] Button ${label}: hostname match -> ${resolvedAddr}`);
+                            break;
+                        }
+                    }
+                }
+            }
+            
             const btn = document.createElement('button');
             btn.style.cssText = `
                 display: inline-flex; align-items: center; gap: 5px;
@@ -130,13 +212,13 @@ window.DnaasHelpers = {
                 transition: all 0.2s ease;
                 backdrop-filter: blur(6px);
             `;
-            const displayText = addr.length > 20 ? `${addr.substring(0,20)}...` : addr;
-            const isIP = /^\d+\.\d+\.\d+\.\d+/.test(addr);
+            const displayText = resolvedAddr.length > 20 ? `${resolvedAddr.substring(0,20)}...` : resolvedAddr;
+            const isIP = /^\d+\.\d+\.\d+\.\d+/.test(resolvedAddr);
             const iconSvg = isIP
                 ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(0,180,216,0.8)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>'
                 : '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(0,180,216,0.8)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1" fill="rgba(0,180,216,0.8)" stroke="none"/><circle cx="6" cy="18" r="1" fill="rgba(0,180,216,0.8)" stroke="none"/></svg>';
             btn.innerHTML = `${iconSvg}<span>${label}</span><span style="color:rgba(255,255,255,0.4);font-size:10px;font-weight:400;">${displayText}</span>`;
-            btn.dataset.fullAddr = addr;
+            btn.dataset.fullAddr = resolvedAddr;
             
             btn.onmouseover = () => {
                 btn.style.background = 'rgba(0,180,216,0.22)';
@@ -149,59 +231,16 @@ window.DnaasHelpers = {
                 btn.style.color = 'rgba(255,255,255,0.85)';
             };
             
-            btn.onclick = async (e) => {
+            btn.onclick = (e) => {
                 e.stopPropagation();
-                
-                // Get full address from data attribute or original addr
-                let discoveryAddr = btn.dataset.fullAddr || addr;
-                
-                // Try to look up serial from inventory for better discovery
-                    try {
-                        const inventory = await ScalerAPI.getDeviceInventory();
-                        if (inventory && inventory.devices) {
-                            // Normalize for comparison - strip date suffix like "(05-Jan-2026-18:48:06)"
-                            const normalizedLabel = (label || '').split('(')[0].trim();
-                        const normalizedAddr = (discoveryAddr || '').split('(')[0].trim();
-                            
-                        // First check if discoveryAddr is already a valid serial in inventory
-                        if (inventory.devices[discoveryAddr] || inventory.devices[discoveryAddr.toUpperCase()]) {
-                            // Already a valid serial, use it (prefer uppercase version if exists)
-                            discoveryAddr = inventory.devices[discoveryAddr.toUpperCase()] ? discoveryAddr.toUpperCase() : discoveryAddr;
-                            console.log(`[DNAAS] Using serial directly: ${discoveryAddr}`);
-                        } else {
-                            // Try to find by hostname
-                            for (const [invSerial, info] of Object.entries(inventory.devices)) {
-                                const invHostname = (info.hostname || '').split('(')[0].trim();
-                                // Compare normalized versions and also check full hostname match
-                                if (invHostname === normalizedLabel || 
-                                    invHostname === normalizedAddr ||
-                                    info.hostname === discoveryAddr ||
-                                    info.hostname === label ||
-                                    invHostname.includes(normalizedLabel) ||
-                                    normalizedLabel.includes(invHostname)) {
-                                    discoveryAddr = invSerial;
-                                    console.log(`[DNAAS] Resolved ${label} → ${invSerial}`);
-                                    break;
-                                }
-                                }
-                            }
-                        }
-                    } catch (e) {
-                    console.warn('[DNAAS] Inventory lookup failed, using original address:', e);
-                }
-                
-                // Fill the input with the resolved address (user must click Start)
+                const discoveryAddr = btn.dataset.fullAddr;
                 const serialInput = document.getElementById('dnaas-serial-input');
                 if (serialInput) {
                     serialInput.value = discoveryAddr;
                     console.log(`[DNAAS] Set input to: ${discoveryAddr}`);
-                    // Focus the start button to indicate user should click it
                     const startBtn = document.getElementById('dnaas-start-discovery');
-                    if (startBtn) {
-                        startBtn.focus();
-                    }
+                    if (startBtn) startBtn.focus();
                 }
-                // DO NOT auto-start - user must click Start button
                 editor.showToast(`Device selected: ${discoveryAddr} - click Start to begin`, 'info');
             };
             
@@ -471,50 +510,52 @@ window.DnaasHelpers = {
             // No auto-reset timer - user must take action
             
         } catch (error) {
+            const isCancelled = (error.message || '').includes('cancelled');
             
-            // === ERROR STATE: Red button ===
-            if (dnaasBtn) {
-                dnaasBtn.classList.remove('dnaas-loading', 'dnaas-panel-open', 'dnaas-complete');
-                dnaasBtn.classList.add('dnaas-error');
-                console.log('[DNAAS] Error state applied to button:', dnaasBtn.className);
+            if (!isCancelled) {
+                // === ERROR STATE: Red button (only for real errors, not cancellation) ===
+                if (dnaasBtn) {
+                    dnaasBtn.classList.remove('dnaas-loading', 'dnaas-panel-open', 'dnaas-complete');
+                    dnaasBtn.classList.add('dnaas-error');
+                }
+                if (progressText) progressText.textContent = 'Discovery failed';
+                if (progressSpinner) {
+                    progressSpinner.style.animation = 'none';
+                    progressSpinner.style.border = '2px solid #e74c3c';
+                    progressSpinner.innerHTML = '!';
+                    progressSpinner.style.display = 'flex';
+                    progressSpinner.style.alignItems = 'center';
+                    progressSpinner.style.justifyContent = 'center';
+                    progressSpinner.style.color = '#e74c3c';
+                    progressSpinner.style.fontSize = '10px';
+                    progressSpinner.style.fontWeight = 'bold';
+                }
+                if (statusSpan) {
+                    statusSpan.textContent = '[ERROR]';
+                    statusSpan.style.background = 'rgba(231, 76, 60, 0.7)';
+                }
+                let userMsg = error.message || 'Unknown error';
+                if (userMsg.includes('unreachable') || userMsg.includes('discovery_api')) {
+                    userMsg = 'API down - check serve.py and discovery_api.py are running';
+                } else if (userMsg.includes('Connection failed') || userMsg.includes('SSH') || userMsg.includes('connect')) {
+                    userMsg = 'SSH connection failed - check device reachability and credentials';
+                } else if (userMsg.includes('timeout') || userMsg.includes('MCP') || userMsg.includes('timed out')) {
+                    userMsg = 'Request timed out - MCP or SSH may be slow';
+                }
+                if (outputDiv) outputDiv.textContent += `\n[ERROR] ${userMsg}\n`;
+                editor.showToast(`Discovery failed: ${userMsg}`, 'error');
+                
+                setTimeout(() => {
+                    if (dnaasBtn) dnaasBtn.classList.remove('dnaas-error');
+                }, 5000);
             }
-            if (progressText) progressText.textContent = 'Discovery failed';
-            // Stop spinner and show error X
-            if (progressSpinner) {
-                progressSpinner.style.animation = 'none';
-                progressSpinner.style.border = '2px solid #e74c3c';
-                progressSpinner.innerHTML = '✗';
-                progressSpinner.style.display = 'flex';
-                progressSpinner.style.alignItems = 'center';
-                progressSpinner.style.justifyContent = 'center';
-                progressSpinner.style.color = '#e74c3c';
-                progressSpinner.style.fontSize = '10px';
-                progressSpinner.style.fontWeight = 'bold';
-            }
-            if (statusSpan) {
-                statusSpan.textContent = '✗ Error';
-                statusSpan.style.background = 'rgba(231, 76, 60, 0.7)';
-            }
-            let userMsg = error.message || 'Unknown error';
-            if (userMsg.includes('unreachable') || userMsg.includes('discovery_api')) {
-                userMsg = 'API down - check serve.py and discovery_api.py are running';
-            } else if (userMsg.includes('Connection failed') || userMsg.includes('SSH') || userMsg.includes('connect')) {
-                userMsg = 'SSH connection failed - check device reachability and credentials';
-            } else if (userMsg.includes('timeout') || userMsg.includes('MCP') || userMsg.includes('timed out')) {
-                userMsg = 'Request timed out - MCP or SSH may be slow';
-            }
-            if (outputDiv) outputDiv.textContent += `\n[ERROR] ${userMsg}\n`;
-            editor.showToast(`Discovery failed: ${userMsg}`, 'error');
-            
-            // Reset button after 5 seconds
-            setTimeout(() => {
-                if (dnaasBtn) dnaasBtn.classList.remove('dnaas-error');
-            }, 5000);
+            // Cancellation UI is already handled by cancelDnaasDiscovery() -- skip here
         } finally {
             if (startBtn) startBtn.disabled = false;
             if (cancelBtn) cancelBtn.style.display = 'none';
             editor._currentDiscoveryJobId = null;
             editor._discoveryAbortController = null;
+            editor._discoveryCancelling = false;
         }
         
         if (editor.debugger) {
@@ -527,10 +568,11 @@ window.DnaasHelpers = {
      */
     async cancelDnaasDiscovery() {
         const editor = this._getEditor();
-        if (!editor._discoveryAbortController) {
-            editor.showToast('No discovery in progress', 'info');
+        if (!editor._discoveryAbortController || editor._discoveryCancelling) {
+            if (!editor._discoveryAbortController) editor.showToast('No discovery in progress', 'info');
             return;
         }
+        editor._discoveryCancelling = true;
         
         // Signal abortion to the polling loop
         editor._discoveryAbortController.abort();
@@ -591,11 +633,11 @@ window.DnaasHelpers = {
         }
         if (cancelBtn) cancelBtn.style.display = 'none';
         if (startBtn) startBtn.disabled = false;
-        if (outputDiv) outputDiv.textContent += '\n⚠ Discovery cancelled by user\n';
+        if (outputDiv) outputDiv.textContent += '\n[WARN] Discovery cancelled by user\n';
         
-        // Clean up tracking state
-        editor._currentDiscoveryJobId = null;
-        editor._discoveryAbortController = null;
+        // Do NOT null _discoveryAbortController here -- the polling loop
+        // checks signal.aborted to break out. The finally block in
+        // startMultiBDDiscovery/startDnaasDiscovery handles cleanup.
         
         editor.showToast('Discovery cancelled', 'warning');
         
@@ -658,17 +700,25 @@ window.DnaasHelpers = {
             try {
                 const inventory = await ScalerAPI.getDeviceInventory();
                 if (inventory && inventory.devices) {
-                    // Normalize for comparison - strip date suffix like "(05-Jan-2026-18:48:06)"
-                    const normalizedInput = (serialOrHostname || '').split('(')[0].trim();
-                    
-                    for (const [invSerial, info] of Object.entries(inventory.devices)) {
-                        const invHostname = (info.hostname || '').split('(')[0].trim();
-                        // Check both normalized and full hostname matches
-                        if (invHostname === normalizedInput || 
-                            info.hostname === serialOrHostname) {
-                            serial = invSerial;
-                            console.log(`[Multi-BD] Resolved ${serialOrHostname} → ${invSerial} via inventory`);
-                            break;
+                    const entry = inventory.devices[serial];
+                    if (entry) {
+                        const activeNcc = DnaasHelpers._findActiveNcc(inventory, serial);
+                        if (activeNcc) {
+                            serial = activeNcc;
+                            console.log(`[Multi-BD] "${serialOrHostname}" -> active NCC: ${activeNcc}`);
+                        } else {
+                            console.log(`[Multi-BD] "${serial}" is a valid inventory key, using directly`);
+                        }
+                    } else {
+                        const normalizedInput = (serialOrHostname || '').split('(')[0].trim();
+                        for (const [invSerial, info] of Object.entries(inventory.devices)) {
+                            const invHostname = (info.hostname || '').split('(')[0].trim();
+                            if (invHostname === normalizedInput || 
+                                info.hostname === serialOrHostname) {
+                                serial = invSerial;
+                                console.log(`[Multi-BD] Resolved ${serialOrHostname} -> ${invSerial} via inventory`);
+                                break;
+                            }
                         }
                     }
                 }
@@ -886,15 +936,21 @@ window.DnaasHelpers = {
                 if (saveBtn) {
                     saveBtn.onclick = async () => {
                         try {
-                            const data = await _fetchDiscoveryData();
-                            window._dnaasDiscoveryData = data;
-                            editor.loadDnaasData(data);
+                            if (!window._dnaasDiscoveryData) {
+                                const data = await _fetchDiscoveryData();
+                                window._dnaasDiscoveryData = data;
+                            }
+                            
+                            // Always load discovery data onto canvas before saving
+                            editor.loadDnaasData(window._dnaasDiscoveryData);
                             
                             if (dnaasBtn) dnaasBtn.classList.remove('dnaas-complete');
                             const dnaasPanel = document.getElementById('dnaas-panel');
                             if (dnaasPanel) dnaasPanel.style.display = 'none';
                             
-                            setTimeout(() => editor.saveAsDnaasTopology(), 300);
+                            const deviceName = window._dnaasDiscoveryData?.metadata?.source
+                                || '';
+                            editor.saveAsDnaasTopology(deviceName);
                         } catch (saveErr) {
                             console.error('[Multi-BD] Failed to save topology:', saveErr);
                             editor.showToast(`Failed to save: ${saveErr.message}`, 'error');
@@ -904,42 +960,44 @@ window.DnaasHelpers = {
             }
             
         } catch (error) {
-            console.error('[Multi-BD] Discovery error:', error);
+            const isCancelled = (error.message || '').includes('cancelled');
             
-            // === ERROR STATE ===
-            if (dnaasBtn) {
-                dnaasBtn.classList.remove('dnaas-loading', 'dnaas-panel-open', 'dnaas-complete');
-                dnaasBtn.classList.add('dnaas-error');
+            if (!isCancelled) {
+                console.error('[Multi-BD] Discovery error:', error);
+                if (dnaasBtn) {
+                    dnaasBtn.classList.remove('dnaas-loading', 'dnaas-panel-open', 'dnaas-complete');
+                    dnaasBtn.classList.add('dnaas-error');
+                }
+                if (progressText) progressText.textContent = 'Multi-BD discovery failed';
+                if (progressSpinner) {
+                    progressSpinner.style.animation = 'none';
+                    progressSpinner.style.border = '2px solid #e74c3c';
+                    progressSpinner.innerHTML = '!';
+                    progressSpinner.style.display = 'flex';
+                    progressSpinner.style.alignItems = 'center';
+                    progressSpinner.style.justifyContent = 'center';
+                    progressSpinner.style.color = '#e74c3c';
+                    progressSpinner.style.fontSize = '10px';
+                    progressSpinner.style.fontWeight = 'bold';
+                }
+                if (statusSpan) {
+                    statusSpan.textContent = '[ERROR]';
+                    statusSpan.style.background = 'rgba(231, 76, 60, 0.7)';
+                }
+                if (outputDiv) outputDiv.textContent += `\n[ERROR] ${error.message}\n`;
+                editor.showToast(`Multi-BD discovery failed: ${error.message}`, 'error');
+                
+                setTimeout(() => {
+                    if (dnaasBtn) dnaasBtn.classList.remove('dnaas-error');
+                }, 5000);
             }
-            if (progressText) progressText.textContent = 'Multi-BD discovery failed';
-            if (progressSpinner) {
-                progressSpinner.style.animation = 'none';
-                progressSpinner.style.border = '2px solid #e74c3c';
-                progressSpinner.innerHTML = '✗';
-                progressSpinner.style.display = 'flex';
-                progressSpinner.style.alignItems = 'center';
-                progressSpinner.style.justifyContent = 'center';
-                progressSpinner.style.color = '#e74c3c';
-                progressSpinner.style.fontSize = '10px';
-                progressSpinner.style.fontWeight = 'bold';
-            }
-            if (statusSpan) {
-                statusSpan.textContent = '✗ Error';
-                statusSpan.style.background = 'rgba(231, 76, 60, 0.7)';
-            }
-            if (outputDiv) outputDiv.textContent += `\n✗ Error: ${error.message}\n`;
-            
-            editor.showToast(`Multi-BD discovery failed: ${error.message}`, 'error');
-            
-            setTimeout(() => {
-                if (dnaasBtn) dnaasBtn.classList.remove('dnaas-error');
-            }, 5000);
             
         } finally {
             if (startBtn) startBtn.disabled = false;
             if (multiBdBtn) multiBdBtn.disabled = false;
             editor._currentDiscoveryJobId = null;
             editor._discoveryAbortController = null;
+            editor._discoveryCancelling = false;
         }
         
         if (editor.debugger) {
@@ -1098,8 +1156,7 @@ to help discover DNAAS neighbors.
                         outputDiv.innerHTML += `<span style="color: #3498db;">Finalizing discovery...</span>\n`;
                     }
                     
-                    // Brief wait -- backend already waited 10s for LLDP hellos
-                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    // Backend already waited for LLDP hellos -- proceed immediately
                     
                     // Remove action container
                     actionContainer.remove();
@@ -1340,9 +1397,9 @@ to help discover DNAAS neighbors.
                     device._lldpStatus = 'enabled';
                 }
                 
-                // Mark LLDP as completed with timestamp
                 device.lldpEnabled = true;
                 device._lldpCompletedAt = Date.now();
+                device._lldpNewResults = true;
                 
                 // Brief success glow (internal method)
                 this._showLldpSuccessGlow(editor, device);
@@ -2200,7 +2257,7 @@ to help discover DNAAS neighbors.
                 const index = parseInt(item.dataset.index);
                 const topo = topologies[index];
                 dialog.remove();
-                editor.loadTopologyFromData(topo.data);
+                editor.loadTopologyFromData(topo.data, { domain: 'DNAAS' });
                 editor.showToast(`Loaded "${topo.name}"`, 'success');
             };
         });
@@ -2416,47 +2473,55 @@ to help discover DNAAS neighbors.
         }
         
         if (topologyData) {
+            const doLoad = () => {
+                editor.saveState();
+                editor.objects = topologyData.objects || [];
+                editor.deviceIdCounter = topologyData.metadata?.deviceIdCounter || 0;
+                editor.linkIdCounter = topologyData.metadata?.linkIdCounter || 0;
+                editor.textIdCounter = topologyData.metadata?.textIdCounter || 0;
+                
+                editor.selectedObject = null;
+                editor.selectedObjects = [];
+                editor.zoom = 1;
+                
+                const devices = editor.objects.filter(o => o.type === 'device');
+                if (devices.length > 0) {
+                    const centerX = devices.reduce((sum, d) => sum + d.x, 0) / devices.length;
+                    const centerY = devices.reduce((sum, d) => sum + d.y, 0) / devices.length;
+                    editor.panOffset = {
+                        x: ((editor.canvasW || editor.canvas.width) / 2) - centerX,
+                        y: ((editor.canvasH || editor.canvas.height) / 2) - centerY
+                    };
+                } else {
+                    editor.panOffset = { x: 0, y: 0 };
+                }
+                
+                localStorage.setItem('topology_zoom', editor.zoom.toString());
+                localStorage.setItem('topology_panOffset', JSON.stringify(editor.panOffset));
+                
+                editor.updatePropertiesPanel();
+                editor.updateZoomIndicator();
+                editor.draw();
+                
+                console.log(`[DNAAS] topology loaded: ${topologyType}`, {
+                    objects: editor.objects.length,
+                    devices: devices.length,
+                    panOffset: editor.panOffset
+                });
+                
+                if (editor.debugger) {
+                    editor.debugger.logSuccess(`[DNAAS] topology loaded: ${topologyType} (${editor.objects.length} objects)`);
+                }
+            };
+
             if (editor.objects.length > 0) {
-                if (!confirm('This will replace the current canvas. Continue?')) return;
-            }
-            
-            editor.saveState();
-            editor.objects = topologyData.objects || [];
-            editor.deviceIdCounter = topologyData.metadata?.deviceIdCounter || 0;
-            editor.linkIdCounter = topologyData.metadata?.linkIdCounter || 0;
-            editor.textIdCounter = topologyData.metadata?.textIdCounter || 0;
-            
-            editor.selectedObject = null;
-            editor.selectedObjects = [];
-            editor.zoom = 1;
-            
-            const devices = editor.objects.filter(o => o.type === 'device');
-            if (devices.length > 0) {
-                const centerX = devices.reduce((sum, d) => sum + d.x, 0) / devices.length;
-                const centerY = devices.reduce((sum, d) => sum + d.y, 0) / devices.length;
-                editor.panOffset = {
-                    x: ((editor.canvasW || editor.canvas.width) / 2) - centerX,
-                    y: ((editor.canvasH || editor.canvas.height) / 2) - centerY
-                };
+                editor.showConfirmDialog(
+                    'Replace Current Canvas?',
+                    `This will replace the current canvas (${editor.objects.length} objects) with the DNAAS topology. Continue?`,
+                    doLoad
+                );
             } else {
-                editor.panOffset = { x: 0, y: 0 };
-            }
-            
-            localStorage.setItem('topology_zoom', editor.zoom.toString());
-            localStorage.setItem('topology_panOffset', JSON.stringify(editor.panOffset));
-            
-            editor.updatePropertiesPanel();
-            editor.updateZoomIndicator();
-            editor.draw();
-            
-            console.log(`📡 DNAAS topology loaded: ${topologyType}`, {
-                objects: editor.objects.length,
-                devices: devices.length,
-                panOffset: editor.panOffset
-            });
-            
-            if (editor.debugger) {
-                editor.debugger.logSuccess(`📡 DNAAS topology loaded: ${topologyType} (${editor.objects.length} objects)`);
+                doLoad();
             }
         }
     },
@@ -2524,17 +2589,21 @@ to help discover DNAAS neighbors.
             };
             
             const dnaasKeywords = ['DNAAS', 'LEAF', 'SPINE', 'FABRIC', 'TOR', 'AGGREGATION', 'AGG-', 'CORE-'];
+            const isValidIP = (s) => /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(s);
             
-            data.objects.forEach(obj => {
-                if (obj.type !== 'device') return;
-                
+            const terminationDevices = data.objects.filter(obj => {
+                if (obj.type !== 'device') return false;
                 const label = (obj.label || '').toUpperCase();
-                const isDnaasDevice = dnaasKeywords.some(kw => label.includes(kw));
-                if (isDnaasDevice) return;
-                
+                return !dnaasKeywords.some(kw => label.includes(kw));
+            });
+
+            const unresolvedNames = [];
+
+            terminationDevices.forEach(obj => {
                 const labelLower = (obj.label || '').toLowerCase();
                 const serial = (obj.deviceSerial || '').toLowerCase();
                 const sshHost = obj.sshConfig?.host || obj.sshConfig?.hostBackup || '';
+                const hostIsIP = isValidIP(sshHost);
                 
                 let matchedDevice = null;
                 if (labelLower && managedByHostname[labelLower]) matchedDevice = managedByHostname[labelLower];
@@ -2543,19 +2612,58 @@ to help discover DNAAS neighbors.
                 else matchedDevice = findManagedDeviceByPartialMatch(obj.label);
                 
                 if (matchedDevice) {
-                    console.log(`[DNAAS] Enriching termination device "${obj.label}" with managed device SSH config`);
+                    console.log(`[DNAAS] Enriching "${obj.label}" with managed device SSH config`);
                     obj.sshConfig = obj.sshConfig || {};
-                    if (matchedDevice.ip && !obj.sshConfig.host) obj.sshConfig.host = matchedDevice.ip;
+                    if (matchedDevice.ip) {
+                        if (!hostIsIP) {
+                            obj.sshConfig.lldpHostname = obj.sshConfig.host;
+                        }
+                        obj.sshConfig.host = matchedDevice.ip;
+                    }
                     if (matchedDevice.username) obj.sshConfig.user = matchedDevice.username;
                     if (matchedDevice.password) obj.sshConfig.password = matchedDevice.password;
                     obj.sshConfig.enrichedFromManaged = true;
                     obj.sshConfig.managedDeviceId = matchedDevice.id || matchedDevice.hostname;
-                    
-                    if (editor.debugger) {
-                        editor.debugger.logSuccess(`📡 Termination device "${obj.label}" enriched with SSH from managed device`);
-                    }
+                } else if (!hostIsIP) {
+                    unresolvedNames.push(obj.label || sshHost);
                 }
             });
+
+            if (unresolvedNames.length > 0) {
+                console.log(`[DNAAS] ${unresolvedNames.length} devices need Network Mapper resolution:`, unresolvedNames);
+                try {
+                    const resp = await fetch('/api/dnaas/devices/resolve-batch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ names: unresolvedNames })
+                    });
+                    if (resp.ok) {
+                        const { resolved } = await resp.json();
+                        terminationDevices.forEach(obj => {
+                            const key = obj.label || obj.sshConfig?.host || '';
+                            const match = resolved[key];
+                            if (!match) return;
+                            if (match.mgmt_ip) {
+                                obj.sshConfig = obj.sshConfig || {};
+                                if (!isValidIP(obj.sshConfig.host)) {
+                                    obj.sshConfig.lldpHostname = obj.sshConfig.host;
+                                }
+                                obj.sshConfig.host = match.mgmt_ip;
+                                obj.sshConfig.enrichedFromNM = true;
+                                console.log(`[DNAAS] NM resolved "${key}" -> ${match.mgmt_ip}`);
+                            }
+                            if (match.serial && !obj.deviceSerial) {
+                                obj.deviceSerial = match.serial;
+                            }
+                            if (match.hostname) {
+                                obj.sshConfig.nmHostname = match.hostname;
+                            }
+                        });
+                    }
+                } catch (nmErr) {
+                    console.warn('[DNAAS] Network Mapper batch resolve failed:', nmErr.message);
+                }
+            }
             
             return data;
         } catch (err) {
@@ -2567,62 +2675,99 @@ to help discover DNAAS neighbors.
     /**
      * Save as DNAAS topology with metadata - extracted from topology.js
      */
-    saveAsDnaasTopology(editor) {
+    saveAsDnaasTopology(editor, deviceName) {
         const stale = document.getElementById('dnaas-save-dialog');
         if (stale) stale.remove();
 
         const data = editor.generateTopologyData();
         const deviceCount = editor.objects.filter(o => o.type === 'device').length;
         const linkCount = editor.objects.filter(o => o.type === 'link' || o.type === 'unbound').length;
+
+        // Build default name: <device>_dnaas_<YYYYMMDD>
+        const now = new Date();
+        const dateStr = now.getFullYear().toString()
+            + String(now.getMonth() + 1).padStart(2, '0')
+            + String(now.getDate()).padStart(2, '0');
+        const seedName = deviceName
+            || window._dnaasDiscoveryData?.metadata?.source
+            || '';
+        const defaultName = seedName ? `${seedName}_dnaas_${dateStr}` : '';
         
-        const promptDialog = document.createElement('div');
-        promptDialog.id = 'dnaas-save-dialog';
-        promptDialog.style.cssText = `
+        const dk = document.body.classList.contains('dark-mode');
+        const glassBg = dk
+            ? 'linear-gradient(145deg, rgba(30,35,45,0.92), rgba(20,25,35,0.96))'
+            : 'linear-gradient(145deg, rgba(255,255,255,0.95), rgba(240,242,245,0.98))';
+        const glassBorder = dk ? 'rgba(100,150,200,0.2)' : 'rgba(0,0,0,0.1)';
+        const glassShadow = dk
+            ? '0 12px 48px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)'
+            : '0 12px 48px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.8)';
+        const textColor = dk ? '#ecf0f1' : '#1a1a2e';
+        const subtextColor = dk ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)';
+        const inputBg = dk ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)';
+        const inputBorder = dk ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)';
+        const cancelBg = dk ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+        const cancelColor = dk ? '#ccc' : '#555';
+
+        if (!document.getElementById('dnaas-dialog-anim')) {
+            const s = document.createElement('style'); s.id = 'dnaas-dialog-anim';
+            s.textContent = '@keyframes dnaasDialogIn{from{opacity:0;transform:scale(0.95) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}';
+            document.head.appendChild(s);
+        }
+
+        const overlay = document.createElement('div');
+        overlay.id = 'dnaas-save-dialog';
+        overlay.style.cssText = `
             position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(8px);
-            z-index: 10001; display: flex; align-items: center; justify-content: center;
+            width: 100vw; height: 100vh;
+            background: ${dk ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.3)'};
+            backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+            z-index: 9999999;
+            display: flex; align-items: center; justify-content: center;
         `;
         
-        const isDark = editor.darkMode;
-        promptDialog.innerHTML = `
-            <div style="
-                background: ${isDark ? 'rgba(15, 15, 25, 0.95)' : 'rgba(255, 255, 255, 0.95)'};
-                backdrop-filter: blur(24px) saturate(200%);
-                border: 1px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)'};
-                border-radius: 16px; padding: 24px; min-width: 400px;
-                box-shadow: 0 12px 48px rgba(0,0,0,0.3);
-            ">
-                <h3 style="margin: 0 0 8px 0; color: ${isDark ? '#fff' : '#1a1a1a'}; font-size: 18px;">Save DNAAS Topology</h3>
-                <p style="margin: 0 0 16px 0; color: ${isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)'}; font-size: 13px;">
-                    ${deviceCount} devices, ${linkCount} links
-                </p>
-                <input data-role="name" type="text" placeholder="Enter topology name..." style="
-                    width: 100%; padding: 10px;
-                    border: 1px solid ${isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'};
-                    border-radius: 8px; background: ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)'};
-                    color: ${isDark ? '#fff' : '#1a1a1a'}; font-size: 14px;
-                    margin-bottom: 16px; box-sizing: border-box;
-                " />
-                <div style="display: flex; gap: 8px; justify-content: flex-end;">
-                    <button data-role="cancel" style="
-                        padding: 8px 16px; border: 1px solid ${isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'};
-                        border-radius: 8px; background: transparent; color: ${isDark ? '#fff' : '#1a1a1a'}; cursor: pointer;
-                    ">Cancel</button>
-                    <button data-role="save" style="
-                        padding: 8px 16px; border: none; border-radius: 8px;
-                        background: #FF5E1F; color: #fff; cursor: pointer; font-weight: 600;
-                    ">Save</button>
-                </div>
+        const dialog = document.createElement('div');
+        dialog.style.cssText = `
+            background: ${glassBg};
+            border: 1px solid ${glassBorder};
+            border-radius: 16px;
+            padding: 24px;
+            min-width: 400px;
+            max-width: 90vw;
+            box-shadow: ${glassShadow};
+            backdrop-filter: blur(32px) saturate(180%);
+            -webkit-backdrop-filter: blur(32px) saturate(180%);
+            animation: dnaasDialogIn 0.2s ease;
+        `;
+        dialog.innerHTML = `
+            <div style="color:#FF5E1F;font-size:17px;font-weight:600;margin-bottom:6px;letter-spacing:-0.2px;">Save DNAAS Topology</div>
+            <div style="color:${subtextColor};font-size:12px;margin-bottom:18px;">
+                ${deviceCount} devices, ${linkCount} links
+            </div>
+            <input data-role="name" type="text" value="${defaultName}" placeholder="Enter topology name..." style="
+                width:100%; padding:10px 12px;
+                border:1px solid ${inputBorder};
+                border-radius:8px; background:${inputBg};
+                color:${textColor}; font-size:14px;
+                margin-bottom:18px; box-sizing:border-box;
+                outline:none; transition: border-color 0.2s;
+            " onfocus="this.style.borderColor='rgba(0,180,216,0.5)'" onblur="this.style.borderColor='${inputBorder}'" />
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button data-role="cancel" style="padding:8px 18px;border:1px solid ${glassBorder};border-radius:8px;background:${cancelBg};color:${cancelColor};cursor:pointer;font-size:13px;transition:background 0.15s;">Cancel</button>
+                <button data-role="save" style="padding:8px 18px;border:none;border-radius:8px;background:#FF5E1F;color:white;cursor:pointer;font-weight:600;font-size:13px;transition:opacity 0.15s;">Save</button>
             </div>
         `;
         
-        document.body.appendChild(promptDialog);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
         
-        const input = promptDialog.querySelector('[data-role="name"]');
-        const saveBtn = promptDialog.querySelector('[data-role="save"]');
-        const cancelBtn = promptDialog.querySelector('[data-role="cancel"]');
+        const input = overlay.querySelector('[data-role="name"]');
+        const saveBtn = overlay.querySelector('[data-role="save"]');
+        const cancelBtn = overlay.querySelector('[data-role="cancel"]');
         
         input.focus();
+        if (defaultName) input.select();
+        
+        const cleanup = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
         
         const doSave = async () => {
             const name = input.value.trim();
@@ -2636,6 +2781,9 @@ to help discover DNAAS neighbors.
             data.metadata.savedAt = Date.now();
             data.metadata.deviceCount = deviceCount;
             data.metadata.linkCount = linkCount;
+            if (editor._multiBDMetadata?.bridge_domains?.length > 0) {
+                data.metadata.bridge_domains = editor._multiBDMetadata.bridge_domains;
+            }
             
             try {
                 let sectionId = await DnaasHelpers._ensureDnaasSection();
@@ -2648,9 +2796,14 @@ to help discover DNAAS neighbors.
                 const result = await resp.json();
                 if (result.error) throw new Error(result.error);
                 
-                promptDialog.remove();
+                cleanup();
                 editor.showToast(`DNAAS topology "${name}" saved`, 'success');
                 
+                const sections = (editor._customSections || []);
+                const sec = sections.find(s => s.id === sectionId) || sections.find(s => s.name === 'DNAAS');
+                if (typeof FileOps !== 'undefined') {
+                    FileOps.updateTopologyIndicator(name, sec?.name || 'DNAAS', sec?.color || '#FF5E1F', sectionId);
+                }
                 if (editor.loadCustomSections) editor.loadCustomSections();
             } catch (err) {
                 saveBtn.textContent = 'Save';
@@ -2660,10 +2813,11 @@ to help discover DNAAS neighbors.
         };
         
         saveBtn.onclick = doSave;
-        cancelBtn.onclick = () => promptDialog.remove();
+        cancelBtn.onclick = cleanup;
+        overlay.onclick = (e) => { if (e.target === overlay) cleanup(); };
         input.onkeydown = (e) => {
             if (e.key === 'Enter') doSave();
-            if (e.key === 'Escape') promptDialog.remove();
+            if (e.key === 'Escape') cleanup();
         };
     },
 

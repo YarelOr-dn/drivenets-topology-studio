@@ -1,0 +1,3231 @@
+#!/usr/bin/env python3
+"""
+DNAAS Path Auto-Discovery Script
+
+Automatically discovers DNAAS paths by:
+1. Accepting device serial numbers as input
+2. SSHing to discover device info and DNAAS-connected interfaces
+3. Tracing through the DNAAS fabric via LLDP
+4. Outputting results in multiple formats (JSON, Text, Excel, Terminal)
+
+Usage:
+    python3 dnaas_path_discovery.py <serial1> [serial2] [--use-cache]
+    
+Example:
+    python3 dnaas_path_discovery.py wk31d7vv00023 100.64.0.220
+"""
+
+import paramiko
+import time
+import re
+import json
+import os
+import sys
+import argparse
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+
+# Try to import openpyxl for Excel output
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    EXCEL_AVAILABLE = True
+except ImportError:
+    EXCEL_AVAILABLE = False
+    print("Warning: openpyxl not installed. Excel output will be skipped.")
+    print("Install with: pip install openpyxl")
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+# Default credentials
+DEFAULT_USER = "dnroot"
+DEFAULT_PASS = "dnroot"
+
+# DNAAS credentials (different from PE credentials)
+DNAAS_USER = "sisaev"
+DNAAS_PASS = "Drive1234!"
+
+# Paths
+SCRIPT_DIR = Path(__file__).parent.resolve()
+INVENTORY_FILE = SCRIPT_DIR / "device_inventory.json"
+CREDENTIALS_FILE = SCRIPT_DIR / "device_credentials.json"
+OUTPUT_DIR = SCRIPT_DIR / "output"
+DNAAS_TABLE_FILE = SCRIPT_DIR / "dnaas_table.xlsx"
+
+# DNAAS detection keywords
+DNAAS_KEYWORDS = ['DNAAS', 'LEAF', 'SPINE', 'FABRIC', 'TOR', 'AGGREGATION', 'SUPERSPINE']
+
+# Terminal colors
+class Colors:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+# ============================================================================
+# CREDENTIAL MANAGER
+# ============================================================================
+
+class CredentialManager:
+    """
+    Manages device credentials for fast reuse.
+    Stores credentials in device_credentials.json with format:
+    {
+        "serial_or_hostname": {
+            "hostname": "...",
+            "mgmt_ip": "...",
+            "user": "...",
+            "password": "...",
+            "device_type": "DUT|DNAAS",
+            "last_used": "2025-12-30T..."
+        }
+    }
+    """
+    
+    def __init__(self, filepath: Path = CREDENTIALS_FILE):
+        self.filepath = filepath
+        self.credentials: Dict[str, Dict[str, Any]] = {}
+        self._load()
+    
+    def _load(self):
+        """Load credentials from file"""
+        if self.filepath.exists():
+            try:
+                with open(self.filepath, 'r') as f:
+                    data = json.load(f)
+                    self.credentials = data.get('devices', {})
+                print(f"{Colors.CYAN}Loaded credentials for {len(self.credentials)} devices{Colors.ENDC}")
+            except Exception as e:
+                print(f"{Colors.YELLOW}Warning: Could not load credentials: {e}{Colors.ENDC}")
+                self.credentials = {}
+    
+    def _save(self):
+        """Save credentials to file"""
+        try:
+            data = {
+                'devices': self.credentials,
+                'last_updated': datetime.now().isoformat()
+            }
+            with open(self.filepath, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"{Colors.RED}Error saving credentials: {e}{Colors.ENDC}")
+    
+    def get(self, device_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get credentials for a device by serial, hostname, or IP.
+        Returns dict with hostname, mgmt_ip, user, password or None.
+        """
+        device_id_lower = device_id.lower()
+        
+        # Direct lookup by key (serial, hostname, or IP)
+        if device_id_lower in self.credentials:
+            return self.credentials[device_id_lower]
+        
+        # Search by hostname or mgmt_ip
+        for key, creds in self.credentials.items():
+            if creds.get('hostname', '').lower() == device_id_lower:
+                return creds
+            if creds.get('mgmt_ip', '') == device_id:
+                return creds
+        
+        return None
+    
+    def save_credentials(self, device_id: str, hostname: str, mgmt_ip: str,
+                        user: str, password: str, device_type: str = "DUT"):
+        """
+        Save credentials for a device.
+        device_type: "DUT" for user-owned devices, "DNAAS" for fabric devices
+        """
+        self.credentials[device_id.lower()] = {
+            'hostname': hostname,
+            'mgmt_ip': mgmt_ip,
+            'user': user,
+            'password': password,
+            'device_type': device_type,
+            'last_used': datetime.now().isoformat()
+        }
+        self._save()
+        print(f"{Colors.GREEN}Saved credentials for {hostname} ({device_type}){Colors.ENDC}")
+    
+    def update_last_used(self, device_id: str):
+        """Update the last_used timestamp for a device"""
+        device_id_lower = device_id.lower()
+        if device_id_lower in self.credentials:
+            self.credentials[device_id_lower]['last_used'] = datetime.now().isoformat()
+            self._save()
+    
+    def list_devices(self) -> List[Dict[str, Any]]:
+        """List all stored devices with their credentials (passwords masked)"""
+        devices = []
+        for device_id, creds in self.credentials.items():
+            devices.append({
+                'id': device_id,
+                'hostname': creds.get('hostname', ''),
+                'mgmt_ip': creds.get('mgmt_ip', ''),
+                'device_type': creds.get('device_type', 'DUT'),
+                'last_used': creds.get('last_used', '')
+            })
+        return devices
+    
+    def remove(self, device_id: str) -> bool:
+        """Remove credentials for a device"""
+        device_id_lower = device_id.lower()
+        if device_id_lower in self.credentials:
+            del self.credentials[device_id_lower]
+            self._save()
+            return True
+        return False
+
+# Global credential manager instance
+credential_manager = CredentialManager()
+
+# ============================================================================
+# DUT CONFIGURATOR
+# ============================================================================
+
+class DUTConfigurator:
+    """
+    Handles configuration changes on DUT (user-owned) devices only.
+    IMPORTANT: This class should NEVER be used on DNAAS devices.
+    
+    Capabilities:
+    - Enable physical interfaces
+    - Add interfaces to LLDP
+    - Commit configuration changes
+    """
+    
+    def __init__(self, ssh_client: paramiko.SSHClient, hostname: str):
+        self.ssh = ssh_client
+        self.hostname = hostname
+        self.pending_changes: List[str] = []
+        self.config_log: List[str] = []
+        # Create interactive shell for DNOS CLI
+        self.shell = ssh_client.invoke_shell(width=250, height=50)
+        self.shell.settimeout(60)
+        time.sleep(1)
+        # Clear initial banner
+        if self.shell.recv_ready():
+            self.shell.recv(65535)
+    
+    def _run_command(self, command: str, timeout: int = 30) -> Tuple[str, bool]:
+        """Run a command using interactive shell and return output and success status"""
+        try:
+            self.shell.send(command + "\n")
+            output = ""
+            end_time = time.time() + timeout
+            
+            while time.time() < end_time:
+                if self.shell.recv_ready():
+                    chunk = self.shell.recv(65535).decode('utf-8', errors='ignore')
+                    output += chunk
+                    # Check for prompt (ends with # or >)
+                    if output.rstrip().endswith('#') or output.rstrip().endswith('>'):
+                        break
+                else:
+                    time.sleep(0.1)
+            
+            # Check for errors in output
+            if 'error' in output.lower() and 'commit' in command:
+                return output, False
+            if 'invalid' in output.lower() or 'unknown command' in output.lower():
+                return output, False
+                
+            return output, True
+        except Exception as e:
+            return str(e), False
+    
+    def get_physical_interfaces(self) -> List[Dict[str, Any]]:
+        """
+        Get list of physical interfaces (ge100, ge400, etc.) with their status.
+        Returns list of dicts with: name, admin_state, oper_state
+        """
+        output, success = self._run_command("show interfaces | no more")
+        if not success:
+            print(f"{Colors.RED}Failed to get interfaces{Colors.ENDC}")
+            return []
+        
+        interfaces = []
+        current_if = None
+        
+        for line in output.split('\n'):
+            # Match physical interface lines (ge100-0/0/1, ge400-0/0/4, etc.)
+            # Skip sub-interfaces (those with dots like ge100-0/0/1.100)
+            if_match = re.match(r'^(ge\d+-\d+/\d+/\d+)\s', line)
+            if if_match:
+                if_name = if_match.group(1)
+                # Only include if it's a physical interface (no dot = no sub-interface)
+                if '.' not in if_name:
+                    current_if = {'name': if_name, 'admin_state': '', 'oper_state': ''}
+                    interfaces.append(current_if)
+            
+            # Extract admin/oper state
+            if current_if:
+                if 'admin-state:' in line.lower():
+                    admin_match = re.search(r'admin-state:\s*(\w+)', line, re.I)
+                    if admin_match:
+                        current_if['admin_state'] = admin_match.group(1).lower()
+                elif 'oper-state:' in line.lower():
+                    oper_match = re.search(r'oper-state:\s*(\w+)', line, re.I)
+                    if oper_match:
+                        current_if['oper_state'] = oper_match.group(1).lower()
+        
+        return interfaces
+    
+    def get_disabled_interfaces(self) -> List[str]:
+        """Get list of physical interfaces that are admin-disabled"""
+        interfaces = self.get_physical_interfaces()
+        disabled = [iface['name'] for iface in interfaces 
+                   if iface.get('admin_state', '').lower() in ['disabled', 'down', '']]
+        return disabled
+    
+    def get_lldp_configured_interfaces(self) -> List[str]:
+        """Get list of interfaces configured in LLDP"""
+        output, success = self._run_command("show config protocols lldp | no more")
+        if not success:
+            return []
+        
+        interfaces = []
+        for line in output.split('\n'):
+            # Look for interface lines in LLDP config
+            match = re.search(r'interface\s+(ge\d+-\d+/\d+/\d+)', line)
+            if match:
+                interfaces.append(match.group(1))
+        
+        return interfaces
+    
+    def get_unconfigured_lldp_interfaces(self) -> List[str]:
+        """Get physical interfaces NOT configured in LLDP"""
+        all_physical = self.get_physical_interfaces()
+        lldp_configured = self.get_lldp_configured_interfaces()
+        
+        unconfigured = [iface['name'] for iface in all_physical 
+                       if iface['name'] not in lldp_configured]
+        return unconfigured
+    
+    def get_interface_details(self, interface: str) -> Dict[str, Any]:
+        """
+        Get comprehensive interface details for Link Table.
+        Uses multiple DNOS commands:
+        - show interfaces <interface>
+        - show interfaces <interface> transceiver
+        - show config interfaces <interface>
+        
+        Returns dict with: admin_state, oper_state, speed, mtu, fec, transceiver, encapsulation, etc.
+        """
+        details = {
+            'name': interface,
+            'admin_state': '',
+            'oper_state': '',
+            'speed': '',
+            'mtu': '',
+            'fec': '',
+            'transceiver': '',
+            'transceiver_vendor': '',
+            'transceiver_type': '',
+            'encapsulation': '',
+            'vlan_id': '',
+            'inner_vlan': '',
+            'l2_service': False,
+            'bundle_parent': '',
+            'sub_interfaces': []
+        }
+        
+        # Get basic interface state
+        base_iface = interface.split('.')[0]  # Strip sub-interface suffix
+        output, success = self._run_command(f"show interfaces {base_iface} | no-more", timeout=15)
+        if success:
+            for line in output.split('\n'):
+                line_lower = line.lower().strip()
+                
+                # Admin/oper state
+                if 'admin-state:' in line_lower:
+                    match = re.search(r'admin-state:\s*(\w+)', line, re.I)
+                    if match:
+                        details['admin_state'] = match.group(1)
+                elif 'oper-state:' in line_lower:
+                    match = re.search(r'oper-state:\s*(\w+)', line, re.I)
+                    if match:
+                        details['oper_state'] = match.group(1)
+                elif 'speed:' in line_lower:
+                    match = re.search(r'speed:\s*(\S+)', line, re.I)
+                    if match:
+                        details['speed'] = match.group(1)
+                elif 'mtu:' in line_lower:
+                    match = re.search(r'mtu:\s*(\d+)', line, re.I)
+                    if match:
+                        details['mtu'] = match.group(1)
+        
+        # Get transceiver info
+        trans_output, trans_success = self._run_command(f"show interfaces {base_iface} transceiver | no-more", timeout=15)
+        if trans_success:
+            for line in trans_output.split('\n'):
+                line_lower = line.lower()
+                if 'vendor:' in line_lower or 'manufacturer:' in line_lower:
+                    match = re.search(r'(?:vendor|manufacturer):\s*(.+)', line, re.I)
+                    if match:
+                        details['transceiver_vendor'] = match.group(1).strip()
+                elif 'type:' in line_lower or 'module type:' in line_lower:
+                    match = re.search(r'(?:type|module type):\s*(\S+)', line, re.I)
+                    if match:
+                        details['transceiver_type'] = match.group(1)
+                elif 'serial' in line_lower:
+                    match = re.search(r'serial[^:]*:\s*(\S+)', line, re.I)
+                    if match:
+                        if not details['transceiver']:
+                            details['transceiver'] = match.group(1)
+            
+            # Combine vendor + type for display
+            if details['transceiver_vendor'] or details['transceiver_type']:
+                details['transceiver'] = f"{details['transceiver_vendor']} {details['transceiver_type']}".strip()
+        
+        # Get config for VLAN/encapsulation info (if sub-interface)
+        if '.' in interface:
+            cfg_output, cfg_success = self._run_command(f"show config interfaces {interface} | no-more", timeout=15)
+            if cfg_success:
+                for line in cfg_output.split('\n'):
+                    line_lower = line.lower()
+                    if 'l2-service' in line_lower and 'enabled' in line_lower:
+                        details['l2_service'] = True
+                    if 'encapsulation' in line_lower:
+                        # Parse: encapsulation dot1q 210 or encapsulation dot1q outer-vlan 210 inner-vlan 100
+                        vlan_match = re.search(r'dot1q\s+(?:outer-vlan\s+)?(\d+)', line, re.I)
+                        if vlan_match:
+                            details['vlan_id'] = vlan_match.group(1)
+                            details['encapsulation'] = f"dot1q {vlan_match.group(1)}"
+                        inner_match = re.search(r'inner-vlan\s+(\d+)', line, re.I)
+                        if inner_match:
+                            details['inner_vlan'] = inner_match.group(1)
+                            details['encapsulation'] += f" inner {inner_match.group(1)}"
+        
+        # Get FEC configuration
+        fec_output, fec_success = self._run_command(f"show config interfaces {base_iface} | include fec | no-more", timeout=10)
+        if fec_success:
+            fec_match = re.search(r'fec\s+(\S+)', fec_output)
+            if fec_match:
+                details['fec'] = fec_match.group(1)
+        
+        return details
+    
+    def get_link_table_data(self, interface_a: str, interface_b: str, device_a: str = "", device_b: str = "") -> Dict[str, Any]:
+        """
+        Get all data needed to populate the Link Table for a specific link.
+        Returns comprehensive dict with both sides' interface details.
+        """
+        return {
+            'device_a': device_a,
+            'device_b': device_b,
+            'interface_a': self.get_interface_details(interface_a),
+            'interface_b': self.get_interface_details(interface_b) if interface_b else {}
+        }
+
+    def enable_interface(self, interface: str) -> bool:
+        """
+        Enable a physical interface using 'admin-state enabled'.
+        Returns True if command was added to pending changes.
+        """
+        # Validate interface name
+        if not re.match(r'^ge\d+-\d+/\d+/\d+$', interface):
+            print(f"{Colors.RED}Invalid interface name: {interface}{Colors.ENDC}")
+            return False
+        
+        config_cmd = f"config; interfaces interface {interface} admin-state enabled"
+        self.pending_changes.append(config_cmd)
+        self.config_log.append(f"[{datetime.now().isoformat()}] Enable interface: {interface}")
+        print(f"{Colors.CYAN}Queued: Enable interface {interface}{Colors.ENDC}")
+        return True
+    
+    def add_interface_to_lldp(self, interface: str) -> bool:
+        """
+        Add interface to LLDP configuration.
+        Returns True if command was added to pending changes.
+        """
+        # Validate interface name
+        if not re.match(r'^ge\d+-\d+/\d+/\d+$', interface):
+            print(f"{Colors.RED}Invalid interface name: {interface}{Colors.ENDC}")
+            return False
+        
+        config_cmd = f"config; protocols lldp interface {interface}"
+        self.pending_changes.append(config_cmd)
+        self.config_log.append(f"[{datetime.now().isoformat()}] Add to LLDP: {interface}")
+        print(f"{Colors.CYAN}Queued: Add {interface} to LLDP{Colors.ENDC}")
+        return True
+    
+    def commit_changes(self) -> Tuple[bool, str]:
+        """
+        Commit all pending configuration changes.
+        Returns (success, message).
+        """
+        if not self.pending_changes:
+            return True, "No changes to commit"
+        
+        print(f"\n{Colors.YELLOW}Committing {len(self.pending_changes)} configuration changes on {self.hostname}...{Colors.ENDC}")
+        
+        # Build combined config command
+        # Join all config commands and add final commit
+        config_commands = "; ".join(self.pending_changes) + "; commit"
+        
+        output, success = self._run_command(config_commands, timeout=60)
+        
+        if success:
+            self.config_log.append(f"[{datetime.now().isoformat()}] COMMIT SUCCESS")
+            self.pending_changes = []
+            print(f"{Colors.GREEN}Configuration committed successfully!{Colors.ENDC}")
+            return True, "Committed successfully"
+        else:
+            self.config_log.append(f"[{datetime.now().isoformat()}] COMMIT FAILED: {output}")
+            print(f"{Colors.RED}Commit failed: {output}{Colors.ENDC}")
+            return False, output
+    
+    def auto_configure_for_discovery(self) -> Tuple[bool, List[str]]:
+        """
+        Automatically configure the device for DNAAS discovery:
+        1. Enable all disabled physical interfaces
+        2. Add unconfigured interfaces to LLDP
+        3. Commit changes
+        
+        Returns (success, list of configured interfaces)
+        """
+        configured_interfaces = []
+        
+        # Step 1: Enable disabled physical interfaces
+        disabled = self.get_disabled_interfaces()
+        if disabled:
+            print(f"\n{Colors.YELLOW}Found {len(disabled)} disabled interfaces to enable:{Colors.ENDC}")
+            for iface in disabled:
+                print(f"  - {iface}")
+                self.enable_interface(iface)
+                configured_interfaces.append(iface)
+        
+        # Step 2: Add interfaces to LLDP
+        unconfigured_lldp = self.get_unconfigured_lldp_interfaces()
+        if unconfigured_lldp:
+            print(f"\n{Colors.YELLOW}Found {len(unconfigured_lldp)} interfaces not in LLDP:{Colors.ENDC}")
+            for iface in unconfigured_lldp:
+                print(f"  - {iface}")
+                self.add_interface_to_lldp(iface)
+                if iface not in configured_interfaces:
+                    configured_interfaces.append(iface)
+        
+        # Step 3: Commit if there are changes
+        if self.pending_changes:
+            success, msg = self.commit_changes()
+            if not success:
+                return False, configured_interfaces
+        
+        return True, configured_interfaces
+    
+    def get_config_log(self) -> List[str]:
+        """Get the log of all configuration changes made"""
+        return self.config_log.copy()
+
+# ============================================================================
+# BRIDGE DOMAIN DISCOVERY (DNAAS DEVICES ONLY - SHOW COMMANDS)
+# ============================================================================
+
+@dataclass
+class BridgeDomain:
+    """Bridge Domain information from DNAAS device"""
+    bd_id: int
+    name: str = ""
+    vlan_id: Optional[int] = None
+    interfaces: List[str] = field(default_factory=list)
+    attachment_circuits: List[Dict[str, Any]] = field(default_factory=list)
+    state: str = "unknown"
+
+@dataclass
+class LACPBundle:
+    """LACP Bundle information"""
+    bundle_id: str
+    name: str = ""
+    members: List[str] = field(default_factory=list)
+    state: str = "unknown"
+    partner_system_id: str = ""
+
+class BridgeDomainDiscovery:
+    """
+    Handles Bridge Domain discovery on DNAAS devices.
+    IMPORTANT: This class uses ONLY show commands - no configuration changes.
+    
+    Capabilities:
+    - Parse 'show network-services bridge-domain'
+    - Resolve LACP bundle members
+    - Map BD interfaces to LLDP neighbors
+    
+    NOTE: Uses interactive shell because DNAAS devices require it.
+    """
+    
+    def __init__(self, ssh_connection, hostname: str):
+        """
+        Initialize with an SSHConnection object (which has interactive shell)
+        or a paramiko.SSHClient (fallback for compatibility)
+        """
+        self.hostname = hostname
+        self._bd_cache: Optional[List[BridgeDomain]] = None
+        self._lacp_cache: Dict[str, LACPBundle] = {}
+        
+        # Handle both SSHConnection and raw paramiko client
+        if hasattr(ssh_connection, 'send_command'):
+            # It's an SSHConnection - use its shell method
+            self._ssh_conn = ssh_connection
+            self._use_shell = True
+        else:
+            # It's a raw paramiko client - create shell
+            self._ssh_client = ssh_connection
+            self._shell = None
+            self._use_shell = False
+            self._init_shell()
+    
+    def _init_shell(self):
+        """Initialize interactive shell for paramiko client"""
+        if self._use_shell:
+            return
+        try:
+            self._shell = self._ssh_client.invoke_shell(width=250, height=50)
+            self._shell.settimeout(60)
+            time.sleep(1)
+            # Clear initial banner
+            if self._shell.recv_ready():
+                self._shell.recv(65535)
+        except Exception as e:
+            print(f"{Colors.RED}Failed to create shell on {self.hostname}: {e}{Colors.ENDC}")
+    
+    def _run_command(self, command: str, timeout: int = 30) -> str:
+        """Run a show command and return output using interactive shell"""
+        try:
+            if self._use_shell:
+                # Use SSHConnection's send_command
+                output = self._ssh_conn.send_command(command, timeout=timeout)
+            else:
+                # Use our own shell
+                if not self._shell:
+                    return ""
+                
+                self._shell.send(command + "\n")
+                output = ""
+                end_time = time.time() + timeout
+                
+                while time.time() < end_time:
+                    if self._shell.recv_ready():
+                        chunk = self._shell.recv(65535).decode('utf-8', errors='ignore')
+                        output += chunk
+                        # Check for prompt (ends with # or >)
+                        if output.rstrip().endswith('#') or output.rstrip().endswith('>'):
+                            break
+                    else:
+                        time.sleep(0.1)
+            
+            # Strip ANSI color codes from output (| include highlights matches)
+            # ANSI codes: \x1b[...m or \033[...m
+            ansi_escape = re.compile(r'\x1b\[[0-9;]*m|\033\[[0-9;]*m|\[\d+m')
+            output = ansi_escape.sub('', output)
+            
+            return output
+        except Exception as e:
+            print(f"{Colors.RED}Command failed on {self.hostname}: {e}{Colors.ENDC}")
+            return ""
+    
+    def get_bridge_domains(self, force_refresh: bool = False) -> List[BridgeDomain]:
+        """
+        Get all bridge domains from the DNAAS device.
+        
+        ENHANCED: Captures ALL bridge domains with various naming patterns:
+        - Simple numeric: 210, 213, 500
+        - Prefixed: v210, v213, BD-100, vlan-500
+        - Complex: g_yor_v210, yor_210, customer_bd_100
+        
+        Two-step process:
+        1. 'show network-services bridge-domain' -> list of BD names
+        2. For each BD, 'show network-services bridge-domain <name>' -> details
+        """
+        if self._bd_cache is not None and not force_refresh:
+            return self._bd_cache
+        
+        print(f"{Colors.CYAN}Querying ALL bridge domains on {self.hostname}...{Colors.ENDC}")
+        
+        # Step 1: Get list of BD names - ENHANCED to capture all patterns
+        output = self._run_command("show network-services bridge-domain | no-more")
+        
+        bd_names = []
+        seen_names = set()  # Avoid duplicates
+        
+        for line in output.split('\n'):
+            line_stripped = line.strip()
+            
+            # Skip empty lines and command prompts
+            if not line_stripped or '#' in line_stripped:
+                continue
+            
+            # Skip header lines (usually contain "Name", "State", etc.)
+            if line_stripped.lower().startswith('name') or line_stripped.startswith('----'):
+                continue
+            
+            # Parse table format: "| bd_name | state | ..." or "| bd_name    |"
+            if '|' in line_stripped:
+                parts = [p.strip() for p in line_stripped.split('|') if p.strip()]
+                if parts:
+                    bd_name = parts[0]
+                    # Skip if it looks like a header row
+                    if bd_name.lower() in ['name', 'bridge-domain', 'bridge domain', 'bd']:
+                        continue
+                    if bd_name and bd_name not in seen_names:
+                        bd_names.append(bd_name)
+                        seen_names.add(bd_name)
+            else:
+                # Non-table format: BD names might be listed directly
+                # Match common BD naming patterns
+                bd_match = re.match(r'^([\w\-_]+)(?:\s|$)', line_stripped)
+                if bd_match:
+                    bd_name = bd_match.group(1)
+                    # Filter out common non-BD words
+                    if bd_name.lower() not in ['name', 'state', 'type', 'admin', 'oper', 'associated', 'interfaces']:
+                        if bd_name and bd_name not in seen_names:
+                            bd_names.append(bd_name)
+                            seen_names.add(bd_name)
+        
+        print(f"  Found {len(bd_names)} BD names: {', '.join(bd_names[:10])}{'...' if len(bd_names) > 10 else ''}")
+        
+        bridge_domains = []
+        
+        # Step 2: Get details for each BD
+        for bd_name in bd_names:
+            bd = self._get_bd_details(bd_name)
+            if bd:
+                bridge_domains.append(bd)
+        
+        self._bd_cache = bridge_domains
+        print(f"{Colors.GREEN}Found {len(bridge_domains)} bridge domains on {self.hostname}{Colors.ENDC}")
+        return bridge_domains
+    
+    def _get_bd_details(self, bd_name: str) -> Optional[BridgeDomain]:
+        """
+        Get details of a specific bridge domain by name.
+        
+        ENHANCED: Uses multiple commands to get comprehensive BD information:
+        1. show network-services bridge-domain <bd> - General BD info
+        2. show network-services bridge-domain <bd> interface - Interface details
+        """
+        # First get general BD info
+        output = self._run_command(f"show network-services bridge-domain {bd_name} | no-more")
+        
+        bd = BridgeDomain(bd_id=0)  # We'll use name instead of numeric ID
+        bd.name = bd_name
+        
+        # Try to extract VLAN from name (multiple patterns)
+        # Patterns: g_yor_v210, v213, BD-100, vlan-500, 210
+        vlan_match = re.search(r'[_\-]?v?(\d{2,4})$', bd_name, re.I)
+        if vlan_match:
+            bd.vlan_id = int(vlan_match.group(1))
+        elif re.match(r'^\d+$', bd_name):  # Pure numeric BD name
+            bd.vlan_id = int(bd_name)
+        
+        parsing_interfaces = False
+        for line in output.split('\n'):
+            line_stripped = line.strip()
+            
+            # Parse Admin State
+            if 'Admin State:' in line or 'admin-state:' in line.lower():
+                state_match = re.search(r'(?:Admin State|admin-state):\s*(\w+)', line, re.I)
+                if state_match:
+                    bd.state = state_match.group(1).lower()
+            
+            # Detect start of interface list
+            if 'Associated Interfaces:' in line or 'Interfaces:' in line:
+                parsing_interfaces = True
+                continue
+            
+            # Parse interfaces (indented lines after "Associated Interfaces:")
+            if parsing_interfaces and line_stripped:
+                # Stop if we hit the prompt or another section
+                if '#' in line_stripped or line_stripped.startswith('Bridge-Domain'):
+                    parsing_interfaces = False
+                    continue
+                
+                # Extract interface name (may be on its own line or prefixed)
+                interface = line_stripped
+                if interface and (interface.startswith('ge') or interface.startswith('bundle') or 
+                                 interface.startswith('eth') or '.' in interface):
+                    if interface not in bd.interfaces:  # Avoid duplicates
+                        bd.interfaces.append(interface)
+                        
+                        # Parse sub-interface VLAN if present
+                        subif_match = re.match(r'([\w\-/]+)\.(\d+)', interface)
+                        if subif_match:
+                            bd.attachment_circuits.append({
+                                'interface': subif_match.group(1),
+                                'sub_interface': interface,
+                                'vlan': int(subif_match.group(2))
+                            })
+        
+        # ENHANCED: Also try dedicated interface command for more details
+        if not bd.interfaces:
+            iface_output = self._run_command(f"show network-services bridge-domain {bd_name} interface | no-more")
+            for line in iface_output.split('\n'):
+                line_stripped = line.strip()
+                if not line_stripped or '#' in line_stripped:
+                    continue
+                
+                # Parse interface lines from table format
+                if '|' in line_stripped:
+                    parts = [p.strip() for p in line_stripped.split('|') if p.strip()]
+                    if parts and not parts[0].lower().startswith('interface'):
+                        iface = parts[0]
+                        if iface and iface not in bd.interfaces:
+                            bd.interfaces.append(iface)
+                            # Parse sub-interface VLAN
+                            subif_match = re.match(r'([\w\-/]+)\.(\d+)', iface)
+                            if subif_match:
+                                bd.attachment_circuits.append({
+                                    'interface': subif_match.group(1),
+                                    'sub_interface': iface,
+                                    'vlan': int(subif_match.group(2))
+                                })
+                else:
+                    # Non-table format
+                    if line_stripped.startswith('ge') or line_stripped.startswith('bundle'):
+                        if line_stripped not in bd.interfaces:
+                            bd.interfaces.append(line_stripped)
+        
+        if bd.interfaces:
+            print(f"    BD {bd_name}: {len(bd.interfaces)} interfaces - {', '.join(bd.interfaces[:3])}{'...' if len(bd.interfaces) > 3 else ''}")
+            return bd
+        return None
+    
+    def get_bd_by_id(self, bd_id: int) -> Optional[BridgeDomain]:
+        """Get a specific bridge domain by ID"""
+        bds = self.get_bridge_domains()
+        for bd in bds:
+            if bd.bd_id == bd_id:
+                return bd
+        return None
+    
+    def find_bds_for_interface(self, interface: str) -> List[BridgeDomain]:
+        """
+        Find bridge domains containing a specific interface.
+        DEMAND-DRIVEN: Only queries BD details when needed, not all BDs.
+        
+        Handles:
+        - Direct interface matches
+        - Sub-interface matches  
+        - Bundle member matches (if interface is a member of a bundle in a BD)
+        """
+        matching_bds = []
+        base_interface = interface.split('.')[0]
+        
+        # Get list of BD names (quick - just table output)
+        bd_names = self._get_bd_names()
+        print(f"  Checking {len(bd_names)} BDs for interface {interface}...")
+        
+        # Query each BD's details until we find matching ones
+        for bd_name in bd_names:
+            bd = self._get_bd_details(bd_name)
+            if not bd:
+                continue
+                
+            # Check if our interface is in this BD
+            for bd_if in bd.interfaces:
+                # Direct or sub-interface match
+                if bd_if == interface or bd_if.startswith(base_interface + '.') or interface.startswith(bd_if.split('.')[0] + '.'):
+                    matching_bds.append(bd)
+                    break
+                
+                # Check if interface is a bundle member
+                bundle_base = bd_if.split('.')[0]
+                if self.is_bundle_interface(bundle_base):
+                    bundle = self.get_lacp_bundle(bundle_base)
+                    if bundle and interface in bundle.members:
+                        matching_bds.append(bd)
+                        break
+        
+        return matching_bds
+    
+    def find_bd_from_config(self, interface: str) -> List[str]:
+        """
+        Find bridge domains containing an interface using config search.
+        
+        Uses the CORRECT command for DNAAS:
+        show config network-services bridge-domain | include <interface> leading 10 trailing 10
+        
+        This is more reliable than parsing operational show commands because:
+        1. It finds the EXACT BD that contains the interface
+        2. Works even if the interface is in a bundle
+        3. Shows context around the interface reference
+        
+        Config format on DNAAS:
+            instance g_yor_v210
+              interface bundle-60000.210
+              !
+              interface ge100-0/0/4
+              !
+            !
+        
+        BD Naming Convention: g_yor_v210_xxx
+        - g = global
+        - yor = username/customer
+        - v210 = VLAN 210 (provider global VLAN)
+        - xxx = optional suffix (WAN, etc.)
+        
+        Returns list of BD names found for this interface.
+        """
+        bd_names = []
+        seen = set()
+        
+        # Strip sub-interface to search base interface too
+        base_interface = interface.split('.')[0]
+        interfaces_to_search = [interface]
+        if interface != base_interface:
+            interfaces_to_search.append(base_interface)
+        
+        for search_if in interfaces_to_search:
+            print(f"  Searching config for BD containing {search_if}...")
+            cmd = f"show config network-services bridge-domain | include {search_if} leading 10 trailing 10 | no-more"
+            output = self._run_command(cmd, timeout=45)
+            
+            if not output or 'No match' in output:
+                continue
+            
+            # Parse output to find BD name
+            # DNAAS Config format:
+            #   instance g_yor_v210        <-- BD name is after "instance"
+            #     interface ge100-0/0/4    <-- interface reference
+            #   !
+            current_bd = None
+            for line in output.split('\n'):
+                line_stripped = line.strip()
+                
+                # Look for "instance <bd_name>" - this is the BD definition
+                instance_match = re.match(r'instance\s+(\S+)', line_stripped)
+                if instance_match:
+                    current_bd = instance_match.group(1)
+                    continue
+                
+                # If we found an interface line matching our search, and we have a current BD
+                if current_bd and search_if in line_stripped and 'interface' in line_stripped:
+                    # Skip mgmt BDs - they span entire fabric and cause infinite loops
+                    if 'mgmt' in current_bd.lower():
+                        print(f"    {Colors.YELLOW}Skipping mgmt BD: {current_bd}{Colors.ENDC}")
+                        current_bd = None
+                        continue
+                        
+                    if current_bd not in seen:
+                        bd_names.append(current_bd)
+                        seen.add(current_bd)
+                        print(f"    {Colors.GREEN}Found BD: {current_bd} (contains {search_if}){Colors.ENDC}")
+                        # Reset current_bd to find next instance if any
+                        current_bd = None
+        
+        return bd_names
+    
+    def get_bd_details_by_name(self, bd_name: str) -> Optional[BridgeDomain]:
+        """
+        Get full details of a BD by name (wrapper for _get_bd_details).
+        Public method for use by tracing logic.
+        """
+        return self._get_bd_details(bd_name)
+    
+    def _get_bd_names(self) -> List[str]:
+        """Get list of BD names (fast - just parses table output)"""
+        output = self._run_command("show network-services bridge-domain | no-more")
+        
+        bd_names = []
+        for line in output.split('\n'):
+            line = line.strip()
+            if line.startswith('|'):
+                parts = [p.strip() for p in line.split('|') if p.strip()]
+                if parts and parts[0].lower() != 'name' and not parts[0].startswith('-'):
+                    bd_names.append(parts[0])
+        
+        return bd_names
+    
+    def get_lacp_bundle(self, bundle_id: str, force_refresh: bool = False) -> Optional[LACPBundle]:
+        """
+        Get LACP bundle members.
+        Parses 'show lacp interface bundle-<ID>' output.
+        
+        Output format:
+        | Interface    | Role    | Port State   | Protocol State   | ...
+        | ge100-0/0/36 | actor   | active       | ascd             | ...
+        """
+        # Strip sub-interface if present (bundle-60000.210 -> bundle-60000)
+        bundle_base = bundle_id.split('.')[0]
+        
+        if bundle_base in self._lacp_cache and not force_refresh:
+            return self._lacp_cache[bundle_base]
+        
+        # Normalize bundle ID
+        if not bundle_base.startswith('bundle-'):
+            bundle_base = f"bundle-{bundle_base}"
+        
+        print(f"{Colors.CYAN}Querying LACP bundle {bundle_base} on {self.hostname}...{Colors.ENDC}")
+        output = self._run_command(f"show lacp interface {bundle_base} | no-more")
+        
+        bundle = LACPBundle(bundle_id=bundle_base)
+        seen_interfaces = set()  # Avoid duplicates (actor and partner rows)
+        
+        for line in output.split('\n'):
+            line_stripped = line.strip()
+            
+            # Parse table rows: | ge100-0/0/36 | actor | ...
+            if line_stripped.startswith('|') and 'ge' in line_stripped:
+                parts = [p.strip() for p in line_stripped.split('|') if p.strip()]
+                if len(parts) >= 2:
+                    interface = parts[0]
+                    role = parts[1].lower() if len(parts) > 1 else ''
+                    
+                    # Only add if it looks like an interface and role is 'actor'
+                    if (interface.startswith('ge') or interface.startswith('eth')) and role == 'actor':
+                        if interface not in seen_interfaces:
+                            bundle.members.append(interface)
+                            seen_interfaces.add(interface)
+            
+            # Match partner system ID from the header section
+            partner_match = re.search(r'System-id:\s*([\w:]+)', line_stripped)
+            if partner_match and 'Peer:' in output[:output.index(line) if line in output else len(output)]:
+                bundle.partner_system_id = partner_match.group(1)
+        
+        self._lacp_cache[bundle_base] = bundle
+        print(f"{Colors.GREEN}Bundle {bundle_base} has {len(bundle.members)} members{Colors.ENDC}")
+        return bundle
+    
+    def resolve_bundle_members(self, bundle_id: str) -> List[str]:
+        """Get list of member interfaces for a bundle"""
+        bundle = self.get_lacp_bundle(bundle_id)
+        return bundle.members if bundle else []
+    
+    def is_bundle_interface(self, interface: str) -> bool:
+        """Check if an interface is a bundle"""
+        return 'bundle' in interface.lower() or interface.lower().startswith('ae')
+    
+    def get_physical_for_bundle(self, bundle_interface: str) -> List[str]:
+        """
+        If interface is a bundle, return its member interfaces.
+        Otherwise, return the interface itself.
+        """
+        if self.is_bundle_interface(bundle_interface):
+            return self.resolve_bundle_members(bundle_interface)
+        return [bundle_interface]
+    
+    def get_lldp_neighbors(self) -> List[Dict[str, str]]:
+        """Get LLDP neighbors from the DNAAS device"""
+        output = self._run_command("show lldp neighbors | no-more")
+        
+        neighbors = []
+        for line in output.split('\n'):
+            # Parse LLDP neighbor table
+            # Format: | ge100-0/0/4 | YOR_PE-1 | ge400-0/0/4 | 120 |
+            match = re.match(
+                r'\|\s*([\w\-/\.]+)\s*\|\s*(\S+)\s*\|\s*([\w\-/\.]+)\s*\|\s*(\d+)',
+                line
+            )
+            if match:
+                local_if, neighbor, remote_if, ttl = match.groups()
+                if local_if.lower() != 'interface':  # Skip header
+                    neighbors.append({
+                        'local_interface': local_if,
+                        'neighbor_name': neighbor,
+                        'neighbor_interface': remote_if,
+                        'ttl': int(ttl)
+                    })
+            else:
+                # Fallback: try simple whitespace split
+                parts = line.split()
+                if len(parts) >= 3 and (parts[0].startswith('ge') or parts[0].startswith('bundle')):
+                    neighbors.append({
+                        'local_interface': parts[0],
+                        'neighbor_name': parts[1] if len(parts) > 1 else '',
+                        'neighbor_interface': parts[2] if len(parts) > 2 else ''
+                    })
+        
+        return neighbors
+    
+    def get_lldp_neighbors_detail(self) -> List[Dict[str, Any]]:
+        """
+        Get detailed LLDP neighbor information using 'show lldp neighbors detail'.
+        
+        Returns enhanced neighbor info including:
+        - System capabilities
+        - Management addresses
+        - Port descriptions
+        """
+        output = self._run_command("show lldp neighbors detail | no-more")
+        
+        neighbors = []
+        current_neighbor = {}
+        
+        for line in output.split('\n'):
+            line_stripped = line.strip()
+            
+            # New neighbor section starts with "Interface:"
+            if line_stripped.startswith('Interface:'):
+                if current_neighbor:
+                    neighbors.append(current_neighbor)
+                current_neighbor = {
+                    'local_interface': line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+                }
+            elif current_neighbor:
+                # Parse neighbor details
+                if 'Neighbor:' in line_stripped or 'System Name:' in line_stripped:
+                    val = line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+                    current_neighbor['neighbor_name'] = val
+                elif 'Neighbor Interface:' in line_stripped or 'Port ID:' in line_stripped:
+                    val = line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+                    current_neighbor['neighbor_interface'] = val
+                elif 'System Capabilities:' in line_stripped:
+                    val = line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+                    current_neighbor['capabilities'] = val
+                elif 'Management Address:' in line_stripped or 'Mgmt Address:' in line_stripped:
+                    val = line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+                    current_neighbor['mgmt_address'] = val
+                elif 'Port Description:' in line_stripped:
+                    val = line_stripped.split(':', 1)[1].strip() if ':' in line_stripped else ''
+                    current_neighbor['port_description'] = val
+        
+        # Add last neighbor
+        if current_neighbor:
+            neighbors.append(current_neighbor)
+        
+        return neighbors
+    
+    def get_interface_state(self, interface: str) -> Dict[str, Any]:
+        """
+        Get operational state of an interface using 'show interface <if>'.
+        
+        Returns:
+        - admin_state: enabled/disabled
+        - oper_state: up/down
+        - speed: interface speed
+        - duplex: full/half
+        - mtu: configured MTU
+        """
+        result = {
+            'interface': interface,
+            'admin_state': None,
+            'oper_state': None,
+            'speed': None,
+            'duplex': None,
+            'mtu': None
+        }
+        
+        output = self._run_command(f"show interface {interface} | no-more")
+        
+        for line in output.split('\n'):
+            line_lower = line.lower()
+            
+            if 'admin-state:' in line_lower or 'admin state:' in line_lower:
+                match = re.search(r'(?:admin[- ]state):\s*(\w+)', line, re.I)
+                if match:
+                    result['admin_state'] = match.group(1).lower()
+            elif 'oper-state:' in line_lower or 'oper state:' in line_lower:
+                match = re.search(r'(?:oper[- ]state):\s*(\w+)', line, re.I)
+                if match:
+                    result['oper_state'] = match.group(1).lower()
+            elif 'speed:' in line_lower:
+                match = re.search(r'speed:\s*([\w\d]+)', line, re.I)
+                if match:
+                    result['speed'] = match.group(1)
+            elif 'mtu:' in line_lower:
+                match = re.search(r'mtu:\s*(\d+)', line, re.I)
+                if match:
+                    result['mtu'] = int(match.group(1))
+        
+        return result
+    
+    def match_bd_interface_to_lldp(self, bd_interface: str) -> Optional[Dict[str, str]]:
+        """
+        Match a BD interface to an LLDP neighbor.
+        Handles bundle resolution if needed.
+        """
+        # Get physical interfaces (resolve bundle if needed)
+        physical_interfaces = self.get_physical_for_bundle(bd_interface.split('.')[0])
+        
+        # Get LLDP neighbors
+        neighbors = self.get_lldp_neighbors()
+        
+        # Match
+        for neighbor in neighbors:
+            if neighbor['local_interface'] in physical_interfaces:
+                return neighbor
+        
+        return None
+    
+    def get_connected_dut_info(self, dut_lldp_interface: str) -> Optional[Dict[str, Any]]:
+        """
+        Given an LLDP interface that connects to a DUT, find:
+        - All bridge domains on that interface
+        - VLAN mappings
+        - Bundle info if applicable
+        """
+        bds = self.find_bds_for_interface(dut_lldp_interface)
+        
+        if not bds:
+            return None
+        
+        return {
+            'interface': dut_lldp_interface,
+            'bridge_domains': [
+                {
+                    'bd_id': bd.bd_id,
+                    'name': bd.name,
+                    'vlan_id': bd.vlan_id,
+                    'state': bd.state,
+                    'all_interfaces': bd.interfaces
+                }
+                for bd in bds
+            ]
+        }
+
+    def get_interface_config_details(self, interface: str) -> Dict[str, Any]:
+        """
+        Fetch detailed configuration for an interface.
+        Runs 'show configure interface <interface>' and parses VLAN/encapsulation info.
+        
+        Returns dict with:
+        - encapsulation: dot1q config
+        - vlan_id: outer VLAN
+        - inner_vlan: inner VLAN (QinQ)
+        - rewrite_ingress/egress: VLAN manipulation rules
+        - l2_service: True if interface is L2
+        - admin_state: up/down
+        - raw_config: full config output
+        """
+        result = {
+            'interface': interface,
+            'encapsulation': None,
+            'vlan_id': None,
+            'inner_vlan': None,
+            'rewrite_ingress': None,
+            'rewrite_egress': None,
+            'l2_service': False,
+            'admin_state': None,
+            'oper_state': None,
+            'raw_config': None
+        }
+        
+        try:
+            # Get interface configuration
+            config_output = self._run_command(f"show configure interface {interface} | no-more")
+            result['raw_config'] = config_output
+            
+            # Parse encapsulation
+            encap_match = re.search(r'encapsulation\s+dot1q\s+(\d+)(?:\s+second-dot1q\s+(\d+))?', config_output)
+            if encap_match:
+                result['encapsulation'] = encap_match.group(0)
+                result['vlan_id'] = int(encap_match.group(1))
+                if encap_match.group(2):
+                    result['inner_vlan'] = int(encap_match.group(2))
+            
+            # Parse vlan-id (sub-interface style)
+            vlan_match = re.search(r'vlan-id\s+(\d+)', config_output)
+            if vlan_match and not result['vlan_id']:
+                result['vlan_id'] = int(vlan_match.group(1))
+            
+            # Parse rewrite rules
+            rewrite_in = re.search(r'rewrite\s+ingress\s+tag\s+(push|pop|translate)\s+[^\n]+', config_output)
+            if rewrite_in:
+                result['rewrite_ingress'] = rewrite_in.group(0)
+            
+            rewrite_out = re.search(r'rewrite\s+egress\s+tag\s+(push|pop|translate)\s+[^\n]+', config_output)
+            if rewrite_out:
+                result['rewrite_egress'] = rewrite_out.group(0)
+            
+            # Check for L2 service
+            if 'l2-service' in config_output.lower():
+                result['l2_service'] = True
+            
+            # Get interface state
+            state_output = self._run_command(f"show interface {interface} | no-more")
+            admin_match = re.search(r'admin[- ]?state[:\s]+(\w+)', state_output, re.IGNORECASE)
+            if admin_match:
+                result['admin_state'] = admin_match.group(1).lower()
+            oper_match = re.search(r'oper[- ]?(?:state|status)[:\s]+(\w+)', state_output, re.IGNORECASE)
+            if oper_match:
+                result['oper_state'] = oper_match.group(1).lower()
+                
+        except Exception as e:
+            print(f"{Colors.YELLOW}Warning: Could not get config for {interface}: {e}{Colors.ENDC}")
+        
+        return result
+    
+    def get_all_bd_interface_configs(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Fetch configuration details for ALL interfaces across all Bridge Domains.
+        Returns dict mapping interface name to config details.
+        """
+        all_configs = {}
+        bds = self.get_bridge_domains()
+        
+        print(f"{Colors.CYAN}Fetching interface configs for {len(bds)} bridge domains...{Colors.ENDC}")
+        
+        for bd in bds:
+            for iface in bd.interfaces:
+                if iface not in all_configs:
+                    print(f"    Getting config for {iface}...", end=' ', flush=True)
+                    config = self.get_interface_config_details(iface)
+                    all_configs[iface] = config
+                    vlan_str = f"VLAN {config['vlan_id']}" if config['vlan_id'] else "no VLAN"
+                    print(f"{Colors.GREEN}{vlan_str}{Colors.ENDC}")
+        
+        return all_configs
+    
+    def get_downlink_interface_configs(self, dut_interfaces: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Fetch configuration details for downlink interfaces towards DUTs.
+        
+        Args:
+            dut_interfaces: List of interface names connected to DUTs (from LLDP)
+            
+        Returns dict mapping interface name to config details.
+        """
+        configs = {}
+        
+        print(f"{Colors.CYAN}Fetching configs for {len(dut_interfaces)} DUT downlinks...{Colors.ENDC}")
+        
+        for iface in dut_interfaces:
+            # Get config for the physical interface
+            base_iface = iface.split('.')[0]  # Remove sub-interface suffix
+            if base_iface not in configs:
+                print(f"    Getting config for {base_iface}...", end=' ', flush=True)
+                config = self.get_interface_config_details(base_iface)
+                configs[base_iface] = config
+                state = config.get('admin_state', 'unknown')
+                print(f"{Colors.GREEN}state: {state}{Colors.ENDC}")
+            
+            # Also get sub-interface config if present
+            if '.' in iface and iface not in configs:
+                print(f"    Getting config for {iface}...", end=' ', flush=True)
+                config = self.get_interface_config_details(iface)
+                configs[iface] = config
+                vlan_str = f"VLAN {config['vlan_id']}" if config['vlan_id'] else "no VLAN"
+                print(f"{Colors.GREEN}{vlan_str}{Colors.ENDC}")
+        
+        return configs
+
+# ============================================================================
+# DATA CLASSES
+# ============================================================================
+
+@dataclass
+class ManagementInterface:
+    """Management interface information"""
+    name: str
+    admin_state: str = ""
+    oper_state: str = ""
+    ipv4: str = ""
+    ipv6: str = ""
+    mtu: str = ""
+    vrf: str = ""
+
+@dataclass
+class LLDPNeighbor:
+    """LLDP neighbor information"""
+    local_interface: str
+    neighbor_name: str
+    neighbor_interface: str
+    ttl: int = 120
+    is_dnaas: bool = False
+
+@dataclass  
+class InterfaceDetails:
+    """Detailed interface information"""
+    name: str
+    description: str = ""
+    vlan_id: Optional[int] = None
+    bundle: str = ""
+    sub_interfaces: List[str] = field(default_factory=list)
+    admin_state: str = ""
+    oper_state: str = ""
+
+@dataclass
+class DeviceInfo:
+    """Device information cached in inventory"""
+    serial: str
+    hostname: str = ""
+    mgmt_ip: str = ""
+    mgmt_ipv6: str = ""
+    system_type: str = ""
+    dnos_version: str = ""
+    last_seen: str = ""
+    dnaas_interfaces: List[str] = field(default_factory=list)
+    lldp_neighbors: List[Dict] = field(default_factory=list)
+    all_mgmt_interfaces: List[Dict] = field(default_factory=list)
+    interface_details: Dict[str, Dict] = field(default_factory=dict)  # Details per DNAAS interface
+
+@dataclass
+class PathHop:
+    """A single hop in the DNAAS path"""
+    device_name: str
+    device_type: str  # PE, LEAF, SPINE
+    device_serial: str = ""
+    device_ip: str = ""
+    ingress_interface: str = ""
+    egress_interface: str = ""
+    vlan_id: Optional[int] = None
+    bundle: str = ""
+    
+@dataclass
+class DNAASPath:
+    """Complete DNAAS path between two endpoints"""
+    source_device: str
+    destination_device: str
+    hops: List[PathHop] = field(default_factory=list)
+    discovered_at: str = ""
+    success: bool = False
+    error_message: str = ""
+
+# ============================================================================
+# DNAAS TABLE LOADER
+# ============================================================================
+
+class DNAASTable:
+    """Loads and queries the DNAAS device table from Excel"""
+    
+    def __init__(self, filepath: Path = DNAAS_TABLE_FILE):
+        self.filepath = filepath
+        self.devices: Dict[str, Dict] = {}
+        self._load()
+    
+    def _load(self):
+        """Load DNAAS table from Excel"""
+        if not self.filepath.exists():
+            print(f"{Colors.YELLOW}Warning: DNAAS table not found at {self.filepath}{Colors.ENDC}")
+            return
+        
+        try:
+            from openpyxl import load_workbook
+            wb = load_workbook(self.filepath, read_only=True)
+            ws = wb.active
+            
+            # Expected columns: Index, Rack, Name, Serial, IP Address, Status, TACACS, Accessible
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if row[2]:  # Name column
+                    name = str(row[2]).strip()
+                    # Normalize name (replace underscores with dashes for matching)
+                    normalized_name = name.replace('_', '-').upper()
+                    
+                    self.devices[normalized_name] = {
+                        'name': name,
+                        'serial': str(row[3]) if row[3] else '',
+                        'ip': str(row[4]) if row[4] else '',
+                        'rack': str(row[1]) if row[1] else '',
+                        'status': str(row[5]) if row[5] else '',
+                        'accessible': str(row[7]).lower() == 'yes' if row[7] else False
+                    }
+            
+            print(f"{Colors.GREEN}Loaded {len(self.devices)} DNAAS devices from table{Colors.ENDC}")
+            wb.close()
+            
+        except Exception as e:
+            print(f"{Colors.RED}Error loading DNAAS table: {e}{Colors.ENDC}")
+    
+    def lookup(self, name: str) -> Optional[Dict]:
+        """Look up DNAAS device by name (fuzzy matching)"""
+        # Normalize input name
+        normalized = name.replace('_', '-').upper()
+        
+        # Direct match
+        if normalized in self.devices:
+            return self.devices[normalized]
+        
+        # Fuzzy match - find devices containing the search term
+        for key, device in self.devices.items():
+            if normalized in key or key in normalized:
+                return device
+            # Also try without DNAAS prefix
+            short_name = normalized.replace('DNAAS-', '').replace('DNAAS_', '')
+            if short_name in key:
+                return device
+        
+        return None
+    
+    def get_ip(self, name: str) -> Optional[str]:
+        """Get IP address for a DNAAS device"""
+        device = self.lookup(name)
+        return device['ip'] if device else None
+    
+    def list_all(self) -> List[Dict]:
+        """List all DNAAS devices"""
+        return list(self.devices.values())
+
+# ============================================================================
+# DEVICE INVENTORY DATABASE
+# ============================================================================
+
+class DeviceInventory:
+    """Manages the device inventory database"""
+    
+    def __init__(self, filepath: Path = INVENTORY_FILE):
+        self.filepath = filepath
+        self.data = self._load()
+    
+    def _load(self) -> Dict:
+        """Load inventory from file"""
+        if self.filepath.exists():
+            try:
+                with open(self.filepath, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"{Colors.YELLOW}Warning: Could not load inventory: {e}{Colors.ENDC}")
+        return {"devices": {}, "last_updated": ""}
+    
+    def save(self):
+        """Save inventory to file"""
+        self.data["last_updated"] = datetime.now().isoformat()
+        with open(self.filepath, 'w') as f:
+            json.dump(self.data, f, indent=2, default=str)
+        print(f"{Colors.GREEN}Inventory saved to {self.filepath}{Colors.ENDC}")
+    
+    def get_device(self, serial: str) -> Optional[DeviceInfo]:
+        """Get device info by serial"""
+        if serial in self.data["devices"]:
+            d = self.data["devices"][serial]
+            return DeviceInfo(**d)
+        return None
+    
+    def get_device_by_hostname(self, hostname: str) -> Optional[DeviceInfo]:
+        """Get device info by hostname (with or without date suffix)"""
+        if not hostname:
+            return None
+        
+        # Normalize hostname - strip date suffix like (05-Jan-2026-18:48:06)
+        clean_hostname = hostname.split('(')[0].strip().lower()
+        
+        for serial, device_data in self.data.get("devices", {}).items():
+            device_hostname = (device_data.get("hostname") or "").split('(')[0].strip().lower()
+            if device_hostname == clean_hostname or device_hostname == hostname.lower():
+                return DeviceInfo(**device_data)
+        return None
+    
+    def update_device(self, device: DeviceInfo):
+        """Update or add device to inventory"""
+        device.last_seen = datetime.now().isoformat()
+        self.data["devices"][device.serial] = asdict(device)
+        self.save()
+    
+    def list_devices(self) -> List[str]:
+        """List all known device serials"""
+        return list(self.data["devices"].keys())
+
+# ============================================================================
+# SSH CONNECTION MANAGER
+# ============================================================================
+
+class SSHConnection:
+    """Manages SSH connections to devices"""
+    
+    def __init__(self, host: str, username: str = DEFAULT_USER, 
+                 password: str = DEFAULT_PASS, timeout: int = 30):
+        self.host = host
+        self.username = username
+        self.password = password
+        self.timeout = timeout
+        self.client: Optional[paramiko.SSHClient] = None
+        self.shell = None
+        self.connected = False
+    
+    def connect(self) -> bool:
+        """Establish SSH connection"""
+        try:
+            print(f"  {Colors.CYAN}Connecting to {self.host}...{Colors.ENDC}", flush=True)
+            self.client = paramiko.SSHClient()
+            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            self.client.connect(
+                self.host, 
+                username=self.username, 
+                password=self.password, 
+                timeout=self.timeout,
+                look_for_keys=False,
+                allow_agent=False
+            )
+            self.shell = self.client.invoke_shell(width=250, height=50)
+            self.shell.settimeout(60)
+            time.sleep(1)
+            # Clear initial banner
+            if self.shell.recv_ready():
+                self.shell.recv(65535)
+            self.connected = True
+            print(f"  {Colors.GREEN}Connected!{Colors.ENDC}", flush=True)
+            return True
+        except Exception as e:
+            print(f"  {Colors.RED}Connection failed: {e}{Colors.ENDC}", flush=True)
+            return False
+    
+    def send_command(self, cmd: str, timeout: int = 30) -> str:
+        """Send command and return output"""
+        if not self.shell:
+            return ""
+        
+        self.shell.send(cmd + "\n")
+        output = ""
+        end_time = time.time() + timeout
+        
+        while time.time() < end_time:
+            if self.shell.recv_ready():
+                chunk = self.shell.recv(65535).decode('utf-8', errors='ignore')
+                output += chunk
+                # Check for prompt (ends with # or >)
+                if output.rstrip().endswith('#') or output.rstrip().endswith('>'):
+                    break
+            else:
+                time.sleep(0.1)
+        
+        # Strip ANSI escape codes (| include command highlights matches)
+        # Patterns: \x1b[91m (red), \x1b[0m (reset), [F, etc.
+        ansi_pattern = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\[F')
+        output = ansi_pattern.sub('', output)
+        
+        return output
+    
+    def close(self):
+        """Close SSH connection"""
+        if self.client:
+            self.client.close()
+            self.connected = False
+
+# ============================================================================
+# DEVICE DISCOVERY
+# ============================================================================
+
+class DeviceDiscovery:
+    """Discovers device information via SSH"""
+    
+    def __init__(self, ssh: SSHConnection):
+        self.ssh = ssh
+    
+    def get_hostname(self) -> str:
+        """Get device hostname from show system"""
+        output = self.ssh.send_command("show system | no-more", timeout=15)
+        # Look for hostname in output
+        for line in output.split('\n'):
+            if 'hostname' in line.lower() or 'system name' in line.lower():
+                match = re.search(r':\s*(\S+)', line)
+                if match:
+                    return match.group(1)
+            # Also try matching prompt
+            match = re.match(r'^(\S+)[#>]', line.strip())
+            if match and match.group(1) not in ['show', 'no-more']:
+                return match.group(1)
+        return ""
+    
+    def get_system_info(self) -> Dict[str, str]:
+        """Get system type and version"""
+        info = {"system_type": "", "dnos_version": ""}
+        output = self.ssh.send_command("show system | no-more", timeout=15)
+        
+        for line in output.split('\n'):
+            if 'system type' in line.lower() or 'platform' in line.lower():
+                match = re.search(r':\s*(.+)', line)
+                if match:
+                    info["system_type"] = match.group(1).strip()
+            if 'version' in line.lower() and 'dnos' in line.lower():
+                match = re.search(r':\s*(.+)', line)
+                if match:
+                    info["dnos_version"] = match.group(1).strip()
+        
+        return info
+    
+    def get_management_interfaces(self) -> List[ManagementInterface]:
+        """Get all management interfaces"""
+        interfaces = []
+        output = self.ssh.send_command("show interfaces management | no-more", timeout=30)
+        
+        # Parse table format
+        # | Interface | Admin | Operational | IPv4 Address | IPv6 Address | MTU | VRF |
+        for line in output.split('\n'):
+            match = re.match(
+                r'\|\s*([\w\-/\.]+)\s*\|\s*(\w+)\s*\|\s*(\S*)\s*\|\s*([^\|]*)\s*\|\s*([^\|]*)\s*\|\s*(\d*)\s*\|\s*(\S*)\s*\|',
+                line
+            )
+            if match:
+                name, admin, oper, ipv4, ipv6, mtu, vrf = match.groups()
+                if name.lower() != 'interface':  # Skip header
+                    interfaces.append(ManagementInterface(
+                        name=name.strip(),
+                        admin_state=admin.strip(),
+                        oper_state=oper.strip(),
+                        ipv4=ipv4.strip(),
+                        ipv6=ipv6.strip(),
+                        mtu=mtu.strip(),
+                        vrf=vrf.strip()
+                    ))
+        
+        return interfaces
+    
+    def get_primary_mgmt_ip(self, interfaces: List[ManagementInterface]) -> Tuple[str, str]:
+        """Extract primary management IPv4 and IPv6"""
+        ipv4, ipv6 = "", ""
+        
+        # Prefer mgmt0 or first interface with IP
+        for iface in interfaces:
+            if iface.name == 'mgmt0' and iface.ipv4:
+                ipv4 = iface.ipv4.split('/')[0]
+                ipv6 = iface.ipv6.split('/')[0] if iface.ipv6 else ""
+                break
+        
+        # Fallback to any interface with IP
+        if not ipv4:
+            for iface in interfaces:
+                if iface.ipv4:
+                    ipv4 = iface.ipv4.split('/')[0]
+                    ipv6 = iface.ipv6.split('/')[0] if iface.ipv6 else ""
+                    break
+        
+        return ipv4, ipv6
+    
+    def get_lldp_neighbors(self) -> List[LLDPNeighbor]:
+        """Get all LLDP neighbors"""
+        neighbors = []
+        output = self.ssh.send_command("show lldp neighbors | no-more", timeout=30)
+        
+        for line in output.split('\n'):
+            # Format: | interface | neighbor_name | neighbor_if | ttl |
+            match = re.match(
+                r'\|\s*([\w\-/\.]+)\s*\|\s*(\S+)\s*\|\s*([\w\-/\.]+)\s*\|\s*(\d+)',
+                line
+            )
+            if match:
+                local_if, neighbor, remote_if, ttl = match.groups()
+                if local_if.lower() != 'interface':  # Skip header
+                    is_dnaas = any(kw in neighbor.upper() for kw in DNAAS_KEYWORDS)
+                    neighbors.append(LLDPNeighbor(
+                        local_interface=local_if,
+                        neighbor_name=neighbor,
+                        neighbor_interface=remote_if,
+                        ttl=int(ttl),
+                        is_dnaas=is_dnaas
+                    ))
+        
+        return neighbors
+    
+    def get_interface_descriptions(self) -> Dict[str, str]:
+        """Get interface descriptions from running config"""
+        descriptions = {}
+        output = self.ssh.send_command("show running-config interfaces | no-more", timeout=60)
+        
+        current_interface = None
+        for line in output.split('\n'):
+            # Match interface definitions
+            iface_match = re.match(r'\s*(ge\d+-\d/\d/\d|bundle-ether\d+)', line)
+            if iface_match:
+                current_interface = iface_match.group(1)
+            
+            # Match descriptions
+            if current_interface:
+                desc_match = re.match(r'\s*description\s+"?([^"]+)"?', line)
+                if desc_match:
+                    descriptions[current_interface] = desc_match.group(1).strip()
+        
+        return descriptions
+    
+    def get_interface_details(self, interface_name: str) -> Dict[str, Any]:
+        """Get detailed information about a specific interface including sub-interfaces"""
+        details = {
+            'interface': interface_name,
+            'sub_interfaces': [],
+            'speed': '',
+            'bundle': '',
+            'description': '',
+            'encapsulation': ''
+        }
+        
+        # Get main interface info
+        output = self.ssh.send_command(f"show interfaces {interface_name} | no-more", timeout=30)
+        
+        for line in output.split('\n'):
+            if 'Speed:' in line:
+                match = re.search(r'Speed:\s*(\S+)', line)
+                if match:
+                    details['speed'] = match.group(1)
+            if 'Bundle-id:' in line:
+                match = re.search(r'Bundle-id:\s*(\S+)', line)
+                if match and match.group(1) != 'N/A':
+                    details['bundle'] = match.group(1)
+            if 'Description:' in line:
+                match = re.search(r'Description:\s*(.+)', line)
+                if match:
+                    details['description'] = match.group(1).strip()
+            if 'Encapsulation:' in line:
+                match = re.search(r'Encapsulation:\s*(\S+)', line)
+                if match:
+                    details['encapsulation'] = match.group(1)
+        
+        # Get sub-interfaces
+        output2 = self.ssh.send_command(f"show interfaces | include {interface_name}. | no-more", timeout=30)
+        
+        # Remove ANSI color codes
+        ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+        clean_output = ansi_escape.sub('', output2)
+        
+        for line in clean_output.split('\n'):
+            # Parse table format: | interface | admin | oper | ipv4 | ipv6 | vlan | mtu | service |
+            # Example: | ge400-0/0/4.12 | enabled | up | 12.12.12.1/30 | | 12 | 9220 | VRF (default) |
+            match = re.search(
+                rf'\|\s*({re.escape(interface_name)}\.\d+)(?:\s*\(L2\))?\s*\|\s*(\w+)\s*\|\s*(\w+)\s*\|\s*([^\|]*)\|\s*([^\|]*)\|\s*(\d*)\s*\|\s*(\d*)\s*\|\s*([^\|]*)\|',
+                line
+            )
+            if match:
+                sub_iface, admin, oper, ipv4, ipv6, vlan, mtu, service = match.groups()
+                details['sub_interfaces'].append({
+                    'name': sub_iface.strip(),
+                    'admin': admin.strip(),
+                    'oper': oper.strip(),
+                    'ipv4': ipv4.strip(),
+                    'vlan': int(vlan) if vlan.strip() else None,
+                    'mtu': int(mtu) if mtu.strip() else None,
+                    'service': service.strip()
+                })
+        
+        return details
+    
+    def detect_dnaas_interfaces(self, neighbors: List[LLDPNeighbor], 
+                                 descriptions: Dict[str, str],
+                                 config_text: str = "") -> List[str]:
+        """Detect DNAAS-connected interfaces using all methods"""
+        dnaas_interfaces = set()
+        
+        # Method 1: LLDP neighbor name contains DNAAS keywords
+        for neighbor in neighbors:
+            if neighbor.is_dnaas:
+                dnaas_interfaces.add(neighbor.local_interface)
+                print(f"    {Colors.GREEN}[LLDP]{Colors.ENDC} {neighbor.local_interface} -> {neighbor.neighbor_name}")
+        
+        # Method 2: Interface description contains DNAAS keywords
+        for iface, desc in descriptions.items():
+            if any(kw in desc.upper() for kw in DNAAS_KEYWORDS):
+                dnaas_interfaces.add(iface)
+                print(f"    {Colors.GREEN}[DESC]{Colors.ENDC} {iface}: {desc}")
+        
+        # Method 3: Config patterns (bundle-ether with DNAAS in description)
+        if config_text:
+            # Look for bundle-ether interfaces connected to DNAAS
+            bundle_pattern = re.compile(
+                r'(bundle-ether\d+).*?description\s+["\']?([^"\']+)["\']?',
+                re.DOTALL
+            )
+            for match in bundle_pattern.finditer(config_text):
+                bundle, desc = match.groups()
+                if any(kw in desc.upper() for kw in DNAAS_KEYWORDS):
+                    dnaas_interfaces.add(bundle)
+                    print(f"    {Colors.GREEN}[CONFIG]{Colors.ENDC} {bundle}: {desc}")
+        
+        return list(dnaas_interfaces)
+
+# ============================================================================
+# PE/TERMINATION DEVICE INFO FETCHER
+# ============================================================================
+
+def fetch_pe_device_info(hostname_or_ip: str, user: str = DEFAULT_USER, 
+                          password: str = DEFAULT_PASS, timeout: int = 20) -> Dict[str, str]:
+    """
+    Quickly connect to a PE/termination device and extract:
+    - Serial number (from show system)
+    - Management IP (from show interfaces management)
+    
+    Returns dict with 'serial', 'mgmt_ip', 'hostname' or empty values on failure.
+    Used to auto-populate SSH credentials for discovered termination devices.
+    """
+    result = {
+        'serial': '',
+        'mgmt_ip': '',
+        'hostname': '',
+        'success': False
+    }
+    
+    print(f"    {Colors.CYAN}Fetching info from PE: {hostname_or_ip}...{Colors.ENDC}", flush=True)
+    
+    try:
+        ssh = SSHConnection(hostname_or_ip, user, password)
+        if not ssh.connect():
+            print(f"      {Colors.YELLOW}Could not connect to {hostname_or_ip}{Colors.ENDC}")
+            return result
+        
+        try:
+            discovery = DeviceDiscovery(ssh)
+            
+            # Get hostname
+            hostname = discovery.get_hostname()
+            if hostname:
+                result['hostname'] = hostname
+            
+            # Get system info (contains serial number)
+            output = ssh.send_command("show system | no-more", timeout=15)
+            for line in output.split('\n'):
+                line_lower = line.lower()
+                if 'serial' in line_lower and 'number' in line_lower:
+                    match = re.search(r':\s*(\S+)', line)
+                    if match:
+                        result['serial'] = match.group(1).strip()
+                        break
+            
+            # Get management IP
+            mgmt_interfaces = discovery.get_management_interfaces()
+            mgmt_ip, _ = discovery.get_primary_mgmt_ip(mgmt_interfaces)
+            if mgmt_ip:
+                result['mgmt_ip'] = mgmt_ip
+            
+            result['success'] = True
+            print(f"      {Colors.GREEN}Got: SN={result['serial'] or 'N/A'}, IP={result['mgmt_ip'] or 'N/A'}{Colors.ENDC}")
+            
+        finally:
+            ssh.close()
+            
+    except Exception as e:
+        print(f"      {Colors.RED}Error fetching PE info: {e}{Colors.ENDC}")
+    
+    return result
+
+
+# ============================================================================
+# PATH TRACING ENGINE
+# ============================================================================
+
+class PathTracer:
+    """
+    Traces paths through DNAAS fabric with Bridge Domain awareness.
+    
+    Enhanced capabilities:
+    - Auto-configures DUT interfaces for LLDP discovery
+    - Discovers Bridge Domains on DNAAS devices
+    - Maps full DUT-to-DUT paths through BD
+    - Resolves LACP bundles to physical interfaces
+    """
+    
+    def __init__(self, inventory: DeviceInventory, dnaas_table: DNAASTable = None):
+        self.inventory = inventory
+        self.dnaas_table = dnaas_table or DNAASTable()
+        self.visited_devices = set()
+        self.max_depth = 15  # Limit depth to prevent overly long traces (increased for multi-BD discovery)
+        self.found_target = False
+        
+        # Bridge Domain tracking
+        self.discovered_bds: Dict[str, List[BridgeDomain]] = {}  # device -> BDs
+        self.bd_path: List[Dict[str, Any]] = []  # BD path through fabric
+        
+        # LACP tracking  
+        self.discovered_bundles: Dict[str, LACPBundle] = {}  # bundle_id -> bundle
+        
+        # Configuration changes made (for DUT devices only)
+        self.config_changes: List[Dict[str, Any]] = []
+        
+        # Connection tracking for topology generation
+        # Each entry: {"from": device_name, "to": device_name, "from_if": iface, "to_if": iface}
+        self.discovered_connections: List[Dict[str, str]] = []
+    
+    def _get_lldp_from_dnaas(self, device_name: str, device_ip: str) -> List[LLDPNeighbor]:
+        """SSH to DNAAS device and get LLDP neighbors"""
+        neighbors = []
+        
+        print(f"    {Colors.CYAN}SSHing to {device_name} ({device_ip})...{Colors.ENDC}")
+        
+        ssh = SSHConnection(device_ip, DNAAS_USER, DNAAS_PASS)
+        if not ssh.connect():
+            print(f"    {Colors.RED}Failed to connect to {device_name}{Colors.ENDC}")
+            return neighbors
+        
+        try:
+            discovery = DeviceDiscovery(ssh)
+            neighbors = discovery.get_lldp_neighbors()
+            print(f"    {Colors.GREEN}Found {len(neighbors)} LLDP neighbors{Colors.ENDC}")
+        except Exception as e:
+            print(f"    {Colors.RED}Error getting LLDP: {e}{Colors.ENDC}")
+        finally:
+            ssh.close()
+        
+        return neighbors
+    
+    def _classify_device(self, name: str) -> str:
+        """Classify device type based on name"""
+        upper_name = name.upper()
+        
+        # Test equipment detection (Spirent, Ixia, etc.)
+        if any(test in upper_name for test in ['SPIRENT', 'IXIA', 'KEYSIGHT', 'TESTER', 'TRAFFIC']):
+            return "TEST_EQUIPMENT"
+        
+        # Server/Host detection
+        if any(srv in upper_name for srv in ['SERVER', 'HOST', 'VM', 'WORKSTATION']):
+            return "SERVER"
+        
+        # DNAAS fabric devices
+        if 'SUPERSPINE' in upper_name:
+            return "SUPERSPINE"
+        elif 'SPINE' in upper_name:
+            return "SPINE"
+        elif 'LEAF' in upper_name:
+            return "LEAF"
+        elif 'DNAAS' in upper_name:
+            return "DNAAS"
+        else:
+            return "PE"
+    
+    def _trace_through_dnaas(self, current_device: str, current_ip: str, 
+                              target_devices: List[str], depth: int = 0) -> List[PathHop]:
+        """Recursively trace through DNAAS fabric with optimized path finding"""
+        hops = []
+        
+        if self.found_target:
+            return hops
+        
+        print(f"  {Colors.CYAN}[TRACE depth={depth}] {current_device}{Colors.ENDC}")
+        
+        if depth >= self.max_depth:
+            print(f"    {Colors.YELLOW}Max depth ({self.max_depth}) reached{Colors.ENDC}")
+            return hops
+        
+        if current_device in self.visited_devices:
+            return hops
+        
+        self.visited_devices.add(current_device)
+        
+        # Get LLDP neighbors from this DNAAS device
+        neighbors = self._get_lldp_from_dnaas(current_device, current_ip)
+        
+        # First pass: Check if any neighbor is our target
+        for neighbor in neighbors:
+            neighbor_name = neighbor.neighbor_name
+            for target in target_devices:
+                if target.upper() in neighbor_name.upper() or neighbor_name.upper() in target.upper():
+                    print(f"    {Colors.GREEN}*** FOUND TARGET: {neighbor_name} ***{Colors.ENDC}")
+                    hops.append(PathHop(
+                        device_name=neighbor_name,
+                        device_type="PE",
+                        ingress_interface=neighbor.neighbor_interface
+                    ))
+                    self.found_target = True
+                    return hops
+        
+        # Second pass: Prioritize SPINEs and SuperSPINEs (they're more central)
+        spine_neighbors = []
+        leaf_neighbors = []
+        
+        for neighbor in neighbors:
+            if neighbor.is_dnaas and neighbor.neighbor_name not in self.visited_devices:
+                device_type = self._classify_device(neighbor.neighbor_name)
+                if device_type in ['SPINE', 'SUPERSPINE']:
+                    spine_neighbors.append((neighbor, device_type))
+                elif device_type == 'LEAF':
+                    leaf_neighbors.append((neighbor, device_type))
+        
+        # Trace through SPINEs first (more efficient path), limit to 2
+        for neighbor, device_type in spine_neighbors[:2]:
+            if self.found_target:
+                return hops
+                
+            neighbor_name = neighbor.neighbor_name
+            dnaas_info = self.dnaas_table.lookup(neighbor_name)
+            
+            if dnaas_info and dnaas_info.get('ip'):
+                print(f"    {Colors.CYAN}-> {neighbor_name} ({device_type}){Colors.ENDC}")
+                
+                hop = PathHop(
+                    device_name=neighbor_name,
+                    device_type=device_type,
+                    device_ip=dnaas_info['ip'],
+                    ingress_interface=neighbor.neighbor_interface
+                )
+                hops.append(hop)
+                
+                deeper_hops = self._trace_through_dnaas(
+                    neighbor_name, 
+                    dnaas_info['ip'],
+                    target_devices,
+                    depth + 1
+                )
+                
+                if deeper_hops:
+                    hops.extend(deeper_hops)
+                    return hops
+                else:
+                    hops.pop()  # Remove hop if it didn't lead to target
+        
+        # If no SPINEs or target not found, try LEAFs (limit to 2)
+        for neighbor, device_type in leaf_neighbors[:2]:
+            if self.found_target:
+                return hops
+                
+            neighbor_name = neighbor.neighbor_name
+            dnaas_info = self.dnaas_table.lookup(neighbor_name)
+            
+            if dnaas_info and dnaas_info.get('ip'):
+                print(f"    {Colors.CYAN}-> {neighbor_name} ({device_type}){Colors.ENDC}")
+                
+                hop = PathHop(
+                    device_name=neighbor_name,
+                    device_type=device_type,
+                    device_ip=dnaas_info['ip'],
+                    ingress_interface=neighbor.neighbor_interface
+                )
+                hops.append(hop)
+                
+                deeper_hops = self._trace_through_dnaas(
+                    neighbor_name, 
+                    dnaas_info['ip'],
+                    target_devices,
+                    depth + 1
+                )
+                
+                if deeper_hops:
+                    hops.extend(deeper_hops)
+                    return hops
+                else:
+                    hops.pop()  # Remove hop if it didn't lead to target
+        
+        return hops
+    
+    def trace_path(self, source_serial: str, dest_serial: str = "") -> DNAASPath:
+        """Trace path between two devices through DNAAS"""
+        path = DNAASPath(
+            source_device=source_serial,
+            destination_device=dest_serial,
+            discovered_at=datetime.now().isoformat()
+        )
+        
+        self.visited_devices.clear()
+        self.found_target = False
+        
+        # Get source device info
+        source_info = self.inventory.get_device(source_serial)
+        if not source_info:
+            path.error_message = f"Source device {source_serial} not in inventory"
+            return path
+        
+        # Get destination device info if specified
+        dest_info = None
+        target_devices = []
+        if dest_serial:
+            dest_info = self.inventory.get_device(dest_serial)
+            if dest_info:
+                target_devices.append(dest_info.hostname or dest_serial)
+        
+        print(f"\n{Colors.HEADER}Tracing DNAAS path from {source_info.hostname or source_serial}...{Colors.ENDC}")
+        
+        # Add source as first hop
+        path.hops.append(PathHop(
+            device_name=source_info.hostname or source_serial,
+            device_type="PE",
+            device_serial=source_serial,
+            device_ip=source_info.mgmt_ip
+        ))
+        
+        # Find DNAAS neighbors from source
+        dnaas_neighbors = [n for n in source_info.lldp_neighbors if n.get('is_dnaas', False)]
+        
+        if not dnaas_neighbors:
+            path.error_message = "No DNAAS neighbors found on source device"
+            return path
+        
+        # Trace through each DNAAS neighbor (typically LEAFs)
+        for neighbor in dnaas_neighbors:
+            leaf_name = neighbor.get('neighbor_name', '')
+            local_if = neighbor.get('local_interface', '')
+            remote_if = neighbor.get('neighbor_interface', '')
+            
+            print(f"  {Colors.CYAN}Found DNAAS LEAF: {leaf_name} via {local_if}{Colors.ENDC}")
+            
+            # Update source hop with egress interface
+            path.hops[0].egress_interface = local_if
+            
+            # Look up LEAF IP from DNAAS table
+            leaf_info = self.dnaas_table.lookup(leaf_name)
+            leaf_ip = leaf_info['ip'] if leaf_info else None
+            
+            # Add LEAF hop
+            leaf_hop = PathHop(
+                device_name=leaf_name,
+                device_type="LEAF",
+                device_ip=leaf_ip or "",
+                ingress_interface=remote_if
+            )
+            path.hops.append(leaf_hop)
+            
+            # If we have the LEAF IP, trace deeper into DNAAS
+            if leaf_ip:
+                # Don't add to visited here - let _trace_through_dnaas handle it
+                deeper_hops = self._trace_through_dnaas(
+                    leaf_name, 
+                    leaf_ip, 
+                    target_devices
+                )
+                
+                if deeper_hops:
+                    path.hops.extend(deeper_hops)
+                    if self.found_target:
+                        path.success = True
+                    break
+                else:
+                    print(f"    {Colors.YELLOW}Target not found through {leaf_name}{Colors.ENDC}")
+                    # Still add the explored path for visibility
+                    if not target_devices:
+                        path.success = True  # No specific target = exploration mode
+        
+        # If destination specified but path not complete, add destination from its LLDP
+        if dest_info and not path.success:
+            dest_dnaas = [n for n in dest_info.lldp_neighbors if n.get('is_dnaas', False)]
+            if dest_dnaas:
+                # Add the connecting LEAF if not already in path
+                for neighbor in dest_dnaas:
+                    leaf_name = neighbor.get('neighbor_name', '')
+                    if not any(h.device_name == leaf_name for h in path.hops):
+                        leaf_info = self.dnaas_table.lookup(leaf_name)
+                        path.hops.append(PathHop(
+                            device_name=leaf_name,
+                            device_type="LEAF",
+                            device_ip=leaf_info['ip'] if leaf_info else "",
+                            egress_interface=neighbor.get('neighbor_interface', '')
+                        ))
+                
+                # Add destination PE
+                path.hops.append(PathHop(
+                    device_name=dest_info.hostname or dest_serial,
+                    device_type="PE",
+                    device_serial=dest_serial,
+                    device_ip=dest_info.mgmt_ip,
+                    ingress_interface=dest_dnaas[0].get('local_interface', '')
+                ))
+                path.success = True
+        
+        if not path.success:
+            if len(path.hops) > 1:
+                path.success = True  # Partial success if we found at least one DNAAS device
+                if dest_info and not dest_info.lldp_neighbors:
+                    path.error_message = f"Partial path: {dest_info.hostname or dest_serial} has no LLDP neighbors (not connected to DNAAS?)"
+            elif dest_info and not dest_info.lldp_neighbors:
+                path.error_message = f"Target {dest_info.hostname or dest_serial} has 0 LLDP neighbors - not connected to DNAAS fabric"
+        
+        return path
+    
+    # =========================================================================
+    # BRIDGE DOMAIN AWARE TRACING
+    # =========================================================================
+    
+    def configure_dut_for_discovery(self, ssh_client: paramiko.SSHClient, 
+                                    hostname: str) -> Tuple[bool, List[str]]:
+        """
+        Configure DUT device for DNAAS discovery.
+        Enables interfaces and adds them to LLDP.
+        
+        Returns (success, list of configured interfaces)
+        """
+        print(f"\n{Colors.HEADER}Configuring {hostname} for discovery...{Colors.ENDC}")
+        
+        configurator = DUTConfigurator(ssh_client, hostname)
+        success, interfaces = configurator.auto_configure_for_discovery()
+        
+        if interfaces:
+            self.config_changes.append({
+                'device': hostname,
+                'timestamp': datetime.now().isoformat(),
+                'interfaces': interfaces,
+                'config_log': configurator.get_config_log()
+            })
+        
+        return success, interfaces
+    
+    def discover_bridge_domains_on_dnaas(self, device_name: str, device_ip: str,
+                                          dut_interface: str,
+                                          target_bd_name: str = "") -> List[BridgeDomain]:
+        """
+        Connect to DNAAS device and find the Bridge Domain for the specified interface.
+        
+        DEMAND-DRIVEN approach:
+        - If target_bd_name provided, only look for that specific BD
+        - Otherwise, find all BDs for the interface (first hop only)
+        
+        Args:
+            device_name: DNAAS device hostname
+            device_ip: IP address to connect
+            dut_interface: Interface connecting to DUT
+            target_bd_name: Specific BD name to look for (speeds up traversal)
+        
+        Returns:
+            List of BridgeDomain objects found
+        """
+        if target_bd_name:
+            print(f"\n{Colors.HEADER}Looking for BD '{target_bd_name}' on {device_name}...{Colors.ENDC}")
+        else:
+            print(f"\n{Colors.HEADER}Finding BD for interface {dut_interface} on {device_name}...{Colors.ENDC}")
+        
+        ssh = SSHConnection(device_ip, DNAAS_USER, DNAAS_PASS)
+        if not ssh.connect():
+            print(f"{Colors.RED}Failed to connect to {device_name}{Colors.ENDC}")
+            return []
+        
+        try:
+            bd_discovery = BridgeDomainDiscovery(ssh, device_name)
+            
+            relevant_bds = []
+            
+            if target_bd_name:
+                # FAST PATH: Direct lookup by BD name
+                # Try exact match first, then partial match for cross-device names
+                # e.g., g_yor_v210 on LEAF might be g_yor_v210_WAN on SPINE
+                bd = bd_discovery._get_bd_details(target_bd_name)
+                if bd:
+                    relevant_bds = [bd]
+                else:
+                    # Try partial match (BD name might differ slightly between devices)
+                    bd_names = bd_discovery._get_bd_names()
+                    for name in bd_names:
+                        # Match by base name or VLAN suffix
+                        if target_bd_name.split('_')[0:2] == name.split('_')[0:2]:
+                            bd = bd_discovery._get_bd_details(name)
+                            if bd:
+                                relevant_bds.append(bd)
+                                break
+            else:
+                # FIRST HOP: Find BDs for this interface
+                relevant_bds = bd_discovery.find_bds_for_interface(dut_interface)
+            
+            if not relevant_bds:
+                print(f"{Colors.YELLOW}No BDs found{Colors.ENDC}")
+                return []
+            
+            print(f"{Colors.GREEN}Found {len(relevant_bds)} BD(s){Colors.ENDC}")
+            
+            # For each relevant BD, get the other interfaces (these are the paths through DNAAS)
+            for bd in relevant_bds:
+                print(f"\n  {Colors.CYAN}BD: {bd.name or f'BD-{bd.bd_id}'}{Colors.ENDC}")
+                print(f"    Interfaces: {', '.join(bd.interfaces)}")
+                
+                # Check for bundles and resolve members (needed for LLDP matching)
+                for iface in bd.interfaces:
+                    bundle_base = iface.split('.')[0]
+                    if bd_discovery.is_bundle_interface(bundle_base):
+                        bundle = bd_discovery.get_lacp_bundle(bundle_base)
+                        if bundle and bundle.members:
+                            self.discovered_bundles[bundle_base] = bundle
+                            print(f"    Bundle {bundle_base} -> {', '.join(bundle.members)}")
+                
+                # Fetch interface configs for all BD interfaces
+                interface_configs = {}
+                print(f"    {Colors.CYAN}Fetching interface configs...{Colors.ENDC}")
+                for iface in bd.interfaces:
+                    config = bd_discovery.get_interface_config_details(iface)
+                    interface_configs[iface] = config
+                    vlan_str = f"VLAN {config['vlan_id']}" if config.get('vlan_id') else ""
+                    rewrite_str = "rewrite" if config.get('rewrite_ingress') else ""
+                    if vlan_str or rewrite_str:
+                        print(f"      {iface}: {vlan_str} {rewrite_str}")
+                
+                # Add to BD path tracking with interface configs
+                self.bd_path.append({
+                    'device': device_name,
+                    'bd_id': bd.bd_id,
+                    'bd_name': bd.name,
+                    'vlan_id': bd.vlan_id,
+                    'interfaces': bd.interfaces,
+                    'state': bd.state,
+                    'interface_configs': interface_configs  # NEW: Store interface configs
+                })
+            
+            return relevant_bds
+            
+        except Exception as e:
+            print(f"{Colors.RED}Error discovering BDs on {device_name}: {e}{Colors.ENDC}")
+            import traceback
+            traceback.print_exc()
+            return []
+        finally:
+            ssh.close()
+    
+    def trace_bd_path(self, source_serial: str, dest_serial: str = "",
+                      auto_configure: bool = True) -> DNAASPath:
+        """
+        Trace path between devices with Bridge Domain awareness.
+        
+        This enhanced trace:
+        1. Optionally configures DUT interfaces for LLDP
+        2. Waits for LLDP to populate
+        3. Discovers Bridge Domains on DNAAS devices
+        4. Maps full path through BD topology
+        
+        Args:
+            source_serial: Source device serial/hostname
+            dest_serial: Destination device serial/hostname (optional)
+            auto_configure: If True, auto-configure DUT interfaces
+        
+        Returns:
+            DNAASPath with BD information
+        """
+        # Start with standard path trace
+        path = DNAASPath(
+            source_device=source_serial,
+            destination_device=dest_serial,
+            discovered_at=datetime.now().isoformat()
+        )
+        
+        self.visited_devices.clear()
+        self.found_target = False
+        self.discovered_bds.clear()
+        self.bd_path.clear()
+        
+        # Get source device info
+        source_info = self.inventory.get_device(source_serial)
+        if not source_info:
+            path.error_message = f"Source device {source_serial} not in inventory"
+            return path
+        
+        print(f"\n{Colors.HEADER}{'='*60}{Colors.ENDC}")
+        print(f"{Colors.HEADER}BD-Aware Path Trace: {source_info.hostname or source_serial}{Colors.ENDC}")
+        print(f"{Colors.HEADER}{'='*60}{Colors.ENDC}")
+        
+        # Step 1: Configure DUT if needed
+        if auto_configure and source_info.mgmt_ip:
+            # Get credentials
+            creds = credential_manager.get(source_serial)
+            user = creds.get('user', DEFAULT_USER) if creds else DEFAULT_USER
+            passwd = creds.get('password', DEFAULT_PASS) if creds else DEFAULT_PASS
+            
+            ssh = SSHConnection(source_info.mgmt_ip, user, passwd)
+            if ssh.connect():
+                success, interfaces = self.configure_dut_for_discovery(
+                    ssh.client, source_info.hostname
+                )
+                ssh.close()
+                
+                if interfaces:
+                    print(f"\n{Colors.YELLOW}Waiting 30 seconds for LLDP to populate...{Colors.ENDC}")
+                    time.sleep(30)
+                    
+                    # Re-discover LLDP neighbors after configuration
+                    ssh = SSHConnection(source_info.mgmt_ip, user, passwd)
+                    if ssh.connect():
+                        discovery = DeviceDiscovery(ssh.client)
+                        source_info.lldp_neighbors = [
+                            asdict(n) for n in discovery.get_lldp_neighbors()
+                        ]
+                        ssh.close()
+        
+        # Step 2: Add source as first hop
+        path.hops.append(PathHop(
+            device_name=source_info.hostname or source_serial,
+            device_type="PE",
+            device_serial=source_serial,
+            device_ip=source_info.mgmt_ip
+        ))
+        
+        # Step 3: Find DNAAS neighbors and discover BDs
+        dnaas_neighbors = [n for n in source_info.lldp_neighbors if n.get('is_dnaas', False)]
+        
+        if not dnaas_neighbors:
+            path.error_message = "No DNAAS neighbors found. Try running with auto_configure=True"
+            return path
+        
+        for neighbor in dnaas_neighbors:
+            leaf_name = neighbor.get('neighbor_name', '')
+            local_if = neighbor.get('local_interface', '')
+            remote_if = neighbor.get('neighbor_interface', '')
+            
+            print(f"\n{Colors.CYAN}DNAAS connection: {local_if} -> {leaf_name}:{remote_if}{Colors.ENDC}")
+            
+            # Update source hop
+            path.hops[0].egress_interface = local_if
+            
+            # Look up LEAF IP
+            leaf_info = self.dnaas_table.lookup(leaf_name)
+            leaf_ip = leaf_info['ip'] if leaf_info else None
+            
+            if leaf_ip:
+                # Add LEAF hop
+                leaf_hop = PathHop(
+                    device_name=leaf_name,
+                    device_type="LEAF",
+                    device_ip=leaf_ip,
+                    ingress_interface=remote_if
+                )
+                path.hops.append(leaf_hop)
+                
+                # Track this PE-to-LEAF connection for topology generation
+                source_name = source_info.hostname or source_serial
+                self.discovered_connections.append({
+                    "from": source_name,
+                    "to": leaf_name,
+                    "from_if": local_if,
+                    "to_if": remote_if
+                })
+                
+                # Discover Bridge Domains on LEAF
+                bds = self.discover_bridge_domains_on_dnaas(leaf_name, leaf_ip, remote_if)
+                
+                # Continue tracing through BDs
+                if bds:
+                    target_devices = []
+                    
+                    # If destination specified, look for it
+                    if dest_serial:
+                        target_info = self.inventory.get_device(dest_serial)
+                        if target_info:
+                            target_devices = [target_info.hostname or dest_serial]
+                    
+                    # Get the BD name for targeted lookup on subsequent devices
+                    source_bd_name = bds[0].name if bds else ""
+                    
+                    # Use BD info to guide deeper tracing (exploration mode or targeted)
+                    deeper_hops = self._trace_through_dnaas_with_bd(
+                        leaf_name, leaf_ip, target_devices, bds,
+                        source_bd_name=source_bd_name
+                    )
+                    if deeper_hops:
+                        path.hops.extend(deeper_hops)
+                        if self.found_target:
+                            path.success = True
+                    else:
+                        path.success = True  # Exploration complete
+                else:
+                    path.success = True  # No BDs to trace
+        
+        return path
+    
+    def _trace_through_dnaas_with_bd(self, current_device: str, current_ip: str,
+                                      target_devices: List[str], 
+                                      current_bds: List[BridgeDomain],
+                                      depth: int = 0,
+                                      source_bd_name: str = "") -> List[PathHop]:
+        """
+        Trace through DNAAS fabric following a specific Bridge Domain.
+        Uses BD interfaces to guide path rather than just LLDP.
+        
+        For transit nodes (like SuperSpine) that don't have the BD configured,
+        falls back to LLDP-based tracing through ALL DNAAS neighbors.
+        
+        source_bd_name: The BD we're tracing (used for targeted lookup on next hops)
+        """
+        hops = []
+        
+        if self.found_target or depth >= self.max_depth:
+            return hops
+        
+        if current_device in self.visited_devices:
+            return hops
+        
+        self.visited_devices.add(current_device)
+        
+        device_type = self._classify_device(current_device)
+        is_superspine = 'SUPERSPINE' in current_device.upper()
+        
+        print(f"\n  {Colors.CYAN}[BD-TRACE depth={depth}] {current_device} ({device_type}){Colors.ENDC}")
+        
+        # Get all interfaces from relevant BDs
+        bd_interfaces = set()
+        for bd in current_bds:
+            bd_interfaces.update(bd.interfaces)
+        
+        # Determine if this is a transit node (no BD configured here)
+        is_transit_node = len(bd_interfaces) == 0
+        
+        if is_transit_node:
+            print(f"    {Colors.YELLOW}Transit node - no BD interfaces, using LLDP to continue{Colors.ENDC}")
+        else:
+            print(f"    BD interfaces: {', '.join(bd_interfaces)}")
+        
+        # Connect to get LLDP and match with BD interfaces
+        ssh = SSHConnection(current_ip, DNAAS_USER, DNAAS_PASS)
+        if not ssh.connect():
+            return hops
+        
+        try:
+            bd_discovery = BridgeDomainDiscovery(ssh, current_device)
+            neighbors = bd_discovery.get_lldp_neighbors()
+            
+            print(f"    LLDP neighbors: {len(neighbors)} total")
+            
+            # Expand BD interfaces to include bundle members
+            # e.g., if BD has bundle-60000.210, expand to include ge100-0/0/36, 37, 38
+            expanded_bd_interfaces = set()
+            for bd_if in bd_interfaces:
+                expanded_bd_interfaces.add(bd_if)
+                base_bd_if = bd_if.split('.')[0]  # bundle-60000.210 -> bundle-60000
+                expanded_bd_interfaces.add(base_bd_if)
+                
+                # If it's a bundle, get its member interfaces
+                if bd_discovery.is_bundle_interface(base_bd_if):
+                    members = bd_discovery.resolve_bundle_members(base_bd_if)
+                    expanded_bd_interfaces.update(members)
+                    print(f"      Expanded {base_bd_if} -> {', '.join(members)}")
+            
+            # Find neighbors connected via BD interfaces (or ALL DNAAS neighbors for transit nodes)
+            exploration_mode = len(target_devices) == 0
+            found_dnaas_devices = []
+            found_pe_devices = []
+            
+            # Check if current device is a LEAF (edge devices connect to LEAFs)
+            is_leaf_node = 'LEAF' in current_device.upper()
+            
+            for neighbor in neighbors:
+                local_if = neighbor.get('local_interface', '')
+                remote_device = neighbor.get('neighbor_name', '')
+                remote_if = neighbor.get('neighbor_interface', '')
+                
+                if not remote_device:
+                    continue
+                
+                # Check if this is a DNAAS device
+                is_dnaas_neighbor = any(kw in remote_device.upper() for kw in DNAAS_KEYWORDS)
+                
+                # For transit nodes (SuperSpine), follow ALL DNAAS neighbors
+                # For nodes with BD, only follow neighbors on BD interfaces
+                base_if = local_if.split('.')[0]
+                interface_matches_bd = (local_if in expanded_bd_interfaces or 
+                                       base_if in expanded_bd_interfaces)
+                
+                should_follow_dnaas = is_transit_node or interface_matches_bd
+                
+                # For LEAF nodes, discover ALL non-DNAAS neighbors as edge devices
+                # This finds all PEs/edge devices connected to the fabric
+                should_discover_edge = is_leaf_node and not is_dnaas_neighbor
+                
+                if should_follow_dnaas:
+                    # Check if this is our target (only in targeted mode)
+                    if not exploration_mode:
+                        for target in target_devices:
+                            if target.upper() in remote_device.upper():
+                                print(f"    {Colors.GREEN}*** FOUND TARGET: {remote_device} ***{Colors.ENDC}")
+                                hops.append(PathHop(
+                                    device_name=remote_device,
+                                    device_type="PE",
+                                    ingress_interface=remote_if
+                                ))
+                                self.found_target = True
+                                return hops
+                    
+                    # Check if this is another DNAAS device
+                    if is_dnaas_neighbor:
+                        if remote_device not in self.visited_devices:
+                            found_dnaas_devices.append({
+                                'name': remote_device,
+                                'interface': remote_if,
+                                'local_if': local_if
+                            })
+                
+                # CRITICAL FIX: Only add edge devices that are on BD TERMINATION interfaces
+                # This prevents listing all LLDP neighbors - only those actually in the BD
+                if is_leaf_node and interface_matches_bd and not is_dnaas_neighbor:
+                    if remote_device not in self.visited_devices:
+                        if not any(d['name'] == remote_device for d in found_pe_devices):
+                            print(f"    {Colors.BLUE}BD Edge device: {remote_device}{Colors.ENDC} via BD interface {local_if}")
+                            found_pe_devices.append({
+                                'name': remote_device,
+                                'interface': remote_if,
+                                'local_if': local_if
+                            })
+            
+            # Deduplicate DNAAS devices (same device may appear on multiple bundle members)
+            seen_devices = set()
+            unique_dnaas_devices = []
+            for dev in found_dnaas_devices:
+                if dev['name'] not in seen_devices:
+                    seen_devices.add(dev['name'])
+                    unique_dnaas_devices.append(dev)
+            
+            # Also deduplicate PE devices
+            seen_pe_devices = set()
+            unique_pe_devices = []
+            for dev in found_pe_devices:
+                if dev['name'] not in seen_pe_devices:
+                    seen_pe_devices.add(dev['name'])
+                    unique_pe_devices.append(dev)
+            
+            print(f"    Found {len(unique_dnaas_devices)} DNAAS devices, {len(unique_pe_devices)} potential PEs")
+            
+            # Sort DNAAS devices: prioritize by type for better topology layout
+            # SuperSpine -> SPINE -> LEAF order for going "up" then "down"
+            def sort_key(x):
+                name = x['name'].upper()
+                if 'SUPERSPINE' in name:
+                    return 0
+                elif 'SPINE' in name:
+                    return 1
+                elif 'LEAF' in name:
+                    return 2
+                return 3
+            
+            # Process ALL discovered DNAAS devices (not just first one!)
+            for dnaas_dev in sorted(unique_dnaas_devices, key=sort_key):
+                remote_device = dnaas_dev['name']
+                remote_if = dnaas_dev['interface']
+                local_if = dnaas_dev['local_if']
+                
+                dnaas_info = self.dnaas_table.lookup(remote_device)
+                if dnaas_info and dnaas_info.get('ip'):
+                    device_type = self._classify_device(remote_device)
+                    print(f"      -> {Colors.GREEN}{remote_device}{Colors.ENDC} ({device_type}) via {local_if}")
+                    
+                    # Track this connection for topology generation
+                    self.discovered_connections.append({
+                        "from": current_device,
+                        "to": remote_device,
+                        "from_if": local_if,
+                        "to_if": remote_if
+                    })
+                    
+                    hop = PathHop(
+                        device_name=remote_device,
+                        device_type=device_type,
+                        device_ip=dnaas_info['ip'],
+                        ingress_interface=remote_if
+                    )
+                    hops.append(hop)
+                    
+                    # Get BDs on next device - use source BD name for targeted lookup
+                    next_bds = self.discover_bridge_domains_on_dnaas(
+                        remote_device, dnaas_info['ip'], remote_if,
+                        target_bd_name=source_bd_name
+                    )
+                    
+                    # Continue tracing deeper
+                    deeper = self._trace_through_dnaas_with_bd(
+                        remote_device, dnaas_info['ip'],
+                        target_devices, next_bds, depth + 1,
+                        source_bd_name=source_bd_name
+                    )
+                    if deeper:
+                        hops.extend(deeper)
+                    
+                    # In targeted mode, return after finding target
+                    if self.found_target:
+                        return hops
+                    
+                    # In exploration mode, KEEP all discovered hops (don't pop!)
+                    # This allows us to build the full topology
+                else:
+                    print(f"      {Colors.YELLOW}No IP for {remote_device} in DNAAS table{Colors.ENDC}")
+            
+            # Also add discovered PE devices (these are endpoints!)
+            # For each PE, try to fetch their SSH credentials (SN, mgmt IP)
+            for pe_dev in unique_pe_devices:
+                pe_name = pe_dev['name']
+                local_if = pe_dev['local_if']
+                remote_if = pe_dev['interface']
+                print(f"      -> {Colors.BLUE}PE: {pe_name}{Colors.ENDC} via {local_if}")
+                
+                # Try to fetch PE device info for SSH credentials
+                # The PE name from LLDP is often the hostname, which is resolvable
+                pe_info = fetch_pe_device_info(pe_name)
+                pe_serial = pe_info.get('serial', '')
+                pe_mgmt_ip = pe_info.get('mgmt_ip', '')
+                
+                # Track this PE connection
+                self.discovered_connections.append({
+                    "from": current_device,
+                    "to": pe_name,
+                    "from_if": local_if,
+                    "to_if": remote_if
+                })
+                
+                hops.append(PathHop(
+                    device_name=pe_name,
+                    device_type="PE",
+                    device_serial=pe_serial,
+                    device_ip=pe_mgmt_ip,
+                    ingress_interface=remote_if
+                ))
+        
+        except Exception as e:
+            print(f"    {Colors.RED}Error in BD trace: {e}{Colors.ENDC}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            ssh.close()
+        
+        return hops
+    
+    def get_bd_summary(self) -> Dict[str, Any]:
+        """Get summary of discovered Bridge Domains"""
+        return {
+            'devices_with_bds': list(self.discovered_bds.keys()),
+            'total_bds_discovered': sum(len(bds) for bds in self.discovered_bds.values()),
+            'bd_path': self.bd_path,
+            'bundles_discovered': {k: asdict(v) for k, v in self.discovered_bundles.items()},
+            'config_changes': self.config_changes
+        }
+
+
+# ============================================================================
+# MULTI-BD PATH TRACER - Maps ALL Bridge Domains from a device
+# ============================================================================
+
+# Color palette for BD visualization (10 distinct colors)
+BD_COLOR_PALETTE = [
+    '#3498db',  # Blue
+    '#e74c3c',  # Red
+    '#2ecc71',  # Green
+    '#9b59b6',  # Purple
+    '#f39c12',  # Orange
+    '#1abc9c',  # Teal
+    '#e91e63',  # Pink
+    '#00bcd4',  # Cyan
+    '#ff5722',  # Deep Orange
+    '#8bc34a'   # Light Green
+]
+
+
+def classify_bd_type(bd_name: str) -> Tuple[str, Optional[int]]:
+    """
+    Classify Bridge Domain type and extract global VLAN.
+    
+    Returns (type, global_vlan) where:
+    - type: "global" if starts with "g_", "local" if starts with "l_", else "unknown"
+    - global_vlan: extracted from "_vXXX" pattern (e.g., "_v210" -> 210)
+    """
+    bd_name_lower = bd_name.lower()
+    
+    # Determine BD type from prefix
+    if bd_name_lower.startswith("g_"):
+        bd_type = "global"
+    elif bd_name_lower.startswith("l_"):
+        bd_type = "local"
+    else:
+        bd_type = "unknown"
+    
+    # Extract VLAN from pattern like "_v210" or "v210"
+    vlan_match = re.search(r'_v(\d+)', bd_name, re.IGNORECASE)
+    if not vlan_match:
+        vlan_match = re.search(r'v(\d+)$', bd_name, re.IGNORECASE)
+    
+    global_vlan = int(vlan_match.group(1)) if vlan_match else None
+    
+    return bd_type, global_vlan
+
+
+# ============================================================================
+# OUTPUT GENERATOR
+# ============================================================================
+
+class OutputGenerator:
+    """Generates output files for topology visualization"""
+    
+    def __init__(self):
+        self.output_dir = OUTPUT_DIR
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+    
+    def generate_all(self, path: 'DNAASPath', devices: List['DeviceInfo'],
+                     bd_summary: Optional[Dict] = None,
+                     discovered_connections: Optional[List] = None) -> str:
+        """Generate all output files and return the JSON filename"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        json_filename = f"dnaas_path_{timestamp}.json"
+        json_path = self.output_dir / json_filename
+        
+        # Build topology data
+        objects = []
+        x_offset = 600
+        y_offset = 500
+        spacing = 200
+        
+        for i, hop in enumerate(path.hops):
+            device_obj = {
+                "id": f"device_{i}",
+                "type": "device",
+                "deviceType": "router" if hop.device_type == "PE" else "switch",
+                "x": x_offset + (i * spacing),
+                "y": y_offset,
+                "radius": 45,
+                "rotation": 0,
+                "color": "#3498db" if hop.device_type == "PE" else "#e67e22",
+                "label": hop.device_name,
+                "locked": False,
+                "visualStyle": "classic",
+                "deviceSerial": hop.device_serial,
+            }
+            
+            # Add SSH config if we have IP
+            if hop.device_ip:
+                device_obj["sshConfig"] = {
+                    "host": hop.device_ip,
+                    "hostBackup": hop.device_ip,
+                    "user": "dnroot",
+                    "password": "dnroot"
+                }
+            
+            objects.append(device_obj)
+        
+        # Add links between hops
+        for i in range(len(path.hops) - 1):
+            link_obj = {
+                "id": f"link_{i}",
+                "type": "link",
+                "device1": f"device_{i}",
+                "device2": f"device_{i+1}",
+                "width": 2,
+                "color": "#7f8c8d",
+                "style": "solid"
+            }
+            objects.append(link_obj)
+        
+        # Build output structure
+        output_data = {
+            "version": "1.0",
+            "objects": objects,
+            "metadata": {
+                "name": "DNAAS Path Discovery",
+                "created": datetime.now().isoformat(),
+                "source": path.source_device,
+                "destination": path.destination_device or "",
+                "bridge_domains": list(bd_summary.keys()) if bd_summary else [],
+                "bundles": {},
+                "config_changes": []
+            }
+        }
+        
+        # Save JSON
+        with open(json_path, 'w') as f:
+            json.dump(output_data, f, indent=2)
+        
+        print(f"  {Colors.GREEN}Output saved: {json_filename}{Colors.ENDC}")
+        return json_filename
+
+
+# ============================================================================
+# MAIN DISCOVERY FLOW
+# ============================================================================
+
+def discover_device(serial: str, inventory: DeviceInventory, 
+                    use_cache: bool = False,
+                    ssh_user: str = DEFAULT_USER,
+                    ssh_pass: str = DEFAULT_PASS) -> Optional[DeviceInfo]:
+    """Discover a device by serial number"""
+    
+    # Check cache first if requested
+    if use_cache:
+        cached = inventory.get_device(serial)
+        if cached:
+            print(f"{Colors.CYAN}Using cached data for {serial}{Colors.ENDC}")
+            return cached
+    
+    print(f"\n{Colors.HEADER}[DISCOVERY] {serial}{Colors.ENDC}")
+    print("-" * 50)
+    
+    # Connect to device
+    ssh = SSHConnection(serial, ssh_user, ssh_pass)
+    if not ssh.connect():
+        print(f"{Colors.RED}Failed to connect to {serial}{Colors.ENDC}")
+        return None
+    
+    try:
+        discovery = DeviceDiscovery(ssh)
+        
+        # Get hostname
+        print("  Getting hostname...", flush=True)
+        hostname = discovery.get_hostname()
+        print(f"    Hostname: {Colors.GREEN}{hostname or 'Unknown'}{Colors.ENDC}")
+        
+        # Get system info
+        print("  Getting system info...", flush=True)
+        sys_info = discovery.get_system_info()
+        print(f"    System Type: {sys_info.get('system_type', 'Unknown')}, Family: {sys_info.get('system_family', 'Unknown')}")
+        print(f"    DNOS Version: {sys_info.get('dnos_version', 'Unknown')}")
+        
+        # Get management interfaces
+        print("  Getting management interfaces...", flush=True)
+        mgmt_interfaces = discovery.get_management_interfaces()
+        print(f"    Found {len(mgmt_interfaces)} management interfaces")
+        
+        mgmt_ip, mgmt_ipv6 = discovery.get_primary_mgmt_ip(mgmt_interfaces)
+        print(f"    Primary IPv4: {Colors.GREEN}{mgmt_ip or 'None'}{Colors.ENDC}")
+        print(f"    Primary IPv6: {mgmt_ipv6 or 'None'}")
+        
+        # Get LLDP neighbors
+        print("  Getting LLDP neighbors...", flush=True)
+        neighbors = discovery.get_lldp_neighbors()
+        print(f"    Found {len(neighbors)} LLDP neighbors")
+        
+        # Get interface descriptions
+        print("  Getting interface descriptions...", flush=True)
+        descriptions = discovery.get_interface_descriptions()
+        
+        # Detect DNAAS interfaces
+        print("  Detecting DNAAS interfaces...", flush=True)
+        dnaas_interfaces = discovery.detect_dnaas_interfaces(neighbors, descriptions)
+        print(f"    Found {Colors.GREEN}{len(dnaas_interfaces)}{Colors.ENDC} DNAAS interfaces")
+        
+        # Get detailed interface info for each DNAAS interface
+        interface_details = {}
+        for iface in dnaas_interfaces[:5]:  # Limit to first 5 for speed
+            print(f"    Getting details for {iface}...", flush=True)
+            details = discovery.get_interface_details(iface)
+            interface_details[iface] = details
+        
+        # Build device info
+        device = DeviceInfo(
+            serial=serial,
+            hostname=hostname,
+            mgmt_ip=mgmt_ip,
+            mgmt_ipv6=mgmt_ipv6,
+            system_type=sys_info.get('system_type', ''),
+            dnos_version=sys_info.get('dnos_version', ''),
+            dnaas_interfaces=dnaas_interfaces,
+            lldp_neighbors=[asdict(n) for n in neighbors],
+            all_mgmt_interfaces=[asdict(m) for m in mgmt_interfaces],
+            interface_details=interface_details
+        )
+        
+        # Save to inventory
+        inventory.update_device(device)
+        print(f"{Colors.GREEN}Inventory saved to {INVENTORY_FILE}{Colors.ENDC}")
+        
+        return device
+        
+    finally:
+        ssh.close()
+
+
+def main():
+    """Main entry point"""
+    parser = argparse.ArgumentParser(
+        description="DNAAS Path Auto-Discovery with Bridge Domain Support",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python3 dnaas_path_discovery.py wk31d7vv00023
+  python3 dnaas_path_discovery.py wk31d7vv00023 100.64.0.220
+  python3 dnaas_path_discovery.py --use-cache wk31d7vv00023
+  python3 dnaas_path_discovery.py --multi-bd 100.64.7.186
+  python3 dnaas_path_discovery.py --enable-lldp 100.64.7.186
+  python3 dnaas_path_discovery.py --list-inventory
+        """
+    )
+    
+    parser.add_argument('serials', nargs='*', help='Device serial number(s) or IP addresses to discover')
+    parser.add_argument('--use-cache', action='store_true', 
+                        help='Use cached data if available')
+    parser.add_argument('--list-inventory', action='store_true',
+                        help='List all devices in inventory')
+    parser.add_argument('--list-credentials', action='store_true',
+                        help='List all stored device credentials')
+    parser.add_argument('--multi-bd', action='store_true',
+                        help='Discover all Bridge Domains from source device')
+    parser.add_argument('--enable-lldp', action='store_true',
+                        help='Enable LLDP and admin-state on physical interfaces')
+    parser.add_argument('--bd-aware', action='store_true',
+                        help='Use BD-aware tracing (auto-configures DUT interfaces)')
+    parser.add_argument('--no-auto-config', action='store_true',
+                        help='Skip auto-configuration of DUT interfaces (use with --bd-aware)')
+    parser.add_argument('--user', default=DEFAULT_USER, help='SSH username')
+    parser.add_argument('--password', default=DEFAULT_PASS, help='SSH password')
+    
+    args = parser.parse_args()
+    
+    # Initialize inventory
+    inventory = DeviceInventory()
+    
+    # List inventory if requested
+    if args.list_inventory:
+        devices = inventory.list_devices()
+        if devices:
+            print(f"\n{Colors.HEADER}Device Inventory ({len(devices)} devices){Colors.ENDC}")
+            print("-" * 50)
+            for serial in devices:
+                device = inventory.get_device(serial)
+                if device:
+                    print(f"  {Colors.CYAN}{serial}{Colors.ENDC}: {device.hostname or 'Unknown'} ({device.mgmt_ip})")
+        else:
+            print("No devices in inventory.")
+        return
+    
+    # List credentials if requested
+    if args.list_credentials:
+        creds = credential_manager.list_devices()
+        if creds:
+            print(f"\n{Colors.HEADER}Stored Credentials ({len(creds)} devices){Colors.ENDC}")
+            print("-" * 50)
+            for cred in creds:
+                device_type = cred.get('device_type', 'DUT')
+                type_color = Colors.BLUE if device_type == 'DUT' else Colors.YELLOW
+                print(f"  {type_color}[{device_type}]{Colors.ENDC} {cred['hostname']} ({cred['mgmt_ip']})")
+                print(f"         Last used: {cred.get('last_used', 'Never')[:19]}")
+        else:
+            print("No stored credentials.")
+        return
+    
+    # Check for serial numbers
+    if not args.serials:
+        parser.print_help()
+        print(f"\n{Colors.RED}Error: At least one serial number or IP is required{Colors.ENDC}")
+        sys.exit(1)
+    
+    # Use provided credentials
+    ssh_user = args.user
+    ssh_pass = args.password
+    
+    # Handle --enable-lldp option
+    if args.enable_lldp:
+        device_ip = args.serials[0]
+        print(f"\n{Colors.BOLD}{Colors.HEADER}ENABLING LLDP on {device_ip}{Colors.ENDC}")
+        print("=" * 70)
+        
+        ssh = SSHConnection(device_ip, ssh_user, ssh_pass)
+        if not ssh.connect():
+            print(f"{Colors.RED}Failed to connect to {device_ip}{Colors.ENDC}")
+            sys.exit(1)
+        
+        try:
+            print(f"  {Colors.CYAN}Enabling LLDP globally...{Colors.ENDC}")
+            ssh.send_command("configure")
+            ssh.send_command("protocols lldp")
+            ssh.send_command("admin-state enable")
+            ssh.send_command("exit")  # Exit lldp context
+            
+            print(f"  {Colors.CYAN}Getting physical interfaces...{Colors.ENDC}")
+            # Get interfaces that are physical (ge400, ge100, eth, hu, ce, qsfp patterns)
+            output = ssh.send_command("show interfaces brief | no-more", timeout=30)
+            
+            # Match physical interfaces only (no sub-interfaces with dots)
+            physical_pattern = re.compile(r'^(ge\d+-\d+/\d+/\d+|eth-\d+/\d+/\d+|hu\d+-\d+/\d+/\d+|ce\d+-\d+/\d+/\d+|qsfp\d+-\d+/\d+/\d+)\s', re.MULTILINE)
+            
+            interfaces = physical_pattern.findall(output)
+            interfaces = list(set(interfaces))  # Remove duplicates
+            
+            if interfaces:
+                print(f"  {Colors.GREEN}Found {len(interfaces)} physical interfaces{Colors.ENDC}")
+                for iface in interfaces:
+                    print(f"    Configuring {iface}...")
+                    ssh.send_command(f"interfaces {iface}")
+                    ssh.send_command("admin-state enabled")
+                    ssh.send_command("exit")  # Exit interface context
+                
+                print(f"  {Colors.CYAN}Committing changes...{Colors.ENDC}")
+                ssh.send_command("commit")
+                print(f"  {Colors.GREEN}Configuration committed successfully!{Colors.ENDC}")
+                print(f"\n{Colors.GREEN}LLDP enabled on {len(interfaces)} physical interfaces!{Colors.ENDC}")
+            else:
+                print(f"  {Colors.YELLOW}No physical interfaces found to configure{Colors.ENDC}")
+        except Exception as e:
+            print(f"{Colors.RED}Error during LLDP configuration: {e}{Colors.ENDC}")
+            sys.exit(1)
+        finally:
+            ssh.close()
+        sys.exit(0)
+    
+    # Handle --multi-bd discovery
+    if args.multi_bd:
+        source_serial = args.serials[0]
+        print(f"\n{Colors.BOLD}{Colors.HEADER}MULTI-BD DNAAS DISCOVERY{Colors.ENDC}")
+        print("=" * 70)
+        print(f"Source device: {source_serial}")
+        print("=" * 70)
+        
+        # Load DNAAS table
+        dnaas_table = DNAASTable()
+        print(f"{Colors.GREEN}Loaded {len(dnaas_table.devices)} DNAAS devices from table{Colors.ENDC}")
+        
+        # Create path tracer
+        tracer = PathTracer(inventory, dnaas_table)
+        
+        # Discover the source device first
+        device = discover_device(source_serial, inventory, args.use_cache, ssh_user, ssh_pass)
+        
+        if device:
+            # Check if we have LLDP neighbors - if not, fail early with clear message
+            if not device.lldp_neighbors:
+                print(f"\n{Colors.RED}✗ Found 0 LLDP neighbors on {device.hostname or source_serial}{Colors.ENDC}")
+                print(f"{Colors.RED}No LLDP neighbors detected - cannot discover DNAAS fabric{Colors.ENDC}")
+                print(f"\n{Colors.YELLOW}Tip: LLDP must be enabled on the device interfaces{Colors.ENDC}")
+                print(f"{Colors.YELLOW}Run: python3 dnaas_path_discovery.py --enable-lldp {source_serial}{Colors.ENDC}")
+                sys.exit(1)  # Exit with error to trigger UI dialog
+            
+            # Check if any neighbors are DNAAS devices
+            dnaas_neighbors = [n for n in device.lldp_neighbors if n.get('is_dnaas', False)]
+            if not dnaas_neighbors:
+                print(f"\n{Colors.RED}✗ Found 0 DNAAS neighbors on {device.hostname or source_serial}{Colors.ENDC}")
+                print(f"{Colors.RED}Found {len(device.lldp_neighbors)} LLDP neighbors but none are DNAAS infrastructure{Colors.ENDC}")
+                print(f"\n{Colors.YELLOW}Tip: Device may not be connected to DNAAS fabric{Colors.ENDC}")
+                sys.exit(1)  # Exit with error
+            
+            # Use BD-aware path trace for multi-BD discovery
+            auto_config = not args.no_auto_config
+            path = tracer.trace_bd_path(source_serial, auto_configure=auto_config)
+            
+            # Get BD summary
+            bd_summary = tracer.get_bd_summary()
+            
+            # Check if we actually discovered anything beyond source device
+            # path.hops always has source as first hop, so we need > 1 for real discovery
+            real_discovery = len(path.hops) > 1 or path.success
+            
+            if real_discovery:
+                print(f"\n{Colors.GREEN}Multi-BD Discovery Complete!{Colors.ENDC}")
+                print(f"Discovered {len(path.hops)} hops")
+                for hop in path.hops:
+                    print(f"  - {hop.device_name} ({hop.device_type})")
+                
+                # Generate outputs
+                output_gen = OutputGenerator()
+                discovered_connections = getattr(tracer, 'discovered_connections', [])
+                output_gen.generate_all(path, [device], bd_summary, discovered_connections)
+                
+                print(f"\n{Colors.GREEN}Multi-BD output saved!{Colors.ENDC}")
+            else:
+                # Discovery didn't find any DNAAS infrastructure path
+                print(f"\n{Colors.YELLOW}{path.error_message or 'Discovery incomplete - no DNAAS neighbors found'}{Colors.ENDC}")
+                print(f"{Colors.YELLOW}Tip: Make sure LLDP is enabled on the device interfaces{Colors.ENDC}")
+                # Still exit 0 since we got some info, but log the issue
+                output_gen = OutputGenerator()
+                output_gen.generate_all(path, [device], bd_summary, [])
+                print(f"{Colors.YELLOW}Partial results saved{Colors.ENDC}")
+        else:
+            print(f"\n{Colors.RED}Failed to discover source device{Colors.ENDC}")
+            sys.exit(1)
+        
+        return
+    
+    # Standard discovery flow
+    print(f"\n{Colors.BOLD}{Colors.HEADER}DNAAS PATH AUTO-DISCOVERY{Colors.ENDC}")
+    print("=" * 70)
+    print(f"Devices to discover: {', '.join(args.serials)}")
+    print(f"Use cache: {args.use_cache}")
+    print("=" * 70)
+    
+    # Discover all devices
+    discovered_devices = []
+    for serial in args.serials:
+        device = discover_device(serial, inventory, args.use_cache, ssh_user, ssh_pass)
+        if device:
+            discovered_devices.append(device)
+    
+    if not discovered_devices:
+        print(f"\n{Colors.RED}Failed to connect - No devices discovered successfully{Colors.ENDC}")
+        print(f"{Colors.RED}Please check the device serial/hostname and network connectivity{Colors.ENDC}")
+        sys.exit(1)
+    
+    # Load DNAAS table and trace path
+    dnaas_table = DNAASTable()
+    tracer = PathTracer(inventory, dnaas_table)
+    
+    # Choose tracing method based on --bd-aware flag
+    bd_summary = None
+    if args.bd_aware:
+        print(f"\n{Colors.HEADER}Using BD-Aware Path Tracing{Colors.ENDC}")
+        auto_config = not args.no_auto_config
+        
+        if len(args.serials) == 1:
+            path = tracer.trace_bd_path(args.serials[0], auto_configure=auto_config)
+        else:
+            path = tracer.trace_bd_path(args.serials[0], args.serials[1], 
+                                         auto_configure=auto_config)
+        
+        # Get BD summary
+        bd_summary = tracer.get_bd_summary()
+    else:
+        # Standard tracing (LLDP-only)
+        if len(args.serials) == 1:
+            path = tracer.trace_path(args.serials[0])
+        else:
+            path = tracer.trace_path(args.serials[0], args.serials[1])
+    
+    # Generate outputs
+    output_gen = OutputGenerator()
+    discovered_connections = getattr(tracer, 'discovered_connections', [])
+    output_gen.generate_all(path, discovered_devices, bd_summary, discovered_connections)
+    
+    print(f"\n{Colors.GREEN}Discovery complete!{Colors.ENDC}")
+
+
+if __name__ == "__main__":
+    main()

@@ -12,8 +12,131 @@
 | HTML entry point | `index.html` |
 | Debugger panel | `debugger.js` |
 | DNAAS discovery | `dnaas_path_discovery.py` |
+| Scaler bridge API | `scaler_bridge.py` (port 8766) |
 | Momentum physics | `topology-momentum.js` |
 | History/undo | `topology-history.js` |
+
+### Scaler Bridge API (scaler_bridge.py, port 8766)
+
+The bridge wraps scaler-wizard modules for the topology app. serve.py proxies `/api/config/*`, `/api/operations/*`, `/api/devices/discover`, `/api/devices/{id}/test`, and `/api/devices/{id}/context` to it.
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/devices/{id}/context` | GET | Unified device context for wizard suggestions. Returns: interfaces (physical, bundle, subinterface, pwhe, free_physical), lldp, config_summary, wan_interfaces, igp, services (fxc_count, vrf_count, next_evi), loopbacks, vrfs, bridge_domains, flowspec_policies, routing_policies, bgp_peers, multihoming, platform_limits. Query `?live=true` for live fetch. |
+| `/api/devices/{id}/test` | POST | Test SSH connection to device |
+| `/api/config/{id}/running` | GET | Cached or live running config |
+| `/api/config/{id}/summary` | GET | Parsed config summary (AS, RTs, EVPN, etc.) |
+| `/api/config/{id}/sync` | POST | Fetch and cache config from device |
+| `/api/config/{id}/interfaces` | GET | Parsed interface list |
+| `/api/config/{id}/diff` | GET | Cached vs live diff, in_sync status |
+| `/api/config/compare` | POST | Compare two device configs (device_ids) |
+| `/api/config/generate/interfaces` | POST | Generate interface config |
+| `/api/config/generate/services` | POST | Generate service config |
+| `/api/config/generate/bgp` | POST | Generate BGP peer config |
+| `/api/config/generate/igp` | POST | Generate IGP (ISIS/OSPF) config |
+| `/api/config/generate/batch` | POST | Batch generate from multiple hierarchies (items: [{hierarchy, params}]) |
+| `/api/config/preview-diff` | POST | Preview diff of proposed config vs running (device_id, config) |
+| `/api/operations/validate` | POST | Validate DNOS config (config, hierarchy, check_limits, check_interface_order). Returns valid, errors, warnings, suggestions. |
+| `/api/config/templates` | GET | List policy templates |
+| `/api/config/templates/generate` | POST | Generate from template |
+| `/api/operations/delete-hierarchy` | POST | Delete config hierarchy (dry_run) |
+| `/api/operations/push` | POST | Push config to device (merge/replace/dry_run). Returns job_id. When dry_run, holds SSH after commit check for commit/cancel. |
+| `/api/config/push/progress/{job_id}` | GET | SSE stream for push progress (phase, percent, terminal lines, done, success, awaiting_decision) |
+| `/api/operations/push/{job_id}/commit` | POST | Commit held config on same SSH session (after dry_run when check passed) |
+| `/api/operations/push/{job_id}/cancel` | POST | Cancel held config (discard candidate) and close SSH session |
+| `/api/operations/push/{job_id}/cleanup` | POST | Cleanup dirty candidate on device after failed commit check (connects fresh) |
+| `/api/operations/jobs` | GET | List all jobs (active + recent history) |
+| `/api/operations/jobs/{job_id}` | GET | Full job state including all terminal output |
+| `/api/operations/jobs/{job_id}/retry` | POST | Re-submit same config. Returns new job_id. |
+| `/api/operations/jobs/{job_id}` | DELETE | Remove job from history |
+| `/api/config/limits/{device_id}` | GET | Platform limits (max_subifs) from limits.json |
+| `/api/devices/discover` | POST | SSH discover device by IP, add to inventory |
+| `/api/config/scan-existing` | POST | Scan device for existing sub-ids, VRFs, EVIs, L3 conflicts. Body: `{ device_id, ssh_host, scan_type: "interfaces"\|"services"\|"vrfs"\|"all" }`. Returns `existing_sub_ids`, `existing_vrfs`, `existing_evis`, `l3_conflicts`, `next_free`. Used by interface wizard collision check. |
+| `/api/config/detect-pattern` | POST | Detect interface pattern (dot1q/qinq, stepping_tag, last_vlan, last_sub_id) from device config. Body: `{ device_id, ssh_host, parent_interface }`. Used for auto-fill in subif flow. |
+| `/api/mirror/analyze` | POST | Analyze source vs target config for mirror. Body: `{ source_device_id, target_device_id, ssh_hosts?: [src_ip, tgt_ip] }`. Returns `source_summary`, `target_summary`, `smart_diff`, `interface_map`. |
+| `/api/mirror/generate` | POST | Generate mirrored config. Body: `{ source_device_id, target_device_id, ssh_hosts, interface_map, section_selection?, output_mode: "full"\|"diff_only" }`. Returns `config`, `summary`, `line_count`, `diff_stats`. |
+| `/api/mirror/preview-diff` | POST | Preview diff of proposed mirrored config vs target running. Body: `{ target_device_id, config, ssh_host }`. Returns `diff_text`, `lines_added`, `lines_removed`. |
+
+**Config generation**: All `generate/*` endpoints use `scaler.wizard.config_builders` (pure DNOS generators). No frontend DNOS string construction. GUI previews always call backend API with full params. The terminal wizard (`interactive_scale.py`) also calls `config_builders.build_from_expansion()` for config generation, ensuring terminal and GUI produce identical DNOS output.
+
+**Type-aware generation** (`config_builders.py`): Two categories with different output rules:
+- **Basic types** (bundle, ph, irb): Parent gets `admin-state enabled` only. Sub-ifs get `admin-state` + VLAN + IP. No l2-service, MPLS, flowspec, BFD, or MTU.
+- **Physical types** (ge100, ge400, ge10): Full E/7 flow. Sub-ifs support L2 mode (l2-service) OR L3 mode (IP, MPLS, flowspec, BFD, MTU). L2 and L3 are mutually exclusive.
+- **Loopback**: `admin-state` + optional description + optional IPv4 (/32). No sub-interfaces.
+
+**Config push**: `POST /api/operations/push` uses `ConfigPusher` from scaler. Progress streamed via SSE at `GET /api/config/push/progress/{job_id}`. The SSE stream includes `terminal` (new SSH output lines since last poll) via `live_output_callback` piped from ConfigPusher. ScalerAPI.connectPushProgress uses EventSource for real-time progress and terminal streaming.
+
+**Hold-and-commit flow** (dry_run): When `dry_run=true`, backend uses `push_config_terminal_check_and_hold()` which pastes config, runs commit check, and keeps SSH session alive. Job enters `awaiting_decision` state. Frontend shows Commit Now / Cancel (discard) buttons in the progress panel. User clicks Commit -> `POST /api/operations/push/{job_id}/commit` sends commit on same session. User clicks Cancel -> `POST /api/operations/push/{job_id}/cancel` sends cancel+exit. No second push job. When commit check fails, Cleanup button calls `POST /api/operations/push/{job_id}/cleanup` to connect fresh and run cancel on device.
+
+**Running Commits Panel**: `ScalerGUI.openCommitsPanel()` opens a persistent panel that polls `GET /api/operations/jobs` every 2s. Shows job cards with status dot (gray=pending, cyan=running, green=completed, red=failed), progress bar, and expand/minimize. Expanded cards show a live terminal view with SSH output. Error lines highlighted red; DNOS errors parsed with `suggestErrorFix()` (patterns: "already exists", "limit exceeded", "Hook failed"). Retry button re-submits via `POST /api/operations/jobs/{job_id}/retry`. Accessible via "Commits" button in Scaler CONFIG menu with active-job badge. Job history persisted to `~/.scaler_push_history.json` (max 50 jobs, terminal truncated to 200 lines on completion).
+
+**Push parity**: All wizards (Interface, Service, VRF, Bridge Domain, FlowSpec, Routing Policy, BGP, IGP) share the same push flow: Review step (generates config, shows preview, validation, optional diff) -> Push step (dry_run / merge / replace / clipboard+SSH). All route through `ScalerAPI.pushConfig()` -> `ScalerGUI.showProgress()` -> commits panel. `ssh_host` is included in all push calls from `deviceContext.mgmt_ip`.
+
+**Wizard Run History** (Phase 2): `recordWizardChange(deviceId, changeType, details, options)` stores full run records with `generatedConfig`, `params`, `pushMode`, `jobId`, `success`. Persisted to `localStorage` key `scaler_wizard_history` (max 100 entries). `updateWizardRunResult(jobId, success)` updates history when push completes. Per-wizard "Last Run" card shows at top of each wizard when history exists for that wizard+device. Global "Wizard Run History" panel in CONFIG menu shows chronological list grouped by date. "Re-run with same params" pre-fills wizard; "Re-run on different device" opens Mirror Wizard with source=history device, target=user-selected device.
+
+**Re-run on different device** (Phase 4c): Both per-wizard Last Run card and global History panel wire "Re-run on different device" to `openMirrorWizard(sourceId)`. User selects target device; Mirror Wizard runs analyze -> generate -> diff vs target -> push. Uses ConfigMirror from `mirror_config.py` for device-agnostic config adaptation.
+
+**Mirror Config Wizard**: `openMirrorWizard(prefillSourceId?, prefillTargetId?)` - when source is pre-filled (e.g. from history), only target selector shown. Flow: Analyze (fetch configs, compare) -> Generate Config (diff-only) -> Show diff vs target -> Push to Target. Uses `ScalerAPI.mirrorAnalyze()`, `mirrorGenerate()`, `mirrorPreviewDiff()`.
+
+**Collision check** (Phase 3b): Interface wizard review step, when `interfaceType === 'subif'` and parent exists, calls `ScalerAPI.scanExisting()` before Generate. Shows warning panel with options: Skip conflicts, Start after existing (#N), Override. Auto-adjusts `startNumber`/`vlanStart` based on user choice.
+
+**Reusable step components** (Phase 4A): `ScalerGUI._buildPushStep(opts)` returns a Push step with configurable `radioName`, `includeClipboard`, `infoText`. `_buildReviewStep(opts)`, `_buildInterfaceSelector(opts)`, `_buildAddressFamilySelector(opts)` provide shared HTML/collectData for wizard steps. VRF, Bridge Domain, FlowSpec, Routing Policy, and Service wizards use `_buildPushStep`.
+
+**Scaler menu order** (Phase 4C): Configuration Wizards: Interface, Service, VRF, Bridge Domain, BGP, IGP, FlowSpec, Routing Policy, Multihoming (matches terminal wizard hierarchy order).
+
+**Cross-wizard dependency warnings** (Phase 4D): `_getWizardDependencyWarnings(wizardType, data)` returns context-based warnings (e.g. VRF needs sub-interfaces, FlowSpec name conflict, Multihoming ESI). `_renderDependencyWarnings(warnings)` displays them. VRF Interface Attachment step shows when no sub-interfaces exist.
+
+**Validation**: Review steps call `ScalerAPI.validateConfig({ config, hierarchy })` after generating config. Errors and warnings displayed in `scaler-validation-box`. Uses `CLIValidator.validate_generated_config()` (syntax, scale limits, interface order).
+
+**Diff preview**: Interface wizard Review step has "Show diff vs running" button. Calls `ScalerAPI.previewConfigDiff(deviceId, config, sshHost)` to show proposed-vs-running unified diff.
+
+**Platform limits**: The sub-interfaces step validates total count against `GET /api/config/limits/{device_id}` (sources `limits.json` vlan_pool max_capacity, default 20480). Warning shown if `count * subifCount > max_subifs`.
+
+ScalerAPI (scaler-api.js) methods: getDevices, getDevice, getDeviceContext, testConnection, syncDevice, generateInterfaces, generateServices, generateBGP, generateIGP, batchGenerate, previewConfigDiff, validateConfig, compareConfigs, getConfigDiff, getInterfaces, getTemplates, generateTemplate, discoverDevice, deleteHierarchyOp, pushConfig, commitHeldJob, cancelHeldJob, cleanupHeldJob, connectPushProgress, getJobs, getJob, retryJob, deleteJob, getLimits, scanExisting, detectPattern, mirrorAnalyze, mirrorGenerate, mirrorPreviewDiff.
+
+### Smart Wizard Suggestions (DeviceContextCache)
+
+Wizards (Interface, Service, VRF, BGP, IGP) use a cached-then-live device context for smart suggestions:
+
+- **Device resolution by SSH**: Canvas labels are NOT backend device IDs. Resolution uses `sshConfig.host` (which may be an IP, hostname, or serial number) as the primary key. `_resolveDeviceId(label)` extracts SSH credentials from the canvas device object. `ScalerAPI.getDeviceContext(deviceId, live, sshHost)` passes `ssh_host` to the backend.
+- **Central IP resolution** (`_resolve_mgmt_ip(device_id, ssh_host)` in `scaler_bridge.py`): ALL endpoints use this single function. Uses cached `_build_scaler_ops_index()` (60s TTL) that indexes all `operational.json` files by serial, hostname, mgmt_ip, and dir name. Chain: 1) `ssh_host` is IP -> direct match in index; 2) `ssh_host` is serial/hostname -> match in index; 3) `device_id` exact match in index; 4) discovery API `_resolve_device`; 5) `device_inventory.json` fuzzy match; 6) partial name match (e.g. `PE-1` matches `YOR_PE-1`). Returns `(mgmt_ip, scaler_device_id, resolved_via)`. Results cached for 120s in `_resolve_cache`. Raises 503 if all fail.
+- **NEVER add `_resolve_device()` calls directly in endpoints** -- always use `_resolve_mgmt_ip`. The discovery API frequently returns empty `mgmt_ip`; the central function handles all fallbacks.
+- **Context builder** (`_get_device_context`): Uses `_resolve_mgmt_ip` first, then tries `_get_cached_config(scaler_device_id)`. Falls back to `_get_cached_config(device_id)` and `_get_cached_config(hostname)`. Returns `resolved_ip` field so frontend shows the actual IP.
+- **DeviceContextCache**: `ScalerGUI.getDeviceContext(deviceId)` returns cached context if fresh (<60s), else fetches. `refreshDeviceContextLive(deviceId)` fetches live and updates cache. `invalidateDeviceContext(deviceId)` clears cache.
+- **Instant wizard loading**: All wizards (Interface, Service, VRF, BGP, IGP) open instantly with cached data. If no fresh cache exists, the wizard renders immediately with a "Loading..." state, then fetches context in the background and re-renders when ready.
+- **Cross-wizard awareness**: `recordWizardChange(deviceId, changeType, details)` logs wizard changes to `_wizardChangeLog`. `getDeviceContext()` merges pending changes into the returned context so the next wizard sees updated free interfaces, next EVI/bundle numbers, etc. Changes persist for 5 minutes. Devices with pending changes show a "changed" badge in the device selector.
+- **Context panel**: Collapsible panel at top of each wizard. Compact visual bar for interface counts (phys, bundle, lo, sub-if), LLDP chips with neighbor tooltips, color-coded status (green=has data, orange=partial, red=no SSH). System line: `System | AS | RID`. "Refresh Live" fetches over SSH.
+
+### VRF / L3VPN Wizard (5 Steps)
+
+The VRF wizard creates L3VPN VRF instances via `build_service_config(service_type='vrf')` which delegates to `_generate_vrf_config` from interactive_scale. Steps: VRF Naming (prefix, start, count, description) -> Interface Attachment (optional, sub-interfaces from context) -> BGP & Route Targets (enable BGP, AS, router-id, RT mode same_as_rd/custom) -> Review (config preview, validation) -> Push. Uses `POST /api/config/generate/services` with `service_type: 'vrf'` and params: `attach_interfaces`, `interface_list`, `interfaces_per_vrf`, `enable_bgp`, `bgp_config`, `rt_config`.
+- **DNAAS device handling**: DNAAS devices (NCM/NCF/NCC/LEAF/SPINE) are excluded from wizard device selectors. If a DNAAS device does appear in a wizard, LLDP suggestions are disabled (`ctx._isDnaas = true`).
+- **Suggestion chips**: `ScalerGUI.renderSuggestionChips(items, { type, onSelect })` renders clickable chips. Types: `lldp` (cyan), `free` (green), `config` (orange), `smart` (purple). Items may have `target` for routing onSelect (e.g. `target: 'evi'` or `target: 'asn'`). Bundle member chips use toggle mode: click to add/remove, `.chip-selected` for selected state.
+
+### Interface Wizard Architecture (7 Steps)
+
+The Interface Wizard has full parity with the scaler-wizard terminal backend. Steps are **dynamically composed per type** using `stepBuilder` -- the step indicator shows only relevant steps for the selected type:
+
+| Type | Steps (in order) | Count |
+|------|-------------------|-------|
+| **Loopback** | Type → IP & Description → Review → Push | 4 |
+| **Bundle** | Type → Bundle Members → Sub-ifs & IP → Encap → Review → Push | 6 |
+| **PH / IRB** | Type → Sub-ifs & IP → Encap → Review → Push | 5 |
+| **GE100/GE400/GE10** | Type → Location → Mode & Features → Encap → Review → Push | 6 |
+
+When the user changes the type in Step 0 and clicks Next, the WizardController calls `stepBuilder(data)` to recompose the step array, dependencies, and keys. The step indicator re-renders with only the relevant dots.
+
+**Step 3 per-type feature gating** (matches terminal wizard exactly):
+- **Loopback**: Description field, IPv4 address (/32). No sub-ifs, no L2/MPLS/etc.
+- **Bundle/PH/IRB** (basic): Sub-ifs + VLAN + IP addressing (IPv4/IPv6/dual, 3 step modes). No L2 Service, MPLS, Flowspec, BFD, or MTU.
+- **GE100/GE400/GE10** (physical): Sub-ifs + VLAN + Interface Mode selector (L2 vs L3). L2 mode: l2-service, hides IP/L3 features. L3 mode: IP, MPLS, Flowspec, BFD, MTU.
+
+**Dual-stack IP**: When `ipVersion=dual`, separate IPv4 and IPv6 start/prefix fields. Params: `ip_start`, `ip_prefix` (IPv4), `ipv6_start`, `ipv6_prefix` (IPv6).
+
+**Backend parameter contract** (`POST /api/config/generate/interfaces`): `interface_type`, `start_number`, `count`, `create_subinterfaces`, `subif_vlan_start`, `vlan_mode` (single/qinq), `outer_vlan_start`, `inner_vlan_start`, `l2_service` (physical only), `ip_enabled`, `ip_version`, `ip_start`, `ip_prefix`, `ipv6_start`, `ipv6_prefix`, `ip_mode` (per_subif/per_parent/unique_subnet), `mpls_enabled` (physical only), `flowspec_enabled` (physical only), `bundle_members`, `lacp_mode` (active/passive/static), `slot`, `bay`, `port_start`, `mtu` (physical only), `bfd` (physical only), `description`.
+
+**Step re-editing**: `WizardController` supports `stepDependencies`, `stepKeys`, and `skipIf`. When going back and changing a step, dependent steps are invalidated (their collected keys cleared). The "Next" button shows "Update" when re-visiting a prior step. Steps with `skipIf: (data) => bool` are auto-skipped during forward/backward navigation.
+- **Device selector alignment**: `openDeviceSelector` uses `_getCanvasDeviceObjects()` to get canvas devices with their SSH credentials. Devices with SSH configured appear first; devices without SSH appear greyed out with "Set SSH first". DNAAS devices are excluded.
 
 ---
 
@@ -379,6 +502,18 @@ this.hideAllSelectionToolbars(); // Hides text, device, and link toolbars
 ---
 
 ## 🐛 Recent Fixes (Jan 2026)
+
+### Wizard Smart Features (Mar 2026)
+
+**Phase 1 - Sub-interface count bug**: Step invalidation only when `interfaceType` changes (preserves `subifCount`). `isLoopback` computed inside `updateLimitsWarning` from `data.interfaceType`. Debug logging in review step and `onComplete`.
+
+**Phase 2 - Wizard history**: `recordWizardChange` extended with `generatedConfig`, `params`, `pushMode`, `jobId`. Persisted to `localStorage` (`scaler_wizard_history`, max 100). Per-wizard Last Run card and global History panel. Re-run / Re-run on other device.
+
+**Phase 3 - Skip-existing**: `POST /api/config/scan-existing`, `POST /api/config/detect-pattern`. Interface wizard review step collision check with Skip/Start-after/Override options.
+
+**Phase 4 - Mirror**: `POST /api/mirror/analyze`, `/generate`, `/preview-diff`. Mirror Config wizard (source/target, analyze, generate, diff, push). "Re-run on different device" wired to Mirror Wizard flow.
+
+**Files**: scaler-gui.js, scaler-api.js, scaler_bridge.py, styles.css, scale_operations.py, mirror_config.py.
 
 ### Arrow Tips Drawn On Top of Devices (Mar 1)
 **Problem**: Link arrowheads were drawn during the link pass (before devices), so device fills covered the arrow tips, making them invisible.
@@ -780,34 +915,37 @@ The topology app integrates with `/debug-dnos` bug evidence system:
 - **Shape Type Grid**: `.shape-type-grid` and `.shape-type-btn` provide scalable, aligned layout for the SHAPER section. Use `minmax(0, 1fr)` for responsive columns.
 - **Section alignment**: Toolbar section headers use `min-height: 40px`, `gap: 8px`. Nested subsection headers use `min-height: 28px`. Device/link/font grids use `minmax(0, 1fr)` for equal column sizing.
 
-### XRAY GUI Integration (Feb 2026)
+### XRAY GUI Integration (Feb 2026, updated Mar 2026)
 
 **Overview**: Links between two devices show a magnifying glass icon when selected. Clicking opens an XRAY Capture popup for DP/CP/DNAAS-DP traffic capture, with results delivered to Mac Wireshark.
 
 **Key files:**
-- `topology-xray-popup.js` — XRAY popup UI (mode, duration, output, POV, start/stop)
-- `topology-link-drawing.js` — Magnifying glass icon drawn at link midpoint (`_getXrayIconPos()`)
-- `topology-object-detection.js` — `checkXrayIconHover()`, XRAY icon click detection via `_xrayIconClicked`
-- `topology-mouse-down.js` — Routes XRAY icon clicks to `XrayPopup.show()`
+- `topology-xray-popup.js` — XRAY popup UI (liquid glass style, mode CP/DP (Arista)/DP (DNAAS), duration, direction, protocol filters, output, POV, SSH prompt when device has no SSH)
+- `topology-link-toolbar.js` — Packet Capture button in the link toolbar (first button, only for device-to-device links)
+- `topology-mouse-down.js` — Opens link toolbar on link click; calls `XrayPopup.temporaryHide()` when panning starts
+- `topology-mouse-up.js` — Calls `XrayPopup.temporaryShow()` when panning ends
+- `topology-toolbar-setup.js` — XRAY Settings section handlers (load/save config, Verify Mac)
+- `index.html` — XRAY Settings section in left toolbar (Mac IP, user, password, Wireshark path, pcap dir)
 - `serve.py` — `/api/xray/run`, `/api/xray/status/{id}`, `/api/xray/stop/{id}`, `/api/xray/config`, `/api/xray/verify-mac`
-- `scaler-gui.js` — `openXraySettings()` in CONFIG menu (Mac IP, credentials, Wireshark path)
 - `topology-link-details.js` — `autoFillFromLldp()` cross-references LLDP to auto-bind interfaces
 
 **Data flow:**
-1. Link selected between 2 devices -> magnifying glass icon drawn at midpoint
-2. Click icon -> `XrayPopup.show()` opens floating popup
-3. User picks mode/duration/output/POV -> "Start Capture"
-4. `POST /api/xray/run` -> `serve.py` runs `live_capture.py` as subprocess
-5. Popup polls `GET /api/xray/status/{id}` for progress
-6. Mac delivery: SCP pcap + SSH open Wireshark (credentials from `~/.xray_config.json`)
+1. Link selected between 2 devices -> Packet Capture button appears as first button in link toolbar
+2. Click button -> `XrayPopup.show()` opens floating popup (positioned below link toolbar center, with notch)
+3. If device has no SSH config -> SSH prompt (host, user, pass) shown; user must fill before Start
+4. User picks mode/duration/direction/protocol filters/output/POV -> "Start Capture"
+5. `POST /api/xray/run` with device, mode, interface, duration, output, direction, capture_filter, dut_host
+6. Popup polls `GET /api/xray/status/{id}` for progress
+7. Mac delivery: SCP pcap + SSH open Wireshark (credentials from `~/.xray_config.json`)
+
+**Popup features:** Liquid glass styling (matches device/link toolbar), positioned below link toolbar with upward notch. Mode buttons: CP (Control Plane), DP (Arista), DP (DNAAS) with connectivity dots and inline hints when unavailable. Direction (Ingress/Egress/Both), Quick filters (BGP, OSPF, ISIS, LDP, LLDP, BFD multi-select), Exclude DNOS internal traffic (CP only), interface from link table or auto-detect, SSH prompt when device has no `sshConfig.host`. SSH credentials set in popup are stored on device and trigger `editor.saveState()`.
+
+**Capture lifecycle:** Capture continues when popup is closed (toast on completion). Re-opening XRAY for same link while capture runs restores Stop/status UI. Panning (middle-mouse or space+drag) calls `temporaryHide()`; on pan end `temporaryShow()` repositions popup from link midpoint.
 
 **Editor state:**
-- `editor._hoveredXrayIcon` — link whose XRAY icon is hovered (cursor: pointer)
-- `editor._xrayIconClicked` — link whose icon was just clicked (consumed in mouse-down)
-- `editor._xrayCapturing` — link ID with active capture (pulsing orange ring)
-- `link._xrayIconPos` — `{x, y, r}` stored after drawing for hit detection
+- `editor._xrayCapturing` — link ID with active capture (button turns orange)
 
-**Settings:** SCALER CONFIG menu -> "XRAY Settings" -> `openXraySettings()` reads/writes `~/.xray_config.json` via `/api/xray/config`.
+**Settings:** Left toolbar Packet-Capture section (collapsible) — Mac IP, Mac user, Mac password, Wireshark path, pcap directory. Save writes via `POST /api/xray/config`. Verify Mac tests SSH via `POST /api/xray/verify-mac`.
 
 ### Brand Assets
 - **LingoApp**: Official DriveNets brandbook is at https://www.lingoapp.com/110100/k/d5jKxQ — requires LingoApp login to download. Cannot be fetched programmatically.
@@ -841,9 +979,57 @@ The topology app integrates with `/debug-dnos` bug evidence system:
 - **LLDP proxy**: `topology-lldp-dialog.js` routes via `/api/dnaas/*` (relative URLs) so it works when deployed to h263; no direct port 8765 calls.
 - **MCP session reuse**: `network_mapper_client.py` caches SSE sessions (120s TTL) to avoid 5s handshake per tool call.
 - **MCP singleton**: `discovery_api.py` uses `_get_mcp_client()` instead of per-request `NetworkMapperClient()`.
-- **Proxy retry**: `serve.py` uses 30s timeout for GET, 300s for POST; 1 retry with 2s backoff on connection errors; 502 includes endpoint and detail.
+- **MCP single-worker-task architecture (Mar 2026)**: Root-cause fix for the `RuntimeError: Attempted to exit cancel scope in a different task` crash. `NetworkMapperClient` now runs a single persistent asyncio Task on a dedicated daemon thread. All MCP calls from any thread are submitted to this worker via `asyncio.Queue`. The worker owns the SSE session exclusively -- context managers are always entered and exited in the same Task, which is what `anyio` requires. Old design used `ThreadPoolExecutor` + `asyncio.run()` per request, creating separate event loops and Tasks that triggered the cross-task crash during session cleanup/GC.
+- **MCP auto-reset**: `_mcp_call()` wrapper in `discovery_api.py` retries with client reset on network failures. Now simplified since the root cause (cross-task SSE) is eliminated.
+- **Health endpoint**: `GET /api/health` on discovery_api.py returns `{status, mcp_client, uptime_s}`. `serve.py` probes this on 502 to give the UI a specific error (API running but MCP broken vs API not responding).
+- **Proxy retry**: `serve.py` uses 30s timeout for GET, 300s for POST; 1 retry with 2s backoff on connection errors; 502 includes endpoint and detail from health probe.
+- **XRAY hint clarity**: XRAY popup distinguishes 502 (API down, shows detail from health probe) from network error (server not running) from LLDP-not-found (no neighbors).
 - **Job cleanup**: `_nm_cleanup_old_jobs()` and `_cleanup_old_discovery_jobs()` remove completed jobs older than 30 minutes.
 - **Error feedback**: LLDP dialog shows API/SSH/MCP-specific errors; Network Mapper shows toast after 3 poll failures; DNAAS distinguishes API-down vs SSH vs timeout.
+- **CP direction BPF fix (Mar 2026)**: `cp_capture.py` now injects `outbound`/`inbound` BPF primitives into the filter expression when direction is egress/ingress. Previously direction was only used for analysis labeling, not filtering -- CP captures always grabbed both directions regardless of the panel setting.
+
+### Service Orchestration (Mar 2026)
+
+**serve.py as orchestrator**: When started, serve.py auto-launches `discovery_api.py` (port 8765) and `scaler_bridge.py` (port 8766) as child processes if not already running. A background monitor thread health-checks both every 15s and restarts on crash or after 3 consecutive health failures. Crash-loop protection: stops restarts if a service crashes 5+ times within 2 minutes.
+
+**Auto-reload**:
+- `scaler_bridge.py`: Started with uvicorn `--reload` — auto-restarts when its Python files change.
+- `discovery_api.py`: Monitor thread checks mtime of `discovery_api.py`; if changed since last start, restarts the process.
+
+**start.sh**: One-command launcher at project root. `./start.sh` kills any existing instances on 8080/8765/8766, optionally starts Network Mapper MCP if `~/network-mapper` exists, then runs `python3 serve.py`. `./start.sh --stop` stops all. `./start.sh --watch` monitors `serve.py` for changes and restarts the full stack when it changes.
+
+**Health endpoint**: `GET /api/health` returns aggregated status: `{ serve, discovery_api, scaler_bridge }` with `status`, `port`, `pid`, `uptime_s` for managed services; `managed: false` when a service was already running before serve.py started.
+
+### 503 Errors and Scaler Bridge Resilience (Mar 2026)
+
+**Root causes of 503 on scaler_bridge-dependent endpoints** (`/api/config/*`, `/api/operations/*`, `/api/devices/{id}/test`):
+
+| Cause | Source | Detail | Fix |
+|-------|--------|--------|-----|
+| Bridge not running | serve.py proxy | "Scaler bridge unavailable: Connection refused" | Auto-fixed: on-demand restart in proxy + monitor thread |
+| Device resolution failed | scaler_bridge | "Could not resolve IP for 'X'. Set SSH address on canvas device." | Right-click device > Set SSH (IP or serial) |
+| SSH failed | scaler_bridge | "SSH to X failed: ..." | Check credentials, network, device reachability |
+
+**Root cause bugs fixed (Mar 10 2026):**
+1. **Monitor ignored unmanaged services**: `_service_monitor()` wrapped health checks in `if proc is not None:` -- services not started by serve.py (or where startup returned None) were never monitored or restarted. Fixed: monitor always health-checks both services regardless of proc handle.
+2. **Health endpoint reported "dead" not "down"**: When a managed proc died, `_handle_health()` reported `"status": "dead"` instead of probing the actual port. Frontend `checkHealth()` only checked for `=== 'ok'`, so "dead" was treated as down forever. Fixed: health endpoint now probes the port directly when proc is dead/absent.
+3. **No on-demand restart**: When the proxy hit a connection error, it returned 503 and waited for the 15s monitor cycle. Fixed: proxy now attempts an on-demand bridge start on first failure, retries the request if startup succeeds.
+4. **404 triggered false bridge-down**: `getLimits()` treated 404 (device not found) same as 503 (bridge down), putting the bridge in a 60s cooldown. Fixed: 404 returns default limits without touching bridge state.
+5. **60s cooldown too long**: With auto-restart in place, bridge recovers in ~2s. Cooldown reduced from 60s to 15s.
+
+**Auto-recovery mechanisms (serve.py):**
+- **On-demand restart**: When a proxy request fails with connection error, serve.py starts the bridge immediately and retries the request (single retry).
+- **Monitor thread**: Every 15s, checks if bridge proc is dead or health-check fails 3x in a row. Auto-restarts with crash-loop protection (max 5 restarts per 2min window).
+- **Startup**: `_start_scaler_bridge()` checks if bridge is already responding before starting a new one. If it can't connect, starts uvicorn subprocess.
+
+**Frontend resilience** (scaler-api.js):
+- `_bridgeUp` / `_bridgeRetryAfter`: When 503 contains "Scaler bridge unavailable", skip requests for 15s and show friendly message.
+- `testConnection`, `getJobs`, `getLimits`: Check bridge state before requesting; on cooldown, try `checkHealth()` to recover.
+- `checkHealth()`: If `scaler_bridge.status === 'ok'`, resets `_bridgeUp` so subsequent requests proceed.
+
+**Silent 503 paths** (topology-notifications.js): `/api/config/`, `/api/operations/`, `/api/devices/` — no toast for 503 (user sees error in ScalerGUI notification). Red console line is browser-built-in and cannot be suppressed.
+
+**Debugging**: Run `curl http://localhost:8080/api/health` to see bridge status. If `scaler_bridge.status` is "down", check `journalctl --user -u topology-app.service` for startup errors.
 
 ### LLDP Animation & Dialog Fixes (Mar 2026)
 
@@ -952,3 +1138,32 @@ For Cursor slash-command docs and learning stores in `~/.cursor/commands/`, `~/.
 - **Self-learning has two paths**:
   - JSON-backed commands (BGP, XRAY, SPIRENT, HA, NETCONF): write to JSON, then MANDATORY sync
   - Direct-Markdown commands (/debug-dnos): edit the correct section file per the Learning Routing Table in SKILL.md
+
+## DNOS CLI Syntax Corrections (Validated via MCP run_show_command on PE-4, 2026-03-09)
+
+All commands below were tested live on YOR_CL_PE-4 (25.4.13.146_dev) using the Network Mapper
+MCP `run_show_command` tool plus `search_cli_docs` for documentation cross-reference.
+
+| Wrong (was in specs) | Correct (validated) | Files fixed |
+|---|---|---|
+| `show bgp ipv4 flowspec-vpn summary` | `show bgp ipv4 flowspec summary` | HA.md, BGP.md, debug-dnos.md, feature-ha-mapping.md, known-behaviors.md, learned_rules.md, route-injection.md, phase-procedures.md, debug-dnos.mdc |
+| `show mpls lsp` | `show mpls route` or `show mpls forwarding-table` | HA.md, feature-ha-mapping.md, health-check.md |
+| `show interfaces brief` | `show interfaces description` (Admin + Oper + Description) | HA.md, dnos-cli-discoveries.mdc |
+| `show system process bgpd` | `show system process routing:bgpd` (container-prefixed) | HA.md, snapshots.md, cross-command-integration.mdc, dnos-cli-discoveries.mdc |
+| `show system process isisd/fibmgrd` | `show system process routing:isisd` / `routing:fibmgrd` | Same as above |
+| `show system process wb_agent ncp <id>` | `show system process wb_agent` (no `ncp` suffix -- shows all NCPs) | Same as above |
+| `show system process interface-manager` | Not a valid name. Use `mgmt_interface_manager` or `ctrl_interface_agent` | Same as above |
+
+**Process monitoring approach:** Process names in DNOS use container-prefixed syntax for
+`show system process <name>` (e.g., `routing:bgpd`, `routing:fibmgrd`). The short names
+(bgpd, isisd) are NOT valid arguments. Discover valid names via `search_cli_docs('show system process')`
+or CLI `?` completion on device. Full process name list cached in
+`~/.cursor/dnos-cli-completions.json`. Alternative: use container-scoped queries like
+`show system ncc <id> container routing-engine` for all routing processes.
+
+**CLI discovery protocol (search first, ask device second):**
+1. `search_cli_docs(keyword)` -- PRIMARY. Searches 469+ DNOS commands. No SSH needed.
+2. `get_cli_doc_section(doc_name, term)` -- full syntax details when search returns snippets.
+3. `~/.cursor/dnos-cli-completions.json` -- cached dynamic values (process names, VRF names).
+4. `run_show_command` on device -- only for uncached dynamic arguments.
+Rule: `~/.cursor/rules/dnos-cli-completion-protocol.mdc`

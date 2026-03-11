@@ -43,6 +43,7 @@ nm_job_lock = threading.Lock()
 # MCP client singleton (reused across requests to avoid repeated SSE handshakes)
 _mcp_client = None
 _mcp_client_lock = threading.Lock()
+_server_start_time = time.time()
 
 
 def _get_mcp_client():
@@ -68,6 +69,34 @@ def _reset_mcp_client():
             except Exception:
                 pass
             _mcp_client = None
+            print("[MCP] Client reset -- will reconnect on next call")
+
+
+def _mcp_call(fn_name, *args, **kwargs):
+    """Execute an MCP client method with auto-reset on failure.
+
+    NetworkMapperClient now serializes all MCP calls on a dedicated event
+    loop thread, so the 'cancel scope in different task' crash cannot happen.
+    This wrapper still provides retry-with-reset for network-level failures.
+    """
+    for attempt in range(2):
+        try:
+            nm = _get_mcp_client()
+            method = getattr(nm, fn_name)
+            return method(*args, **kwargs)
+        except (TimeoutError, OSError, ConnectionError) as e:
+            if attempt == 0:
+                print(f"[MCP] {fn_name} failed ({e}), resetting client and retrying...")
+                _reset_mcp_client()
+            else:
+                print(f"[MCP] {fn_name} failed after retry: {e}")
+                raise
+        except Exception as e:
+            if attempt == 0:
+                print(f"[MCP] {fn_name} error ({e}), resetting client and retrying...")
+                _reset_mcp_client()
+            else:
+                raise
 
 
 def _nm_cleanup_old_jobs():
@@ -345,44 +374,54 @@ def _nm_try_network_mapper_mcp(name: str) -> dict:
     """Try to get enriched device data from Network Mapper MCP server.
     Returns dict with lldp_neighbors, system_type, dnos_version, serial, interfaces.
     Returns None if MCP has no data for this device.
+    Auto-resets MCP client on SSE/connection failures.
     """
-    try:
-        nm = _get_mcp_client()
-
-        # Get LLDP first — if no LLDP, device is unknown to MCP
-        nm_neighbors = nm.get_device_lldp(name)
-        if not nm_neighbors:
-            return None
-
-        lldp = [{
-            'local_interface': n.local_interface,
-            'neighbor_device': n.neighbor_name,
-            'neighbor_port': n.neighbor_interface
-        } for n in nm_neighbors]
-
-        result = {'lldp_neighbors': lldp, 'system_type': '', 'dnos_version': '', 'serial': '', 'interfaces': {}}
-
-        # Enrich with system info
+    for attempt in range(2):
         try:
-            sys_info = nm.get_device_system_info(name)
-            if sys_info:
-                result['system_type'] = sys_info.get('system_type', '') or sys_info.get('platform', '') or ''
-                result['dnos_version'] = sys_info.get('version', '') or sys_info.get('software_version', '') or ''
-                result['serial'] = sys_info.get('serial_number', '') or sys_info.get('serial', '') or ''
-        except Exception:
-            pass
+            nm = _get_mcp_client()
 
-        # Enrich with interface details (speed, bundle membership)
-        try:
-            iface_raw = nm._call_tool("get_device_interfaces_detail", {"device_name": name})
-            if iface_raw:
-                result['interfaces'] = _parse_mcp_interfaces_detail(iface_raw)
-        except Exception:
-            pass
+            nm_neighbors = nm.get_device_lldp(name)
+            if not nm_neighbors:
+                return None
 
-        return result
-    except Exception:
-        return None
+            lldp = [{
+                'local_interface': n.local_interface,
+                'neighbor_device': n.neighbor_name,
+                'neighbor_port': n.neighbor_interface
+            } for n in nm_neighbors]
+
+            result = {'lldp_neighbors': lldp, 'system_type': '', 'dnos_version': '', 'serial': '', 'interfaces': {}}
+
+            try:
+                sys_info = nm.get_device_system_info(name)
+                if sys_info:
+                    result['system_type'] = sys_info.get('system_type', '') or sys_info.get('platform', '') or ''
+                    result['dnos_version'] = sys_info.get('version', '') or sys_info.get('software_version', '') or ''
+                    result['serial'] = sys_info.get('serial_number', '') or sys_info.get('serial', '') or ''
+            except Exception:
+                pass
+
+            try:
+                iface_raw = nm._call_tool("get_device_interfaces_detail", {"device_name": name})
+                if iface_raw:
+                    result['interfaces'] = _parse_mcp_interfaces_detail(iface_raw)
+            except Exception:
+                pass
+
+            return result
+        except (RuntimeError, OSError, ConnectionError) as e:
+            if attempt == 0:
+                print(f"[MCP] _nm_try_network_mapper_mcp failed ({e}), resetting client...")
+                _reset_mcp_client()
+            else:
+                return None
+        except Exception as e:
+            if attempt == 0 and ('cancel scope' in str(e).lower() or 'task' in str(e).lower()):
+                print(f"[MCP] _nm_try_network_mapper_mcp SSE error ({e}), resetting client...")
+                _reset_mcp_client()
+            else:
+                return None
+    return None
 
 
 def _parse_mcp_interfaces_detail(text: str) -> dict:
@@ -638,6 +677,19 @@ def _nm_mcp_full_map(job_id):
     try:
         raw_list = run_async(nm._call_tool_async("list_devices"))
         all_mcp_devices = nm._parse_devices_markdown(raw_list)
+    except (RuntimeError, OSError, ConnectionError) as e:
+        log(f"list_devices failed ({e}), resetting MCP client...")
+        _reset_mcp_client()
+        try:
+            nm = _get_mcp_client()
+            raw_list = run_async(nm._call_tool_async("list_devices"))
+            all_mcp_devices = nm._parse_devices_markdown(raw_list)
+        except Exception as e2:
+            with nm_job_lock:
+                nm_jobs[job_id]['status'] = 'completed'
+                nm_jobs[job_id]['errors'] = [{'device': 'MCP', 'error': f"list_devices: {e2}"}]
+            log(f"list_devices failed after retry: {e2}")
+            return
     except Exception as e:
         with nm_job_lock:
             nm_jobs[job_id]['status'] = 'completed'
@@ -685,6 +737,15 @@ def _nm_mcp_full_map(job_id):
         batch_results = [None, None, None]
         try:
             batch_results = run_async(nm._call_tools_batch_async(batch_calls))
+        except (RuntimeError, OSError, ConnectionError) as e:
+            log(f"  MCP error for {clean} ({e}), resetting client and retrying...")
+            _reset_mcp_client()
+            try:
+                nm = _get_mcp_client()
+                batch_results = run_async(nm._call_tools_batch_async(batch_calls))
+            except Exception as e2:
+                errors.append({'device': clean, 'error': f"batch: {e2}"})
+                log(f"  Error fetching {clean} after retry: {e2}")
         except Exception as e:
             errors.append({'device': clean, 'error': f"batch: {e}"})
             log(f"  Error fetching {clean}: {e}")
@@ -773,6 +834,75 @@ def _nm_mcp_full_map(job_id):
         nm_jobs[job_id]['progress']['queued'] = 0
 
     log(f"MCP map complete: {len(devices)} devices ({stubs_added} stubs), {len(links)} links")
+
+
+def _extract_mgmt_ip(mgmt_text: str) -> str:
+    """Parse MCP management interfaces markdown, prefer mgmt0/mgmt-ncc-0 IPs."""
+    import re as _re
+    best_ip = ''
+    for line in str(mgmt_text).split('\n'):
+        line_lower = line.lower()
+        ip_match = _re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', line)
+        if not ip_match:
+            continue
+        ip = ip_match.group(1)
+        if 'mgmt0' in line_lower or 'mgmt-ncc-0 ' in line_lower:
+            best_ip = ip
+            break
+        if ('mgmt' in line_lower) and not best_ip:
+            best_ip = ip
+        if not best_ip and 'ipmi' not in line_lower and 'console' not in line_lower:
+            best_ip = ip
+    return best_ip
+
+
+def _resolve_device_mgmt(device_name: str) -> dict:
+    """Resolve a device LLDP name to its management IP using MCP + inventory.
+    Strategy:
+      1. get_full_device_info_with_mgmt (fast, handles partial names)
+      2. _call_tool('get_device_management_interfaces') if #1 gives no IP
+      3. _nm_resolve_host for inventory/DNS fallback
+    """
+    import re as _re
+    result = {'name': device_name, 'mgmt_ip': '', 'serial': '', 'hostname': '', 'source': ''}
+
+    try:
+        info = _mcp_call('get_full_device_info_with_mgmt', device_name)
+        if info:
+            result['hostname'] = info.get('hostname') or info.get('full_name') or device_name
+            result['serial'] = info.get('serial') or ''
+            result['source'] = 'network-mapper'
+            if info.get('mgmt_ip'):
+                result['mgmt_ip'] = info['mgmt_ip']
+            elif info.get('connection_target'):
+                ct = info['connection_target']
+                if _re.match(r'^\d+\.\d+\.\d+\.\d+$', ct):
+                    result['mgmt_ip'] = ct
+    except Exception as e:
+        print(f"[Resolve] MCP info lookup failed for {device_name}: {e}")
+
+    if not result['mgmt_ip']:
+        try:
+            nm = _get_mcp_client()
+            mgmt_text = nm._call_tool('get_device_management_interfaces', {'device_name': device_name})
+            if mgmt_text and 'not found' not in str(mgmt_text).lower():
+                ip = _extract_mgmt_ip(mgmt_text)
+                if ip:
+                    result['mgmt_ip'] = ip
+                    result['source'] = 'network-mapper'
+                    if not result['hostname']:
+                        result['hostname'] = device_name
+        except Exception as e:
+            print(f"[Resolve] MCP mgmt interfaces failed for {device_name}: {e}")
+
+    if not result['mgmt_ip']:
+        resolved = _nm_resolve_host(device_name)
+        if resolved and resolved != device_name and _re.match(r'^\d+\.\d+\.\d+\.\d+$', resolved):
+            result['mgmt_ip'] = resolved
+            result['source'] = result['source'] or 'inventory'
+
+    print(f"[Resolve] {device_name} -> mgmt={result['mgmt_ip']} serial={result['serial']} src={result['source']}")
+    return result
 
 
 class DiscoveryHandler(BaseHTTPRequestHandler):
@@ -927,35 +1057,40 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                     log(f"✗ Error: {e}")
                     raise Exception(f"SSH error on {serial}: {e}")
             
-            # Helper to safely receive
-            def safe_recv(timeout_seconds=10):
+            # Helper to safely receive with prompt detection
+            def safe_recv(timeout_seconds=10, wait_for_prompt=True):
                 output = ""
                 end_time = time.time() + timeout_seconds
+                idle_since = None
                 try:
                     while time.time() < end_time:
                         if shell.recv_ready():
                             output += shell.recv(65535).decode('utf-8', errors='ignore')
+                            idle_since = None
+                            if wait_for_prompt and output.rstrip():
+                                last_line = output.rstrip().split('\n')[-1].strip()
+                                if last_line.endswith('#') or last_line.endswith('>'):
+                                    time.sleep(0.15)
+                                    if shell.recv_ready():
+                                        output += shell.recv(65535).decode('utf-8', errors='ignore')
+                                    break
                         else:
-                            time.sleep(0.3)
-                        # Break early if we have substantial output and no more coming
-                        if len(output) > 5000 and not shell.recv_ready():
-                            time.sleep(1)
-                            if not shell.recv_ready():
+                            if idle_since is None:
+                                idle_since = time.time()
+                            elif output and (time.time() - idle_since) > 1.0:
                                 break
+                            time.sleep(0.1)
                 except socket.error as e:
-                    log(f"⚠ Connection issue while receiving: {e}")
-                    # Return what we have so far
+                    log(f"[WARN] Connection issue while receiving: {e}")
                 return output
             
-            # Wait for initial CLI prompt and read it
-            time.sleep(3)  # Wait for DNOS CLI to load
+            time.sleep(2)
             
-            # Read and log initial CLI output
             initial_output = ""
             try:
                 while shell.recv_ready():
                     initial_output += shell.recv(65535).decode('utf-8', errors='ignore')
-                    time.sleep(0.2)
+                    time.sleep(0.1)
             except:
                 pass
             
@@ -973,17 +1108,14 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 log("✗ SSH transport closed unexpectedly")
                 raise Exception(f"SSH channel to {serial} closed unexpectedly after CLI load")
             
-            log("📋 Getting interface list...")
-            # Send a newline first to ensure we have a prompt
+            log("[INFO] Getting interface list...")
             safe_send("\n")
+            time.sleep(0.5)
+            
+            safe_send("show interfaces | no-more\n")
             time.sleep(1)
             
-            # NOTE: Don't send "exit" here - at the base prompt it logs out!
-            # Just go directly to getting interfaces
-            safe_send("show interfaces | no-more\n")
-            time.sleep(5)  # Wait for interface table output
-            
-            output = safe_recv(12)
+            output = safe_recv(15)
             
             log(f"📊 Raw output length: {len(output)} chars")
             
@@ -1041,11 +1173,10 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             # CHECK IF LLDP IS ALREADY CONFIGURED ON ALL INTERFACES
             # ================================================================
             if unique_interfaces:
-                log("🔍 Checking existing LLDP configuration...")
-                # Use 'show configuration lldp' which shows current LLDP config state
+                log("[INFO] Checking existing LLDP configuration...")
                 safe_send("show configuration protocols lldp | no-more\n")
-                time.sleep(3)
-                lldp_config_output = safe_recv(10)
+                time.sleep(0.5)
+                lldp_config_output = safe_recv(8)
                 
                 # Parse interfaces that already have LLDP configured
                 # DNOS format: "interface ge400-0/0/1" under protocols lldp
@@ -1064,11 +1195,10 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                     log(f"   Admin-state: enabled")
                     log(f"   Interfaces with LLDP: {len(already_configured)}")
                     
-                    # Still check admin-state on physical interfaces
                     log("[INFO] Verifying interface admin-state...")
                     safe_send("show interfaces brief | no-more\n")
-                    time.sleep(3)
-                    iface_status_output = safe_recv(8)
+                    time.sleep(0.5)
+                    iface_status_output = safe_recv(10)
                     
                     # Count interfaces that are admin-down
                     admin_down_count = 0
@@ -1103,16 +1233,13 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             interfaces_enabled = 0
             
             if unique_interfaces:
-                log("📝 Entering configuration mode...")
+                log("[INFO] Entering configuration mode...")
                 safe_send("configure\n")
-                time.sleep(1)
+                time.sleep(0.5)
                 
-                # Step 1: Enable LLDP globally (if not already enabled)
-                log("🔧 Enabling LLDP globally...")
-                safe_send("protocols lldp\n")
-                time.sleep(0.5)
-                safe_send("admin-state enabled\n")  # DNOS uses 'enabled' not 'enable'
-                time.sleep(0.5)
+                log("[INFO] Enabling LLDP globally...")
+                safe_send("protocols lldp\nadmin-state enabled\n")
+                time.sleep(0.3)
                 
                 # Step 2: Configure LLDP on all interfaces using batch mode
                 # Sends multi-line config blocks instead of one-at-a-time with per-line sleeps
@@ -1178,15 +1305,10 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 else:
                     log(f"[OK] Admin-state enabled on {total} interfaces")
                 
-                # Commit changes with verification
                 log("[INFO] Committing configuration...")
                 safe_send("commit\n")
-                commit_wait = min(15, max(8, len(unique_interfaces) // 5))
-                log(f"  Commit wait: {commit_wait}s...")
-                time.sleep(commit_wait)
-                
-                # Read commit output to verify success
-                commit_output = safe_recv(10)  # Increased from 5 to 10 seconds
+                time.sleep(1)
+                commit_output = safe_recv(20)
                 
                 # Log the full commit output for debugging
                 if commit_output:
@@ -1205,51 +1327,28 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 else:
                     log(f"✅ Configuration committed (output: {len(commit_output)} bytes)")
                 
-                # Verify speed/fec was applied (if PE device with ge400-*)
-                if has_400g and not is_cluster:
-                    log("🔍 Verifying speed/fec configuration on first ge400-* interface...")
-                    test_iface = ge400_interfaces[0]
-                    safe_send(f"show config interfaces {test_iface}\n")
-                    time.sleep(2)
-                    verify_output = safe_recv(5)
-                    
-                    if 'speed 100' in verify_output and 'fec none' in verify_output:
-                        log(f"✅ Verified: speed 100 + fec none applied on {test_iface}")
-                    else:
-                        log(f"⚠️  WARNING: Could not verify speed/fec on {test_iface}")
-                        log(f"   Output: {verify_output[:300]}")
-                
                 safe_send("exit\n")
-                time.sleep(0.5)
+                time.sleep(0.3)
                 
-                # Wait for LLDP hellos -- LLDP PDUs are sent immediately on enable,
-                # neighbors typically appear within 5-10s
-                log("[INFO] Waiting for LLDP neighbor discovery (10 seconds)...")
-                for wait_sec in range(10):
+                # LLDP PDUs are sent immediately on enable; neighbors appear within 5s
+                log("[INFO] Waiting for LLDP neighbor discovery (5 seconds)...")
+                for wait_sec in range(5):
                     if is_cancelled():
                         log("[WARN] Cancelled during LLDP wait")
                         client.close()
                         return {'success': False, 'error': 'Cancelled by user'}
                     time.sleep(1)
-                    if (wait_sec + 1) % 5 == 0:
-                        log(f"  {wait_sec + 1}/10 seconds elapsed...")
                 
                 log("[OK] LLDP hello wait completed!")
             else:
-                # Even if no interfaces found, still enable LLDP globally
-                log("⚠ No physical interfaces detected - enabling LLDP globally anyway...")
+                log("[WARN] No physical interfaces detected - enabling LLDP globally anyway...")
                 safe_send("configure\n")
+                time.sleep(0.5)
+                safe_send("protocols lldp\nadmin-state enabled\n!\ncommit\n")
                 time.sleep(1)
-                safe_send("protocols lldp\n")
-                time.sleep(0.5)
-                safe_send("admin-state enabled\n")  # DNOS uses 'enabled' not 'enable'
-                time.sleep(0.5)
-                safe_send("!\n")  # Exit protocols lldp
-                time.sleep(0.5)
-                safe_send("commit\n")
-                time.sleep(3)
+                safe_recv(10)
                 safe_send("exit\n")
-                time.sleep(0.5)
+                time.sleep(0.3)
                 log("✓ LLDP enabled globally (interfaces may need manual configuration)")
             
             client.close()
@@ -1380,39 +1479,42 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
         try:
             shell = client.invoke_shell(width=250, height=50)
             shell.settimeout(30)
-            time.sleep(4)
+            time.sleep(2)
             while shell.recv_ready():
                 shell.recv(65535)
-                time.sleep(0.2)
-            # Try "show lldp neighbor" (singular) first; some DNOS use "neighbors" (plural)
+                time.sleep(0.1)
             for cmd in ("show lldp neighbor | no-more\r\n", "show lldp neighbors | no-more\r\n"):
                 shell.send(cmd)
-                time.sleep(3)
+                time.sleep(0.5)
                 output = ""
-                end_time = time.time() + 15
+                end_time = time.time() + 10
+                idle_since = None
                 while time.time() < end_time:
                     if shell.recv_ready():
                         output += shell.recv(65535).decode('utf-8', errors='replace')
-                        if '#' in output or '>' in output:
-                            time.sleep(0.5)
+                        idle_since = None
+                        last_line = output.rstrip().split('\n')[-1].strip() if output.rstrip() else ''
+                        if last_line.endswith('#') or last_line.endswith('>'):
+                            time.sleep(0.15)
                             if shell.recv_ready():
                                 output += shell.recv(65535).decode('utf-8', errors='replace')
                             break
-                    time.sleep(0.3)
+                    else:
+                        if idle_since is None:
+                            idle_since = time.time()
+                        elif output and (time.time() - idle_since) > 1.0:
+                            break
+                        time.sleep(0.1)
                 raw_clean = strip_ansi(output)
                 neighbors = _parse_lldp_output(raw_clean)
-                # If we got rows or output looks like a table, we're done
                 if neighbors or ('interface' in raw_clean.lower() and 'invalid' not in raw_clean.lower()):
                     client.close()
                     return {'lldp_neighbors': neighbors, 'raw_output': raw_clean}
-                # If first command looked like an error, try plural
                 if 'invalid' in raw_clean.lower() or 'unknown' in raw_clean.lower() or 'error' in raw_clean.lower():
-                    time.sleep(1)
+                    time.sleep(0.3)
                     while shell.recv_ready():
                         shell.recv(65535)
-                    time.sleep(0.5)
                     continue
-                # Empty output - return what we have
                 client.close()
                 return {'lldp_neighbors': neighbors, 'raw_output': raw_clean}
             client.close()
@@ -1472,7 +1574,24 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         
-        if parsed.path == '/api/discovery/status':
+        if parsed.path == '/api/health':
+            nm_health = {}
+            try:
+                nm = _get_mcp_client()
+                if hasattr(nm, 'health'):
+                    nm_health = nm.health()
+                else:
+                    nm_health = {'state': 'connected' if nm else 'disconnected'}
+            except Exception as e:
+                nm_health = {'state': 'error', 'last_error': str(e)}
+            self._send_json({
+                'status': 'ok',
+                'network_mapper': nm_health,
+                'uptime_s': int(time.time() - _server_start_time)
+            })
+            return
+
+        elif parsed.path == '/api/discovery/status':
             # Get status of a job
             params = parse_qs(parsed.query)
             job_id = params.get('job_id', [None])[0]
@@ -1578,6 +1697,49 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({'error': 'Invalid filename'}, 400)
         
+        elif parsed.path == '/api/devices/list':
+            devices = []
+            try:
+                all_nm = _mcp_call('list_devices')
+                for dev in (all_nm or []):
+                    dev_name = getattr(dev, 'name', str(dev))
+                    hostname = dev_name.split('_dev_')[0] if '_dev_' in dev_name else dev_name.split('_priv_')[0] if '_priv_' in dev_name else dev_name
+                    devices.append({
+                        'id': hostname,
+                        'hostname': hostname,
+                        'full_name': dev_name,
+                        'ip': '',
+                        'platform': 'dnos'
+                    })
+            except Exception as e:
+                print(f"[devices/list] MCP list failed: {e}")
+            if not devices:
+                inv_file = Path('/home/dn/CURSOR/device_inventory.json')
+                if inv_file.exists():
+                    try:
+                        with open(inv_file) as f:
+                            inv = json.load(f)
+                        for key, dev in inv.get('devices', {}).items():
+                            devices.append({
+                                'id': key,
+                                'hostname': dev.get('hostname', key),
+                                'ip': dev.get('mgmt_ip', ''),
+                                'platform': 'dnos'
+                            })
+                    except Exception:
+                        pass
+            self._send_json({'devices': devices, 'count': len(devices)})
+
+        elif parsed.path.startswith('/api/device/') and '/resolve' in parsed.path:
+            path_parts = parsed.path.split('/')
+            if len(path_parts) >= 5:
+                from urllib.parse import unquote
+                device_name = unquote(path_parts[3])
+                result = _resolve_device_mgmt(device_name)
+                self._send_json(result)
+            else:
+                self._send_json({'error': 'Invalid path'}, 400)
+
         elif parsed.path.startswith('/api/device/') and '/lldp' in parsed.path:
             # GET endpoint: /api/device/<serial>/lldp - fetch LLDP from scaler-monitor cache
             # Extract serial from path: /api/device/SERIAL/lldp
@@ -1595,15 +1757,31 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 search_term_lower = serial.lower()
                 lldp_source = None
                 
-                # 1. Try NetworkMapper MCP first (most recently updated DB, 15s timeout)
+                # 1. Try NetworkMapper MCP first (auto-reset on SSE/connection failure)
                 try:
-                    import concurrent.futures
-                    nm = _get_mcp_client()
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                        future = pool.submit(nm.get_device_lldp, serial)
-                        nm_neighbors = future.result(timeout=15)
+                    nm_neighbors = _mcp_call('get_device_lldp', serial)
                     if nm_neighbors:
                         found_device = serial
+                    else:
+                        # Fuzzy: find NM device whose name contains the search term
+                        # Normalize underscores/hyphens for matching (CL-PE-4 vs CL_PE-4)
+                        import re as _re
+                        norm = lambda s: _re.sub(r'[-_]', '', s.lower())
+                        search_norm = norm(serial)
+                        try:
+                            all_nm = _mcp_call('list_devices')
+                            for dev in (all_nm or []):
+                                dev_name = getattr(dev, 'name', str(dev))
+                                dev_norm = norm(dev_name)
+                                if search_norm in dev_norm or dev_norm in search_norm:
+                                    nm_neighbors = _mcp_call('get_device_lldp', dev_name)
+                                    if nm_neighbors:
+                                        found_device = dev_name
+                                        print(f"[LLDP] Fuzzy match: '{serial}' -> '{dev_name}'")
+                                        break
+                        except Exception:
+                            pass
+                    if nm_neighbors:
                         lldp_source = 'network-mapper'
                         for n in nm_neighbors:
                             neighbors.append({
@@ -1611,9 +1789,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                                 'neighbor': n.neighbor_name,
                                 'remote_port': n.neighbor_interface
                             })
-                        print(f"[LLDP] Found {len(neighbors)} neighbors via NetworkMapper for {serial}")
-                except concurrent.futures.TimeoutError:
-                    print(f"[LLDP] NetworkMapper timed out (15s) for {serial}, trying fallbacks...")
+                        print(f"[LLDP] Found {len(neighbors)} neighbors via NetworkMapper for {found_device or serial}")
                 except Exception as e:
                     print(f"[LLDP] NetworkMapper lookup skipped: {e}")
                 
@@ -1628,13 +1804,16 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                                     try:
                                         with open(op_file, 'r') as f:
                                             op_data = json.load(f)
-                                        dev_hostname = op_data.get('hostname', device_dir.name)
-                                        dev_serial = op_data.get('serial_number', '')
-                                        dev_connection_ip = op_data.get('connection_ip', '')
+                                        dev_hostname = op_data.get('hostname') or device_dir.name
+                                        dev_serial = op_data.get('serial_number') or ''
+                                        dev_connection_ip = op_data.get('connection_ip') or ''
+                                        dir_name = device_dir.name.lower()
                                         
                                         if dev_hostname.lower() == search_term_lower or \
                                            search_term_lower in dev_hostname.lower() or \
                                            dev_hostname.lower() in search_term_lower or \
+                                           search_term_lower in dir_name or \
+                                           dir_name in search_term_lower or \
                                            (dev_serial and dev_serial.lower() == search_term_lower) or \
                                            (dev_connection_ip and dev_connection_ip == serial):
                                             found_device = dev_hostname
@@ -1701,6 +1880,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                                 'device': found_device,
                                 'cached': False,
                                 'live': True,
+                                'source': 'live-ssh',
                                 'cache_updated': True
                             })
                             return
@@ -1781,6 +1961,26 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
         global job_counter, nm_job_counter
         parsed = urlparse(self.path)
         
+        if parsed.path == '/api/devices/resolve-batch':
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode()
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._send_json({'error': 'Invalid JSON'}, 400)
+                return
+            names = data.get('names', [])
+            if not names:
+                self._send_json({'error': 'names array required'}, 400)
+                return
+
+            results = {}
+            for device_name in names:
+                results[device_name] = _resolve_device_mgmt(device_name)
+
+            self._send_json({'resolved': results})
+            return
+
         if parsed.path == '/api/discovery/start':
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length).decode()
@@ -1971,6 +2171,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 job['status'] = 'running'
                 job['progress'] = 10
                 job['output_lines'].append(f"Starting Multi-BD discovery for {serial}...")
+                start_ts = time.time()
                 
                 # Use --multi-bd flag for multi-BD discovery (MUST come before positional args)
                 cmd = ['python3', str(DISCOVERY_SCRIPT), '--multi-bd', serial]
@@ -2014,14 +2215,17 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                     if process.returncode == 0:
                         job['status'] = 'completed'
                         job['progress'] = 100
-                        # Find the latest output file (multi_bd_*.json or dnaas_*.json)
+                        # Find output file created during THIS run (after start_ts)
                         multi_bd_files = list(OUTPUT_DIR.glob('multi_bd_*.json'))
                         dnaas_files = list(OUTPUT_DIR.glob('dnaas_path_*.json'))
                         all_files = multi_bd_files + dnaas_files
-                        latest = max(all_files, key=lambda f: f.stat().st_mtime, default=None)
+                        recent = [f for f in all_files if f.stat().st_mtime >= start_ts]
+                        latest = max(recent, key=lambda f: f.stat().st_mtime, default=None)
+                        if not latest:
+                            latest = max(all_files, key=lambda f: f.stat().st_mtime, default=None)
                         if latest:
                             job['result_file'] = f"/api/multi-bd/file/{latest.name}"
-                            job['output_lines'].append(f"✓ Multi-BD output saved: {latest.name}")
+                            job['output_lines'].append(f"[OK] Multi-BD output saved: {latest.name}")
                     else:
                         job['status'] = 'failed'
                         job['error'] = f"Process exited with code {process.returncode}"
@@ -2166,13 +2370,9 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             search_term_lower = search_term.lower()
             
             if use_cache:
-                # FIRST: Try NetworkMapper MCP (most recently updated DB, 15s timeout)
+                # FIRST: Try NetworkMapper MCP (auto-reset on SSE/connection failure)
                 try:
-                    import concurrent.futures
-                    nm = _get_mcp_client()
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                        future = pool.submit(nm.get_device_lldp, search_term)
-                        nm_neighbors = future.result(timeout=15)
+                    nm_neighbors = _mcp_call('get_device_lldp', search_term)
                     if nm_neighbors:
                         nm_list = [{
                             'local_interface': n.local_interface,
@@ -2186,8 +2386,6 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                             'hostname': search_term
                         })
                         return
-                except concurrent.futures.TimeoutError:
-                    print(f"[LLDP] NetworkMapper timed out (15s) for {search_term}, trying fallbacks...")
                 except Exception as e:
                     print(f"[LLDP] NetworkMapper lookup skipped: {e}")
                 
@@ -2327,10 +2525,9 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 self._send_json({'error': 'serial is required'}, 400)
                 return
             
-            # Try NetworkMapper first (fast DB lookup, freshest data)
+            # Try NetworkMapper first (auto-reset on SSE/connection failure)
             try:
-                nm = _get_mcp_client()
-                nm_neighbors = nm.get_device_lldp(serial)
+                nm_neighbors = _mcp_call('get_device_lldp', serial)
                 if nm_neighbors:
                     nm_list = [{
                         'local_interface': n.local_interface,

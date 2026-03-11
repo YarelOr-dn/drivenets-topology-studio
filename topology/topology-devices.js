@@ -91,6 +91,7 @@ class DeviceManager {
         
         editor.saveState();
         editor.objects.push(device);
+        editor.events?.emit('topology:loaded', {});
         editor.selectedObject = device;
         editor.selectedObjects = [device];
         editor.updateDeviceProperties();
@@ -555,6 +556,7 @@ class DeviceManager {
             const idx = this.editor.objects.indexOf(device);
             if (idx !== -1) {
                 this.editor.objects.splice(idx, 1);
+                this.editor.events?.emit('topology:loaded', {});
                 this.editor.draw();
                 this.editor.saveState();
             }

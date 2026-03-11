@@ -646,8 +646,10 @@ class BridgeDomainDiscovery:
         for line in output.split('\n'):
             line_stripped = line.strip()
             
-            # Skip empty lines and command prompts
-            if not line_stripped or '#' in line_stripped:
+            # Skip empty lines and CLI prompts (hostname# or hostname>)
+            if not line_stripped:
+                continue
+            if re.match(r'^[\w\-\.]+[#>]\s*$', line_stripped):
                 continue
             
             # Skip header lines (usually contain "Name", "State", etc.)
@@ -730,15 +732,17 @@ class BridgeDomainDiscovery:
             
             # Parse interfaces (indented lines after "Associated Interfaces:")
             if parsing_interfaces and line_stripped:
-                # Stop if we hit the prompt or another section
-                if '#' in line_stripped or line_stripped.startswith('Bridge-Domain'):
+                # Stop if we hit CLI prompt or another section header
+                if re.match(r'^[\w\-\.]+[#>]\s*$', line_stripped) or line_stripped.startswith('Bridge-Domain'):
                     parsing_interfaces = False
                     continue
                 
                 # Extract interface name (may be on its own line or prefixed)
                 interface = line_stripped
-                if interface and (interface.startswith(('ge', 'hu', 'ce', 'qsfp', 'bundle', 'ae', 'eth')) or '.' in interface):
-                    if interface not in bd.interfaces:  # Avoid duplicates
+                _IF_PREFIXES = ('ge', 'hu', 'ce', 'qsfp', 'bundle', 'ae', 'eth',
+                                'ten', 'hundred', 'forty', 'fo', 'lag', 'port-channel')
+                if interface and (interface.startswith(_IF_PREFIXES) or '.' in interface):
+                    if interface not in bd.interfaces:
                         bd.interfaces.append(interface)
                         
                         # Parse sub-interface VLAN if present
@@ -755,7 +759,7 @@ class BridgeDomainDiscovery:
             iface_output = self._run_command(f"show network-services bridge-domain {bd_name} interface | no-more")
             for line in iface_output.split('\n'):
                 line_stripped = line.strip()
-                if not line_stripped or '#' in line_stripped:
+                if not line_stripped or re.match(r'^[\w\-\.]+[#>]\s*$', line_stripped):
                     continue
                 
                 # Parse interface lines from table format
@@ -775,14 +779,17 @@ class BridgeDomainDiscovery:
                                 })
                 else:
                     # Non-table format
-                    if line_stripped.startswith(('ge', 'hu', 'ce', 'qsfp', 'bundle', 'ae', 'eth')):
+                    _IF_PREFIXES2 = ('ge', 'hu', 'ce', 'qsfp', 'bundle', 'ae', 'eth',
+                                     'ten', 'hundred', 'forty', 'fo', 'lag', 'port-channel')
+                    if line_stripped.startswith(_IF_PREFIXES2):
                         if line_stripped not in bd.interfaces:
                             bd.interfaces.append(line_stripped)
         
         if bd.interfaces:
             print(f"    BD {bd_name}: {len(bd.interfaces)} interfaces - {', '.join(bd.interfaces[:3])}{'...' if len(bd.interfaces) > 3 else ''}")
-            return bd
-        return None
+        else:
+            print(f"    BD {bd_name}: no interfaces parsed (will try config search)")
+        return bd
     
     def get_bd_by_id(self, bd_id: int) -> Optional[BridgeDomain]:
         """Get a specific bridge domain by ID"""
@@ -893,7 +900,9 @@ class BridgeDomainDiscovery:
                     continue
                 
                 # If we found an interface line matching our search, and we have a current BD
-                if current_bd and search_if in line_stripped and 'interface' in line_stripped:
+                # Use word-boundary match to prevent ge100-0/0/3 matching ge100-0/0/30
+                if current_bd and 'interface' in line_stripped and re.search(
+                        r'(?:^|\s)interface\s+' + re.escape(search_if) + r'(?:\s|$|\.)', line_stripped):
                     # Skip mgmt BDs - they span entire fabric and cause infinite loops
                     if 'mgmt' in current_bd.lower():
                         print(f"    {Colors.YELLOW}Skipping mgmt BD: {current_bd}{Colors.ENDC}")
@@ -959,14 +968,14 @@ class BridgeDomainDiscovery:
             line_stripped = line.strip()
             
             # Parse table rows: | ge100-0/0/36 | actor | ...
-            if line_stripped.startswith('|') and 'ge' in line_stripped:
+            _LACP_PREFIXES = ('ge', 'hu', 'ce', 'eth', 'qsfp', 'ten', 'hundred', 'forty', 'fo')
+            if line_stripped.startswith('|'):
                 parts = [p.strip() for p in line_stripped.split('|') if p.strip()]
                 if len(parts) >= 2:
                     interface = parts[0]
                     role = parts[1].lower() if len(parts) > 1 else ''
                     
-                    # Only add if it looks like an interface and role is 'actor'
-                    if (interface.startswith('ge') or interface.startswith('eth')) and role == 'actor':
+                    if interface.startswith(_LACP_PREFIXES) and role == 'actor':
                         if interface not in seen_interfaces:
                             bundle.members.append(interface)
                             seen_interfaces.add(interface)
@@ -1642,19 +1651,27 @@ class DeviceDiscovery:
         self.ssh = ssh
     
     def get_hostname(self) -> str:
-        """Get device hostname from show system"""
+        """Get device hostname from show system.
+        Strips NCC standby date suffixes like (01-Mar-2026-15:06:20)."""
         output = self.ssh.send_command("show system | no-more", timeout=15)
-        # Look for hostname in output
+        hostname = ""
         for line in output.split('\n'):
             if 'hostname' in line.lower() or 'system name' in line.lower():
                 match = re.search(r':\s*(\S+)', line)
                 if match:
-                    return match.group(1)
-            # Also try matching prompt
+                    hostname = match.group(1)
+                    break
             match = re.match(r'^(\S+)[#>]', line.strip())
             if match and match.group(1) not in ['show', 'no-more']:
-                return match.group(1)
-        return ""
+                hostname = match.group(1)
+                break
+        # Strip NCC standby date suffix: "YOR_CL_PE-4(01-Mar-2026-15:06:20)" -> "YOR_CL_PE-4"
+        if hostname and re.search(r'\(\d{2}-\w{3}-\d{4}', hostname):
+            clean = hostname.split('(')[0].strip()
+            if clean:
+                print(f"  {Colors.YELLOW}[Hostname] Stripped date suffix: {hostname} -> {clean}{Colors.ENDC}")
+                hostname = clean
+        return hostname
     
     def get_system_info(self) -> Dict[str, str]:
         """Get system type and version"""
@@ -3029,25 +3046,29 @@ class MultiBDPathTracer:
         
         print(f"\n{Colors.CYAN}Found {len(dnaas_neighbors)} DNAAS neighbor(s){Colors.ENDC}")
         
-        # DEDUPLICATE: Group neighbors by LEAF name (DUT may have multiple interfaces to same LEAF)
-        leafs_seen = {}  # leaf_name -> first neighbor info
+        # Group ALL neighbors by LEAF name (collect every interface per LEAF)
+        leafs_all = {}  # leaf_name -> list of (local_if, remote_if)
         for neighbor in dnaas_neighbors:
             leaf_name = neighbor.get('neighbor_name', '')
-            if leaf_name not in leafs_seen:
-                leafs_seen[leaf_name] = neighbor
-        
-        print(f"  {Colors.CYAN}Unique LEAFs: {len(leafs_seen)} ({', '.join(leafs_seen.keys())}){Colors.ENDC}")
-        
-        # Resolve LEAF IPs and build work items
-        leaf_work = []
-        for leaf_name, neighbor in leafs_seen.items():
             local_if = neighbor.get('local_interface', '')
             remote_if = neighbor.get('neighbor_interface', '')
+            if leaf_name not in leafs_all:
+                leafs_all[leaf_name] = []
+            leafs_all[leaf_name].append((local_if, remote_if))
+        
+        for lname, pairs in leafs_all.items():
+            print(f"  {Colors.CYAN}LEAF {lname}: {len(pairs)} interfaces ({', '.join(p[1] for p in pairs)}){Colors.ENDC}")
+        
+        # Resolve LEAF IPs and build work items (with ALL interfaces)
+        leaf_work = []
+        for leaf_name, if_pairs in leafs_all.items():
             leaf_info = self.dnaas_table.lookup(leaf_name)
             if not leaf_info or not leaf_info.get('ip'):
                 print(f"  {Colors.YELLOW}No IP found for {leaf_name} in DNAAS table{Colors.ENDC}")
                 continue
-            leaf_work.append((leaf_name, leaf_info['ip'], local_if, remote_if))
+            dut_interfaces = [p[0] for p in if_pairs]
+            leaf_interfaces = [p[1] for p in if_pairs]
+            leaf_work.append((leaf_name, leaf_info['ip'], dut_interfaces, leaf_interfaces))
         
         # Process LEAFs in PARALLEL (up to 4 at once) for faster discovery
         if len(leaf_work) > 1:
@@ -3056,10 +3077,10 @@ class MultiBDPathTracer:
             print(f"\n{Colors.CYAN}Parallel discovery: {len(leaf_work)} LEAFs with {max_workers} workers{Colors.ENDC}")
             
             def _process_leaf(args):
-                lname, lip, lif, rif = args
-                print(f"\n{Colors.BLUE}Processing LEAF: {lname} (via {lif}){Colors.ENDC}")
+                lname, lip, dut_ifs, leaf_ifs = args
+                print(f"\n{Colors.BLUE}Processing LEAF: {lname} ({len(dut_ifs)} DUT interfaces){Colors.ENDC}")
                 try:
-                    self._discover_bds_on_leaf(source_info, lname, lip, lif, rif)
+                    self._discover_bds_on_leaf(source_info, lname, lip, dut_ifs, leaf_ifs)
                 except Exception as e:
                     print(f"  {Colors.RED}LEAF {lname} failed: {e}{Colors.ENDC}")
             
@@ -3072,9 +3093,9 @@ class MultiBDPathTracer:
                     except Exception as e:
                         print(f"  {Colors.RED}LEAF {leaf_name} error: {e}{Colors.ENDC}")
         else:
-            for leaf_name, leaf_ip, local_if, remote_if in leaf_work:
-                print(f"\n{Colors.BLUE}Processing LEAF: {leaf_name} (via {local_if}){Colors.ENDC}")
-                self._discover_bds_on_leaf(source_info, leaf_name, leaf_ip, local_if, remote_if)
+            for leaf_name, leaf_ip, dut_ifs, leaf_ifs in leaf_work:
+                print(f"\n{Colors.BLUE}Processing LEAF: {leaf_name} ({len(dut_ifs)} DUT interfaces){Colors.ENDC}")
+                self._discover_bds_on_leaf(source_info, leaf_name, leaf_ip, dut_ifs, leaf_ifs)
         
         # Assign colors to discovered BDs
         # RULE: mgmt BDs are ALWAYS RED, others get distinct colors
@@ -3195,13 +3216,13 @@ class MultiBDPathTracer:
             ssh.close()
     
     def _discover_bds_on_leaf(self, source_info: DeviceInfo, leaf_name: str, 
-                              leaf_ip: str, dut_interface: str, leaf_interface: str):
+                              leaf_ip: str, dut_interfaces: list, leaf_interfaces: list):
         """
-        Connect to LEAF and discover all Bridge Domains.
-        For each BD, trace its path through the fabric.
+        Connect to LEAF and discover all Bridge Domains relevant to the DUT.
         
-        ENHANCED: Finds ALL interfaces on the LEAF that connect to the same DUT
-        (via LLDP hostname matching), not just the one we came in on.
+        Args:
+            dut_interfaces: ALL DUT-side interface names for this LEAF (from inventory LLDP)
+            leaf_interfaces: ALL LEAF-side interface names for this LEAF (from inventory LLDP)
         """
         ssh = SSHConnection(leaf_ip, DNAAS_USER, DNAAS_PASS)
         if not ssh.connect():
@@ -3211,102 +3232,106 @@ class MultiBDPathTracer:
         try:
             bd_discovery = BridgeDomainDiscovery(ssh, leaf_name)
             
-            # Get LLDP neighbors to find ALL interfaces connecting to this DUT
+            # Use LEAF-side interfaces from inventory (already known from LLDP)
+            dut_facing_interfaces = list(leaf_interfaces)
+            print(f"  {Colors.GREEN}DUT-facing interfaces (from inventory): {', '.join(dut_facing_interfaces)}{Colors.ENDC}")
+            
+            # Also try LLDP on the LEAF to catch any additional interfaces
             lldp_neighbors = bd_discovery.get_lldp_neighbors()
-            
-            # Find ALL LEAF interfaces that connect to the same DUT (by hostname)
             dut_hostname = source_info.hostname or source_info.serial
-            dut_facing_interfaces = []
-            
             for n in lldp_neighbors:
                 neighbor_name = n.get('neighbor_name', '')
                 local_if = n.get('local_interface', '')
-                
-                # Check if this neighbor is our DUT (match hostname)
-                if dut_hostname.lower() in neighbor_name.lower() or neighbor_name.lower() in dut_hostname.lower():
+                name_lower = neighbor_name.lower()
+                host_lower = dut_hostname.lower()
+                # Match by substring or by serial
+                if (host_lower in name_lower or name_lower in host_lower or
+                        source_info.serial.lower() in name_lower):
                     if local_if not in dut_facing_interfaces:
                         dut_facing_interfaces.append(local_if)
-                        print(f"  {Colors.CYAN}[LLDP] DUT interface: {local_if} -> {neighbor_name}{Colors.ENDC}")
+                        print(f"  {Colors.CYAN}[LLDP] Additional DUT interface: {local_if} -> {neighbor_name}{Colors.ENDC}")
             
-            # Also include the original interface we came in on
-            if leaf_interface not in dut_facing_interfaces:
-                dut_facing_interfaces.append(leaf_interface)
+            print(f"  {Colors.GREEN}Total DUT-facing interfaces: {len(dut_facing_interfaces)}{Colors.ENDC}")
             
-            print(f"  {Colors.GREEN}Found {len(dut_facing_interfaces)} interfaces connecting to DUT{Colors.ENDC}")
+            # Resolve bundles that contain DUT-facing interfaces so we can
+            # match BDs that reference bundles instead of physical interfaces
+            dut_bundles = set()
+            for dut_if in dut_facing_interfaces:
+                base_if = dut_if.split('.')[0]
+                # Search all bundles for this member
+                bundle_output = bd_discovery._run_command(f"show lacp | include {base_if} | no-more")
+                for line in bundle_output.split('\n'):
+                    bm = re.search(r'(bundle-\d+)', line)
+                    if bm:
+                        dut_bundles.add(bm.group(1))
             
-            # Get ALL Bridge Domains
+            if dut_bundles:
+                print(f"  {Colors.CYAN}DUT-facing bundles: {', '.join(dut_bundles)}{Colors.ENDC}")
+            
+            # Get ALL Bridge Domains from the LEAF
             all_bds = bd_discovery.get_bridge_domains()
             print(f"  {Colors.GREEN}Found {len(all_bds)} Bridge Domains on {leaf_name}{Colors.ENDC}")
             
-            # Filter BDs that are relevant to ANY of our DUT-facing interfaces
-            # A BD is relevant if it contains any interface connecting to DUT
-            # NOTE: mgmt BDs are included but will be colored RED in visualization
+            # Also get BD names directly from config (catches BDs that _get_bd_details
+            # might have dropped due to interface parsing issues)
+            all_bd_names_from_config = set(bd.name for bd in all_bds)
+            
+            # STEP A: Match BDs by interface (primary method)
             relevant_bds = []
             
-            # Extract user prefix from DUT hostname for filtering (e.g., YOR_PE-1 -> yor)
-            dut_user_prefix = None
-            if dut_hostname:
-                # Try multiple patterns to extract user prefix
-                # Pattern 1: YOR_PE-1 -> yor
-                prefix_match = re.match(r'^([A-Za-z]+)_', dut_hostname)
-                if prefix_match:
-                    dut_user_prefix = prefix_match.group(1).lower()
-                else:
-                    # Pattern 2: PE-1 without prefix - try to infer from BD names
-                    # Look for BDs that contain the DUT-facing interface and extract prefix from BD name
-                    for bd in all_bds:
-                        if 'mgmt' in bd.name.lower():
-                            continue
-                        for dut_if in dut_facing_interfaces:
-                            if self._bd_contains_interface(bd, dut_if, bd_discovery):
-                                # Extract prefix from BD name (e.g., g_yor_v210 -> yor)
-                                bd_prefix_match = re.match(r'^[gl]_([a-z]+)_', bd.name.lower())
-                                if bd_prefix_match:
-                                    dut_user_prefix = bd_prefix_match.group(1)
-                                    print(f"  {Colors.CYAN}User prefix inferred from BD {bd.name}: {dut_user_prefix}{Colors.ENDC}")
-                                    break
-                        if dut_user_prefix:
-                            break
-                
-                if dut_user_prefix:
-                    print(f"  {Colors.CYAN}User prefix: {dut_user_prefix}{Colors.ENDC}")
-            
             for bd in all_bds:
-                # SKIP mgmt BDs completely - they span the entire fabric and will cause infinite loops
                 if 'mgmt' in bd.name.lower():
                     continue
                 
-                # Check if BD matches user prefix (e.g., g_yor_* for YOR_PE-1)
-                # This catches BDs that use different physical interfaces but belong to the same user
-                bd_matches_prefix = False
-                if dut_user_prefix:
-                    # Check if BD name contains user prefix (e.g., g_yor_v210 contains 'yor')
-                    bd_matches_prefix = dut_user_prefix in bd.name.lower()
-                
-                # Include BD if it either:
-                # 1. Contains a DUT-facing interface (direct physical match)
-                # 2. Matches the user prefix (same user, possibly different physical link)
-                if bd_matches_prefix:
-                    if bd not in relevant_bds:
-                        relevant_bds.append(bd)
-                        print(f"    Found (prefix match): {bd.name}")
+                for dut_if in dut_facing_interfaces:
+                    if self._bd_contains_interface(bd, dut_if, bd_discovery):
+                        if bd not in relevant_bds:
+                            relevant_bds.append(bd)
+                            print(f"    Found (interface match): {bd.name} via {dut_if}")
+                        break
                 else:
-                    for dut_if in dut_facing_interfaces:
-                        # Check if BD contains this interface or its bundle
-                        if self._bd_contains_interface(bd, dut_if, bd_discovery):
+                    # Also check if BD contains any of the DUT-facing bundles
+                    for bd_iface in bd.interfaces:
+                        bd_base = bd_iface.split('.')[0]
+                        if bd_base in dut_bundles:
                             if bd not in relevant_bds:
                                 relevant_bds.append(bd)
-                                print(f"    Found (interface match): {bd.name}")
+                                print(f"    Found (bundle match): {bd.name} via {bd_base}")
                             break
             
-            print(f"  {Colors.CYAN}Relevant BDs for DUT: {len(relevant_bds)} (prefix: {dut_user_prefix}){Colors.ENDC}")
+            # STEP B: Config-based search (FALLBACK only when STEP A found nothing)
+            if not relevant_bds:
+                print(f"  {Colors.YELLOW}No BDs found via interface/bundle match, searching config...{Colors.ENDC}")
+                search_terms = list(dut_facing_interfaces) + list(dut_bundles)
+                config_found_names = set()
+                
+                for search_term in search_terms:
+                    config_bd_names = bd_discovery.find_bd_from_config(search_term)
+                    for bd_name in config_bd_names:
+                        if 'mgmt' in bd_name.lower():
+                            continue
+                        config_found_names.add(bd_name)
+                
+                existing_names = set(bd.name for bd in relevant_bds)
+                for bd_name in config_found_names:
+                    if bd_name not in existing_names:
+                        bd = bd_discovery._get_bd_details(bd_name)
+                        if not bd:
+                            bd = BridgeDomain(bd_id=0)
+                            bd.name = bd_name
+                        relevant_bds.append(bd)
+                        print(f"    Found (config match): {bd.name}")
             
-            # Get LLDP neighbors for path tracing
-            lldp_neighbors = bd_discovery.get_lldp_neighbors()
+            print(f"  {Colors.CYAN}Relevant BDs for DUT: {len(relevant_bds)}{Colors.ENDC}")
+            
+            # Build LEAF->DUT interface pair map (for port-mode and sub-interface resolution)
+            leaf_to_dut_map = {}
+            for i, l_if in enumerate(leaf_interfaces):
+                if i < len(dut_interfaces):
+                    leaf_to_dut_map[l_if] = dut_interfaces[i]
             
             # Process each relevant BD
             for bd in relevant_bds:
-                # SKIP BDs that have already been fully traced (avoids redundant tracing)
                 with self._bd_paths_lock:
                     already_traced = bd.name in self.bd_paths
                 if already_traced:
@@ -3317,70 +3342,89 @@ class MultiBDPathTracer:
                 
                 print(f"\n  {Colors.HEADER}[BD] {bd.name} ({bd_type}, VLAN {global_vlan or 'N/A'}){Colors.ENDC}")
                 
-                # Create BDPathInfo
                 bd_path_info = BDPathInfo(
                     bd_name=bd.name,
                     bd_type=bd_type,
                     global_vlan=global_vlan,
-                    color=""  # Will be assigned later
+                    color=""
                 )
                 
-                # Find DUT sub-interface for this BD FIRST (so we can use it in path)
-                dut_subif = self._find_dut_subinterface(
-                    source_info, 
-                    dut_interface, 
-                    global_vlan, 
-                    bd.name
-                )
+                # Find which LEAF interface carries this BD (needed before DUT lookup)
+                leaf_if_for_bd = leaf_interfaces[0] if leaf_interfaces else ''
+                bd_uses_bundle = None
+                for l_if in leaf_interfaces:
+                    if self._bd_contains_interface(bd, l_if, bd_discovery):
+                        leaf_if_for_bd = l_if
+                        break
+                else:
+                    # Check bundles
+                    for b in dut_bundles:
+                        for bd_iface in bd.interfaces:
+                            if bd_iface.split('.')[0] == b:
+                                leaf_if_for_bd = bd_iface
+                                bd_uses_bundle = b
+                                break
+                
+                # Determine the correct DUT interface for this BD
+                primary_dut_if = dut_interfaces[0] if dut_interfaces else ''
+                
+                if bd_uses_bundle:
+                    # BD uses a bundle - find which DUT interfaces are members
+                    members = bd_discovery.resolve_bundle_members(bd_uses_bundle)
+                    for member in members:
+                        if member in leaf_to_dut_map:
+                            primary_dut_if = leaf_to_dut_map[member]
+                            break
+                elif leaf_if_for_bd in leaf_to_dut_map:
+                    primary_dut_if = leaf_to_dut_map[leaf_if_for_bd]
+                
+                # Find DUT sub-interface
+                dut_subif = None
+                if global_vlan:
+                    dut_subif = self._find_dut_subinterface(source_info, primary_dut_if, global_vlan, bd.name)
+                
                 bd_path_info.dut_subinterface = dut_subif
                 
-                # Use sub-interface if found, otherwise construct from VLAN
                 dut_if_with_vlan = dut_subif
                 if not dut_if_with_vlan and global_vlan:
-                    dut_if_with_vlan = f"{dut_interface}.{global_vlan}"
+                    dut_if_with_vlan = f"{primary_dut_if}.{global_vlan}"
                 elif not dut_if_with_vlan:
-                    dut_if_with_vlan = dut_interface
+                    # Port-mode: use the bare DUT interface
+                    dut_if_with_vlan = primary_dut_if
                 
-                # Add source device to path (use sub-interface name)
                 bd_path_info.path.append({
                     'device': source_info.hostname or source_info.serial,
                     'device_type': 'PE',
-                    'interface': dut_if_with_vlan,  # Now includes VLAN suffix (e.g., ge400-0/0/5.2635)
-                    'bd_interface': None  # DUT doesn't have BD
+                    'interface': dut_if_with_vlan,
+                    'bd_interface': None
                 })
                 
-                # Add LEAF to path
                 bd_path_info.path.append({
                     'device': leaf_name,
                     'device_type': 'LEAF',
-                    'interface': leaf_interface,
-                    'bd_interface': self._find_bd_interface(bd, leaf_interface, bd_discovery)
+                    'interface': leaf_if_for_bd,
+                    'bd_interface': self._find_bd_interface(bd, leaf_if_for_bd, bd_discovery)
                 })
                 
-                # Record interface mapping (with sub-interface for DUT)
                 bd_path_info.interfaces[source_info.hostname or source_info.serial] = dut_if_with_vlan
-                bd_path_info.interfaces[leaf_name] = leaf_interface
+                bd_path_info.interfaces[leaf_name] = leaf_if_for_bd
                 
-                # Trace path through DNAAS (LEAF -> SPINE -> SuperSpine)
                 self._trace_bd_path(bd, bd_path_info, leaf_name, leaf_ip, bd_discovery, lldp_neighbors)
                 
-                # Store result (thread-safe for parallel LEAF discovery)
                 with self._bd_paths_lock:
                     self.bd_paths[bd.name] = bd_path_info
                 
-                # Add connection for topology (use sub-interface with VLAN, not physical)
-                # Construct expected sub-interface name if dut_subif not found
                 from_interface = dut_subif
                 if not from_interface and global_vlan:
-                    from_interface = f"{dut_interface}.{global_vlan}"
+                    from_interface = f"{primary_dut_if}.{global_vlan}"
                 elif not from_interface:
-                    from_interface = dut_interface
+                    from_interface = primary_dut_if
                     
                 self.discovered_connections.append({
                     'from': source_info.hostname or source_info.serial,
                     'to': leaf_name,
                     'from_if': from_interface,
-                    'to_if': leaf_interface,
+                    'to_if': leaf_if_for_bd,
                     'bd_name': bd.name,
                     'bd_type': bd_type,
                     'global_vlan': global_vlan
@@ -3437,75 +3481,62 @@ class MultiBDPathTracer:
                                 target_vlan: Optional[int], bd_name: str) -> str:
         """
         Find the DUT sub-interface that matches the BD VLAN.
-        
-        Steps:
-        1. Try: show configuration interfaces <lldp_interface>.* | include vlan-id
-        2. If not found: show configuration interfaces | include <vlan> (context lines)
-        3. Parse output to find matching sub-interface
+        Uses cached SSH connection to avoid reconnecting per-BD.
         """
         if not target_vlan:
             return lldp_interface
         
-        # Try to connect to DUT
         mgmt_ip = source_info.mgmt_ip
         if not mgmt_ip:
-            # Try using serial as hostname (DeviceInfo uses 'serial' not 'device_serial')
             mgmt_ip = source_info.serial
-        
         if not mgmt_ip:
-            return f"{lldp_interface}.{target_vlan}"  # Best guess
+            return f"{lldp_interface}.{target_vlan}"
         
         print(f"    {Colors.CYAN}Looking for sub-interface with VLAN {target_vlan}...{Colors.ENDC}")
         
         try:
-            ssh = SSHConnection(mgmt_ip, DEFAULT_USER, DEFAULT_PASS)
-            if not ssh.connect():
+            ssh = self._get_cached_ssh(mgmt_ip, DEFAULT_USER, DEFAULT_PASS)
+            if not ssh:
                 return f"{lldp_interface}.{target_vlan}"
             
-            try:
-                # Method 1: Check sub-interfaces of the LLDP interface
-                cmd1 = f"show configuration interfaces {lldp_interface} | include vlan-id | no-more"
-                output1 = self._run_dut_command(ssh, cmd1)
-                
-                # Parse for vlan-id matching target
-                for line in output1.split('\n'):
-                    if f'vlan-id {target_vlan}' in line or f'vlan-id: {target_vlan}' in line:
-                        # Found! Now find the sub-interface name
-                        subif_match = re.search(rf'{lldp_interface}\.(\d+)', output1)
-                        if subif_match:
-                            subif = f"{lldp_interface}.{subif_match.group(1)}"
-                            print(f"    {Colors.GREEN}Found sub-interface: {subif}{Colors.ENDC}")
-                            return subif
-                
-                # Method 2: Search all interfaces for the VLAN
-                cmd2 = f"show configuration interfaces | include {target_vlan} | no-more"
-                output2 = self._run_dut_command(ssh, cmd2)
-                
-                # Look for interface with this VLAN
-                for line in output2.split('\n'):
-                    if lldp_interface.split('.')[0] in line:
-                        subif_match = re.search(rf'({lldp_interface.split(".")[0]}\.\d+)', line)
-                        if subif_match:
-                            subif = subif_match.group(1)
-                            print(f"    {Colors.GREEN}Found sub-interface: {subif}{Colors.ENDC}")
-                            return subif
-                
-                # Method 3: Try common sub-interface pattern
-                common_subif = f"{lldp_interface}.{target_vlan}"
-                cmd3 = f"show configuration interfaces {common_subif} | no-more"
-                output3 = self._run_dut_command(ssh, cmd3)
-                
-                if 'Unknown' not in output3 and 'ERROR' not in output3 and output3.strip():
-                    print(f"    {Colors.GREEN}Found sub-interface: {common_subif}{Colors.ENDC}")
-                    return common_subif
-                
-            finally:
-                ssh.close()
+            base_if = lldp_interface.split('.')[0]
+            
+            # Method 1: Check sub-interfaces of the LLDP interface
+            cmd1 = f"show configuration interfaces {base_if} | include vlan-id | no-more"
+            output1 = self._run_dut_command(ssh, cmd1)
+            
+            for line in output1.split('\n'):
+                if f'vlan-id {target_vlan}' in line or f'vlan-id: {target_vlan}' in line:
+                    subif_match = re.search(rf'{re.escape(base_if)}\.(\d+)', output1)
+                    if subif_match:
+                        subif = f"{base_if}.{subif_match.group(1)}"
+                        print(f"    {Colors.GREEN}Found sub-interface: {subif}{Colors.ENDC}")
+                        return subif
+            
+            # Method 2: Search all interfaces for the VLAN
+            cmd2 = f"show configuration interfaces | include {target_vlan} | no-more"
+            output2 = self._run_dut_command(ssh, cmd2)
+            
+            for line in output2.split('\n'):
+                if base_if in line:
+                    subif_match = re.search(rf'({re.escape(base_if)}\.\d+)', line)
+                    if subif_match:
+                        subif = subif_match.group(1)
+                        print(f"    {Colors.GREEN}Found sub-interface: {subif}{Colors.ENDC}")
+                        return subif
+            
+            # Method 3: Try common sub-interface pattern
+            common_subif = f"{base_if}.{target_vlan}"
+            cmd3 = f"show configuration interfaces {common_subif} | no-more"
+            output3 = self._run_dut_command(ssh, cmd3)
+            
+            if 'Unknown' not in output3 and 'ERROR' not in output3 and output3.strip():
+                print(f"    {Colors.GREEN}Found sub-interface: {common_subif}{Colors.ENDC}")
+                return common_subif
                 
         except Exception as e:
             print(f"    {Colors.YELLOW}Could not determine sub-interface: {e}{Colors.ENDC}")
         
-        # Fallback: use VLAN as sub-interface number
         return f"{lldp_interface}.{target_vlan}"
     
     def _run_dut_command(self, ssh: SSHConnection, cmd: str) -> str:
@@ -3569,12 +3600,24 @@ class MultiBDPathTracer:
                                         'neighbor_if': n['neighbor_interface']
                                     })
         
-        # Trace through each uplink (usually SPINE)
-        # IMPORTANT: Include initiator DUT in visited so it's NOT discovered as a termination
+        # IMPORTANT: Include initiator DUT + all its aliases in visited
+        # so it's NOT re-discovered as a termination on remote LEAFs
         initiator_name = bd_path_info.path[0]['device'] if bd_path_info.path else None
         visited = {current_device}
         if initiator_name:
             visited.add(initiator_name)
+            # Add known aliases: serial, hostname, NCC serials
+            inv_entry = self.inventory.get_device(initiator_name)
+            if inv_entry:
+                if inv_entry.hostname:
+                    visited.add(inv_entry.hostname.rstrip(','))
+                visited.add(inv_entry.serial)
+            # For cluster devices, also add the main device name and NCC entries
+            for key, dev in self.inventory.data.get("devices", {}).items():
+                h = (dev.get('hostname') or '').split('(')[0].strip()
+                if h and (h == initiator_name or key == initiator_name):
+                    visited.add(key)
+                    visited.add(h)
         
         for uplink in uplink_interfaces:
             neighbor = uplink['neighbor']
@@ -4688,7 +4731,6 @@ class MultiBDPathTracer:
                     # Look up from inventory to get IP or serial
                     pe_info = self.inventory.get_device_by_hostname(device_name) if hasattr(self.inventory, 'get_device_by_hostname') else None
                     if not pe_info:
-                        # Try direct lookup
                         pe_info = self.inventory.get_device(device_name)
                     
                     pe_ip = ''
@@ -4696,6 +4738,13 @@ class MultiBDPathTracer:
                     if pe_info:
                         pe_ip = pe_info.mgmt_ip or ''
                         pe_serial = pe_info.serial or ''
+                        # For cluster devices, resolve to active NCC
+                        active = _find_active_ncc(pe_serial, self.inventory.data.get("devices", {}))
+                        if active:
+                            active_info = self.inventory.data["devices"].get(active, {})
+                            pe_serial = active
+                            if not pe_ip:
+                                pe_ip = active_info.get('mgmt_ip', '') or ''
                     
                     # ENHANCED: Extract serial from device name if it contains SN pattern
                     # Patterns like: R2-WK31D7VW00016, R1-CL48, YOR_PE-1, R3_WDY1B77700018
@@ -4952,6 +5001,7 @@ class OutputGenerator:
         }
         
         # Add BD summary to metadata if available
+        normalized_bds = []
         if bd_summary:
             # Transform bd_path to normalized format expected by topology.js showBDLegend
             raw_bds = bd_summary.get("bd_path", [])
@@ -5326,40 +5376,11 @@ class OutputGenerator:
                 seen_links.add(link_key)
                 unique_connections.append(conn)
         
-        # Build BD color map from bd_summary - group by Global VLAN
-        bd_color_map = {}  # bd_name -> color
-        vlan_color_map = {}  # vlan -> color (for grouping)
-        vlan_bds = {}  # vlan -> list of bd_names
-        
-        if bd_summary and "bd_path" in bd_summary:
-            # First pass: group BDs by their Global VLAN
-            for bd_entry in bd_summary["bd_path"]:
-                bd_name = bd_entry.get("bd_name", "")
-                if not bd_name:
-                    continue
-                
-                # Extract VLAN from BD name pattern (e.g., g_yor_v210 -> 210)
-                _, global_vlan = classify_bd_type(bd_name)
-                
-                # Also check vlan_id field from the BD entry
-                if not global_vlan:
-                    global_vlan = bd_entry.get("vlan_id")
-                
-                vlan_key = global_vlan or "unknown"
-                if vlan_key not in vlan_bds:
-                    vlan_bds[vlan_key] = []
-                if bd_name not in vlan_bds[vlan_key]:
-                    vlan_bds[vlan_key].append(bd_name)
-            
-            # Second pass: assign colors to VLANs
-            for idx, vlan in enumerate(sorted(vlan_bds.keys(), key=lambda x: x if isinstance(x, int) else 0)):
-                vlan_color_map[vlan] = BD_COLOR_PALETTE[idx % len(BD_COLOR_PALETTE)]
-            
-            # Third pass: map BD names to colors based on their VLAN
-            for vlan, bd_names in vlan_bds.items():
-                color = vlan_color_map.get(vlan, "#2c3e50")
-                for bd_name in bd_names:
-                    bd_color_map[bd_name] = color
+        # Build BD color map directly from the normalized metadata BDs
+        # so link colors are guaranteed to match the BD panel colors
+        bd_color_map = {}
+        for bd_meta in normalized_bds:
+            bd_color_map[bd_meta["name"]] = bd_meta["color"]
         
         for i, conn in enumerate(unique_connections):
             from_device = conn["from"]
@@ -5921,6 +5942,71 @@ def _fuzzy_serial_match(input_serial: str, known_serial: str, threshold: float =
     return ratio >= threshold
 
 
+def _find_active_ncc(device_name: str, devices: dict) -> str:
+    """Find the active NCC for a cluster device.
+    
+    Strategy 1: NCC serial prefix matching (e.g. kvm108-cl408d-ncc0 -> ncc1)
+    Strategy 2: Hostname matching (e.g. YOR_CL_PE-4 -> best NCC serial)
+    
+    Prefers: clean hostname (no date suffix) > most recent last_seen.
+    """
+    import re as _re
+    name_norm = device_name.split('(')[0].strip().lower()
+    _date_re = _re.compile(r'\(\d{2}-\w{3}-\d{4}')
+    
+    def _sort_key(c):
+        """Sort: no-date-suffix first, then most recent last_seen."""
+        return (c[2], '')  # has_date=False sorts before True
+    
+    def _pick_best(candidates, current_entry):
+        """Pick best candidate, comparing against current entry."""
+        no_date = sorted([c for c in candidates if not c[2]], key=lambda c: c[1], reverse=True)
+        with_date = sorted([c for c in candidates if c[2]], key=lambda c: c[1], reverse=True)
+        ordered = no_date + with_date
+        best = ordered[0]
+        
+        if not best[2]:
+            print(f"  {Colors.CYAN}[Resolve] {device_name} -> {best[0]} (active NCC, clean hostname){Colors.ENDC}")
+            return best[0]
+        
+        # No current entry = hostname lookup (Strategy 2), just pick most recent
+        if not current_entry:
+            print(f"  {Colors.CYAN}[Resolve] {device_name} -> {best[0]} (most recent NCC, last_seen={best[1]}){Colors.ENDC}")
+            return best[0]
+        
+        # Both have date suffixes: pick more recently seen
+        current_has_date = bool(_date_re.search(current_entry.get('hostname', '')))
+        if current_has_date and best[1] > (current_entry.get('last_seen', '') or ''):
+            print(f"  {Colors.CYAN}[Resolve] {device_name} -> {best[0]} (more recent NCC, last_seen={best[1]}){Colors.ENDC}")
+            return best[0]
+        return ''
+    
+    # Strategy 1: NCC serial prefix matching
+    ncc_match = _re.match(r'^(.+)-ncc\d+$', name_norm, _re.IGNORECASE)
+    if ncc_match:
+        prefix = ncc_match.group(1)
+        candidates = []
+        for key, d in devices.items():
+            if key.lower().startswith(prefix + '-ncc') and key.lower() != name_norm:
+                h = d.get('hostname') or ''
+                candidates.append((key, d.get('last_seen', ''), bool(_date_re.search(h))))
+        if candidates:
+            current = devices.get(device_name) or devices.get(device_name.upper()) or {}
+            return _pick_best(candidates, current)
+    
+    # Strategy 2: hostname matching
+    candidates = []
+    for key, d in devices.items():
+        if key.lower() == name_norm:
+            continue
+        h = (d.get('hostname') or '').split('(')[0].strip().lower()
+        if h == name_norm:
+            candidates.append((key, d.get('last_seen', ''), bool(_date_re.search(d.get('hostname', '')))))
+    if not candidates:
+        return ''
+    return _pick_best(candidates, {})
+
+
 def _resolve_ssh_target(serial: str, inventory: DeviceInventory) -> str:
     """Resolve a serial/hostname to an SSH-connectable target (IP or hostname).
     
@@ -5936,6 +6022,7 @@ def _resolve_ssh_target(serial: str, inventory: DeviceInventory) -> str:
     
     # 1. Check device inventory (exact + fuzzy)
     devices = inventory.data.get("devices", {})
+    matched_entry = None
     for key, d in devices.items():
         dev_hostname = (d.get('hostname') or '').lower()
         dev_serial = d.get('serial', key)
@@ -5945,15 +6032,22 @@ def _resolve_ssh_target(serial: str, inventory: DeviceInventory) -> str:
         fuzzy = _fuzzy_serial_match(serial, dev_serial)
         
         if exact or fuzzy:
+            matched_entry = (key, d)
             if mgmt_ip:
                 print(f"  {Colors.CYAN}[Resolve] {serial} -> {mgmt_ip} (inventory){Colors.ENDC}")
                 return mgmt_ip
-            # If key is an IP, use it
             if re.match(r'^\d+\.\d+\.\d+\.\d+$', key):
                 print(f"  {Colors.CYAN}[Resolve] {serial} -> {key} (inventory key=IP){Colors.ENDC}")
                 return key
+            break
     
-    # 2. Check Scaler DB operational.json
+    # 1b. If primary entry had no mgmt_ip, try NCC lookup (cluster devices)
+    if matched_entry:
+        ncc = _find_active_ncc(serial, devices)
+        if ncc:
+            return ncc
+    
+    # 2. Check Scaler DB operational.json (has mgmt_ip and ssh_host)
     db_configs = Path('/home/dn/SCALER/db/configs')
     if db_configs.exists():
         for device_dir in db_configs.iterdir():
@@ -5966,23 +6060,25 @@ def _resolve_ssh_target(serial: str, inventory: DeviceInventory) -> str:
                         dev_hostname = op_data.get('hostname', device_dir.name) or device_dir.name
                         dev_serial = (op_data.get('serial_number', '') or '')
                         dev_ip = op_data.get('connection_ip', '') or ''
+                        dev_mgmt = (op_data.get('mgmt_ip', '') or '').split('/')[0]
                         
                         exact = (dev_serial.lower() == search_lower or
+                                 device_dir.name.lower() == search_lower or
                                  search_lower in dev_hostname.lower() or
                                  dev_hostname.lower() in search_lower)
                         fuzzy = dev_serial and _fuzzy_serial_match(serial, dev_serial)
                         
                         if exact or fuzzy:
                             if dev_ip:
-                                print(f"  {Colors.CYAN}[Resolve] {serial} -> {dev_ip} (Scaler DB){Colors.ENDC}")
+                                print(f"  {Colors.CYAN}[Resolve] {serial} -> {dev_ip} (Scaler DB connection_ip){Colors.ENDC}")
                                 return dev_ip
-                            if dev_serial and dev_serial.upper() != search_upper:
-                                print(f"  {Colors.CYAN}[Resolve] {serial} -> {dev_serial} (Scaler DB serial){Colors.ENDC}")
-                                return dev_serial
-                            folder_name = device_dir.name
-                            if folder_name.lower() != search_lower:
-                                print(f"  {Colors.CYAN}[Resolve] {serial} -> {folder_name} (Scaler DB hostname){Colors.ENDC}")
-                                return folder_name
+                            if dev_mgmt and re.match(r'^\d+\.\d+\.\d+\.\d+$', dev_mgmt):
+                                print(f"  {Colors.CYAN}[Resolve] {serial} -> {dev_mgmt} (Scaler DB mgmt_ip){Colors.ENDC}")
+                                return dev_mgmt
+                            ssh_host = (op_data.get('ssh_host', '') or '')
+                            if ssh_host:
+                                print(f"  {Colors.CYAN}[Resolve] {serial} -> {ssh_host} (Scaler DB ssh_host){Colors.ENDC}")
+                                return ssh_host
                     except Exception:
                         pass
     
@@ -5995,7 +6091,12 @@ def _resolve_ssh_target(serial: str, inventory: DeviceInventory) -> str:
             print(f"  {Colors.CYAN}[Resolve] {serial} -> {mgmt_ip} (credentials){Colors.ENDC}")
             return mgmt_ip
     
-    # 4. Try uppercase (DNOS serials resolve via DNS in uppercase)
+    # 4. NCC hostname fallback (picks most recently seen NCC)
+    ncc = _find_active_ncc(serial, devices)
+    if ncc:
+        return ncc
+    
+    # 5. Try uppercase (DNOS serials resolve via DNS in uppercase)
     if search_upper != serial:
         print(f"  {Colors.YELLOW}[Resolve] Trying uppercase: {search_upper}{Colors.ENDC}")
         return search_upper

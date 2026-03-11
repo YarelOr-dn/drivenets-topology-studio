@@ -260,24 +260,25 @@ window.DnaasOperations = {
     },
 
     _reconstructBDMetadataFromCanvas(editor) {
-        const BD_COLOR_PALETTE = [
-            '#00bcd4', '#ff9800', '#4caf50', '#e91e63', '#9c27b0',
-            '#03a9f4', '#ff5722', '#8bc34a', '#673ab7', '#ffc107',
-            '#009688', '#f44336', '#2196f3', '#cddc39', '#ff6f00'
+        const fallbackPalette = [
+            '#3498db', '#e74c3c', '#2ecc71', '#9b59b6', '#f39c12',
+            '#1abc9c', '#e91e63', '#00bcd4', '#ff5722', '#8bc34a'
         ];
         const seen = new Map();
         editor.objects.forEach(obj => {
             if (obj.type !== 'link' && obj.type !== 'unbound') return;
             const bdName = obj.linkDetails?.bd_name || obj._bdName;
-            if (!bdName || seen.has(bdName)) return;
-            const vlan = obj.linkDetails?.vlan || obj.linkDetails?.vlan_id || obj.linkDetails?.global_vlan || null;
-            seen.set(bdName, { name: bdName, vlan: vlan });
+            if (!bdName) return;
+            if (!seen.has(bdName)) {
+                const vlan = obj.linkDetails?.vlan || obj.linkDetails?.vlan_id || obj.linkDetails?.global_vlan || null;
+                seen.set(bdName, { vlan, color: obj.color || null });
+            }
         });
         if (seen.size === 0) return;
         const bds = [];
         let idx = 0;
         for (const [name, info] of seen) {
-            bds.push({ name, bd_name: name, vlan: info.vlan, color: BD_COLOR_PALETTE[idx % BD_COLOR_PALETTE.length] });
+            bds.push({ name, bd_name: name, vlan: info.vlan, color: info.color || fallbackPalette[idx % fallbackPalette.length] });
             idx++;
         }
         editor._multiBDMetadata = { bridge_domains: bds, view_mode: 'separate' };

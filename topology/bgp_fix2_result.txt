@@ -1,0 +1,71 @@
+=== TEST 1: SSH basic - show version ===
+Warning: Permanently added '100.64.7.197' (ED25519) to the list of known hosts.
+show version
+exit
+show version
+exit
+DRIVENETS CLI Loading...                        YOR_CL_PE-4#                                                                                 
+Session Timeout
+YOR_CL_PE-4# Connection to 100.64.7.197 closed.
+
+=== TEST 2: SSH show bgp summary ===
+Warning: Permanently added '100.64.7.197' (ED25519) to the list of known hosts.
+show bgp summary
+exit
+show bgp summary
+exit
+DRIVENETS CLI Loading...                        YOR_CL_PE-4#                                                                                 
+Session Timeout
+YOR_CL_PE-4# Connection to 100.64.7.197 closed.
+
+=== TEST 3: ExaBGP diagnose ===
+{
+  "status": "ok",
+  "message": "Session is already ESTABLISHED. No diagnosis needed.",
+  "tcp_state": "ESTAB"
+}
+
+=== TEST 4: ExaBGP log tail ===
+welcome         Thank you for using ExaBGP
+cli control     named pipes for the cli are:
+cli control     to send commands  /run/exabgp/exabgp.in
+cli control     to read responses /run/exabgp/exabgp.out
+outgoing-1      --------------------------------------------------------------------
+outgoing-1      the connection can not carry the following family/families
+outgoing-1       - peer is not configured for ipv6/flow-vpn
+outgoing-1       - peer is not configured for ipv4/flow-vpn
+outgoing-1      therefore no routes of this kind can be announced on the connection
+outgoing-1      --------------------------------------------------------------------
+
+=== TEST 5: Check ExaBGP config ===
+process pipe-reader {
+    run /usr/bin/socat stdout pipe:/run/exabgp/exabgp.in;
+    encoder text;
+}
+
+neighbor 100.70.0.206 {
+    router-id 100.64.6.134;
+    local-address 100.64.6.134;
+    local-as 65200;
+    peer-as 1234567;
+    hold-time 180;
+    passive false;
+    connect 179;
+    outgoing-ttl 64;
+
+    family {
+        ipv4 unicast;
+        ipv4 flow;
+        ipv4 flow-vpn;
+        ipv4 mpls-vpn;
+        ipv6 flow;
+        ipv6 flow-vpn;
+        ipv6 mpls-vpn;
+    }
+
+    api {
+        processes [ pipe-reader ];
+    }
+}
+
+=== DONE ===

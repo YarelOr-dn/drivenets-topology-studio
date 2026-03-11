@@ -1,0 +1,363 @@
+=== Step 1: Kill ExaBGP process ===
+dn       3332114  0.0  0.0   2892   948 ?        Ss   17:13   0:00 /bin/sh -c sleep 30 && cd /home/dn/SCALER/FLOWSPEC_VPN/exabgp && python3 bgp_watchdog.py --auto-restart 2>> logs/watchdog.log # bgp_watchdog_30
+
+=== Step 2: Enable bgp_guard iptables (drop RSTs while ExaBGP is down) ===
+usage: bgp_tool.py [-h]
+                   {start,stop,status,inject,withdraw,list,cleanup,malform,hexdump,scale,verify,diagnose,attribute-test,engine-start,engine-stop,engine-inject}
+                   ...
+bgp_tool.py: error: argument command: invalid choice: 'guard' (choose from 'start', 'stop', 'status', 'inject', 'withdraw', 'list', 'cleanup', 'malform', 'hexdump', 'scale', 'verify', 'diagnose', 'attribute-test', 'engine-start', 'engine-stop', 'engine-inject')
+Guard not available, continuing
+
+=== Step 3: Wait 5 FULL minutes with ZERO TCP/179 traffic ===
+FortiGate IDS quarantine needs 2-5 min of silence to expire.
+PE-4 has passive=enabled (no SYNs from device).
+ExaBGP killed (no SYNs from server).
+Starting 300s countdown...
+  Waited 10s... (290s remaining)
+  Waited 20s... (280s remaining)
+  Waited 30s... (270s remaining)
+  Waited 40s... (260s remaining)
+  Waited 50s... (250s remaining)
+  Waited 60s... (240s remaining)
+  Waited 70s... (230s remaining)
+  Waited 80s... (220s remaining)
+  Waited 90s... (210s remaining)
+  Waited 100s... (200s remaining)
+  Waited 110s... (190s remaining)
+  Waited 120s... (180s remaining)
+  Waited 130s... (170s remaining)
+  Waited 140s... (160s remaining)
+  Waited 150s... (150s remaining)
+  Waited 160s... (140s remaining)
+  Waited 170s... (130s remaining)
+  Waited 180s... (120s remaining)
+  Waited 190s... (110s remaining)
+  Waited 200s... (100s remaining)
+  Waited 210s... (90s remaining)
+  Waited 220s... (80s remaining)
+  Waited 230s... (70s remaining)
+  Waited 240s... (60s remaining)
+  Waited 250s... (50s remaining)
+  Waited 260s... (40s remaining)
+  Waited 270s... (30s remaining)
+  Waited 280s... (20s remaining)
+  Waited 290s... (10s remaining)
+  Waited 300s... (0s remaining)
+300s silence complete.
+
+=== Step 4: Test TCP/179 reachability ===
+Single nc -z test (one SYN packet)...
+[WARN] TCP/179 still blocked. Will try starting ExaBGP anyway (PE-4 has passive).
+
+=== Step 5: Start ExaBGP ===
+[2026-03-09 17:18:23] Killed orphan ExaBGP/socat process PID 3334648
+[2026-03-09 17:18:23] Killed 1 orphaned ExaBGP/socat process(es). Waiting 3s for TCP state to clear.
+[2026-03-09 17:18:26] Pre-start cleanup: killed 1 orphan(s)
+[2026-03-09 17:18:26] Port 179 guard: OPEN (ACCEPT active)
+[2026-03-09 17:18:26] Starting ExaBGP with config: /tmp/exabgp_pe_4.conf
+[2026-03-09 17:18:26] ExaBGP started with PID 3334832
+[2026-03-09 17:18:28] ExaBGP running (PID 3334832). Session pe_4 active.
+[2026-03-09 17:18:28] Waiting 6s for BGP establish, then reinjecting 4 manual route(s)...
+[2026-03-09 17:18:34] Route written to pipe
+[2026-03-09 17:18:34] Reinjected: announce flow route rd 4.4.4.4:100 destination 100.100.100.1...
+[2026-03-09 17:18:34] Route written to pipe
+[2026-03-09 17:18:34] Reinjected: announce flow route rd 4.4.4.4:100 destination 100.100.100.1...
+[2026-03-09 17:18:34] Route written to pipe
+[2026-03-09 17:18:34] Reinjected: announce flow route rd 4.4.4.4:100 destination 100.100.100.1...
+[2026-03-09 17:18:34] Route written to pipe
+[2026-03-09 17:18:34] Reinjected: announce flow route rd 4.4.4.4:101 destination 100.100.100.1...
+{
+  "session_id": "pe_4",
+  "status": "active",
+  "created": "2026-03-09T17:18:26.272130+00:00",
+  "exabgp_pid": 3334832,
+  "exabgp_config": "/tmp/exabgp_pe_4.conf",
+  "exabgp_log": "/home/dn/SCALER/FLOWSPEC_VPN/exabgp/logs/pe_4_exabgp.log",
+  "peer_ip": "100.70.0.206",
+  "peer_as": "unknown",
+  "exabgp_ip": "100.70.0.32",
+  "device_ip": "100.70.0.206",
+  "selected_afis": [],
+  "target_device": null,
+  "dnaas_leaf": null,
+  "applied_configs": {},
+  "injected_routes": [
+    {
+      "route": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+      "injected_at": "2026-03-09T17:18:26.271367+00:00"
+    },
+    {
+      "route": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+      "injected_at": "2026-03-09T17:18:26.271410+00:00"
+    },
+    {
+      "route": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+      "injected_at": "2026-03-09T17:18:26.271415+00:00"
+    },
+    {
+      "route": "announce flow route rd 4.4.4.4:101 destination 100.100.100.1/32 redirect 1234567:101 extended-community [ target:1234567:301 ]",
+      "injected_at": "2026-03-09T17:18:26.271422+00:00"
+    }
+  ],
+  "scale_injections": [],
+  "advertised_state": {
+    "summary": {
+      "total_routes": 4,
+      "by_type": {
+        "flowspec-vpn": 4
+      },
+      "by_afi_safi": {
+        "ipv4 flow-vpn": 4
+      },
+      "prefix_count": 1,
+      "prefix_ranges": [
+        "100.100.100.1/32"
+      ],
+      "all_prefixes": [
+        "100.100.100.1/32"
+      ],
+      "rds": [
+        "4.4.4.4:100",
+        "4.4.4.4:101"
+      ],
+      "route_targets": [
+        "1234567:300",
+        "1234567:301"
+      ],
+      "actions": [
+        "redirect-ip 49.49.49.9",
+        "redirect-to-rt 1234567:101"
+      ]
+    },
+    "routes": [
+      {
+        "raw": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+        "action": "announce",
+        "type": "flowspec-vpn",
+        "rd": "4.4.4.4:100",
+        "afi_safi": "ipv4 flow-vpn",
+        "match": {
+          "destination": "100.100.100.1/32"
+        },
+        "actions": {
+          "redirect-ip": "49.49.49.9",
+          "redirect-to-rt": "1234567:101"
+        },
+        "extended_communities": [
+          "target:1234567:300"
+        ],
+        "route_targets": [
+          "1234567:300"
+        ],
+        "injected_at": "2026-03-09T17:18:26.271367+00:00"
+      },
+      {
+        "raw": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+        "action": "announce",
+        "type": "flowspec-vpn",
+        "rd": "4.4.4.4:100",
+        "afi_safi": "ipv4 flow-vpn",
+        "match": {
+          "destination": "100.100.100.1/32"
+        },
+        "actions": {
+          "redirect-ip": "49.49.49.9",
+          "redirect-to-rt": "1234567:101"
+        },
+        "extended_communities": [
+          "target:1234567:300"
+        ],
+        "route_targets": [
+          "1234567:300"
+        ],
+        "injected_at": "2026-03-09T17:18:26.271410+00:00"
+      },
+      {
+        "raw": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+        "action": "announce",
+        "type": "flowspec-vpn",
+        "rd": "4.4.4.4:100",
+        "afi_safi": "ipv4 flow-vpn",
+        "match": {
+          "destination": "100.100.100.1/32"
+        },
+        "actions": {
+          "redirect-ip": "49.49.49.9",
+          "redirect-to-rt": "1234567:101"
+        },
+        "extended_communities": [
+          "target:1234567:300"
+        ],
+        "route_targets": [
+          "1234567:300"
+        ],
+        "injected_at": "2026-03-09T17:18:26.271415+00:00"
+      },
+      {
+        "raw": "announce flow route rd 4.4.4.4:101 destination 100.100.100.1/32 redirect 1234567:101 extended-community [ target:1234567:301 ]",
+        "action": "announce",
+        "type": "flowspec-vpn",
+        "rd": "4.4.4.4:101",
+        "afi_safi": "ipv4 flow-vpn",
+        "match": {
+          "destination": "100.100.100.1/32"
+        },
+        "actions": {
+          "redirect-to-rt": "1234567:101"
+        },
+        "extended_communities": [
+          "target:1234567:301"
+        ],
+        "route_targets": [
+          "1234567:301"
+        ],
+        "injected_at": "2026-03-09T17:18:26.271422+00:00"
+      }
+    ],
+    "capabilities": {
+      "peer_ip": "100.70.0.206",
+      "peer_as": "unknown",
+      "local_as": 65200,
+      "local_ip": "100.70.0.32",
+      "families": [],
+      "ebgp_multihop": 10,
+      "hold_time": 600,
+      "target_device": null,
+      "dnaas_leaf": null
+    }
+  },
+  "routes_injected": 4
+}
+
+=== Step 6: Wait 45s for BGP establish ===
+
+=== Step 7: Verify ExaBGP ===
+{
+  "session_id": "pe_4",
+  "exabgp_pid": 3334832,
+  "exabgp_alive": false,
+  "tcp_state": "DEAD",
+  "healthy": false,
+  "routes_tracked": 4,
+  "scale_modes": [],
+  "action": "ExaBGP process dead. Restart with --preload."
+}
+
+=== Step 8: ExaBGP log ===
+welcome         Thank you for using ExaBGP
+cli control     named pipes for the cli are:
+cli control     to send commands  /run/exabgp/exabgp.in
+cli control     to read responses /run/exabgp/exabgp.out
+outgoing-1      outgoing-1 100.64.6.134-100.70.0.206, closing connection
+outgoing-1      connection to 100.70.0.206 closed
+outgoing-2      outgoing-2 100.64.6.134-100.70.0.206, closing connection
+outgoing-2      connection to 100.70.0.206 closed
+outgoing-3      outgoing-3 100.64.6.134-100.70.0.206, closing connection
+outgoing-3      connection to 100.70.0.206 closed
+outgoing-4      outgoing-4 100.64.6.134-100.70.0.206, closing connection
+outgoing-4      connection to 100.70.0.206 closed
+outgoing-5      outgoing-5 100.64.6.134-100.70.0.206, closing connection
+outgoing-5      connection to 100.70.0.206 closed
+outgoing-6      outgoing-6 100.64.6.134-100.70.0.206, closing connection
+outgoing-6      connection to 100.70.0.206 closed
+outgoing-7      outgoing-7 100.64.6.134-100.70.0.206, closing connection
+outgoing-7      connection to 100.70.0.206 closed
+outgoing-8      outgoing-8 100.64.6.134-100.70.0.206, closing connection
+outgoing-8      connection to 100.70.0.206 closed
+outgoing-9      outgoing-9 100.64.6.134-100.70.0.206, closing connection
+outgoing-9      connection to 100.70.0.206 closed
+
+=== Step 9: PE-4 neighbor state ===
+show bgp neighbor 100.64.6.134 | no-more
+[FYOR_CL_PE-4(09-Mar-2026-19:19:21)# show bgp neighbor 100.64.6.134 | no-more
+
+BGP neighbor is 100.64.6.134, remote AS 65200, local AS 1234567, external link
+ Description: "ExaBGP-server"
+  BGP version 4, remote router ID 0.0.0.0
+  BGP state = Active (passive)
+  Last read 00:10:05, hold time is 180, keepalive interval is 60 seconds
+  Configured hold time is 180, keepalive interval is 60 seconds
+  Graceful restart configuration: enable
+  Local Restart timer is 2 minutes 
+  Local Stalepath timer is 6 minutes 
+  Local Purge timer is 7 minutes 
+  Long Lived Graceful restart configuration: 
+    Address families by peer:
+      none
+  Message statistics:
+    Inq depth is 0
+    Outq depth is 0
+                         Sent       Rcvd
+    Opens:                  0          0
+    Notifications:          0          0
+    Updates:                0          0
+    Keepalives:             0          0
+    Route Refresh:          0          0
+    Capability:             0          0
+    Total:                  0          0
+  Minimum time between advertisement runs is 30 seconds
+  Update source is ge100-18/0/6.999
+
+ For address family: IPv4 Unicast
+  Inbound soft reconfiguration allowed
+  Community attribute sent to this neighbor(both)
+  AS loop detection is enabled
+  0 prefixes accepted
+  0 prefixes out
+
+ For address family: IPv4 Vpn
+  Inbound soft reconfiguration allowed
+  Community attribute sent to this neighbor(both)
+  allowas-in 1
+  AS loop detection is enabled
+  0 prefixes accepted
+  0 prefixes out
+
+ For address family: IPv4 Flowspec
+  Inbound soft reconfiguration allowed
+  Community attribute sent to this neighbor(both)
+  allowas-in 1
+  AS loop detection is enabled
+  0 prefixes accepted
+  0 prefixes out
+
+ For address family: IPv6 Vpn
+  Inbound soft reconfiguration allowed
+  Community attribute sent to this neighbor(both)
+  allowas-in 1
+  AS loop detection is enabled
+  0 prefixes accepted
+  0 prefixes out
+
+ For address family: IPv6 Flowspec
+  Inbound soft reconfiguration allowed
+  Community attribute sent to this neighbor(both)
+  allowas-in 1
+  AS loop detection is enabled
+  0 prefixes accepted
+  0 prefixes out
+
+  Connections established 0; dropped 0
+  Last reset never
+  External BGP neighbor may be up to 10 hops away.
+Read thread: off  Write thread: off
+
+YOR_CL_PE-4# 
+
+=== Step 10: Spirent BGP status ===
+[
+  {
+    "device": "ALPHA_CE_0",
+    "state": "N/A",
+    "routes_advertised": "0",
+    "routes_received": "0",
+    "updates_sent": "0",
+    "updates_received": "0"
+  },
+  {
+    "device": "ZULU_CE_0",
+    "bgp": "not configured"
+  }
+]
+
+=== DONE ===

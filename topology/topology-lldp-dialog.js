@@ -17,6 +17,12 @@ window.LldpDialog = {
         }
         if (existingDialog) existingDialog.remove();
         
+        // Clear the "new results" badge -- user is viewing the data
+        if (device) {
+            device._lldpNewResults = false;
+            if (editor.draw) editor.draw();
+        }
+        
         // Get device label for header
         const deviceLabel = device?.label || serial;
         
@@ -230,7 +236,7 @@ window.LldpDialog = {
             try {
                 const data = await self._fetchLldpNeighborsLive(serial);
                 updateLldpContent(data);
-                editor.showToast('LLDP data refreshed', 'success');
+                editor.showToast('LLDP data refreshed (live SSH)', 'success');
             } catch (err) {
                 content.innerHTML = `
                     <div style="padding: 40px; text-align: center; color: rgba(255,255,255,0.5);">
@@ -252,6 +258,8 @@ window.LldpDialog = {
         // Fetch LLDP data from API (cached) -- uses same updateLldpContent as refresh
         self._fetchLldpNeighbors(serial).then(data => {
             updateLldpContent(data);
+            const src = data.source || (data.live ? 'live-ssh' : 'cached');
+            editor.showToast(`LLDP loaded (${src})`, 'info');
         }).catch(err => {
             content.innerHTML = `
                 <div style="text-align: center; padding: 40px; color: rgba(231, 76, 60, 0.9);">
@@ -485,10 +493,10 @@ window.LldpDialog = {
             const source = errData.source ? ` (tried: ${errData.source})` : '';
             if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDeviceLldp) {
                 try {
-                    return await ScalerAPI.getDeviceLldp(serial);
+                return await ScalerAPI.getDeviceLldp(serial);
                 } catch (e) {
                     throw new Error(msg + source);
-                }
+            }
             }
             throw new Error(msg + source);
         } catch (err) {
@@ -587,30 +595,30 @@ window.LldpDialog = {
         const buildCollapsibleGroup = (groupId, color, icon, localRange, remoteRange, neighbor, entryCount, label, entries) => {
             let html = `
                 <tr style="background: ${color.replace(')', ', 0.08)')}; cursor: pointer;"
-                    onclick="this.classList.toggle('expanded'); document.getElementById('${groupId}').style.display = this.classList.contains('expanded') ? 'table-row-group' : 'none'; this.querySelector('.group-arrow').style.transform = this.classList.contains('expanded') ? 'rotate(90deg)' : '';">
-                    <td style="padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.05); text-align: center;">
+                        onclick="this.classList.toggle('expanded'); document.getElementById('${groupId}').style.display = this.classList.contains('expanded') ? 'table-row-group' : 'none'; this.querySelector('.group-arrow').style.transform = this.classList.contains('expanded') ? 'rotate(90deg)' : '';">
+                        <td style="padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.05); text-align: center;">
                         <span class="group-arrow" style="display: inline-block; transition: transform 0.2s; color: ${color};">&#9654;</span>
-                    </td>
+                        </td>
                     <td style="padding: 8px 10px; color: ${color}; border-bottom: 1px solid rgba(255,255,255,0.05);">
                         ${icon}<strong>${localRange}</strong>
                         <span style="color: rgba(255,255,255,0.5); font-size: 10px; margin-left: 8px;">(${entryCount} ${label})</span>
-                    </td>
+                        </td>
                     <td style="padding: 8px 10px; color: ${color}; border-bottom: 1px solid rgba(255,255,255,0.05);"><strong>${neighbor}</strong></td>
-                    <td style="padding: 8px 10px; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.05);">${remoteRange}</td>
-                </tr>
-            `;
+                        <td style="padding: 8px 10px; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.05);">${remoteRange}</td>
+                    </tr>
+                `;
             html += `<tbody id="${groupId}" style="display: none;">`;
             entries.forEach((entry, i) => {
                 const entryBg = i % 2 === 0 ? color.replace(')', ', 0.03)') : color.replace(')', ', 0.06)');
                 html += `
                     <tr style="background: ${entryBg};">
-                        <td style="padding: 6px 10px 6px 20px;"></td>
+                            <td style="padding: 6px 10px 6px 20px;"></td>
                         <td style="padding: 6px 10px; color: ${color.replace(')', ', 0.85)')}; border-bottom: 1px solid rgba(255,255,255,0.03);">${entry.interface || entry.local_interface || '-'}</td>
                         <td style="padding: 6px 10px; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.03);">${entry.neighbor || entry.neighbor_device || entry.neighbor_name || '-'}</td>
-                        <td style="padding: 6px 10px; color: rgba(255,255,255,0.6); border-bottom: 1px solid rgba(255,255,255,0.03);">${entry.remote_port || entry.neighbor_port || '-'}</td>
-                    </tr>
-                `;
-            });
+                            <td style="padding: 6px 10px; color: rgba(255,255,255,0.6); border-bottom: 1px solid rgba(255,255,255,0.03);">${entry.remote_port || entry.neighbor_port || '-'}</td>
+                        </tr>
+                    `;
+                });
             html += `</tbody>`;
             return html;
         };
@@ -841,11 +849,10 @@ window.LldpDialog = {
             return option;
         };
         
-        // Check if device has LLDP data (green checkmark state)
         const hasLldpData = device?.lldpEnabled || device?.lldpDiscoveryComplete;
+        const hasNewResults = device?._lldpNewResults;
         const isLldpRunning = device?._lldpRunning || device?._lldpAnimating;
         
-        // Enable LLDP option - shows different states
         if (isLldpRunning) {
             // Running state - show with spinner indicator
             const runningOption = document.createElement('div');
@@ -879,13 +886,12 @@ window.LldpDialog = {
                 hasLldpData ? 'LLDP enabled (re-scan)' : 'Enable LLDP',
                 () => {
                     if (serial) {
-                        // Run LLDP enable in background with visual feedback on device
                         editor.enableLldpBackground(device, serial, device?.sshConfig);
                     } else {
                         editor.showToast('No SSH address configured', 'error');
                     }
                 },
-                hasLldpData // Highlight if already enabled
+                hasNewResults
             ));
         }
         
@@ -896,7 +902,7 @@ window.LldpDialog = {
             () => {
                 this.showLldpTableDialog(editor, device, serial);
             },
-            hasLldpData // Highlight if LLDP data exists
+            hasNewResults
         ));
         
         document.body.appendChild(menu);

@@ -115,7 +115,7 @@ class NetworkMapperManager {
 
         // Keyboard shortcut: N
         document.addEventListener('keydown', (e) => {
-            if (e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey &&
+            if (e.key?.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey &&
                 !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) &&
                 !document.activeElement?.isContentEditable) {
                 btn.click();
@@ -378,8 +378,10 @@ class NetworkMapperManager {
             const data = await resp.json();
             if (data.error) {
                 this._pollFailureCount++;
-                if (this._pollFailureCount >= 3) {
-                    this.editor.showToast('Network Mapper API not responding -- check if discovery_api.py is running', 'warning');
+                if (this._pollFailureCount === 1) {
+                    this.editor.showToast(`Network Mapper: ${data.error}`, 'warning');
+                } else if (this._pollFailureCount >= 3) {
+                    this.editor.showToast('Network Mapper API not responding -- check if discovery_api.py is running', 'error');
                     this._pollFailureCount = 0;
                 }
                 return;
@@ -436,20 +438,32 @@ class NetworkMapperManager {
                 this._setStatus(data.status === 'completed' ? 'Complete' : data.status, data.status);
                 this._showResultActions();
 
-                if (data.status === 'completed' && discovered > 0) {
-                    this.editor.showToast(`Discovery complete: ${discovered} devices, ${(data.links || []).length} links`, 'success');
-                    // Auto-generate topology for MCP-map (user doesn't need to click again)
+                const jobErrors = data.errors || [];
+                const hasErrors = jobErrors.length > 0;
+
+                if (data.status === 'error' || (data.status === 'completed' && discovered === 0 && hasErrors)) {
+                    const errMsg = jobErrors.map(e => e.error || e.device || 'Unknown').join('; ');
+                    const lastLog = (data.log || []).slice(-3).join(' | ');
+                    const detail = errMsg || lastLog || 'Unknown error';
+                    this.editor.showToast(`Network Mapper failed: ${detail}`, 'error');
+                } else if (data.status === 'completed' && discovered > 0) {
+                    const suffix = hasErrors ? ` (${jobErrors.length} errors)` : '';
+                    this.editor.showToast(`Discovery complete: ${discovered} devices, ${(data.links || []).length} links${suffix}`, 'success');
                     if (this._autoGenerate) {
                         this._autoGenerate = false;
                         setTimeout(() => this.generateTopology(), 300);
                     }
+                } else if (data.status === 'cancelled') {
+                    this.editor.showToast('Network Mapper discovery cancelled', 'warning');
                 }
             }
         } catch (err) {
-            console.warn('[NetworkMapper] Poll failed:', err);
             this._pollFailureCount++;
-            if (this._pollFailureCount >= 3) {
-                this.editor.showToast('Network Mapper API not responding -- check if discovery_api.py is running', 'warning');
+            const msg = err.message || String(err);
+            if (this._pollFailureCount === 1) {
+                this.editor.showToast(`Network Mapper API error: ${msg}`, 'warning');
+            } else if (this._pollFailureCount >= 3) {
+                this.editor.showToast('Network Mapper API not responding -- check if discovery_api.py is running', 'error');
                 this._pollFailureCount = 0;
             }
         }

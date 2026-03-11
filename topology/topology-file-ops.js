@@ -107,11 +107,50 @@ window.FileOps = {
         const saveEl = document.getElementById('topo-active-save');
         if (!saveEl || saveEl._wired) return;
         saveEl._wired = true;
-        saveEl.addEventListener('mouseenter', () => { saveEl.style.background = 'rgba(255,255,255,0.25)'; saveEl.style.borderColor = 'rgba(255,255,255,0.35)'; });
-        saveEl.addEventListener('mouseleave', () => { saveEl.style.background = 'rgba(255,255,255,0.12)'; saveEl.style.borderColor = 'rgba(255,255,255,0.2)'; });
+        let saveTip = null;
+        saveEl.addEventListener('mouseenter', () => {
+            saveEl.style.background = 'rgba(255,255,255,0.25)';
+            saveEl.style.borderColor = 'rgba(255,255,255,0.35)';
+            if (saveTip) saveTip.remove();
+            const r = saveEl.getBoundingClientRect();
+            saveTip = document.createElement('div');
+            saveTip.style.cssText = `
+                position:fixed; z-index:100001; pointer-events:none;
+                bottom:${window.innerHeight - r.top + 6}px; left:${r.left + r.width / 2}px;
+                transform:translateX(-50%); display:flex; align-items:center; gap:6px;
+                padding:5px 10px; border-radius:6px; white-space:nowrap;
+                background:rgba(15,15,30,0.95); box-shadow:0 3px 12px rgba(0,0,0,0.4);
+                opacity:0; transition:opacity 0.1s ease;
+            `;
+            const label = document.createElement('span');
+            label.textContent = 'Quick Save';
+            label.style.cssText = 'font-size:11px;color:rgba(255,255,255,0.9);font-weight:500;font-family:Poppins,-apple-system,sans-serif;';
+            saveTip.appendChild(label);
+            const kbd = document.createElement('kbd');
+            const isMac = navigator.platform?.includes('Mac');
+            kbd.textContent = isMac ? '\u2318S' : 'Ctrl+S';
+            kbd.style.cssText = `
+                display:inline-block; padding:1px 5px; font-size:9px; font-weight:600;
+                font-family:-apple-system,'SF Mono',Menlo,Consolas,monospace;
+                background:linear-gradient(180deg,rgba(255,255,255,0.18),rgba(255,255,255,0.06));
+                border:1px solid rgba(255,255,255,0.22); border-bottom-width:2px;
+                border-radius:3px; color:rgba(255,255,255,0.9);
+                box-shadow:0 1px 0 rgba(0,0,0,0.35);
+            `;
+            saveTip.appendChild(kbd);
+            document.body.appendChild(saveTip);
+            requestAnimationFrame(() => { saveTip.style.opacity = '1'; });
+        });
+        saveEl.addEventListener('mouseleave', () => {
+            saveEl.style.background = 'rgba(255,255,255,0.12)';
+            saveEl.style.borderColor = 'rgba(255,255,255,0.2)';
+            if (saveTip) { saveTip.remove(); saveTip = null; }
+        });
         saveEl.addEventListener('click', async () => {
             const editor = window.topologyEditor || window.editor;
             if (!editor || !editor.objects || editor.objects.length === 0) return;
+            saveEl.style.transform = 'scale(0.9)';
+            setTimeout(() => { saveEl.style.transform = 'scale(1)'; }, 100);
             let info;
             try { info = JSON.parse(localStorage.getItem('topo_active')); } catch (_) {}
             // Resolve sectionId: try stored value, then match by domain name
@@ -125,7 +164,9 @@ window.FileOps = {
                 sectionId = editor._customSections[0].id;
             }
             if (!sectionId || !info?.name) {
-                editor.showToast('No domain to save to', 'warning');
+                editor.showToast('No domain to save to -- use Topologies menu', 'warning');
+                const btnTopo = document.getElementById('btn-topologies');
+                if (btnTopo) btnTopo.click();
                 return;
             }
             const origSvg = saveEl.innerHTML;
@@ -261,8 +302,9 @@ window.FileOps = {
             if (data.error) { editor.showToast(data.error, 'error'); return; }
 
             const sec = (editor._customSections || []).find(s => s.id === sectionId);
-            editor.loadTopologyFromData(data);
-            FileOps.updateTopologyIndicator(topoName, sec?.name || info?.domain || '', sec?.color || info?.color || '', sectionId);
+            const domainName = sec?.name || info?.domain || '';
+            editor.loadTopologyFromData(data, { domain: domainName });
+            FileOps.updateTopologyIndicator(topoName, domainName, sec?.color || info?.color || '', sectionId);
             editor.showToast(`${topoName}  (${index + 1}/${topos.length})`, 'success');
         } catch (err) {
             editor.showToast('Failed to load: ' + err.message, 'error');
@@ -287,84 +329,111 @@ window.FileOps = {
 
     confirmNewTopology(editor) {
         if (editor.objects.length === 0) {
-            FileOps.performClearCanvas(editor);
-            editor.showToast('New topology created', 'success');
+            FileOps._showNewTopologyDomainPicker(editor);
             return;
         }
-        FileOps.showClearConfirmation(editor);
+        FileOps._autoSaveThenNewTopology(editor);
     },
 
     clearCanvas(editor) {
-        FileOps.showClearConfirmation(editor);
+        if (editor.objects.length === 0) {
+            FileOps.performClearCanvas(editor);
+            return;
+        }
+        FileOps._autoSaveThenNewTopology(editor);
     },
 
-    showClearConfirmation(editor) {
-        const existing = document.getElementById('clear-confirmation');
-        if (existing) existing.remove();
-        
-        const dropdown = document.createElement('div');
-        dropdown.id = 'clear-confirmation';
-        dropdown.style.cssText = `
-            position: fixed;
-            top: 56px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: linear-gradient(135deg, rgba(30, 20, 20, 0.92), rgba(20, 12, 12, 0.96));
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(239, 68, 68, 0.35);
-            border-radius: 12px;
-            padding: 16px 20px;
-            z-index: 10001;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 12px rgba(239, 68, 68, 0.15);
-            max-width: 320px;
-            color: #e2e8f0;
-            font-family: 'Poppins', -apple-system, sans-serif;
-            animation: liquidDropdownFadeIn 0.2s ease-out;
-        `;
-        
-        const deviceCount = editor.objects.filter(o => o.type === 'device').length;
-        const linkCount = editor.objects.filter(o => o.type === 'link' || o.type === 'unbound').length;
-        
-        dropdown.innerHTML = `
-            <div style="font-size: 14px; font-weight: 600; color: #ef4444; margin-bottom: 8px;">Clear canvas?</div>
-            <div style="font-size: 12px; color: #94a3b8; margin-bottom: 12px;">
-                ${deviceCount} devices, ${linkCount} links will be removed.
-            </div>
-            <div style="display: flex; gap: 8px;">
-                <button id="confirm-clear-yes" style="
-                    flex: 1; padding: 7px 0; background: #ef4444; color: #fff; border: none;
-                    border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;
-                    font-family: inherit; transition: background 0.15s;
-                ">Clear All</button>
-                <button id="confirm-clear-no" style="
-                    flex: 1; padding: 7px 0; background: rgba(255,255,255,0.08); color: #94a3b8;
-                    border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; cursor: pointer;
-                    font-size: 12px; font-family: inherit; transition: background 0.15s;
-                ">Cancel</button>
-            </div>
-        `;
-        
-        document.body.appendChild(dropdown);
-        
-        document.getElementById('confirm-clear-yes')?.addEventListener('click', () => {
-            FileOps.performClearCanvas(editor);
-            document.body.removeChild(dropdown);
-            if (editor.debugger) editor.debugger.logSuccess('Canvas cleared');
-        });
-        
-        document.getElementById('confirm-clear-no')?.addEventListener('click', () => {
-            document.body.removeChild(dropdown);
-            if (editor.debugger) editor.debugger.logInfo('Clear cancelled');
-        });
-        
-        const escapeHandler = (e) => {
-            if (e.key === 'Escape') {
-                if (document.body.contains(dropdown)) document.body.removeChild(dropdown);
-                document.removeEventListener('keydown', escapeHandler);
-            }
+    async _autoSaveThenNewTopology(editor) {
+        let info;
+        try { info = JSON.parse(localStorage.getItem('topo_active')); } catch (_) {}
+
+        if (info && info.sectionId && info.name) {
+            const topoData = FileOps.generateTopologyData(editor);
+            const safeName = info.name.replace(/\.json$/i, '');
+            try {
+                const resp = await fetch(`/api/sections/${info.sectionId}/save`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: safeName, topology: topoData })
+                });
+                const result = await resp.json();
+                if (!result.error) {
+                    editor.showToast(`Saved "${safeName}" before clearing`, 'success');
+                }
+            } catch (_) {}
+        }
+
+        FileOps.performClearCanvas(editor);
+        FileOps._showNewTopologyDomainPicker(editor);
+    },
+
+    _showNewTopologyDomainPicker(editor) {
+        const sections = editor._customSections || [];
+        if (sections.length === 0) {
+            editor.showToast('No domains exist. Create one in Topology Domains first.', 'warning');
+            return;
+        }
+
+        const stale = document.getElementById('new-topo-domain-picker');
+        if (stale) stale.remove();
+
+        const isDk = editor.darkMode;
+        const t = {
+            bg: isDk ? 'linear-gradient(135deg, rgba(15,15,25,0.92), rgba(10,10,18,0.96))' : 'linear-gradient(135deg, rgba(255,255,255,0.95), rgba(240,240,245,0.98))',
+            border: isDk ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
+            text: isDk ? '#e2e8f0' : '#1e293b',
+            muted: isDk ? '#94a3b8' : '#64748b',
         };
-        document.addEventListener('keydown', escapeHandler);
+        const icons = FileOps._sectionIcons();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'new-topo-domain-picker';
+        overlay.style.cssText = `position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(6px);z-index:10001;display:flex;align-items:center;justify-content:center;`;
+
+        const card = document.createElement('div');
+        card.style.cssText = `background:${t.bg};border:1px solid ${t.border};border-radius:14px;padding:20px;min-width:340px;max-width:400px;box-shadow:0 12px 48px rgba(0,0,0,0.3);backdrop-filter:blur(16px);font-family:'Poppins',-apple-system,sans-serif;`;
+        card.innerHTML = `
+            <div style="font-size:15px;font-weight:600;color:${t.text};margin-bottom:4px;">New Topology</div>
+            <div style="font-size:11px;color:${t.muted};margin-bottom:14px;">Select a domain for the new topology</div>
+            <div class="nt-domains" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="nt-skip" style="padding:7px 14px;background:transparent;border:1px solid ${t.border};border-radius:8px;color:${t.muted};cursor:pointer;font-size:12px;">No domain</button>
+                <button class="nt-cancel" style="padding:7px 14px;background:transparent;border:1px solid ${t.border};border-radius:8px;color:${t.text};cursor:pointer;font-size:12px;">Cancel</button>
+            </div>
+        `;
+        
+        const domainsList = card.querySelector('.nt-domains');
+        sections.forEach(sec => {
+            const iconSvg = (icons.find(i => i.id === sec.icon) || icons[0]).svg;
+            const btn = document.createElement('button');
+            btn.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 12px;background:${sec.color}0d;border:1px solid ${sec.color}30;border-left:3px solid ${sec.color};border-radius:8px;cursor:pointer;transition:all 0.15s;width:100%;text-align:left;`;
+            btn.innerHTML = `
+                <div style="width:28px;height:28px;border-radius:6px;background:${sec.color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" style="stroke:${sec.color};color:${sec.color};">${iconSvg}</svg>
+                </div>
+                <span style="font-size:13px;font-weight:500;color:${t.text};">${sec.name}</span>
+            `;
+            btn.onmouseenter = () => { btn.style.background = `${sec.color}1a`; btn.style.borderColor = `${sec.color}60`; };
+            btn.onmouseleave = () => { btn.style.background = `${sec.color}0d`; btn.style.borderColor = `${sec.color}30`; };
+            btn.onclick = () => {
+                overlay.remove();
+                FileOps.updateTopologyIndicator('untitled', sec.name, sec.color, sec.id);
+                editor.showToast(`New topology in ${sec.name}`, 'success');
+            };
+            domainsList.appendChild(btn);
+        });
+
+        card.querySelector('.nt-skip').onclick = () => {
+            overlay.remove();
+            editor.showToast('New topology created', 'success');
+        };
+        card.querySelector('.nt-cancel').onclick = () => overlay.remove();
+
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+        const escHandler = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); } };
+        document.addEventListener('keydown', escHandler);
     },
 
     performClearCanvas(editor) {
@@ -387,10 +456,7 @@ window.FileOps = {
     // ========================================================================
 
     generateTopologyData(editor) {
-        return {
-            version: '1.0',
-            objects: editor.objects.map(obj => ({ ...obj })),
-            metadata: {
+        const meta = {
                 deviceIdCounter: editor.deviceIdCounter,
                 linkIdCounter: editor.linkIdCounter,
                 textIdCounter: editor.textIdCounter,
@@ -404,8 +470,12 @@ window.FileOps = {
                 movableDevices: editor.movableDevices,
                 magneticFieldStrength: editor.magneticFieldStrength,
                 gridZoomEnabled: editor.gridZoomEnabled
-            }
         };
+        if (editor._multiBDMetadata?.bridge_domains?.length > 0) {
+            meta.bridge_domains = editor._multiBDMetadata.bridge_domains;
+            meta.isDnaas = true;
+        }
+        return { version: '1.0', objects: editor.objects.map(obj => ({ ...obj })), metadata: meta };
     },
 
     quickSaveTopology(editor) {
@@ -876,9 +946,9 @@ window.FileOps = {
     // DNAAS TOPOLOGIES
     // ========================================================================
 
-    saveAsDnaasTopology(editor) {
+    saveAsDnaasTopology(editor, ...args) {
         if (window.DnaasHelpers && window.DnaasHelpers.saveAsDnaasTopology) {
-            return window.DnaasHelpers.saveAsDnaasTopology(editor);
+            return window.DnaasHelpers.saveAsDnaasTopology(editor, ...args);
         }
     },
 
@@ -1835,7 +1905,7 @@ window.FileOps = {
                         });
                         const result = await resp.json();
                         if (result.error) { editor.showToast('Load failed: ' + result.error, 'error'); return; }
-                        editor.loadTopologyFromData(data);
+                        editor.loadTopologyFromData(data, { domain: sec.name });
                         FileOps.updateTopologyIndicator(name, sec.name, sec.color, sec.id);
                         editor.showToast(`Loaded and saved to ${sec.name}`, 'success');
                         FileOps._loadDomainTopologiesInline(editor, sec, div.querySelector('.domain-topos-list'));
@@ -2111,7 +2181,7 @@ window.FileOps = {
                         const r = await fetch(`/api/sections/${section.id}/topologies/${filename}`);
                         const d = await r.json();
                         if (d.error) { editor.showToast(d.error, 'error'); return; }
-                        editor.loadTopologyFromData(d);
+                        editor.loadTopologyFromData(d, { domain: section.name });
                         const topoName = filename.replace(/\.json$/i, '');
                         FileOps.updateTopologyIndicator(topoName, section.name, section.color, section.id);
                         editor.showToast(`Loaded from ${section.name}`, 'success');
@@ -2196,7 +2266,7 @@ window.FileOps = {
                     const r = await fetch(`/api/sections/${section.id}/topologies/${el.dataset.filename}`);
                     const d = await r.json();
                     if (d.error) { editor.showToast(d.error, 'error'); return; }
-                    editor.loadTopologyFromData(d);
+                    editor.loadTopologyFromData(d, { domain: section.name });
                     const topoName = el.dataset.filename.replace(/\.json$/i, '');
                     FileOps.updateTopologyIndicator(topoName, section.name, section.color, section.id);
                     editor.showToast(`Loaded from ${section.name}`, 'success');
@@ -2358,6 +2428,17 @@ window.FileOps = {
             panel.querySelector('#ms-add').onclick = async () => {
                 const name = panel.querySelector('#ms-name').value.trim();
                 if (!name) { editor.showToast('Enter a domain name', 'warning'); return; }
+                if (name.toLowerCase() === 'dnaas') {
+                    editor.showToast('"DNAAS" is a reserved domain name', 'warning');
+                    return;
+                }
+                const exists = (editor._customSections || []).some(s =>
+                    (s.name || '').toLowerCase() === name.toLowerCase()
+                );
+                if (exists) {
+                    editor.showToast(`Domain "${name}" already exists`, 'warning');
+                    return;
+                }
                 try {
                     const resp = await fetch('/api/sections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, icon: selectedIcon, color: selectedColor }) });
                     const result = await resp.json();
@@ -2449,6 +2530,17 @@ window.FileOps = {
                         ev.stopPropagation();
                         const newName = form.querySelector('.edit-name').value.trim();
                         if (!newName) { editor.showToast('Enter a name', 'warning'); return; }
+                        if (newName.toLowerCase() === 'dnaas' && sec.name.toLowerCase() !== 'dnaas') {
+                            editor.showToast('"DNAAS" is a reserved domain name', 'warning');
+                            return;
+                        }
+                        const dup = (editor._customSections || []).some(s =>
+                            s.id !== sec.id && (s.name || '').toLowerCase() === newName.toLowerCase()
+                        );
+                        if (dup) {
+                            editor.showToast(`Domain "${newName}" already exists`, 'warning');
+                            return;
+                        }
                         try {
                             await fetch('/api/sections/update', {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },

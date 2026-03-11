@@ -1,0 +1,315 @@
+=== BGP SUMMARY ===
+DRIVENETS CLI Loading...                        YOR_CL_PE-4# show bgp summary | no-more
+[FYOR_CL_PE-4(09-Mar-2026-18:50:25)# show bgp summary | no-more
+
+
+IPv4 Unicast
+---------------------
+BGP router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 0
+Table route limit: 2000000
+Table route count: 0
+Routes over limit: 0
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  2.2.2.2         4    1234567       1642       1696    0     0       0 23:47:58                   0
+  10.99.101.1     4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.2     4      65200          0          0    0     0       0 never      Active          
+  10.99.101.3     4      65200          0          0    0     0       0 never      Active          
+  10.99.101.4     4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.5     4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.6     4      65200          0          0    0     0       0 never      Active          
+  10.99.101.7     4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.8     4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.9     4      65200          0          0    0     0       0 never      Active          
+  10.99.101.10    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.11    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.12    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.13    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.14    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.15    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.16    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.17    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.18    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.19    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.20    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.21    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.22    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.23    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.24    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.25    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.26    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.27    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.28    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.29    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.30    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.31    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.32    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.33    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.34    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.35    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.36    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.37    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.38    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.39    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.40    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.41    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.42    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.43    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.44    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.45    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.46    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.47    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.48    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.49    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.50    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.51    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.52    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.53    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.54    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.55    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.56    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.57    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.58    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.59    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.60    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.61    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.62    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.63    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.64    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.65    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.66    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.67    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.68    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.69    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.70    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.71    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.72    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.73    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.74    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.75    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.76    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.77    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.78    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.79    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.80    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.81    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.82    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.83    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.84    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.85    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.86    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.87    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.88    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.89    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.90    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.91    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.92    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.93    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.94    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.95    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.96    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.97    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.98    4      65200          0          0    0     0       0 never      Connect         
+  10.99.101.99    4      65200          0          0    0     0       0 never      Active          
+  10.99.101.100   4      65200          0          0    0     0       0 never      Active          
+
+Total number of established neighbors with IPv4 Unicast 1/101
+
+Total number of NSR capable BGP sessions 0
+
+IPv4 Vpn
+-------------------------
+BGP router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 7
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  2.2.2.2         4    1234567       1642       1696    0     0       3 23:47:58                   3
+
+Total number of established neighbors with IPv4 Vpn 1/1
+
+Total number of NSR capable BGP sessions 0
+
+IPv4 Flowspec
+----------------
+BGP router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 0
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  2.2.2.2         4    1234567       1642       1696    0     0       0 23:47:58                   0
+
+Total number of established neighbors with IPv4 Flowspec 1/1
+
+Total number of NSR capable BGP sessions 0
+
+IPv4 Route Target Constrains
+-----------------------------
+BGP router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 32
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  2.2.2.2         4    1234567       1642       1696    0     0      10 23:47:58                   7
+
+Total number of established neighbors with IPv4 Route Target Constrains 1/1
+
+Total number of NSR capable BGP sessions 0
+
+IPv6 Unicast
+---------------------
+BGP router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 0
+Table route limit: 500000
+Table route count: 0
+Routes over limit: 0
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  2.2.2.2         4    1234567       1642       1696    0     0       0 23:47:58                   0
+
+Total number of established neighbors with IPv6 Unicast 1/1
+
+Total number of NSR capable BGP sessions 0
+
+IPv6 Vpn
+-------------------------
+BGP router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 5
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  2.2.2.2         4    1234567       1642       1696    0     0       4 23:47:58                   1
+
+Total number of established neighbors with IPv6 Vpn 1/1
+
+Total number of NSR capable BGP sessions 0
+
+IPv6 Flowspec
+----------------
+BGP router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 0
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  2.2.2.2         4    1234567       1642       1696    0     0       0 23:47:58                   0
+
+Total number of established neighbors with IPv6 Flowspec 1/1
+
+Total number of NSR capable BGP sessions 0
+
+L2vpn EVPN
+----------------
+BGP router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 0
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  2.2.2.2         4    1234567       1642       1696    0     0       0 23:47:58  (NoNeg)
+
+Total number of established neighbors with L2vpn EVPN 0/1
+
+Total number of NSR capable BGP sessions 0
+
+Total number of established neighbors 1/101
+
+YOR_CL_PE-4# exit
+[FYOR_CL_PE-4(09-Mar-2026-18:50:27)# exit
+
+
+=== EXABGP NEIGHBOR ===
+DRIVENETS CLI Loading...                        YOR_CL_PE-4# show bgp neighbor 100.64.6.134 | no-more
+[FYOR_CL_PE-4(09-Mar-2026-18:50:31)# show bgp neighbor 100.64.6.134 | no-more
+
+% No such neighbor
+
+YOR_CL_PE-4# exit
+[FYOR_CL_PE-4(09-Mar-2026-18:50:33)# exit
+
+
+=== ADMIN-DISABLE ===
+DRIVENETS CLI Loading...                        YOR_CL_PE-4# configure
+[FYOR_CL_PE-4(09-Mar-2026-18:50:38)# configure
+YOR_CL_PE-4(cfg)# protocols bgp 1234567 neighbor 100.64.6.134 admin-state disabled
+[FYOR_CL_PE-4(cfg 09-Mar-2026-18:50:39)# protocols bgp 1234567 neighbor 100.64.6.134 admin-state disabled
+YOR_CL_PE-4(cfg)# commit
+[FYOR_CL_PE-4(cfg 09-Mar-2026-18:50:41)# commit
+ERROR: Missing remote-as value for BGP neighbor 'neighbor 100.64.6.134'.
+[0mYOR_CL_PE-4(cfg)# exit
+[FYOR_CL_PE-4(cfg 09-Mar-2026-18:50:42)# exit
+Warning: Configuration includes uncommitted changes, would you like to commit them before exiting (yes/no/cancel) [cancel]? exit
+Warning: Configuration includes uncommitted changes, would you like to commit them before exiting (yes/no/cancel) [cancel]? 
+
+=== VRF ALPHA BGP ===
+DRIVENETS CLI Loading...                        YOR_CL_PE-4# show bgp instance vrf ALPHA summary | no-more
+[FYOR_CL_PE-4(09-Mar-2026-18:50:49)# show bgp instance vrf ALPHA summary | no-more
+
+
+IPv4 Unicast
+---------------------
+BGP router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 11
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  49.49.49.9      4      65100       2867       2896    0     0       0 01:05:00   Connect         
+
+Total number of established neighbors with IPv4 Unicast 0/1
+
+Total number of NSR capable BGP sessions 0
+
+IPv6 Unicast
+---------------------
+BGP router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 3
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  49.49.49.9      4      65100       2867       2896    0     0       0 01:05:00   Connect         
+
+Total number of established neighbors with IPv6 Unicast 0/1
+
+Total number of NSR capable BGP sessions 0
+
+Total number of established neighbors 0/1
+
+YOR_CL_PE-4# exit
+[FYOR_CL_PE-4(09-Mar-2026-18:50:50)# exit
+
+
+=== VRF ZULU BGP ===
+DRIVENETS CLI Loading...                        YOR_CL_PE-4# show bgp instance vrf ZULU summary | no-more
+[FYOR_CL_PE-4(09-Mar-2026-18:50:55)# show bgp instance vrf ZULU summary | no-more
+
+
+IPv4 Unicast
+---------------------
+BGP router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 5
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  50.50.50.2      4       4500       2867       2885    0     0       0 01:05:07   Connect         
+
+Total number of established neighbors with IPv4 Unicast 0/1
+
+Total number of NSR capable BGP sessions 0
+
+IPv6 Unicast
+---------------------
+BGP router identifier 4.4.4.4, local AS number 1234567
+BGP table node count 3
+
+  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted
+  50.50.50.2      4       4500       2867       2885    0     0       0 01:05:07   Connect         
+
+Total number of established neighbors with IPv6 Unicast 0/1
+
+Total number of NSR capable BGP sessions 0
+
+Total number of established neighbors 0/1
+
+YOR_CL_PE-4# exit
+[FYOR_CL_PE-4(09-Mar-2026-18:50:56)# exit
+
+
+=== BUNDLE-100 SUBIFS ===
+DRIVENETS CLI Loading...                        YOR_CL_PE-4# show interfaces bundle-100 | no-more
+[FYOR_CL_PE-4(09-Mar-2026-18:51:01)# show interfaces bundle-100 | no-more
+---------------------------------------------------^
+ERROR: Unknown word: 'bundle-100'.
+[0mYOR_CL_PE-4# exit
+[FYOR_CL_PE-4(09-Mar-2026-18:51:03)# exit
+
+

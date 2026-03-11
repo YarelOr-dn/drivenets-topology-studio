@@ -1,0 +1,238 @@
+=== STEP 1: Check PE-4 BGP summary ===
+Invalid command
+
+=== STEP 2: Check ExaBGP neighbor state on PE-4 ===
+Invalid command
+
+=== STEP 3: Admin-disable ExaBGP neighbor ===
+Invalid command
+
+=== STEP 4: Verify neighbor disabled ===
+Invalid command
+
+=== STEP 5: Kill old ExaBGP ===
+ExaBGP killed
+
+=== STEP 6: Wait 60s for FortiGate quarantine ===
+Wait done
+
+=== STEP 7: Test TCP/179 via ping ===
+PING 100.70.0.206 (100.70.0.206) 56(84) bytes of data.
+64 bytes from 100.70.0.206: icmp_seq=1 ttl=63 time=0.398 ms
+64 bytes from 100.70.0.206: icmp_seq=2 ttl=63 time=0.323 ms
+
+--- 100.70.0.206 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1007ms
+rtt min/avg/max/mdev = 0.323/0.360/0.398/0.037 ms
+
+=== STEP 8: Clear ARP on PE-4 ===
+Invalid command
+ARP cleared
+
+=== STEP 9: Re-enable ExaBGP neighbor ===
+Invalid command
+
+=== STEP 10: Start ExaBGP ===
+[2026-03-09 16:45:46] Port 179 guard: OPEN (ACCEPT active)
+[2026-03-09 16:45:46] Starting ExaBGP with config: /tmp/exabgp_pe_4.conf
+[2026-03-09 16:45:46] ExaBGP started with PID 3318214
+[2026-03-09 16:45:48] ExaBGP running (PID 3318214). Session pe_4 active.
+[2026-03-09 16:45:48] Waiting 6s for BGP establish, then reinjecting 4 manual route(s)...
+[2026-03-09 16:45:54] Route written to pipe
+[2026-03-09 16:45:54] Reinjected: announce flow route rd 4.4.4.4:100 destination 100.100.100.1...
+[2026-03-09 16:45:54] Route written to pipe
+[2026-03-09 16:45:54] Reinjected: announce flow route rd 4.4.4.4:100 destination 100.100.100.1...
+[2026-03-09 16:45:54] Route written to pipe
+[2026-03-09 16:45:54] Reinjected: announce flow route rd 4.4.4.4:100 destination 100.100.100.1...
+[2026-03-09 16:45:54] Route written to pipe
+[2026-03-09 16:45:54] Reinjected: announce flow route rd 4.4.4.4:101 destination 100.100.100.1...
+{
+  "session_id": "pe_4",
+  "status": "active",
+  "created": "2026-03-09T16:45:46.395269+00:00",
+  "exabgp_pid": 3318214,
+  "exabgp_config": "/tmp/exabgp_pe_4.conf",
+  "exabgp_log": "/home/dn/SCALER/FLOWSPEC_VPN/exabgp/logs/pe_4_exabgp.log",
+  "peer_ip": "100.70.0.206",
+  "peer_as": "unknown",
+  "exabgp_ip": "100.70.0.32",
+  "device_ip": "100.70.0.206",
+  "selected_afis": [],
+  "target_device": null,
+  "dnaas_leaf": null,
+  "applied_configs": {},
+  "injected_routes": [
+    {
+      "route": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+      "injected_at": "2026-03-09T16:45:46.394487+00:00"
+    },
+    {
+      "route": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+      "injected_at": "2026-03-09T16:45:46.394531+00:00"
+    },
+    {
+      "route": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+      "injected_at": "2026-03-09T16:45:46.394538+00:00"
+    },
+    {
+      "route": "announce flow route rd 4.4.4.4:101 destination 100.100.100.1/32 redirect 1234567:101 extended-community [ target:1234567:301 ]",
+      "injected_at": "2026-03-09T16:45:46.394542+00:00"
+    }
+  ],
+  "scale_injections": [],
+  "advertised_state": {
+    "summary": {
+      "total_routes": 4,
+      "by_type": {
+        "flowspec-vpn": 4
+      },
+      "by_afi_safi": {
+        "ipv4 flow-vpn": 4
+      },
+      "prefix_count": 1,
+      "prefix_ranges": [
+        "100.100.100.1/32"
+      ],
+      "all_prefixes": [
+        "100.100.100.1/32"
+      ],
+      "rds": [
+        "4.4.4.4:100",
+        "4.4.4.4:101"
+      ],
+      "route_targets": [
+        "1234567:300",
+        "1234567:301"
+      ],
+      "actions": [
+        "redirect-ip 49.49.49.9",
+        "redirect-to-rt 1234567:101"
+      ]
+    },
+    "routes": [
+      {
+        "raw": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+        "action": "announce",
+        "type": "flowspec-vpn",
+        "rd": "4.4.4.4:100",
+        "afi_safi": "ipv4 flow-vpn",
+        "match": {
+          "destination": "100.100.100.1/32"
+        },
+        "actions": {
+          "redirect-ip": "49.49.49.9",
+          "redirect-to-rt": "1234567:101"
+        },
+        "extended_communities": [
+          "target:1234567:300"
+        ],
+        "route_targets": [
+          "1234567:300"
+        ],
+        "injected_at": "2026-03-09T16:45:46.394487+00:00"
+      },
+      {
+        "raw": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+        "action": "announce",
+        "type": "flowspec-vpn",
+        "rd": "4.4.4.4:100",
+        "afi_safi": "ipv4 flow-vpn",
+        "match": {
+          "destination": "100.100.100.1/32"
+        },
+        "actions": {
+          "redirect-ip": "49.49.49.9",
+          "redirect-to-rt": "1234567:101"
+        },
+        "extended_communities": [
+          "target:1234567:300"
+        ],
+        "route_targets": [
+          "1234567:300"
+        ],
+        "injected_at": "2026-03-09T16:45:46.394531+00:00"
+      },
+      {
+        "raw": "announce flow route rd 4.4.4.4:100 destination 100.100.100.1/32 redirect-ip 49.49.49.9 redirect 1234567:101 extended-community [ target:1234567:300 ]",
+        "action": "announce",
+        "type": "flowspec-vpn",
+        "rd": "4.4.4.4:100",
+        "afi_safi": "ipv4 flow-vpn",
+        "match": {
+          "destination": "100.100.100.1/32"
+        },
+        "actions": {
+          "redirect-ip": "49.49.49.9",
+          "redirect-to-rt": "1234567:101"
+        },
+        "extended_communities": [
+          "target:1234567:300"
+        ],
+        "route_targets": [
+          "1234567:300"
+        ],
+        "injected_at": "2026-03-09T16:45:46.394538+00:00"
+      },
+      {
+        "raw": "announce flow route rd 4.4.4.4:101 destination 100.100.100.1/32 redirect 1234567:101 extended-community [ target:1234567:301 ]",
+        "action": "announce",
+        "type": "flowspec-vpn",
+        "rd": "4.4.4.4:101",
+        "afi_safi": "ipv4 flow-vpn",
+        "match": {
+          "destination": "100.100.100.1/32"
+        },
+        "actions": {
+          "redirect-to-rt": "1234567:101"
+        },
+        "extended_communities": [
+          "target:1234567:301"
+        ],
+        "route_targets": [
+          "1234567:301"
+        ],
+        "injected_at": "2026-03-09T16:45:46.394542+00:00"
+      }
+    ],
+    "capabilities": {
+      "peer_ip": "100.70.0.206",
+      "peer_as": "unknown",
+      "local_as": 65200,
+      "local_ip": "100.70.0.32",
+      "families": [],
+      "ebgp_multihop": 10,
+      "hold_time": 600,
+      "target_device": null,
+      "dnaas_leaf": null
+    }
+  },
+  "routes_injected": 4
+}
+
+=== STEP 11: Wait 20s for BGP to establish ===
+
+=== STEP 12: Verify ExaBGP ===
+{
+  "session_id": "pe_4",
+  "exabgp_pid": 3318214,
+  "exabgp_alive": true,
+  "tcp_state": "UNKNOWN",
+  "healthy": false,
+  "routes_tracked": 4,
+  "scale_modes": [],
+  "action": "TCP in None state. Run 'bgp_tool.py diagnose --session-id pe_4' to check BgpTrius iptables."
+}
+
+=== STEP 13: Check PE-4 BGP summary after fix ===
+Invalid command
+
+=== STEP 14: Check VRF ALPHA BGP ===
+Invalid command
+
+=== STEP 15: Check VRF ZULU BGP ===
+Invalid command
+
+=== STEP 16: Check PE-4 bundle-100 sub-interfaces ===
+Invalid command
+
+=== DONE ===

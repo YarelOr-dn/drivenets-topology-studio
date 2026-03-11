@@ -1605,7 +1605,8 @@ class TopologyEditor {
     
     setupToolbar() {
         if (window.ToolbarSetup) {
-            return window.ToolbarSetup.setupToolbar(this);
+            window.ToolbarSetup.setupToolbar(this);
+            window.ToolbarSetup.buildHelpersSection(this);
         }
     }
     
@@ -12100,8 +12101,9 @@ class TopologyEditor {
     }
     
     // Load topology from data object
-    loadTopologyFromData(data) {
+    loadTopologyFromData(data, opts) {
         this._clearBDState();
+        this._loadDomain = opts?.domain || null;
 
         this.objects = data.objects || [];
         
@@ -12123,7 +12125,34 @@ class TopologyEditor {
                 obj.style = 'solid';
             }
         });
-        
+
+        // Post-load link repair: fix orphaned device refs and missing start/end
+        const deviceById = (id) => this.objects.find(o => o.type === 'device' && o.id === id);
+        this.objects.forEach((obj) => {
+            if (obj.type === 'link' && obj.device1 && obj.device2) {
+                const d1 = deviceById(obj.device1);
+                const d2 = deviceById(obj.device2);
+                if (!d1 || !d2) {
+                    console.warn('[loadTopology] Orphaned link', obj.id, '- device1:', obj.device1, 'device2:', obj.device2);
+                }
+            }
+            if (obj.type === 'unbound') {
+                if (!obj.start || typeof obj.start.x !== 'number' || typeof obj.start.y !== 'number') {
+                    const d1 = obj.device1 ? deviceById(obj.device1) : null;
+                    const d2 = obj.device2 ? deviceById(obj.device2) : null;
+                    obj.start = d1 ? { x: d1.x, y: d1.y } : (obj.start || { x: 200, y: 200 });
+                }
+                if (!obj.end || typeof obj.end.x !== 'number' || typeof obj.end.y !== 'number') {
+                    const d1 = obj.device1 ? deviceById(obj.device1) : null;
+                    const d2 = obj.device2 ? deviceById(obj.device2) : null;
+                    obj.end = d2 ? { x: d2.x, y: d2.y } : (d1 ? { x: d1.x + 150, y: d1.y } : { x: 350, y: 200 });
+                }
+            }
+            if ((obj.type === 'link' || obj.type === 'unbound') && obj._hidden === true) {
+                delete obj._hidden;
+            }
+        });
+
         // GROUP VALIDATION: Validate all groups after loading
         if (this.groups) this.groups.validate();
         
@@ -12148,8 +12177,9 @@ class TopologyEditor {
         this.draw();
         this.saveState();
 
-        this._detectAndRestoreBDState();
+        this._detectAndRestoreBDState(data.metadata);
 
+        this.events?.emit('topology:loaded', {});
         setTimeout(() => this.centerOnDevices(), 50);
     }
 
@@ -12159,10 +12189,27 @@ class TopologyEditor {
         this._bdVisibility = {};
         this._bdPanelOpen = false;
         this.updateBDHierarchyButton();
+        try { localStorage.removeItem('bd_panel_state'); } catch (_) {}
+        try { localStorage.removeItem('topology_bd_panel_state'); } catch (_) {}
     }
 
-    _detectAndRestoreBDState() {
-        this._reconstructBDMetadataFromCanvas();
+    _detectAndRestoreBDState(metadata) {
+        const domainIsDnaas = this._loadDomain && this._loadDomain.toLowerCase().includes('dnaas');
+        const metaIsDnaas = metadata?.isDnaas === true;
+        if (!domainIsDnaas && !metaIsDnaas) {
+            this.updateBDHierarchyButton();
+            return;
+        }
+
+        if (metadata?.bridge_domains?.length > 0) {
+            this._multiBDMetadata = metadata;
+        } else {
+            this._reconstructBDMetadataFromCanvas();
+        }
+
+        if (this._multiBDMetadata?.bridge_domains?.length > 0) {
+            this.showBDLegend(this._multiBDMetadata.bridge_domains);
+        }
         this.updateBDHierarchyButton();
     }
     

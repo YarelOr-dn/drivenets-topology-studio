@@ -1,0 +1,215 @@
+
+============================================================
+=== VRF CONFIG ===
+============================================================
+show config network-services vrf | no-more
+[FYOR_CL_PE-4(09-Mar-2026-18:52:06)# show config network-services vrf | no-more
+
+# YOR_CL_PE-4 config-start [09-Mar-2026 18:52:06 UTC+02:00 (Israel)]
+
+network-services
+  vrf
+    instance ALPHA
+      description "L3VPN customer 1"
+      interface ge100-18/0/0.100
+      interface ge100-18/0/0.219
+      protocols
+        bgp 1234567
+          route-distinguisher 4.4.4.4:100
+          router-id 4.4.4.4
+          address-family ipv4-unicast
+            export-vpn route-target 1234567:100
+            import-vpn route-target 100:100,300:300,1234567:100,1234567:101
+            redistribute connected
+          !
+          address-family ipv6-unicast
+            export-vpn route-target 1234567:200
+            import-vpn route-target 200:100,1234567:200
+            redistribute connected
+          !
+          neighbor 49.49.49.9
+            remote-as 65100
+            admin-state enabled
+            description CE-peer-VRF-1
+            update-source ge100-18/0/0.219
+            address-family ipv4-unicast
+              send-community community-type both
+              soft-reconfiguration inbound
+            !
+            address-family ipv6-unicast
+              send-community community-type both
+              soft-reconfiguration inbound
+            !
+          !
+        !
+      !
+    !
+    instance ZULU
+      description "L3VPN customer 2"
+      interface ge100-18/0/1
+      protocols
+        bgp 1234567
+          route-distinguisher 4.4.4.4:101
+          router-id 4.4.4.4
+          address-family ipv4-unicast
+            export-vpn route-target 1234567:101
+            import-vpn route-target 100:200,300:300,1234567:101
+            redistribute connected
+          !
+          address-family ipv6-unicast
+            export-vpn route-target 1234567:201
+            import-vpn route-target 200:2,200:200,1234567:201
+            redistribute connected
+          !
+          neighbor 50.50.50.2
+            remote-as 4500
+            admin-state enabled
+            update-source ge100-18/0/1
+            address-family ipv4-unicast
+              send-community community-type both
+              soft-reconfiguration inbound
+            !
+            address-family ipv6-unicast
+              send-community community-type both
+              soft-reconfiguration inbound
+            !
+          !
+        !
+      !
+    !
+  !
+!
+
+# YOR_CL_PE-4 config-end
+
+YOR_CL_PE-4# 
+
+============================================================
+=== INTERFACES ===
+============================================================
+show interfaces | no-more
+[FYOR_CL_PE-4(09-Mar-2026-18:52:11)# show interfaces | no-more
+
+Legend: i - inner vlan, u - unnumbered interface, b - interface disabled due to breakout, L2 - l2 service interface, s - suspended IPv6 address, p - primary IP address (has secondaries), d - obtained via DHCP, v - VLAN list or range (only lowest VID is displayed), m - VLAN manipulation or L2-originated-vlans configuration is configured
+
+
+| Interface                  |  Admin   | Operational     | IPv4 Address           | IPv6 Address                                | VLAN          | MTU  | Network-Service                             | Bundle-Id  |
++----------------------------+----------+-----------------+------------------------+---------------------------------------------+---------------+------+---------------------------------------------+------------+
+| ge100-6/0/0                | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/1                | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/2                | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/3                | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/4                | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/5                | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/6                | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/7                | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/8                | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/9                | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/10               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/11               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/12               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/13               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/14               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/15               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/16               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/17               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/18               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/19               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/20               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/21               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/22               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/23               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/24               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/25               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/26               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/27               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/28               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/29               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/30               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/31               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/32               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/33               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/34               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/35               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/36               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/37               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/38               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-6/0/39               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/0               | enabled  | up              |                        |                                             |               | 9216 | VRF (default)                               |            |
+| ge100-18/0/0.14            | enabled  | up              | 14.14.14.4/29          | 2003:abba::2/64                             | 14            | 9220 | VRF (default)                               |            |
+| ge100-18/0/0.24            | enabled  | up              | 24.24.24.4/29          |                                             | 24            | 9220 | VRF (default)                               |            |
+| ge100-18/0/0.34            | enabled  | up              | 34.34.34.4/29          |                                             | 34            | 9220 | VRF (default)                               |            |
+| ge100-18/0/0.45            | enabled  | up              | 45.45.45.4/29          |                                             | 45            | 9220 | VRF (default)                               |            |
+| ge100-18/0/0.100           | enabled  | up              | 10.99.100.2/30         |                                             | 219, 100(i)   | 9224 | VRF (ALPHA)                                 |            |
+| ge100-18/0/0.101           | enabled  | up              | 10.99.101.254/24       |                                             | 219, 101(i)   | 9224 | VRF (default)                               |            |
+| ge100-18/0/0.219           | enabled  | up              | 49.49.49.4/28          | 2003:cafe::2/64 (p)                         | 219           | 9220 | VRF (ALPHA)                                 |            |
+| ge100-18/0/1               | enabled  | up              | 50.50.50.1/30          | fc01:abba::/127 (p)                         |               | 1514 | VRF (ZULU)                                  |            |
+| ge100-18/0/2               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/3               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/4               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/5               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/6               | enabled  | up              |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/6.999           | enabled  | up              | 100.70.0.206/24        |                                             | 999           | 1518 | VRF (default)                               |            |
+| ge100-18/0/7               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/8               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/9               | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/10              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/11              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/12              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/13              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/14              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/15              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/16              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/17              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/18              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/19              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/20              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/21              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/22              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/23              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/24              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/25              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/26              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/27              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/28              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/29              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/30              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/31              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/32              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/33              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/34              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/35              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/36              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/37              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/38              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| ge100-18/0/39              | enabled  | down            |                        |                                             |               | 1514 | VRF (default)                               |            |
+| lo0                        | enabled  | up              | 4.4.4.4/32             |                                             |               | 1514 | VRF (default)                               |            |
+
+YOR_CL_PE-4# 
+
+============================================================
+=== BGP CONFIG ===
+============================================================
+show config protocols bgp | no-more
+[FYOR_CL_PE-4(09-Mar-2026-18:52:17)# show config protocols bgp | no-more
+ERROR: Incomplete command.
+[0mYOR_CL_PE-4# 
+
+============================================================
+=== GE100-18 CONFIG ===
+============================================================
+show config interfaces ge100-18/0/6 | no-more
+[FYOR_CL_PE-4(09-Mar-2026-18:52:23)# show config interfaces ge100-18/0/6 | no-more
+
+# YOR_CL_PE-4 config-start [09-Mar-2026 18:52:23 UTC+02:00 (Israel)]
+
+interfaces
+  ge100-18/0/6
+    admin-state enabled
+    fec none
+  !
+!
+
+# YOR_CL_PE-4 config-end
+
+YOR_CL_PE-4# 

@@ -546,12 +546,25 @@ window.LinkDrawing = {
         const selectionColor = selectionColors.stroke;
         const selectionGlow = selectionColors.glow;
         
+        if (link._xrayCaptureActive) {
+            editor.ctx.save();
+            editor.ctx.shadowColor = 'rgba(0, 200, 255, 0.6)';
+            editor.ctx.shadowBlur = 14;
+            editor.ctx.strokeStyle = 'rgba(0, 200, 255, 0.35)';
+            editor.ctx.lineWidth = linkWidth + 8;
+            editor.ctx.setLineDash([6, 4]);
+            editor.ctx.beginPath();
+            editor.ctx.moveTo(startX, startY);
+            editor.ctx.lineTo(endX, endY);
+            editor.ctx.stroke();
+            editor.ctx.setLineDash([]);
+            editor.ctx.restore();
+        }
         if (isSelected && !skipHighlight) {
-            // Draw subtle glow effect with theme-appropriate color
             editor.ctx.shadowColor = selectionGlow;
             editor.ctx.shadowBlur = 8;
             editor.ctx.strokeStyle = selectionColor;
-            editor.ctx.lineWidth = linkWidth + 2; // Slightly thicker for visibility
+            editor.ctx.lineWidth = linkWidth + 2;
         } else {
             editor.ctx.shadowBlur = 0;
             editor.ctx.strokeStyle = linkColor;
@@ -2054,80 +2067,6 @@ window.LinkDrawing = {
             editor.ctx.stroke();
         }
 
-        // Draw XRAY magnifying glass icon on selected links between two devices
-        if (isSelected && link.device1 && link.device2) {
-            const mgMidX = (startX + endX) / 2;
-            const mgMidY = (startY + endY) / 2;
-            const iconPos = LinkDrawing._getXrayIconPos(editor, link, mgMidX, mgMidY);
-            const ix = iconPos.x;
-            const iy = iconPos.y;
-            const iconR = 10 / editor.zoom;
-            const isHovered = editor._hoveredXrayIcon === link;
-            const isCapturing = editor._xrayCapturing === link.id;
-
-            editor.ctx.save();
-            // Glow
-            if (isHovered || isCapturing) {
-                editor.ctx.shadowColor = isCapturing ? 'rgba(255, 94, 31, 0.8)' : 'rgba(0, 102, 250, 0.7)';
-                editor.ctx.shadowBlur = 12 / editor.zoom;
-            }
-            // Circle bg
-            editor.ctx.beginPath();
-            editor.ctx.arc(ix, iy, iconR, 0, Math.PI * 2);
-            const bgGrad = editor.ctx.createRadialGradient(ix, iy, 0, ix, iy, iconR);
-            if (isCapturing) {
-                bgGrad.addColorStop(0, 'rgba(255, 126, 51, 0.95)');
-                bgGrad.addColorStop(1, 'rgba(255, 94, 31, 0.95)');
-            } else {
-                bgGrad.addColorStop(0, 'rgba(0, 102, 250, 0.95)');
-                bgGrad.addColorStop(1, 'rgba(0, 82, 204, 0.95)');
-            }
-            editor.ctx.fillStyle = bgGrad;
-            editor.ctx.fill();
-            editor.ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-            editor.ctx.lineWidth = 1.2 / editor.zoom;
-            editor.ctx.stroke();
-            editor.ctx.shadowBlur = 0;
-
-            // Magnifying glass icon (white)
-            const s = iconR * 0.55;
-            editor.ctx.strokeStyle = '#ffffff';
-            editor.ctx.lineWidth = 1.5 / editor.zoom;
-            editor.ctx.lineCap = 'round';
-            editor.ctx.beginPath();
-            editor.ctx.arc(ix - s * 0.15, iy - s * 0.15, s * 0.6, 0, Math.PI * 2);
-            editor.ctx.stroke();
-            editor.ctx.beginPath();
-            editor.ctx.moveTo(ix + s * 0.25, iy + s * 0.25);
-            editor.ctx.lineTo(ix + s * 0.65, iy + s * 0.65);
-            editor.ctx.stroke();
-
-            // Pulsing ring during capture
-            if (isCapturing) {
-                const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300);
-                editor.ctx.beginPath();
-                editor.ctx.arc(ix, iy, iconR * (1.3 + 0.2 * pulse), 0, Math.PI * 2);
-                editor.ctx.strokeStyle = `rgba(255, 94, 31, ${0.6 * pulse})`;
-                editor.ctx.lineWidth = 1.5 / editor.zoom;
-                editor.ctx.stroke();
-            }
-
-            editor.ctx.restore();
-
-            // Store icon position for hit detection
-            link._xrayIconPos = { x: ix, y: iy, r: iconR };
-        }
-    },
-
-    _getXrayIconPos(editor, link, midX, midY) {
-        const offset = 18 / editor.zoom;
-        const dx = link.end ? link.end.x - link.start.x : 0;
-        const dy = link.end ? link.end.y - link.start.y : 0;
-        const len = Math.sqrt(dx * dx + dy * dy) || 1;
-        // Perpendicular offset (above the link)
-        const nx = -dy / len;
-        const ny = dx / len;
-        return { x: midX + nx * offset, y: midY + ny * offset };
     },
 
     drawLinkArrows(editor, link) {

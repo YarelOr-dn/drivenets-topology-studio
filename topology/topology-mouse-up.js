@@ -83,6 +83,9 @@ window.MouseUpHandler = {
         if (editor.panning) {
             editor.panning = false;
             editor.updateCursor();
+            if (window.XrayPopup && window.XrayPopup.temporaryShow) {
+                window.XrayPopup.temporaryShow();
+            }
             // Object stays selected but toolbar does NOT auto-restore after panning.
             // User must click the object again to bring toolbar back.
             return;

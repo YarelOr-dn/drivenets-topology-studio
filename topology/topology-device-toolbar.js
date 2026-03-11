@@ -182,6 +182,7 @@ function showDeviceSelectionToolbar(editor, device) {
         const serial = sshConfig.host || device.deviceSerial || device.label || '';
         const isLldpRunning = device._lldpRunning || device._lldpAnimating;
         const hasLldpData = device.lldpEnabled || device.lldpDiscoveryComplete;
+        const hasNewResults = device._lldpNewResults;
         const lldpCompletedAt = device._lldpCompletedAt;
         
         const defaultIconColor = isDarkMode ? 'rgba(255, 255, 255, 0.85)' : 'rgba(30, 30, 50, 0.85)';
@@ -204,12 +205,12 @@ function showDeviceSelectionToolbar(editor, device) {
             lldpBg = 'rgba(0, 180, 216, 0.15)';
             tooltipText = 'LLDP scanning...';
             indicatorHtml = `<span style="position:absolute;top:-2px;right:-2px;width:10px;height:10px;border:2px solid rgba(0, 180, 216, 0.3);border-top-color:#00B4D8;border-radius:50%;animation:lldpSpin 0.8s linear infinite;"></span>`;
-        } else if (hasLldpData) {
+        } else if (hasNewResults) {
             lldpColor = '#27ae60';
             lldpBg = 'rgba(39, 174, 96, 0.15)';
             tooltipText = lldpCompletedAt
-                ? `LLDP (${new Date(lldpCompletedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })})`
-                : 'LLDP enabled';
+                ? `LLDP scan done (${new Date(lldpCompletedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })})`
+                : 'LLDP scan done';
             indicatorHtml = `<span style="position:absolute;top:-2px;right:-2px;width:8px;height:8px;background:#27ae60;border-radius:50%;border:2px solid ${isDarkMode ? '#1a202c' : '#ffffff'};"></span>`;
         }
         
@@ -229,7 +230,7 @@ function showDeviceSelectionToolbar(editor, device) {
             ${indicatorHtml}
         `;
         lldpBtn.onmouseenter = () => {
-            lldpBtn.style.background = hasLldpData ? 'rgba(39, 174, 96, 0.25)' : (isLldpRunning ? 'rgba(0, 180, 216, 0.25)' : defaultHoverBg);
+            lldpBtn.style.background = hasNewResults ? 'rgba(39, 174, 96, 0.25)' : (isLldpRunning ? 'rgba(0, 180, 216, 0.25)' : defaultHoverBg);
             lldpBtn.style.transform = 'scale(1.08)';
             if (editor._showToolbarTooltip) editor._showToolbarTooltip(lldpBtn, tooltipText);
         };

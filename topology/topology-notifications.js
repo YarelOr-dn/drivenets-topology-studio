@@ -33,7 +33,8 @@ window.NotificationManager = {
         if (m.includes('text') || m.includes('label') || m.includes('font') || m.includes('style cop')) return 'text';
         if (m.includes('undo') || m.includes('redo')) return 'history';
         if (m.includes('load') || m.includes('open') || m.includes('import')) return 'load';
-        if (m.includes('dnaas') || m.includes('discover') || m.includes('ssh') || m.includes('lldp')) return 'network';
+        if (m.includes('ssh') || m.includes('terminal')) return 'ssh';
+        if (m.includes('dnaas') || m.includes('discover') || m.includes('lldp')) return 'network';
         if (m.includes('duplicate') || m.includes('copied') || m.includes('paste') || m.includes('clipboard')) return 'clipboard';
         if (type === 'error') return 'error';
         return 'general';
@@ -173,6 +174,7 @@ window.NotificationManager = {
         text:      { label: 'Text',      color: '#fbbf24', icon: '<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/>' },
         history:   { label: 'History',   color: '#94a3b8', icon: '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>' },
         load:      { label: 'Load',      color: '#38bdf8', icon: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>' },
+        ssh:       { label: 'SSH',       color: '#a3e635', icon: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>' },
         network:   { label: 'Network',   color: '#34d399', icon: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>' },
         clipboard: { label: 'Clipboard', color: '#fb923c', icon: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/>' },
         error:     { label: 'Error',     color: '#f87171', icon: '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>' },
@@ -648,5 +650,122 @@ window.NotificationManager = {
         }, 5000);
     }
 };
+
+(function installApiErrorInterceptor() {
+    const _origFetch = window.fetch;
+    const _recentErrors = {};
+    const SUPPRESS_MS = 10000;
+    const API_PATTERN = /^\/api\//;
+    const _SILENT_404_EXACT = ['/api/dnaas/interface-details'];
+    const _SILENT_404_PREFIX = ['/api/config/', '/api/operations/', '/api/health'];
+    const _SILENT_BRIDGE_PREFIX = ['/api/config/', '/api/operations/', '/api/devices/'];
+    const _BRIDGE_UNAVAIL_CODES = new Set([404, 501, 502, 503]);
+
+    window.fetch = async function(...args) {
+        const input = args[0];
+        const url = typeof input === 'string' ? input : (input?.url || '');
+
+        let resp;
+        try {
+            resp = await _origFetch.apply(this, args);
+        } catch (err) {
+            if (API_PATTERN.test(url)) {
+                const cleanUrl = url.split('?')[0];
+                const isBridgePath = _SILENT_BRIDGE_PREFIX.some(p => cleanUrl.startsWith(p));
+                if (!isBridgePath) {
+                    _showApiError(url, 0, `Network error: ${err.message}`);
+                }
+            }
+            throw err;
+        }
+
+        if (!resp.ok && API_PATTERN.test(url)) {
+            const cleanUrl = url.split('?')[0];
+            const isSilent = (
+                (resp.status === 404 && (
+                    _SILENT_404_EXACT.some(p => cleanUrl === p) ||
+                    _SILENT_404_PREFIX.some(p => cleanUrl.startsWith(p))
+                )) ||
+                (_BRIDGE_UNAVAIL_CODES.has(resp.status) &&
+                    _SILENT_BRIDGE_PREFIX.some(p => cleanUrl.startsWith(p)))
+            );
+            if (!isSilent) {
+                _showApiError(url, resp.status, resp.statusText);
+            }
+        }
+        return resp;
+    };
+
+    function _showApiError(url, status, statusText) {
+        const shortPath = url.split('?')[0].replace(/^\/api\//, '');
+        const key = `${status}:${shortPath}`;
+        const now = Date.now();
+        if (_recentErrors[key] && (now - _recentErrors[key]) < SUPPRESS_MS) return;
+        _recentErrors[key] = now;
+
+        const dk = document.body.classList.contains('dark-mode');
+        const log = document.getElementById('api-error-log');
+        if (log) {
+            _appendLogEntry(log, shortPath, status, statusText, dk);
+            return;
+        }
+
+        const container = document.createElement('div');
+        container.id = 'api-error-log';
+        container.style.cssText = `
+            position: fixed; top: 8px; right: 8px; z-index: 9999;
+            max-width: 340px; max-height: 220px; overflow-y: auto;
+            display: flex; flex-direction: column; gap: 3px;
+            pointer-events: auto;
+        `;
+        document.body.appendChild(container);
+        _appendLogEntry(container, shortPath, status, statusText, dk);
+    }
+
+    function _appendLogEntry(container, path, status, statusText, dk) {
+        const entry = document.createElement('div');
+        const statusColor = status >= 500 ? '#f87171' : status >= 400 ? '#fbbf24' : '#60a5fa';
+        entry.style.cssText = `
+            padding: 5px 10px; border-radius: 6px; font-size: 11px;
+            font-family: 'Space Grotesk', 'SF Mono', monospace;
+            background: ${dk ? 'rgba(20,20,30,0.88)' : 'rgba(255,255,255,0.92)'};
+            border: 1px solid ${dk ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'};
+            color: ${dk ? '#c8d0da' : '#333'};
+            backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            animation: glassToastIn 0.25s ease-out forwards;
+            display: flex; align-items: center; gap: 6px;
+            cursor: pointer;
+        `;
+        const badge = `<span style="background:${statusColor};color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;">${status || 'ERR'}</span>`;
+        const pathText = path.length > 35 ? '...' + path.slice(-32) : path;
+        entry.innerHTML = `${badge}<span style="opacity:0.8;">${pathText}</span><span style="margin-left:auto;opacity:0.4;font-size:9px;">${statusText}</span>`;
+        entry.title = `${status} ${statusText}\n/${path}`;
+        entry.addEventListener('click', () => {
+            entry.style.transition = 'opacity 0.2s';
+            entry.style.opacity = '0';
+            setTimeout(() => {
+                entry.remove();
+                if (container.children.length === 0) container.remove();
+            }, 200);
+        });
+        container.appendChild(entry);
+
+        while (container.children.length > 5) {
+            container.removeChild(container.firstChild);
+        }
+
+        setTimeout(() => {
+            if (entry.parentNode) {
+                entry.style.transition = 'opacity 0.3s';
+                entry.style.opacity = '0';
+                setTimeout(() => {
+                    entry.remove();
+                    if (container.children.length === 0) container.remove();
+                }, 300);
+            }
+        }, 8000);
+    }
+})();
 
 console.log('[topology-notifications.js] NotificationManager loaded');
