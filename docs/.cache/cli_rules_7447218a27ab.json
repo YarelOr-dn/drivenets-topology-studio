@@ -1,0 +1,782 @@
+{
+  "rules": {
+    "interfaces": {
+      "name": "interfaces",
+      "parent": null,
+      "required_children": [],
+      "optional_children": [
+        "ge",
+        "xe",
+        "et",
+        "bundle",
+        "irb",
+        "lo",
+        "ph",
+        "management",
+        "null"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "Interface configuration container"
+    },
+    "interfaces.ge": {
+      "name": "ge*",
+      "parent": null,
+      "required_children": [
+        "admin-state"
+      ],
+      "optional_children": [
+        "description",
+        "mtu",
+        "speed",
+        "fec",
+        "mpls",
+        "ipv4-address",
+        "ipv6-address",
+        "vlan-id",
+        "vlan-tags"
+      ],
+      "valid_values": null,
+      "value_pattern": "ge\\d+-\\d+/\\d+/\\d+(\\.\\d+)?",
+      "requires": [],
+      "description": "Gigabit Ethernet interface"
+    },
+    "interfaces.xe": {
+      "name": "xe*",
+      "parent": null,
+      "required_children": [
+        "admin-state"
+      ],
+      "optional_children": [
+        "description",
+        "mtu",
+        "speed",
+        "fec",
+        "mpls",
+        "ipv4-address",
+        "ipv6-address",
+        "vlan-id",
+        "vlan-tags"
+      ],
+      "valid_values": null,
+      "value_pattern": "xe\\d+-\\d+/\\d+/\\d+(\\.\\d+)?",
+      "requires": [],
+      "description": "10 Gigabit Ethernet interface"
+    },
+    "interfaces.et": {
+      "name": "et*",
+      "parent": null,
+      "required_children": [
+        "admin-state"
+      ],
+      "optional_children": [
+        "description",
+        "mtu",
+        "speed",
+        "fec",
+        "mpls",
+        "ipv4-address",
+        "ipv6-address",
+        "vlan-id",
+        "vlan-tags",
+        "bundle-membership"
+      ],
+      "valid_values": null,
+      "value_pattern": "et\\d+-\\d+/\\d+/\\d+(\\.\\d+)?",
+      "requires": [],
+      "description": "Ethernet interface (25G/40G/100G/400G)"
+    },
+    "interfaces.bundle": {
+      "name": "bundle*",
+      "parent": null,
+      "required_children": [
+        "admin-state"
+      ],
+      "optional_children": [
+        "description",
+        "mtu",
+        "mpls",
+        "ipv4-address",
+        "ipv6-address",
+        "vlan-id",
+        "vlan-tags",
+        "lacp-mode",
+        "minimum-links",
+        "max-active-links"
+      ],
+      "valid_values": null,
+      "value_pattern": "bundle\\d+(\\.\\d+)?",
+      "requires": [],
+      "description": "Bundle/LAG interface"
+    },
+    "interfaces.irb": {
+      "name": "irb*",
+      "parent": null,
+      "required_children": [
+        "admin-state"
+      ],
+      "optional_children": [
+        "description",
+        "mtu",
+        "ipv4-address",
+        "ipv6-address"
+      ],
+      "valid_values": null,
+      "value_pattern": "irb\\d+",
+      "requires": [],
+      "description": "Integrated Routing and Bridging interface"
+    },
+    "interfaces.lo": {
+      "name": "lo*",
+      "parent": null,
+      "required_children": [
+        "admin-state"
+      ],
+      "optional_children": [
+        "description",
+        "ipv4-address",
+        "ipv6-address"
+      ],
+      "valid_values": null,
+      "value_pattern": "lo\\d+",
+      "requires": [],
+      "description": "Loopback interface"
+    },
+    "interfaces.ph": {
+      "name": "ph*",
+      "parent": null,
+      "required_children": [
+        "admin-state"
+      ],
+      "optional_children": [
+        "description",
+        "mtu",
+        "mpls",
+        "vlan-id",
+        "vlan-tags",
+        "generic-interface-list"
+      ],
+      "valid_values": null,
+      "value_pattern": "ph\\d+(\\.\\d+)?",
+      "requires": [],
+      "description": "PWHE (Pseudowire Headend) interface"
+    },
+    "interfaces.admin-state": {
+      "name": "admin-state",
+      "parent": "interfaces.*",
+      "required_children": [],
+      "optional_children": [],
+      "valid_values": [
+        "enabled",
+        "disabled"
+      ],
+      "value_pattern": null,
+      "requires": [],
+      "description": "Administrative state"
+    },
+    "interfaces.vlan-id": {
+      "name": "vlan-id",
+      "parent": "interfaces.*",
+      "required_children": [],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "Single VLAN encapsulation"
+    },
+    "interfaces.vlan-tags": {
+      "name": "vlan-tags",
+      "parent": "interfaces.*",
+      "required_children": [
+        "outer-tag",
+        "inner-tag"
+      ],
+      "optional_children": [
+        "outer-tpid"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "QinQ VLAN encapsulation"
+    },
+    "interfaces.vlan-tags.outer-tag": {
+      "name": "outer-tag",
+      "parent": "interfaces.*.vlan-tags",
+      "required_children": [
+        "vlan-id"
+      ],
+      "optional_children": [
+        "tpid"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "Outer VLAN tag (S-tag)"
+    },
+    "interfaces.vlan-tags.inner-tag": {
+      "name": "inner-tag",
+      "parent": "interfaces.*.vlan-tags",
+      "required_children": [
+        "vlan-id"
+      ],
+      "optional_children": [
+        "tpid"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "Inner VLAN tag (C-tag)"
+    },
+    "interfaces.mpls": {
+      "name": "mpls",
+      "parent": "interfaces.*",
+      "required_children": [
+        "admin-state"
+      ],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "MPLS on interface"
+    },
+    "interfaces.ipv4-address": {
+      "name": "ipv4-address",
+      "parent": "interfaces.*",
+      "required_children": [],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": "\\d+\\.\\d+\\.\\d+\\.\\d+/\\d+",
+      "requires": [],
+      "description": "IPv4 address configuration"
+    },
+    "interfaces.ipv6-address": {
+      "name": "ipv6-address",
+      "parent": "interfaces.*",
+      "required_children": [],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": "[0-9a-fA-F:]+/\\d+",
+      "requires": [],
+      "description": "IPv6 address configuration"
+    },
+    "protocols": {
+      "name": "protocols",
+      "parent": null,
+      "required_children": [],
+      "optional_children": [
+        "bgp",
+        "isis",
+        "ospf",
+        "ldp",
+        "static"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "Protocol configuration container"
+    },
+    "protocols.bgp": {
+      "name": "bgp",
+      "parent": null,
+      "required_children": [
+        "router-id"
+      ],
+      "optional_children": [
+        "neighbor",
+        "peer-group",
+        "address-family",
+        "graceful-restart",
+        "route-reflector"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "BGP protocol configuration"
+    },
+    "protocols.bgp.router-id": {
+      "name": "router-id",
+      "parent": "protocols.bgp",
+      "required_children": [],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": "\\d+\\.\\d+\\.\\d+\\.\\d+",
+      "requires": [],
+      "description": "BGP router ID"
+    },
+    "protocols.bgp.neighbor": {
+      "name": "neighbor",
+      "parent": "protocols.bgp",
+      "required_children": [
+        "remote-as"
+      ],
+      "optional_children": [
+        "description",
+        "update-source",
+        "ebgp-multihop",
+        "local-as",
+        "password",
+        "peer-group",
+        "address-family",
+        "admin-state",
+        "hold-time",
+        "keepalive-interval"
+      ],
+      "valid_values": null,
+      "value_pattern": "\\d+\\.\\d+\\.\\d+\\.\\d+",
+      "requires": [],
+      "description": "BGP neighbor configuration"
+    },
+    "protocols.bgp.neighbor.remote-as": {
+      "name": "remote-as",
+      "parent": "protocols.bgp.neighbor",
+      "required_children": [],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "Remote AS number"
+    },
+    "protocols.bgp.neighbor.address-family": {
+      "name": "address-family",
+      "parent": "protocols.bgp.neighbor",
+      "required_children": [],
+      "optional_children": [
+        "send-community",
+        "route-policy-in",
+        "route-policy-out",
+        "next-hop-self",
+        "soft-reconfiguration",
+        "activate"
+      ],
+      "valid_values": [
+        "ipv4-unicast",
+        "ipv6-unicast",
+        "vpnv4-unicast",
+        "vpnv6-unicast",
+        "l2vpn-evpn",
+        "l2vpn-vpls"
+      ],
+      "value_pattern": null,
+      "requires": [],
+      "description": "BGP address family"
+    },
+    "protocols.bgp.neighbor.address-family.send-community": {
+      "name": "send-community",
+      "parent": "protocols.bgp.neighbor.address-family",
+      "required_children": [],
+      "optional_children": [
+        "community-type"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "Send BGP communities"
+    },
+    "protocols.bgp.peer-group": {
+      "name": "peer-group",
+      "parent": "protocols.bgp",
+      "required_children": [],
+      "optional_children": [
+        "remote-as",
+        "update-source",
+        "address-family",
+        "local-as",
+        "ebgp-multihop"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "BGP peer group template"
+    },
+    "protocols.isis": {
+      "name": "isis",
+      "parent": "protocols",
+      "required_children": [
+        "instance"
+      ],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "IS-IS protocol configuration"
+    },
+    "protocols.isis.instance": {
+      "name": "instance",
+      "parent": "protocols.isis",
+      "required_children": [
+        "iso-network"
+      ],
+      "optional_children": [
+        "address-family",
+        "interface",
+        "segment-routing",
+        "level-capability",
+        "authentication",
+        "lsp-refresh-interval",
+        "max-lsp-lifetime",
+        "overload",
+        "reference-bandwidth"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "IS-IS instance"
+    },
+    "protocols.isis.instance.iso-network": {
+      "name": "iso-network",
+      "parent": "protocols.isis.instance",
+      "required_children": [],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": "\\d+\\.\\d{4}\\.\\d{4}\\.\\d{4}\\.00",
+      "requires": [],
+      "description": "IS-IS NET (Network Entity Title)"
+    },
+    "protocols.isis.instance.level-capability": {
+      "name": "level-capability",
+      "parent": "protocols.isis.instance",
+      "required_children": [],
+      "optional_children": [],
+      "valid_values": [
+        "level-1",
+        "level-2",
+        "level-1-2"
+      ],
+      "value_pattern": null,
+      "requires": [],
+      "description": "IS-IS level capability"
+    },
+    "protocols.isis.instance.interface": {
+      "name": "interface",
+      "parent": "protocols.isis.instance",
+      "required_children": [
+        "admin-state"
+      ],
+      "optional_children": [
+        "address-family",
+        "circuit-type",
+        "metric",
+        "priority",
+        "hello-interval",
+        "hello-multiplier",
+        "passive",
+        "bfd"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "IS-IS interface"
+    },
+    "protocols.isis.instance.interface.circuit-type": {
+      "name": "circuit-type",
+      "parent": "protocols.isis.instance.interface",
+      "required_children": [],
+      "optional_children": [],
+      "valid_values": [
+        "level-1",
+        "level-2",
+        "level-1-2"
+      ],
+      "value_pattern": null,
+      "requires": [],
+      "description": "IS-IS circuit type"
+    },
+    "protocols.isis.instance.segment-routing": {
+      "name": "segment-routing",
+      "parent": "protocols.isis.instance",
+      "required_children": [
+        "global-block"
+      ],
+      "optional_children": [
+        "admin-state"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "Segment Routing configuration"
+    },
+    "protocols.isis.instance.segment-routing.global-block": {
+      "name": "global-block",
+      "parent": "protocols.isis.instance.segment-routing",
+      "required_children": [
+        "start-label",
+        "range"
+      ],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "SRGB (Segment Routing Global Block)"
+    },
+    "protocols.ospf": {
+      "name": "ospf",
+      "parent": "protocols",
+      "required_children": [
+        "instance"
+      ],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "OSPF protocol configuration"
+    },
+    "protocols.ospf.instance": {
+      "name": "instance",
+      "parent": "protocols.ospf",
+      "required_children": [
+        "router-id"
+      ],
+      "optional_children": [
+        "area",
+        "address-family",
+        "segment-routing",
+        "reference-bandwidth",
+        "auto-cost"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "OSPF instance"
+    },
+    "protocols.ospf.instance.area": {
+      "name": "area",
+      "parent": "protocols.ospf.instance",
+      "required_children": [],
+      "optional_children": [
+        "interface",
+        "area-type",
+        "stub"
+      ],
+      "valid_values": null,
+      "value_pattern": "\\d+\\.\\d+\\.\\d+\\.\\d+|\\d+",
+      "requires": [],
+      "description": "OSPF area"
+    },
+    "protocols.ospf.instance.area.interface": {
+      "name": "interface",
+      "parent": "protocols.ospf.instance.area",
+      "required_children": [
+        "admin-state"
+      ],
+      "optional_children": [
+        "network-type",
+        "priority",
+        "cost",
+        "hello-interval",
+        "dead-interval",
+        "passive",
+        "bfd"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "OSPF interface in area"
+    },
+    "protocols.ospf.instance.area.interface.network-type": {
+      "name": "network-type",
+      "parent": "protocols.ospf.instance.area.interface",
+      "required_children": [],
+      "optional_children": [],
+      "valid_values": [
+        "broadcast",
+        "point-to-point",
+        "point-to-multipoint",
+        "nbma"
+      ],
+      "value_pattern": null,
+      "requires": [],
+      "description": "OSPF network type"
+    },
+    "protocols.ldp": {
+      "name": "ldp",
+      "parent": "protocols",
+      "required_children": [
+        "router-id",
+        "admin-state"
+      ],
+      "optional_children": [
+        "address-family",
+        "interface"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "LDP protocol configuration"
+    },
+    "protocols.ldp.interface": {
+      "name": "interface",
+      "parent": "protocols.ldp",
+      "required_children": [
+        "admin-state"
+      ],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "LDP interface"
+    },
+    "network-services": {
+      "name": "network-services",
+      "parent": null,
+      "required_children": [],
+      "optional_children": [
+        "evpn-vpws-fxc",
+        "evpn-vpls",
+        "vpls",
+        "l3vpn",
+        "bridge-domain"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "Network services container"
+    },
+    "network-services.evpn-vpws-fxc": {
+      "name": "evpn-vpws-fxc",
+      "parent": "network-services",
+      "required_children": [
+        "instance"
+      ],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "EVPN-VPWS Flexible Cross-Connect service"
+    },
+    "network-services.evpn-vpws-fxc.instance": {
+      "name": "instance",
+      "parent": "network-services.evpn-vpws-fxc",
+      "required_children": [
+        "admin-state",
+        "protocols",
+        "transport-protocol"
+      ],
+      "optional_children": [
+        "interface",
+        "evi",
+        "service-id",
+        "ethernet-segment",
+        "source-address",
+        "destination-address"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "FXC service instance"
+    },
+    "network-services.evpn-vpws-fxc.instance.protocols": {
+      "name": "protocols",
+      "parent": "network-services.evpn-vpws-fxc.instance",
+      "required_children": [
+        "bgp"
+      ],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "FXC protocol configuration"
+    },
+    "network-services.evpn-vpws-fxc.instance.protocols.bgp": {
+      "name": "bgp",
+      "parent": "network-services.evpn-vpws-fxc.instance.protocols",
+      "required_children": [
+        "route-distinguisher",
+        "export-l2vpn-evpn",
+        "import-l2vpn-evpn"
+      ],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "FXC BGP signaling"
+    },
+    "network-services.evpn-vpws-fxc.instance.transport-protocol": {
+      "name": "transport-protocol",
+      "parent": "network-services.evpn-vpws-fxc.instance",
+      "required_children": [],
+      "optional_children": [],
+      "valid_values": [
+        "mpls",
+        "vxlan"
+      ],
+      "value_pattern": null,
+      "requires": [],
+      "description": "Transport protocol"
+    },
+    "network-services.evpn-vpws-fxc.instance.interface": {
+      "name": "interface",
+      "parent": "network-services.evpn-vpws-fxc.instance",
+      "required_children": [],
+      "optional_children": [
+        "service-point-id"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "FXC service attachment interface"
+    },
+    "network-services.l3vpn": {
+      "name": "l3vpn",
+      "parent": "network-services",
+      "required_children": [
+        "instance"
+      ],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "Layer 3 VPN service"
+    },
+    "network-services.l3vpn.instance": {
+      "name": "instance",
+      "parent": "network-services.l3vpn",
+      "required_children": [
+        "admin-state",
+        "route-distinguisher"
+      ],
+      "optional_children": [
+        "interface",
+        "export-route-target",
+        "import-route-target",
+        "protocols",
+        "address-family"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "L3VPN instance (VRF)"
+    },
+    "network-services.evpn-vpls": {
+      "name": "evpn-vpls",
+      "parent": "network-services",
+      "required_children": [
+        "instance"
+      ],
+      "optional_children": [],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "EVPN-VPLS service"
+    },
+    "network-services.evpn-vpls.instance": {
+      "name": "instance",
+      "parent": "network-services.evpn-vpls",
+      "required_children": [
+        "admin-state",
+        "protocols",
+        "evi"
+      ],
+      "optional_children": [
+        "interface",
+        "bridge-domain",
+        "ethernet-segment",
+        "transport-protocol"
+      ],
+      "valid_values": null,
+      "value_pattern": null,
+      "requires": [],
+      "description": "EVPN-VPLS instance"
+    }
+  }
+}

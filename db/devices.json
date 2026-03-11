@@ -1,0 +1,51 @@
+{
+  "devices": [
+    {
+      "id": "pe1",
+      "hostname": "PE-1",
+      "ip": "wk31d7vv00023",
+      "username": "dnroot",
+      "password": "ZG5yb290",
+      "platform": "NCP",
+      "last_sync": "2026-02-02T10:50:24.228680+02:00",
+      "description": "PE-1 Router"
+    },
+    {
+      "id": "rr_sa_2",
+      "hostname": "RR-SA-2",
+      "ip": "100.64.4.205",
+      "username": "dnroot",
+      "password": "ZG5yb290",
+      "platform": "NCP",
+      "last_sync": "2026-02-02T10:50:24.251587+02:00",
+      "description": "RR-SA-2",
+      "connection_method": "SSH\u2192MGMT"
+    },
+    {
+      "id": "pe4",
+      "hostname": "PE-4",
+      "ip": "kvm108-cl408d-ncc0",
+      "username": "dnroot",
+      "password": "ZG5yb290",
+      "platform": "NCP",
+      "last_sync": "2026-02-02T10:50:24.269113+02:00",
+      "description": "PE-4 Cluster"
+    },
+    {
+      "id": "ecdnos_rr",
+      "hostname": "eCdnos-RR",
+      "ip": "100.70.0.32",
+      "username": "dnroot",
+      "password": "ZG5yb290",
+      "platform": "NCP",
+      "last_sync": "2026-02-02T10:50:24.292344+02:00",
+      "description": null,
+      "management_ip": null
+    }
+  ],
+  "settings": {
+    "sync_interval_minutes": 60,
+    "auto_sync_enabled": false,
+    "default_platform": "NCP"
+  }
+}

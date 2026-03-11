@@ -1,0 +1,21 @@
+{
+  "category_key": "SW-231823",
+  "fetched_at": "2026-01-21T11:39:01.133709",
+  "tests": [
+    {
+      "key": "SW-234158",
+      "summary": "Flowspec VPN | Happy Flow",
+      "issuetype": "Testing Task"
+    },
+    {
+      "key": "SW-234159",
+      "summary": "Flowspec VPN | negative testing",
+      "issuetype": "Testing Task"
+    },
+    {
+      "key": "SW-234160",
+      "summary": "Flowspec VPN | Topology creation",
+      "issuetype": "Testing Task"
+    }
+  ]
+}

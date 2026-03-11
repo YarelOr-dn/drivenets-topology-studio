@@ -1,0 +1,55 @@
+syntax:
+  fallback-lfa LEVEL-1-2
+
+base_path:
+  "{parent_base_path}/fallback-lfa"
+
+config_paths:
+  - path: "{base_path}"
+    keys: "level-1-2"
+
+arguments:
+  - name: LEVEL-1-2
+    path: "{base_path}/level-1-2"
+    rst_name : "fallback-lfa"
+
+help:
+  fallback-lfa: "Enable fallback to igp lfa if ti-fast-reroute path is not found"
+  LEVEL-1-2:
+    - text: "Enabled level-1-2 fallback-lfa"
+      hint: "consts.OPTION_ENABLED"
+    - text: "Disabled level-1-2 fallback-lfa"
+      hint: "consts.OPTION_DISABLED"
+
+aaa:
+  role: "operator"
+
+description: |- 
+  There may be cases where ti-fast-reroute path can't be found. For example, not all routers in IS-IS isntance are SR speakers.
+  To enable fallback on regular igp lfa if no ti-fast-reroute path was found:
+cli_examples:
+  - dnRouter# configure
+  - dnRouter(cfg)# protocols isis
+  - dnRouter(cfg-protocols-isis)# instance area_1
+  - dnRouter(cfg-protocols-isis-inst)# address-family ipv4-unicast
+  - dnRouter(cfg-isis-inst-afi)# ti-fast-reroute
+  - dnRouter(cfg-inst-afi-ti-frr)# fallback-lfa enabled
+
+  - dnRouter# configure
+  - dnRouter(cfg)# protocols isis
+  - dnRouter(cfg-protocols-isis)# instance area_1
+  - dnRouter(cfg-protocols-isis-inst)# address-family ipv6-unicast
+  - dnRouter(cfg-isis-inst-afi)# ti-fast-reroute
+  - dnRouter(cfg-inst-afi-ti-frr)# fallback-lfa enabled
+
+removing_configuration:
+  - cmd: "dnRouter(cfg-inst-afi-ti-frr)# no fallback-lfa"
+    note: "To revert fallback-lfa to default:"
+
+note:
+  - If level not specified, set for all isis supported levels
+  - Level-1-2 settings will be the default of per level behavior.  
+
+history:
+  - version: "16.1"
+    changes: "Command introduced"

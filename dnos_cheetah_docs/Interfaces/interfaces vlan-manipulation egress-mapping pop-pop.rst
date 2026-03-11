@@ -1,0 +1,49 @@
+interfaces vlan-manipulation egress-mapping action pop-pop
+----------------------------------------------------------
+
+**Minimum user role:** operator
+
+To configure the VLAN manipulation egress mapping for a pop-pop action:
+
+**Command syntax: vlan-manipulation egress-mapping action pop-pop**
+
+**Command mode:** config
+
+**Hierarchies**
+
+- interfaces
+
+**Note**
+
+- The command is supported for L2 inband network interfaces (single-tagged, double-tagged, port-mode) attached to any L2 service type.
+
+- The PCP policy is determined according to the QoS policy configuration.
+
+**Example**
+::
+
+    dnRouter# configure
+    dnRouter(cfg)# interfaces
+    dnRouter(cfg-if)# bundle-1.1
+    dnRouter(cfg-if-bundle-1.1)# vlan-manipulation egress-mapping action pop-pop
+
+
+**Removing Configuration**
+
+To remove VLAN manipulation egress mapping configuration:
+::
+
+    dnRouter(cfg-if-ge100-1/1/1.100)# no vlan-manipulation egress-mapping
+
+To remove VLAN manipulation configuration altogether:
+::
+
+    dnRouter(cfg-if-ge100-1/1/1.100)# no vlan-manipulation
+
+**Command History**
+
++---------+--------------------+
+| Release | Modification       |
++=========+====================+
+| 18.2    | Command introduced |
++---------+--------------------+

@@ -1,0 +1,50 @@
+interfaces clock ptp g8275-1
+----------------------------
+
+**Minimum user role:** operator
+
+Enter PTP 1588v2 G8275.1 specific interface related configuration options.
+
+To configure ptp G8275.1 interface parameters:
+
+**Command syntax: g8275-1**
+
+**Command mode:** config
+
+**Hierarchies**
+
+- interfaces clock ptp
+
+**Note**
+
+- Notice the change in prompt.
+
+**Example**
+::
+
+    dnRouter# configure
+    dnRouter(cfg)# interfaces
+    dnRouter(cfg-if)# ge400-0/0/0
+    dnRouter(cfg-if-ge400-0/0/0)# clock
+    dnRouter(cfg-if-ge400-0/0/0-clk)# ptp
+    dnRouter(cfg-if-ge400-0/0/0-clk-ptp)# g8275-1
+    dnRouter(cfg-if-ge400-0/0/0-clk-ptp-g8275-1)# admin-state enabled
+
+    dnRouter# configure
+    dnRouter(cfg)# interfaces ge400-0/0/0 clock ptp g8275-1 admin-state enabled
+
+
+**Removing Configuration**
+
+Disable G8275.1 profile and remove its settings
+::
+
+    dnRouter(cfg-system-ncp-7-clk-ptp)# no g8275-1 
+
+**Command History**
+
++---------+--------------------+
+| Release | Modification       |
++=========+====================+
+| 18.3    | Command introduced |
++---------+--------------------+

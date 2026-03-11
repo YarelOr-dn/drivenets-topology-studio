@@ -1,0 +1,214 @@
+{
+  "entries": [
+    {
+      "timestamp": "2025-12-31T10:37:07.837456",
+      "device": "PE-1",
+      "platform": "NCP",
+      "from_version": "",
+      "to_version": "",
+      "components": [],
+      "load_times": {
+        "GI": 30.176008224487305
+      },
+      "install_time": 0,
+      "total_time": 30.659170389175415,
+      "upgrade_type": "normal",
+      "upgrade_category": "dnos_gi_only_reinstall",
+      "success": false,
+      "total_load_time": 30.176008224487305,
+      "component_count": 0
+    },
+    {
+      "timestamp": "2025-12-31T10:37:07.837979",
+      "device": "PE-2",
+      "platform": "NCP",
+      "from_version": "",
+      "to_version": "",
+      "components": [],
+      "load_times": {
+        "GI": 30.17032241821289
+      },
+      "install_time": 0,
+      "total_time": 30.65433669090271,
+      "upgrade_type": "normal",
+      "upgrade_category": "dnos_gi_only_reinstall",
+      "success": false,
+      "total_load_time": 30.17032241821289,
+      "component_count": 0
+    },
+    {
+      "timestamp": "2025-12-31T10:49:11.384123",
+      "device": "PE-1",
+      "platform": "NCP",
+      "from_version": "",
+      "to_version": "",
+      "components": [],
+      "load_times": {
+        "GI": 35.10470247268677
+      },
+      "install_time": 0,
+      "total_time": 35.883721590042114,
+      "upgrade_type": "normal",
+      "upgrade_category": "dnos_gi_only_reinstall",
+      "success": false,
+      "total_load_time": 35.10470247268677,
+      "component_count": 0
+    },
+    {
+      "timestamp": "2025-12-31T10:49:11.384790",
+      "device": "PE-2",
+      "platform": "NCP",
+      "from_version": "",
+      "to_version": "",
+      "components": [],
+      "load_times": {
+        "GI": 35.10415697097778
+      },
+      "install_time": 0,
+      "total_time": 35.8791720867157,
+      "upgrade_type": "normal",
+      "upgrade_category": "dnos_gi_only_reinstall",
+      "success": false,
+      "total_load_time": 35.10415697097778,
+      "component_count": 0
+    },
+    {
+      "timestamp": "2025-12-31T11:30:59.561361",
+      "device": "PE-2",
+      "platform": "NCP",
+      "from_version": "",
+      "to_version": "",
+      "components": [],
+      "load_times": {
+        "GI": 658.3860201835632
+      },
+      "install_time": 0,
+      "total_time": 661.6556532382965,
+      "upgrade_type": "normal",
+      "upgrade_category": "dnos_gi_only_reinstall",
+      "success": false,
+      "total_load_time": 658.3860201835632,
+      "component_count": 0
+    },
+    {
+      "timestamp": "2025-12-31T11:30:59.562359",
+      "device": "PE-1",
+      "platform": "NCP",
+      "from_version": "",
+      "to_version": "",
+      "components": [],
+      "load_times": {
+        "GI": 658.9580960273743
+      },
+      "install_time": 0,
+      "total_time": 663.4215798377991,
+      "upgrade_type": "normal",
+      "upgrade_category": "dnos_gi_only_reinstall",
+      "success": false,
+      "total_load_time": 658.9580960273743,
+      "component_count": 0
+    },
+    {
+      "timestamp": "2025-12-31T11:50:46.023473",
+      "device": "PE-1",
+      "platform": "NCP",
+      "from_version": "",
+      "to_version": "",
+      "components": [],
+      "load_times": {
+        "GI": 59.109230279922485,
+        "DNOS": 91.17996406555176
+      },
+      "install_time": 32.66040873527527,
+      "total_time": 186.7270860671997,
+      "upgrade_type": "normal",
+      "upgrade_category": "dnos_gi_only_reinstall",
+      "success": false,
+      "total_load_time": 150.28919434547424,
+      "component_count": 0
+    },
+    {
+      "timestamp": "2025-12-31T11:50:46.024552",
+      "device": "PE-2",
+      "platform": "NCP",
+      "from_version": "",
+      "to_version": "",
+      "components": [],
+      "load_times": {
+        "GI": 63.10993528366089,
+        "DNOS": 89.97774481773376
+      },
+      "install_time": 32.6622416973114,
+      "total_time": 188.82956981658936,
+      "upgrade_type": "normal",
+      "upgrade_category": "dnos_gi_only_reinstall",
+      "success": false,
+      "total_load_time": 153.08768010139465,
+      "component_count": 0
+    },
+    {
+      "timestamp": "2025-12-31T11:57:27.653850",
+      "device": "PE-1",
+      "platform": "NCP",
+      "from_version": "",
+      "to_version": "",
+      "components": [],
+      "load_times": {
+        "GI": 75.23294806480408
+      },
+      "install_time": 0,
+      "total_time": 79.3162751197815,
+      "upgrade_type": "normal",
+      "upgrade_category": "dnos_gi_only_reinstall",
+      "success": false,
+      "total_load_time": 75.23294806480408,
+      "component_count": 0
+    },
+    {
+      "timestamp": "2025-12-31T12:11:15.071541",
+      "device": "PE-2",
+      "platform": "NCP",
+      "from_version": "",
+      "to_version": "",
+      "components": [],
+      "load_times": {},
+      "install_time": 0,
+      "total_time": 3.4775173664093018,
+      "upgrade_type": "normal",
+      "upgrade_category": "dnos_gi_only_reinstall",
+      "success": true,
+      "total_load_time": 0,
+      "component_count": 0
+    }
+  ],
+  "averages": {
+    "dnos_gi_only_reinstall": {
+      "avg_total_time": 3.4775173664093018,
+      "avg_load_time": 0.0,
+      "avg_install_time": 0.0,
+      "sample_count": 1,
+      "min_time": 3.4775173664093018,
+      "max_time": 3.4775173664093018,
+      "last_updated": "2025-12-31T12:11:15.071571"
+    },
+    "_overall": {
+      "avg_total_time": 3.4775173664093018,
+      "avg_load_time": 0.0,
+      "avg_install_time": 0.0,
+      "sample_count": 1,
+      "last_updated": "2025-12-31T12:11:15.071593"
+    }
+  },
+  "2026-01-07T07:49:34.405625": {
+    "devices": 2,
+    "elapsed_seconds": 19,
+    "success_count": 0,
+    "has_baseos": false
+  },
+  "2026-01-07T07:55:51.163969": {
+    "devices": 2,
+    "elapsed_seconds": 108,
+    "success_count": 2,
+    "has_baseos": false
+  }
+}

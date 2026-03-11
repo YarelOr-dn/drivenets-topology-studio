@@ -1,0 +1,217 @@
+{
+  "hostname": "PE-1",
+  "ip": "wk31d7vv00023",
+  "timestamp": "2026-01-31T23:06:42.960849",
+  "dnos_version": "",
+  "summary": {
+    "total_rules": 0,
+    "bgp_total": 0,
+    "bgp_installed": 0,
+    "bgp_unsupported": 0,
+    "lp_total": 0,
+    "lp_installed": 0,
+    "lp_unsupported": 0,
+    "priority_conflicts": 0
+  },
+  "tcam": {
+    "ipv4_used": 0,
+    "ipv4_capacity": 12000,
+    "ipv6_used": 0,
+    "ipv6_capacity": 4000,
+    "bcm_pmf_entries": 0
+  },
+  "hw_counters": {
+    "rules_write_ok": 0,
+    "rules_write_fail": 0,
+    "policers_write_ok": 0,
+    "policers_write_fail": 0
+  },
+  "priority_reference": {
+    "local_policies_range": "0 - 1,999,999 (WINS - matched first)",
+    "bgp_flowspec_range": "2,000,000 - 4,000,000 (matched after local)",
+    "tcam_full_behavior": "First-installed wins when TCAM is full"
+  },
+  "bgp_rules": [],
+  "local_rules": [],
+  "conflicts": [],
+  "problems": [],
+  "warnings": [],
+  "checks": [
+    {
+      "step": "?",
+      "component": "check_bgp_sessions",
+      "check": "BGP IPv4-FlowSpec Sessions",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_bgp_routes",
+      "check": "BGP IPv4-FlowSpec Routes",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_vrf_import",
+      "check": "VRF IPv4 Import",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_vrf_flowspec_instance",
+      "check": "VRF FlowSpec Instance (DP)",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_ncp_installation",
+      "check": "NCP Installation",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_xray_info",
+      "check": "XRay IPv4 FlowSpec Info",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_match_counters",
+      "check": "Match Counters",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_flowspec_interfaces",
+      "check": "FlowSpec Interfaces",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_local_policies_config",
+      "check": "IPv4 Local Policies Config",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_local_policies_ncp",
+      "check": "IPv4 Local Policies NCP",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_local_policies_xray",
+      "check": "IPv4 Local Policies XRay",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_local_policies_counters",
+      "check": "IPv4 Local Policies Counters",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_bgp_sessions_ipv6",
+      "check": "BGP IPv6-FlowSpec Sessions",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_bgp_routes_ipv6",
+      "check": "BGP IPv6-FlowSpec Routes",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_xray_info_ipv6",
+      "check": "XRay IPv6 FlowSpec Info",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_local_policies_ipv6",
+      "check": "IPv6 Local Policies Config",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_local_policies_xray_ipv6",
+      "check": "IPv6 Local Policies XRay",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_vrf_flowspec_af",
+      "check": "VRF FlowSpec Address-Families",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_detailed_rules_analysis",
+      "check": "Detailed Rules Analysis",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_tcam_capacity",
+      "check": "TCAM Capacity",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_hw_counters_detailed",
+      "check": "HW Counters",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    },
+    {
+      "step": "?",
+      "component": "check_bcm_pmf_detailed",
+      "check": "BCM PMF Entries",
+      "status": "\u2717",
+      "expected": "Check success",
+      "actual": "Error: Console.print() got an unexpected keyword argument"
+    }
+  ]
+}

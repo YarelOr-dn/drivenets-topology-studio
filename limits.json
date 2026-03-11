@@ -1,0 +1,253 @@
+{
+  "dnos_platform_limits": {
+    "multihoming": {
+      "max_esi_interfaces": 2000,
+      "description": "Maximum interfaces with ESI under network-services multihoming",
+      "error_hook": "validate_esi_max_scale",
+      "pwhe_note": "PWHE interfaces only support single-active mode"
+    },
+    "ifindex_pools": {
+      "ph_pool": {
+        "ifindex_min": 58882,
+        "ifindex_max": 62881,
+        "max_capacity": 4000,
+        "description": "Shared pool for phX parents AND phX.Y sub-interfaces (without outer-tag)",
+        "consumes": ["phX", "phX.Y"],
+        "per_service_usage": 2,
+        "note": "Each PWHE service uses 2 slots (1 parent + 1 sub-interface)"
+      },
+      "stag_pool": {
+        "ifindex_min": 88001,
+        "ifindex_max": 92000,
+        "max_capacity": 4000,
+        "description": "Pool for PWHE phX.Ys (Q-in-Q sub-interfaces with outer-tag) - PWHE ONLY!",
+        "consumes": ["phX.Ys"],
+        "per_service_usage": 1,
+        "pr_reference": "PR-86760 extended from 91000 to 92000",
+        "note": "Physical interfaces (ge-*, lag*) with outer-tag use VLAN pool, NOT Stag pool"
+      },
+      "vlan_pool": {
+        "ifindex_min": 13313,
+        "ifindex_max": 33792,
+        "max_capacity": 20480,
+        "description": "Pool for physical sub-interfaces (ge-X.Y, lag-X.Y, bundle-X.Y) including L2-AC",
+        "consumes": ["ge-X.Y", "lag-X.Y", "bundle-X.Y", "et-X.Y", "xe-X.Y"],
+        "per_service_usage": 1,
+        "note": "L2-AC sub-interfaces use this pool, NOT the Stag pool. Much larger capacity."
+      },
+      "irb_pool": {
+        "ifindex_min": 41985,
+        "ifindex_max": 46080,
+        "max_capacity": 4096,
+        "description": "Pool for IRB interfaces",
+        "consumes": ["irb"]
+      }
+    },
+    "soft_limits": {
+      "max_irb_and_phxy_interfaces": {
+        "value": 4000,
+        "description": "Combined limit for IRB + phX.Y interfaces",
+        "error_message": "Number of irb and phX.Y interfaces cannot be greater than 4000",
+        "error_hook": "validate_number_of_irb_and_phxy_interfaces",
+        "jira_reference": "SW-216052"
+      },
+      "max_qinq_interfaces": {
+        "value": 4000,
+        "description": "Maximum unique Stags (parent + outer-vlan-id combinations)",
+        "error_message": "Number of unique Stags cannot be greater than 4000",
+        "error_hook": "validate_number_of_qinq_interfaces",
+        "jira_reference": "SW-229316",
+        "pr_reference": "PR-86760"
+      }
+    },
+    "pwhe_service_impact": {
+      "description": "Each PWHE/FXC service with Q-in-Q consumes from multiple pools",
+      "per_service_consumption": {
+        "ph_pool_slots": 2,
+        "stag_pool_slots": 1,
+        "irb_phxy_limit_count": 1
+      },
+      "max_services_formula": "min(ph_remaining/2, stag_remaining, 4000-current_irb_phxy)",
+      "example": {
+        "current_state": {
+          "phx_count": 2300,
+          "phxy_count": 2300,
+          "stag_count": 2300,
+          "irb_count": 0
+        },
+        "pool_usage": {
+          "ph_pool": "3000/4000 (75.0%)",
+          "stag_pool": "2300/4000 (57.5%)",
+          "irb_phxy": "2300/4000 (57.5%)"
+        },
+        "remaining_capacity": {
+          "ph_pool_remaining": 1544,
+          "stag_remaining": 1700,
+          "irb_phxy_remaining": 1700
+        },
+        "max_additional_services": 772,
+        "bottleneck": "PH pool (1544 remaining, need 2 per service)"
+      }
+    },
+    "services": {
+      "max_fxc_instances": 8000,
+      "max_evpn_instances": 4000,
+      "description": "Network service instance limits"
+    },
+    "bgp": {
+      "max_peers": 2000,
+      "description": "BGP peer limits"
+    },
+    "flowspec": {
+      "scale_from_jira": {
+        "jira_reference": "SW-206883 (Scale User Story under SW-182545)",
+        "max_flowspec_vpn_peers": 8,
+        "max_flowspec_vpn_peers_note": "~8 peers (like scale of VPN RR)",
+        "max_flowspec_vpn_routes": 20000,
+        "max_flowspec_vpn_routes_note": "~20k routes across all VRFs",
+        "dp_ipv4_rules": 12000,
+        "dp_ipv6_rules": 4000,
+        "dp_note": "DP resources shared among ALL flowspec entries regardless of VRF"
+      },
+      "max_rules_per_vrf": 3000,
+      "max_rules_total": 20000,
+      "max_flowspec_interfaces": 1000,
+      "max_local_policies": 256,
+      "max_match_classes": 1024,
+      "max_vrfs_with_flowspec": 512,
+      "max_flowspec_vpn_peers": 8,
+      "description": "Flowspec VPN limits per RFC 8955/8956 (SAFI 134)",
+      "address_families": {
+        "default_vrf": ["ipv4-flowspec", "ipv6-flowspec"],
+        "vpn_safi_134": ["ipv4-flowspec-vpn", "ipv6-flowspec-vpn"],
+        "non_default_vrf": ["ipv4-flowspec", "ipv6-flowspec"]
+      },
+      "bgp_neighbor_afi_safi": {
+        "description": "BGP neighbor address-families for Flowspec VPN (Epic SW-182545)",
+        "global_bgp": {
+          "ipv4-flowspec": "Default VRF only",
+          "ipv6-flowspec": "Default VRF only",
+          "ipv4-flowspec-vpn": "SAFI 134 for VPN (receives from RR/Arbor)",
+          "ipv6-flowspec-vpn": "SAFI 134 for VPN (receives from RR/Arbor)"
+        },
+        "vrf_bgp": {
+          "ipv4-flowspec": "VRF flowspec with import-vpn route-target",
+          "ipv6-flowspec": "VRF flowspec with import-vpn route-target"
+        },
+        "neighbor_options": ["policy in", "policy out", "allow-as-in", "as-loop-check", "maximum-prefix", "nexthop self", "nexthop ADDRESS"]
+      },
+      "vrf_flowspec_config": {
+        "hierarchy": "network-services vrf instance NAME protocols bgp ASN address-family ipv4/6-flowspec",
+        "import_option": "import-vpn route-target <rt>",
+        "description": "Import flowspec VPN routes into non-default VRF by route-target"
+      },
+      "supported_interface_types": ["physical", "physical-vlan", "bundle", "bundle-vlan", "irb"],
+      "actions": ["discard", "rate-limit", "redirect-to-ip"],
+      "match_criteria": {
+        "dest_ip": "A.B.C.D/M",
+        "source_ip": "A.B.C.D/M",
+        "dest_port": "0-65535 (operators: = < > & |)",
+        "src_port": "0-65535 (operators: = < > & |)",
+        "protocol": "0-255 (tcp=6, udp=17, icmp=1)",
+        "dscp": "0-63",
+        "packet_length": "0-65535",
+        "tcp_flag": "syn, ack, fin, rst, psh, urg",
+        "fragmented": "true/false"
+      },
+      "jira_reference": "SW-182545, SW-182546"
+    }
+  },
+  "error_hooks": {
+    "assign_new_if_index": {
+      "description": "Fails when ifindex pool is exhausted during allocation",
+      "error_message": "Hook failed - 'assign_new_if_index'",
+      "possible_causes": [
+        "PH pool (58882-65025) exhausted - too many phX + phX.Y interfaces",
+        "Stag pool (88001-92000) exhausted - too many Q-in-Q interfaces",
+        "IRB pool (41985-46080) exhausted - too many IRB interfaces"
+      ],
+      "solution": "Check pool usage with 'Stag Pool Check' in SCALER wizard"
+    },
+    "validate_number_of_qinq_interfaces": {
+      "description": "Validates Stag count before commit",
+      "error_message": "Number of unique Stags cannot be greater than 4000",
+      "added_in": "PR-86760"
+    },
+    "validate_number_of_irb_and_phxy_interfaces": {
+      "description": "Validates combined IRB + phX.Y count before commit",
+      "error_message": "Number of irb and phX.Y interfaces cannot be greater than 4000"
+    }
+  },
+  "notes": {
+    "source": "DNOS source code analysis - interface_manager_consts.py, consts.py, interface_validations.py",
+    "last_updated": "2026-01-04",
+    "verified_by": "Live kernel query on PE-1 inband-engine container",
+    "pool_summary": {
+      "stag_pool_4000": "ALL Q-in-Q interfaces (ANY interface with outer-tag) - ifindex 88001-92000",
+      "vlan_pool_20480": "Physical sub-interfaces ifindex allocation (ge-X.Y, lag-X.Y) - ifindex 13313-33792",
+      "note": "Both pools may be used! VLAN pool for ifindex, STAG pool for unique (parent, outer-tag) tracking"
+    },
+    "verified_from_source": {
+      "source_files": [
+        "drivenets/cheetah/src/py_packages/dn_common/dn_common/consts.py",
+        "drivenets/cheetah/src/rust_packages/network_reflector/src/stag.rs",
+        "drivenets/cheetah/src/rust_packages/network_reflector/src/configuration/rorm_interfaces.rs"
+      ],
+      "l3_internal_index_limit": {
+        "MIN_L3_INTERNAL_INDEX": 1,
+        "MAX_L3_INTERNAL_INDEX": 8000,
+        "applies_to": "ALL dp_interface_types: VLAN (L2-AC), PHXY (PWHE), LAG, IRB, PHX, PHYSICAL, ISLE, ISPO"
+      },
+      "stag_pool_VERIFIED": {
+        "range": "88001-91000 (extended to 92000 by PR-86760)",
+        "capacity": "3000-4000 slots",
+        "what_consumes_stag": "ANY interface with outer_vlan_id (vlan-tags outer-tag X inner-tag Y)",
+        "stag_definition": "unique (parent_interface, outer_vlan_id) combination",
+        "applies_to": "BOTH L2-AC (ge-*, lag-*) AND PWHE (ph*) with vlan-tags outer-tag",
+        "example": {
+          "ge400-0/0/4.100_outer100": "Creates STAG (ge400-0/0/4, 100) - uses 1 slot",
+          "ge400-0/0/4.101_outer100": "Reuses STAG (ge400-0/0/4, 100) - NO new slot",
+          "ge400-0/0/4.102_outer101": "Creates STAG (ge400-0/0/4, 101) - uses 1 slot",
+          "ph1.1_outer100": "Creates STAG (ph1, 100) - uses 1 slot"
+        }
+      },
+      "conclusion": "STAG pool limit (4000) applies to ALL Q-in-Q interfaces (L2-AC + PWHE). The 8000 internal_index limit is separate and applies to ALL datapath interfaces."
+    },
+    "hardware_model_mapping": {
+      "description": "Maps GI mode hardware models to DNOS system-types for deployment (from Confluence Platforms and FW info)",
+      "models": {
+        "S9700-53DX": {"ncp_type": "NCP-40C", "system_type": "SA-40C", "description": "NCP1 - Standalone 40C"},
+        "S9700-53DX-J": {"ncp_type": "NCP-40C", "system_type": "SA-40C", "description": "NCP1 - Standalone 40C (with suffix)"},
+        "S9700-23DX": {"ncp_type": "NCP-10CD", "system_type": "SA-10CD", "description": "NCP2 - Standalone 10CD"},
+        "S9710-76D": {"ncp_type": "NCP-36CD-S", "system_type": "SA-36CD-S", "description": "NCP3 - Standalone 36CD-S"},
+        "S9710-76D-R": {"ncp_type": "NCP-36CD-S", "system_type": "SA-36CD-S", "description": "NCP3 - Standalone 36CD-S (with suffix)"},
+        "S9710-76DX": {"ncp_type": "NCP-36CD-S", "system_type": "SA-36CD-S", "description": "NCP3 - Standalone 36CD-S (alternate)"},
+        "S9610-36D-R": {"ncp_type": "NCP-36CD-S-SA", "system_type": "SA-36CD-S-SA", "description": "NCP3-SA - Standalone 36CD-S-SA"},
+        "S9701-82DC": {"ncp_type": "NCP-64X12C-S", "system_type": "S9701-82DC-R", "description": "NCPL"},
+        "S9701-82DC-R": {"ncp_type": "NCP-64X12C-S", "system_type": "S9701-82DC-R", "description": "NCPL (with suffix)"},
+        "S9600-72XC-R": {"ncp_type": "NCP-64X8C-S", "system_type": "SA-64X8C-S", "description": "NCP8/NCPL-S"},
+        "ASA926-18XKA": {"ncp_type": "NCP-38E", "system_type": "NCP-38E", "description": "NCP5 - Accton J3 AI cluster"},
+        "ASA926-18XKE": {"ncp_type": "NCP-38E", "system_type": "NCP-38E", "description": "NCP5 - Accton J3 AI cluster (E variant)"},
+        "S9610-48DX-C": {"ncp_type": "NCP-40C8CD", "system_type": "SA-40C8CD", "description": "NCP6/Emux"},
+        "S9610-46DX": {"ncp_type": "NCP-40C6CD-S", "system_type": "SA-40C6CD-S", "description": "NCP6-S/Emux-SA"},
+        "AS9286-32D": {"ncp_type": "NCP-32CD", "system_type": "SA-32CD", "description": "NCP7/CS1"},
+        "S9601-102XC-R": {"ncp_type": "NCP-96X6C-S", "system_type": "SA-96X6C-S", "description": "Q2C NCP"},
+        "S9705-48D": {"ncp_type": "NCF-48CD", "system_type": "NCF-48CD", "description": "NCF"},
+        "S9705-48D-4": {"ncp_type": "NCF-48CD", "system_type": "NCF-48CD", "description": "NCF (variant)"},
+        "S9725-64E-9": {"ncp_type": "NCF-64E", "system_type": "NCF-64E", "description": "NCF2 - UFI"},
+        "AS9936-128D": {"ncp_type": "NCF-128E", "system_type": "NCF-128E", "description": "NCF2 - Accton R3 AI cluster"},
+        "DCS-7060CX2-32S": {"ncp_type": "NCP-36CD-S", "system_type": "SA-36CD-S", "description": "Arista-based 36CD-S"},
+        "S9300-32DX": {"ncp_type": "NCP-36CD-S", "system_type": "SA-36CD-S", "description": "Standalone 36CD-S (legacy)"},
+        "X86": {"ncp_type": "NCC", "system_type": "NCC-ONLY", "description": "x86 NCC node"}
+      },
+      "cluster_type_by_ncp_count": {
+        "1": "Standalone (SA-*)",
+        "2-4": "CL-16 to CL-32",
+        "5-8": "CL-48 to CL-76",
+        "9-16": "CL-86 to CL-134",
+        "17+": "CL-192+"
+      },
+      "note": "Use 'show system' in GI mode to see Hardware Model, then map to system-type"
+    }
+  }
+}

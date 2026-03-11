@@ -1,0 +1,164 @@
+{
+  "recent_urls": [
+    {
+      "url": "https://jenkins.dev.drivenets.net/job/drivenets/job/cheetah/job/ryehuda%252Fv26_1%252Fupgrade_pwhe_port_shutdown_SW-224670/5/artifact/",
+      "timestamp": "2026-01-07T06:38:36.482877",
+      "dnos_version": "dnpkg-48hrs",
+      "branch": "ryehuda%2Fv26_1%2Fupgrade_pwhe_port_shutdown_SW-224670",
+      "build": 5,
+      "_type": "url"
+    }
+  ],
+  "recent_branches": [
+    {
+      "url": "",
+      "timestamp": "2026-01-28T00:38:13.752978",
+      "dnos_version": "drivenets_dnos_26.1.0.19_priv.easraf_flo",
+      "branch": "easraf/flowspec_vpn/wbox_side",
+      "build": 21,
+      "source_type": "other",
+      "has_dnos": true,
+      "has_gi": true,
+      "has_baseos": true
+    },
+    {
+      "url": "",
+      "timestamp": "2026-01-25T12:45:54.484915",
+      "dnos_version": "drivenets_dnos_26.1.0.16_priv.easraf_flo",
+      "branch": "easraf/flowspec_vpn/wbox_side",
+      "build": 18,
+      "source_type": "other",
+      "has_dnos": true,
+      "has_gi": true,
+      "has_baseos": true,
+      "_type": "branch",
+      "_latest_urls": {
+        "dnos": "http://minio-ssd-il.dev.drivenets.net:9000/dnpkg-48hrs/drivenets_dnos_26.1.0.19_priv.easraf_flowspec_vpn_wbox_side_21.tar",
+        "gi": "http://minio-ssd-il.dev.drivenets.net:9000/dnpkg-48hrs/drivenets_gi_26.1.0.19_priv.easraf_flowspec_vpn_wbox_side_21.tar",
+        "baseos": "http://minio-ssd-il.dev.drivenets.net:9000/dnpkg-48hrs/drivenets_baseos_2.2610019015.tar"
+      },
+      "_latest_build": 21
+    },
+    {
+      "url": "",
+      "timestamp": "2026-01-25T11:02:03.270861",
+      "dnos_version": "drivenets_dnos_26.1.0.15_priv.easraf_flo",
+      "branch": "easraf/flowspec_vpn/wbox_side",
+      "build": 17,
+      "source_type": "manual_branch",
+      "has_dnos": true,
+      "has_gi": true,
+      "has_baseos": true,
+      "_type": "branch",
+      "_latest_urls": {
+        "dnos": "http://minio-ssd-il.dev.drivenets.net:9000/dnpkg-60d/drivenets_dnos_26.1.0.16_priv.easraf_flowspec_vpn_wbox_side_18.tar",
+        "gi": "http://minio-ssd-il.dev.drivenets.net:9000/dnpkg-60d/drivenets_gi_26.1.0.16_priv.easraf_flowspec_vpn_wbox_side_18.tar",
+        "baseos": "http://minio-ssd-il.dev.drivenets.net:9000/dnpkg-60d/drivenets_baseos_2.2610019013.tar"
+      },
+      "_latest_build": 18
+    },
+    {
+      "url": "",
+      "timestamp": "2026-01-24T18:55:26.536741",
+      "dnos_version": "drivenets_dnos_26.1.200.2_dev.dev_v26_1_",
+      "branch": "dev_v26_1_200",
+      "build": 3,
+      "source_type": "other",
+      "has_dnos": true,
+      "has_gi": true,
+      "has_baseos": true,
+      "_type": "branch",
+      "_latest_urls": {
+        "dnos": "http://minio-ssd-il.dev.drivenets.net:9000/dnpkg-48hrs/drivenets_dnos_26.1.200.8_dev.dev_v26_1_200_9.tar",
+        "gi": "http://minio-ssd-il.dev.drivenets.net:9000/dnpkg-48hrs/drivenets_gi_26.1.200.8_dev.dev_v26_1_200_9.tar",
+        "baseos": null
+      },
+      "_latest_build": 9
+    },
+    {
+      "url": "",
+      "timestamp": "2026-01-13T15:23:04.552776",
+      "dnos_version": "drivenets_dnos_26.1.0.187_dev.dev_v26_1_",
+      "branch": "dev_v26_1",
+      "build": 644,
+      "source_type": "dev_branch",
+      "has_dnos": true,
+      "has_gi": true,
+      "has_baseos": true,
+      "_type": "branch",
+      "_latest_urls": {
+        "dnos": null,
+        "gi": null,
+        "baseos": null
+      },
+      "_latest_build": 788
+    },
+    {
+      "url": "",
+      "timestamp": "2026-01-13T15:12:42.268312",
+      "dnos_version": "drivenets_dnos_26.1.0.187_dev.dev_v26_1_",
+      "branch": "dev_v26_1",
+      "build": 0,
+      "source_type": "dev_branch",
+      "has_dnos": true,
+      "has_gi": true,
+      "has_baseos": true,
+      "_type": "branch"
+    },
+    {
+      "url": "",
+      "timestamp": "2026-01-11T22:39:35.684619",
+      "dnos_version": "drivenets_dnos_26.1.0.10_priv.easraf_flo",
+      "branch": "easraf/flowspec_vpn/wbox_side",
+      "build": 12,
+      "source_type": "other",
+      "has_dnos": true,
+      "has_gi": true,
+      "has_baseos": true,
+      "_type": "branch"
+    },
+    {
+      "url": "",
+      "timestamp": "2026-01-11T22:20:42.649712",
+      "dnos_version": "drivenets_dnos_26.1.0.9_priv.easraf_flow",
+      "branch": "easraf/flowspec_vpn/wbox_side",
+      "build": 10,
+      "source_type": "other",
+      "has_dnos": true,
+      "has_gi": true,
+      "has_baseos": true,
+      "_type": "branch"
+    },
+    {
+      "url": "",
+      "timestamp": "2026-01-08T17:39:01.925973",
+      "dnos_version": "drivenets_dnos_26.1.0.7_priv.easraf_flow",
+      "branch": "easraf/flowspec_vpn/wbox_side",
+      "build": 7,
+      "source_type": "other",
+      "has_dnos": true,
+      "has_gi": true,
+      "has_baseos": true,
+      "_type": "branch"
+    },
+    {
+      "url": "",
+      "timestamp": "2026-01-07T22:20:15.325364",
+      "dnos_version": "drivenets_dnos_26.1.0.8_priv.feature_dev",
+      "branch": "feature/dev_v26_1/flowspec_vpn",
+      "build": 8,
+      "source_type": "other",
+      "has_dnos": true,
+      "has_gi": true,
+      "has_baseos": true,
+      "_type": "branch",
+      "_latest_urls": {
+        "dnos": "http://minio-ssd-il.dev.drivenets.net:9000/dnpkg-48hrs/drivenets_dnos_26.1.0.9_priv.feature_dev_v26_1_flowspec_vpn_9.tar",
+        "gi": "http://minio-ssd-il.dev.drivenets.net:9000/dnpkg-48hrs/drivenets_gi_26.1.0.9_priv.feature_dev_v26_1_flowspec_vpn_9.tar",
+        "baseos": "http://minio-ssd-il.dev.drivenets.net:9000/dnpkg-48hrs/drivenets_baseos_2.2610003004.tar"
+      },
+      "_latest_build": 9
+    }
+  ],
+  "max_entries": 10
+}

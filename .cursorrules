@@ -1,0 +1,555 @@
+# SCALER Project - Cursor Agent Rules
+# ==================================
+# These rules MUST be followed for ALL development in the SCALER project.
+# Reference: docs/DEVELOPMENT_GUIDELINES.md for detailed examples.
+
+## 🎯 CORE PRINCIPLES
+
+### 1. ALWAYS Read Before Writing
+- NEVER modify code without first reading the relevant files
+- ALWAYS check existing patterns in the codebase before implementing
+- Use `grep` to find similar implementations before creating new ones
+- Reference `db/configs/*/running.txt` for real DNOS config examples
+
+### 2. Feature Parity is MANDATORY
+- ALL features MUST work in BOTH modes:
+  - Single Device Mode (1 device)
+  - Multi-Device Mode (2+ devices)
+- Design for MultiDeviceContext FIRST, then wrap for single device
+- Update BOTH menu locations when adding features
+
+### 3. No Silent Operations
+- ALL configuration pushes MUST have live terminal display
+- Users MUST see real-time progress and device output
+- Never commit configs without user seeing what's happening
+
+### 4. Navigation & Back Options are MANDATORY
+- **EVERY menu/prompt MUST have a [B] Back option**
+- **EVERY configuration input MUST be reversible**
+- User must ALWAYS be able to go back and reconfigure values
+- Never trap user in a flow without escape
+- Pattern for all prompts:
+```python
+# ALWAYS include Back option in choices
+choice = Prompt.ask("Select", choices=["1", "2", "3", "b", "B"], default="1").lower()
+if choice == 'b':
+    raise BackException()  # Or return to previous menu
+```
+- For value inputs that need reconfiguration:
+```python
+while True:
+    value = Prompt.ask("Enter value [B]ack", default=str(current_value))
+    if value.lower() == 'b':
+        raise BackException()
+    # Validate and use value
+    break
+```
+- Store entered values in state so user can modify them later
+- Show current values when re-entering a configuration step
+
+---
+
+## 📺 LIVE TERMINAL RULES (MANDATORY)
+
+### Every Push Operation MUST:
+1. Show live terminal panel with real-time device output
+2. Display progress bar (█░) with percentage
+3. Show status icons: ⏳ 🔌 📤 📥 🔍 ⚙️ ✓ ✗
+4. Use fixed panel height (no jumping/flickering)
+5. Color-code terminal lines (green=sent, yellow=response, red=error)
+
+### Template Pattern:
+```python
+from rich.live import Live
+from rich.panel import Panel
+from rich.text import Text
+import threading
+
+progress_lock = threading.Lock()
+device_progress = {hostname: {"status": "pending", "progress": 0, "terminal_lines": []}}
+
+def render_live_panel():
+    # Build content with Text(), show progress bar, terminal lines
+    return Panel(content, title=hostname, height=FIXED_HEIGHT)
+
+with Live(render_live_panel(), refresh_per_second=4, console=console) as live:
+    def update_callback(info):
+        with progress_lock:
+            device_progress[hostname].update(info)
+        live.update(render_live_panel())
+    
+    success, message = pusher.push_config(..., progress_callback=update_callback)
+```
+
+---
+
+## 🔧 PUSH METHOD RULES (MANDATORY - ALL THREE)
+
+### Every push operation MUST offer these options:
+```
+[1] Terminal Paste - Paste directly (uses rollback 0)
+[2] File Upload - Upload + load override (replaces config)
+[3] Load Merge - Upload + load merge (preserves existing)
+[B] Cancel
+```
+
+### Terminal Paste MUST execute `rollback 0` first:
+```python
+channel.send("configure\n")
+channel.send("rollback 0\n")  # MANDATORY: Clear dirty candidate
+time.sleep(0.5)
+# Then paste config lines
+```
+
+---
+
+## ⏱️ TIME ESTIMATION RULES (MANDATORY)
+
+### Before Operation:
+1. Call `estimate_operation_time(operation_type, config_text, device)`
+2. Display estimate Panel with: lines, interfaces, services, est. time, confidence
+3. Show source: "historical" (learned) or "default" (estimated)
+
+### During Operation:
+1. Show elapsed time in live panel
+2. Show estimated remaining time
+3. Progress bar reflects estimated completion %
+
+### After Operation:
+1. Call `save_timing_record(...)` to improve future estimates
+2. Display: "Completed in X.Xs (estimate was Y.Ys)"
+
+### Estimation Factors:
+| Operation | Base | Per 1K Lines | Per Interface | Per Service |
+|-----------|------|--------------|---------------|-------------|
+| Scale UP | 120s | +30s | +0.01s | +0.1s |
+| Scale DOWN | 60s | +15s | +0.005s | +0.05s |
+| Delete Hierarchy | 30s | +10s | +0.005s | +0.05s |
+| Delete Svc+Iface | 45s | +15s | +0.01s | +0.1s |
+| VLAN Modify | 30s | +10s | +0.002s | - |
+| Factory Reset | 180s | - | - | - |
+
+---
+
+## 🗑️ DELETE OPERATION RULES (MANDATORY)
+
+### Every Delete Operation MUST:
+1. Show live terminal panel with real-time device output
+2. Display delete commands in RED (bright_red for visibility)
+3. Offer option to delete attached interfaces when deleting services
+4. Show detected service types with interface counts before confirmation
+5. Support multi-device parallel deletion with split-screen
+
+### Delete + Interfaces Pattern:
+When deleting services (evpn-vpws, evpn-vpws-fxc, evpn-vpls):
+1. Detect interfaces attached to the service type
+2. Show: "Delete services ONLY" vs "Delete services + N interfaces"
+3. Execute in correct order: services first, then interfaces
+4. Use `_extract_service_interfaces()` to find attachments
+
+### Service Type Detection Menu:
+```
+Detected Service Types:
+  [1] EVPN-VPWS (3996 vpws-service-ids, 1 instances, 3996 interfaces)
+  [2] EVPN-VPWS-FXC (100 instances, 100 interfaces)
+  [B] Back
+```
+
+---
+
+## 🔗 MULTIHOMING (EVPN-MH) RULES
+
+### After Interface Attachment in Service Wizard:
+When configuring EVPN services (FXC, VPWS, VPLS) with interface attachments:
+1. **ALWAYS suggest** MH configuration for attached interfaces
+2. Show count of interfaces eligible for MH
+3. Offer options:
+   - Configure full MH (ESI, redundancy-mode, DF algorithm)
+   - Configure df-invert-preference only
+   - Skip MH
+
+### Multi-Device ESI Coordination:
+1. **Detect** existing MH on peer device
+2. **Offer** to match ESIs from peer for proper dual-homing
+3. **Generate** matching config for peer with complementary DF preference
+4. Store pending MH config in `multi_ctx._pending_mh_configs`
+
+### MH Configuration Structure:
+```
+multihoming
+  redundancy-mode single-active
+  interface ph1.1
+    esi arbitrary value 00:00:01:00:00:00:00:00:01
+    redundancy-mode single-active
+    designated-forwarder
+      algorithm highest-preference value 50
+    !
+  !
+!
+```
+
+### DF Preference Strategy:
+- PE-1: preference 50 (or lower)
+- PE-2: preference 100 (or higher)
+- Allows proper DF election with load sharing across services
+
+---
+
+## 📝 DNOS SYNTAX RULES
+
+### ALWAYS Validate Against:
+1. RST Documentation for the feature
+2. DNOS CLI PDF: `docs/DNOS_CLI.pdf`
+3. Real running configs: `db/configs/*/running.txt`
+4. **DNOS_CLI_Commands documentation** via `search_cli_docs` tool
+
+### Config Generation Requirements:
+- Output valid DNOS CLI syntax ONLY
+- Use 2-space indentation per hierarchy level
+- Include proper closing statements (!)
+- Include ALL available knobs/options (don't oversimplify)
+- Never use simplified text descriptions in previews
+- **ALWAYS verify syntax via CLI docs before suggesting configuration**
+
+### Example - CORRECT:
+```
+l2vpn
+  xconnect group XC-FXC_
+    p2p FXC_1
+      neighbor evpn evi 1000 target 1000
+    !
+  !
+!
+```
+
+### Example - WRONG:
+```
+Will create: FXC_1 through FXC_100  # Never do this!
+```
+
+### Interface Hierarchy - CRITICAL:
+DNOS interfaces are FLAT, not hierarchical! Sub-interfaces are siblings of parents.
+Interface names at **2-space indent** with **NO `interface` keyword**:
+```
+interfaces
+  ge400-0/0/4        <- Parent (2-space indent, just the name!)
+    admin-state enabled
+  !
+  ge400-0/0/4.1      <- Sub-interface (sibling, NOT child!)
+    l2-service enabled
+  !
+!
+```
+
+### Sub-Interface VLAN Configuration - CRITICAL:
+**DNOS does NOT use Cisco/Junos-style encapsulation syntax!**
+
+#### CORRECT DNOS Syntax for VLAN Sub-Interfaces:
+```
+interfaces
+  ge100-0/0/0
+    admin-state enabled
+  !
+  ge100-0/0/0.10                # Sub-interface for VLAN 10
+    admin-state enabled
+    vlan-id 10                  # CORRECT: Simple vlan-id command
+    ipv4-address 10.1.1.1/30
+  !
+  ge100-0/0/0.100               # Sub-interface for VLAN 100
+    admin-state enabled
+    vlan-id 100
+  !
+!
+```
+
+#### For QinQ (double-tagged) Sub-Interfaces:
+```
+interfaces
+  ge100-0/0/0.200
+    admin-state enabled
+    vlan-tags outer-tag 100 inner-tag 200    # QinQ syntax
+  !
+!
+```
+
+#### WRONG - Cisco/IOS-XR Style (NOT DNOS!):
+```
+# ❌ NEVER USE THIS SYNTAX IN DNOS:
+interfaces
+  ge100-0/0/0.10
+    encapsulation              # WRONG: No 'encapsulation' hierarchy
+      dot1q                    # WRONG: No 'dot1q' keyword
+        vlan-id 10             # WRONG: Nested structure
+      !
+    !
+  !
+!
+```
+
+### VRF Interface Attachment - CRITICAL:
+**Interfaces are attached to VRF under `network-services`, NOT under `interfaces`!**
+
+#### CORRECT VRF Interface Syntax:
+```
+network-services
+  vrf instance INTERNET-VRF
+    interface ge100-0/0/0.100       # Attach interface to VRF here
+      ipv4-address 192.168.1.1/24   # IP under VRF, not under interfaces
+    !
+    route-distinguisher 10.0.0.1:100
+    route-target import 65000:100
+    route-target export 65000:100
+  !
+!
+```
+
+#### WRONG - IP on interface in default VRF then moving to VRF:
+```
+# ❌ DO NOT configure IP under interfaces if interface is in VRF:
+interfaces
+  ge100-0/0/0.100
+    ipv4-address 192.168.1.1/24   # WRONG location if in VRF
+  !
+!
+```
+
+### Interface Delete Syntax:
+```
+no interfaces ge400-0/0/4.1    # CORRECT: Flat delete
+```
+
+### NEVER DO:
+```
+no interfaces interface ge400-0/0/4.1    # WRONG: 'interface' keyword
+interfaces interface ge400-0/0/4
+  no interfaces ge400-0/0/4.1            # WRONG: Nested structure
+!
+```
+
+### DNOS Syntax Validation Checklist for ALL Suggestions:
+Before providing ANY DNOS configuration in chat or code:
+- [ ] Verify command exists in DNOS_CLI_Commands docs
+- [ ] Check hierarchy structure matches docs
+- [ ] Confirm no Cisco/Junos/IOS-XR specific syntax used
+- [ ] Validate sub-interface uses `vlan-id` not `encapsulation dot1q`
+- [ ] Ensure VRF interfaces are attached under `network-services vrf instance`
+- [ ] Use 2-space indentation consistently
+
+---
+
+## 🔍 VALUE DETECTION PRIORITY
+
+When determining config values (RT, RD, ASN, VLAN, etc.):
+
+| Priority | Source | Example |
+|----------|--------|---------|
+| 1 | Existing Services | Parse `route-target X:N` from running.txt |
+| 2 | operational.json | `local_as`, `router_id`, `lo0_ip` |
+| 3 | Device Config | Parse from BGP/routing section |
+| 4 | Cross-Device | Same RT ASN as peer device |
+| 5 | Default (LAST RESORT) | Show "(default)" warning to user |
+
+### NEVER hardcode defaults without trying detection chain first!
+
+---
+
+## 🔄 CROSS-DEVICE AWARENESS
+
+### When configuring multiple devices:
+1. **Record** what was configured on Device A
+2. **Suggest** matching config when switching to Device B
+3. **Auto-adjust** unique params (RD uses B's loopback)
+4. **Keep same** peering params (RT, ESI)
+
+### Uniqueness Rules:
+| Parameter | Same Across Devices | Must Be Unique |
+|-----------|:-------------------:|:--------------:|
+| Service Name | ✅ | - |
+| Route Target | ✅ (for peering) | - |
+| EVI | ✅ | - |
+| ESI | ✅ (same ES) | - |
+| Route Distinguisher | - | ✅ (device's loopback) |
+| Interface Names | - | ✅ |
+
+### System + LLDP Retention:
+When user chooses "Keep system configuration":
+- **ALWAYS** include LLDP configuration (protocols lldp)
+- LLDP preserves neighbor discovery for physical connections
+- Physical connections rarely change, so LLDP should persist
+- Prompt text: "Keep system + LLDP configuration"
+- Show LLDP interface count to user
+
+---
+
+## 🖥️ MULTI-DEVICE OPERATIONS
+
+### MUST use ThreadPoolExecutor for parallel execution:
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+with Live(render_split_screen(), refresh_per_second=4) as live:
+    with ThreadPoolExecutor(max_workers=len(devices)) as executor:
+        futures = {executor.submit(process_device, dev): dev for dev in devices}
+        
+        while any(f.running() for f in futures):
+            live.update(render_split_screen())
+            time.sleep(0.25)
+```
+
+### Split-Screen Display:
+- Use `Columns` for side-by-side panels (2+ devices)
+- Fixed panel height (no jumping)
+- Per-device terminal output buffers
+- Thread-safe progress updates with `threading.Lock()`
+
+### Multi-Device Push (MANDATORY for Configure All):
+When pushing to multiple devices, use `push_and_verify_multi()`:
+```python
+# Collect configs for all devices
+device_configs = {
+    dev.hostname: config_text 
+    for dev in multi_ctx.devices
+}
+
+# Push in parallel with per-device live terminals
+results = push_and_verify_multi(
+    multi_ctx,
+    device_configs,
+    dry_run=dry_run,
+    use_terminal_paste=use_terminal_paste,
+    use_merge=use_merge,
+    use_factory_reset=use_factory_reset
+)
+
+# Results is Dict[hostname, Tuple[success, message]]
+```
+
+### Per-Device Live Terminal Requirements:
+1. Each device gets its own panel (70 chars wide, 20 lines height)
+2. Panel shows: progress bar, stage indicators, elapsed/remaining time
+3. SSH output buffer with last 10 lines (color-coded)
+4. Error lines highlighted in bright_red
+5. Side-by-side layout using `Columns(panels, expand=True, equal=True)`
+
+---
+
+## 📊 UI CONSISTENCY RULES
+
+### When updating ANY display format:
+1. Search for ALL similar displays: `grep -rn "Table(" scaler/`
+2. Update ALL to match new format
+3. Document the new pattern
+
+### Standard Summary Format:
+```
+📊 Configuration Summary
+────────────────────────────────────────
+  System:      YOR_PE-1, profile: l3-pe
+  Interfaces:  2,300 PWHE, 2,300 sub-ifs
+  Services:    2,300 FXC (2,301 RTs)
+────────────────────────────────────────
+```
+
+---
+
+## ⚠️ LARGE CONFIG HANDLING
+
+### When interface count > 6000:
+1. Detect high count in `ask_push_method()`
+2. Recommend "Factory reset + load" option
+3. Two-stage push:
+   - Stage 1: `load override factory-default` → `commit`
+   - Stage 2: `load override new_config.txt` → `commit`
+
+### DNOS Limit: 8000 datapath interfaces per commit transaction
+
+---
+
+## 🧪 TESTING CHECKLIST
+
+Before committing any feature:
+- [ ] Test with single device
+- [ ] Test with 2+ devices (multi-device mode)
+- [ ] Test with SSH disconnection
+- [ ] Test with invalid input
+- [ ] Test cancellation (Ctrl+C, "Back")
+- [ ] Verify live display updates correctly
+- [ ] No linting errors: `python -m py_compile scaler/*.py`
+
+---
+
+## 📁 KEY FILE LOCATIONS
+
+| Purpose | Location |
+|---------|----------|
+| Main CLI wizard | `scaler/interactive_scale.py` |
+| Scale operations | `scaler/wizard/scale_operations.py` |
+| Multi-device ops | `scaler/wizard/multi_device.py` |
+| Delete/Push ops | `scaler/wizard/push.py` |
+| Config pusher | `scaler/config_pusher.py` |
+| Extraction script | `extract_configs.sh` |
+| Monitor | `monitor.py` |
+| Models | `scaler/models.py` |
+| Guidelines | `docs/DEVELOPMENT_GUIDELINES.md` |
+| DNOS syntax ref | `docs/DNOS_DELETE_SYNTAX.md` |
+| Limits | `limits.json` |
+
+---
+
+## 🚫 NEVER DO
+
+1. ❌ Push config without live terminal display
+2. ❌ Delete config without live terminal display
+3. ❌ Hardcode values without detection chain
+4. ❌ Assume interface types (PWHE vs L2-AC)
+5. ❌ Use simplified text in config previews
+6. ❌ Forget `rollback 0` before terminal paste
+7. ❌ Skip time estimation
+8. ❌ Implement for single-device only
+9. ❌ Generate invalid DNOS syntax
+10. ❌ Silent operations without user feedback
+11. ❌ Skip WAN interfaces in VLAN modifications
+12. ❌ Delete services without offering to delete attached interfaces
+13. ❌ Create menus/prompts without [B] Back option
+14. ❌ Trap user in a flow without escape route
+15. ❌ Lose user-entered values when going back
+
+---
+
+## ✅ ALWAYS DO
+
+1. ✅ Read existing code before modifying
+2. ✅ Validate DNOS syntax against running configs
+3. ✅ Show live terminal for ALL pushes AND deletes
+4. ✅ Offer all 3 push methods
+5. ✅ Estimate time before, save timing after
+6. ✅ Implement for both single and multi-device
+7. ✅ Use ThreadPoolExecutor for parallel ops
+8. ✅ Detect values from config before using defaults
+9. ✅ Update all similar UI elements when changing format
+10. ✅ Test thoroughly before considering complete
+11. ✅ Detect and show attached interfaces when deleting services
+12. ✅ Use wider panels (70 chars) with 8+ terminal lines
+13. ✅ Include [B] Back option in EVERY menu and prompt
+14. ✅ Allow user to reconfigure any entered value
+15. ✅ Preserve user inputs in state when navigating back
+
+---
+
+## 📋 NEW FEATURE CHECKLIST
+
+When adding any new feature:
+- [ ] Read DEVELOPMENT_GUIDELINES.md first
+- [ ] Check existing patterns with grep
+- [ ] Implement with MultiDeviceContext
+- [ ] Add to both menu locations (single + multi)
+- [ ] Add live terminal display
+- [ ] Add time estimation
+- [ ] Add all 3 push method options
+- [ ] Validate DNOS syntax
+- [ ] Test single + multi-device
+- [ ] Update Feature Parity Matrix
+- [ ] Document in DEVELOPMENT_GUIDELINES.md
+- [ ] **Add [B] Back option to ALL menus/prompts**
+- [ ] **Allow reconfiguration of all entered values**
+- [ ] **Test navigation: back, top, cancel flows**

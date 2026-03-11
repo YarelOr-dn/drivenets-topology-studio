@@ -1,0 +1,47 @@
+system ncp clock ptp g8275-1
+----------------------------
+
+**Minimum user role:** operator
+
+Enter the PTP 1588v2 G8275.1 specific profile related configuration options and reference synchronization clock settings.
+
+To configure ptp G8275.1 parameters:
+
+**Command syntax: g8275-1**
+
+**Command mode:** config
+
+**Hierarchies**
+
+- system ncp clock ptp
+
+**Note**
+
+- Notice the change in prompt.
+
+**Example**
+::
+
+    dnRouter# configure
+    dnRouter(cfg)# system
+    dnRouter(cfg-system)# ncp 7
+    dnRouter(cfg-system-ncp-7)# clock
+    dnRouter(cfg-system-ncp-7-clk)# ptp
+    dnRouter(cfg-system-ncp-7-clk-ptp)# g8275-1
+    dnRouter(cfg-system-ncp-7-clk-ptp-g8275-1)#
+
+
+**Removing Configuration**
+
+Disable G8275.1 profile and remove its settings
+::
+
+    dnRouter(cfg-system-ncp-7-clk-ptp-g8275-1)#no g8275-1 
+
+**Command History**
+
++---------+--------------------+
+| Release | Modification       |
++=========+====================+
+| 18.3    | Command introduced |
++---------+--------------------+

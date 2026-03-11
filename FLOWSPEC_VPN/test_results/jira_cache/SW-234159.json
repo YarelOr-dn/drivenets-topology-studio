@@ -1,0 +1,16 @@
+{
+  "issue_key": "SW-234159",
+  "fetched_at": "2026-01-21T11:32:34.798632",
+  "data": {
+    "key": "SW-234159",
+    "id": "562197",
+    "summary": "Flowspec VPN | negative testing ",
+    "fields": {
+      "summary": "Flowspec VPN | negative testing ",
+      "customfield_11772": {
+        "value": "h1. *Negative Testing Flows:*\n\n#  Verify FlowSpec table is accessible for VRF : \n  Command:  show flowspec instance vrf KK ipv4\n  Expected: Command succeeds, shows installed rules (or empty if none)\n\n 2.  Query with exact destination match (positive control) : \n  Command:  show flowspec instance vrf KK ipv4 destination 10.10.10.1/32\n  Expected: Returns the matching rule (if installed with that exact prefix)\n\n#  Query with non-matching destination (negative test) : \n  Command:  show flowspec instance vrf KK ipv4 destination 50.0.0.0/8\n  Expected: Empty result / \"No flows found\" (exact-match only, no partial)\n#  Query with non-matching source (negative test) : \n  Command:  show flowspec instance vrf KK ipv4 source 1.1.1.1/32\n  Expected: Empty result / \"No flows found\" (if no rule has that exact source)\n#  Query specific NLRI : \n  Command:  show flowspec instance vrf KK ipv4 nlri \"DstPrefix:=10.10.10.1/32\"\n  Expected: Returns matching rule if exists, empty otherwise"
+      }
+    },
+    "source": "mcp_jira"
+  }
+}

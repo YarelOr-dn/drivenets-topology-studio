@@ -1,0 +1,41 @@
+# FlowSpec VPN Test Configuration
+
+devices:
+  dut:
+    hostname: "PE1"
+    serial: "WK31D7VV00023"
+    type: "SA-36CD-S"
+    ip: "10.0.0.1"
+    lo0: "10.0.0.1/32"
+  pe2:
+    hostname: "PE2"
+    serial: "WKY1BC7400002B2"
+    type: "SA-36CD-S"
+    ip: "10.0.0.2"
+    lo0: "10.0.0.2/32"
+  rr:
+    hostname: "CL-408D"
+    type: "Cluster 2xNCP-40C"
+    ip: "10.0.0.100"
+    lo0: "10.0.0.100/32"
+  traffic_gen:
+    hostname: "Spirent01"
+    port: "6:13"
+    speed: "100G"
+
+topology:
+  vrf:
+    name: "INTERNET-VRF"
+    rd: "10.0.0.1:100"
+    rt_import: "65000:100"
+    rt_export: "65000:100"
+  bgp:
+    asn: 65000
+    flowspec_safi: 134
+
+test_settings:
+  timeout: 30
+  retry_count: 3
+  continue_on_failure: true
+  cleanup_on_failure: true
+  validate_topology: true

@@ -1,0 +1,16 @@
+{
+  "issue_key": "SW-234158",
+  "fetched_at": "2026-01-21T11:32:34.798380",
+  "data": {
+    "key": "SW-234158",
+    "id": "562195",
+    "summary": "Flowspec VPN | Happy Flow ",
+    "fields": {
+      "summary": "Flowspec VPN | Happy Flow ",
+      "customfield_11772": {
+        "value": "h1. +*_Test Steps:_*+\n\nA: AFI-SAFI NLRI\n\n1. Configure a non-default VRF on Both PE-1 and PE-2, attach a routed interface to it, and enable FlowSpec on that interface (verify commit succeeds): \n\n2. Configure BGP FlowSpec-VPN (ipv4-flowspec-vpn) peering in the default VRF towards a FSPEC-VPN peer, and configure the NDVRF to import FlowSpec-VPN rules via route-target match: \n\n3. From the peer, advertise a single IPv4/V6 FlowSpec-VPN NLRI that matches traffic destined to an IP behind PE-1 NDVRF interface and carries a DROP action (traffic-rate community rate=0); verify DNOS receives it on both PE-1 and PE-2: \n\n4. Verify the rule is visible under FlowSpec operational show for the  NDVRF and that it is installed in the dataplane (NCP view):\n\n5. Generate matching traffic into the PE-2 NDVRF interface and validate it is dropped and counters increment; clear counters and re-validate counters restart from zero.\n\n\n\nh1. B: Local-Flowspec-policies: \n\nh1. \n\n# Configure interface with {{flowspec enabled}}, attach to non-default VRF \u2192 commit succeeds: \n\n# Define + apply FlowSpec local policy (IPv4 + IPv6) scoped to VRF:\n\n# Verify interface is VRF member and FlowSpec remains enabled (no auto-disable): \n\n# Verify FlowSpec local match-classes/policies exist and counters present:\n\n# Verify FlowSpec rules installed in DP for non-default VRF (IPv4):\n\n# Verify FlowSpec rules installed in DP for non-default VRF (IPv6): \n\nh1. \n*Show commands legend:*\n\n* show bgp ipv4/6 flowspec-vpn summary: \n* show bgp ipv4/6 flowspec-vpn neighbors x.x.x.x received-routes:\n* show bgp instance vrf match ipv4/6 flowspec summary:\n* show flowspec instance vrf match ipv4/6:\n* show flowspec instance vrf match ipv4/6 nlri \"DstPrefix:=192.0.2.10/32,Protocol:=6,DstPort:=80\":\n* show flowspec ncp x:\n* clear flowspec counters: "
+      }
+    },
+    "source": "mcp_jira"
+  }
+}

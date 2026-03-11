@@ -1,0 +1,50 @@
+{
+  "fetched_at": "2026-01-21T11:39:01.133370",
+  "categories": [
+    {
+      "key": "SW-231823",
+      "summary": "Flowspec VPN | Basic functionality + Topology",
+      "issuetype": "Test Category"
+    },
+    {
+      "key": "SW-231824",
+      "summary": "Flowspec VPN | CLI",
+      "issuetype": "Test Category"
+    },
+    {
+      "key": "SW-231825",
+      "summary": "Flowspec VPN | DP Specifics",
+      "issuetype": "Test Category"
+    },
+    {
+      "key": "SW-231828",
+      "summary": "Flowspec VPN | Advanced Functionality",
+      "issuetype": "Test Category"
+    },
+    {
+      "key": "SW-231829",
+      "summary": "Flowspec VPN | Scale",
+      "issuetype": "Test Category"
+    },
+    {
+      "key": "SW-231830",
+      "summary": "Flowspec VPN | HA",
+      "issuetype": "Test Category"
+    },
+    {
+      "key": "SW-231835",
+      "summary": "Flowspec VPN | NetConf",
+      "issuetype": "Test Category"
+    },
+    {
+      "key": "SW-234155",
+      "summary": "Flowspec VPN | stress",
+      "issuetype": "Test Category"
+    },
+    {
+      "key": "SW-234156",
+      "summary": "Flowspec VPN | Upgrade",
+      "issuetype": "Test Category"
+    }
+  ]
+}
