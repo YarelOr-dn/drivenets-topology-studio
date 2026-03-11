@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+*~
+
+# Logs and temporary files
+*.log
+*.tmp
+*.backup*
+*.temp_backup
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Credentials (never commit)
+device_credentials.json
+*.pcap
+
+# Scaler device-specific data
+scaler/db/configs/*/
+scaler/db/history/*/
+scaler/db/timing_history.json
+
+# Node
+node_modules/
+
+# Generated output
+topology/output/
