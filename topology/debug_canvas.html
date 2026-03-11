@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Canvas Debug</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="toolbar" style="position: fixed; left: 0; top: 0; width: 250px; height: 100vh; background: #2c3e50; padding: 10px; color: white;">
+        <h2>Debug Panel</h2>
+        <div id="debug-info" style="font-size: 12px; margin-top: 20px;"></div>
+        <button onclick="testCanvas()" style="margin-top: 20px; padding: 10px;">Test Canvas Draw</button>
+        <button onclick="addTestDevice()" style="margin-top: 10px; padding: 10px;">Add Test Device</button>
+    </div>
+    
+    <div class="canvas-container">
+        <canvas id="topology-canvas"></canvas>
+    </div>
+    
+    <script>
+        const info = document.getElementById('debug-info');
+        function log(msg) {
+            info.innerHTML += msg + '<br>';
+            console.log(msg);
+        }
+        
+        log('Page loaded');
+        
+        const canvas = document.getElementById('topology-canvas');
+        const container = canvas.parentElement;
+        
+        log('Container: ' + container.clientWidth + 'x' + container.clientHeight);
+        
+        // Resize canvas
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+        
+        log('Canvas size: ' + canvas.width + 'x' + canvas.height);
+        
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+            log('Context OK');
+            
+            // Draw something
+            ctx.fillStyle = '#ecf0f1';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw a red circle
+            ctx.beginPath();
+            ctx.fillStyle = '#e74c3c';
+            ctx.arc(200, 200, 50, 0, Math.PI * 2);
+            ctx.fill();
+            
+            log('Drew test shapes');
+        } else {
+            log('ERROR: No context!');
+        }
+        
+        function testCanvas() {
+            ctx.fillStyle = '#3498db';
+            ctx.beginPath();
+            ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, 30, 0, Math.PI * 2);
+            ctx.fill();
+            log('Added random circle');
+        }
+        
+        function addTestDevice() {
+            const x = 300 + Math.random() * 200;
+            const y = 200 + Math.random() * 200;
+            ctx.fillStyle = '#27ae60';
+            ctx.beginPath();
+            ctx.arc(x, y, 30, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Device', x, y + 4);
+            log('Added device at ' + Math.round(x) + ',' + Math.round(y));
+        }
+    </script>
+</body>
+</html>

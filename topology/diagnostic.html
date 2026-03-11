@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Full Diagnostic</title>
+    <style>
+        body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 20px; font-size: 13px; }
+        .section { margin: 15px 0; padding: 10px; background: #2d2d2d; border-radius: 5px; }
+        .ok { color: #4ec9b0; }
+        .error { color: #f14c4c; }
+        .warn { color: #cca700; }
+        h2 { color: #569cd6; margin: 0 0 10px 0; font-size: 14px; }
+        pre { margin: 5px 0; white-space: pre-wrap; word-break: break-all; }
+    </style>
+</head>
+<body>
+    <h1 style="color: #569cd6;">Network Topology Diagnostic</h1>
+    <div id="results"></div>
+    
+    <script>
+        const results = document.getElementById('results');
+        
+        function addSection(title) {
+            const div = document.createElement('div');
+            div.className = 'section';
+            div.innerHTML = '<h2>' + title + '</h2>';
+            results.appendChild(div);
+            return div;
+        }
+        
+        function log(section, msg, type) {
+            const p = document.createElement('pre');
+            p.className = type || '';
+            p.textContent = msg;
+            section.appendChild(p);
+        }
+        
+        // Test 1: Check localStorage
+        const ls = addSection('1. LocalStorage Check');
+        try {
+            const keys = ['topology_autosave', 'topology_zoom', 'topology_panOffset', 'recentColors', 'darkMode', 'momentum_enabled'];
+            keys.forEach(key => {
+                const val = localStorage.getItem(key);
+                if (val) {
+                    const preview = val.length > 100 ? val.substring(0, 100) + '...' : val;
+                    log(ls, key + ': ' + preview, 'ok');
+                    
+                    // Try parsing JSON
+                    if (key !== 'darkMode' && key !== 'momentum_enabled' && key !== 'topology_zoom') {
+                        try {
+                            JSON.parse(val);
+                            log(ls, '  └─ JSON valid ✓', 'ok');
+                        } catch (e) {
+                            log(ls, '  └─ JSON INVALID: ' + e.message, 'error');
+                        }
+                    }
+                } else {
+                    log(ls, key + ': (not set)', 'warn');
+                }
+            });
+        } catch (e) {
+            log(ls, 'LocalStorage error: ' + e.message, 'error');
+        }
+        
+        // Test 2: Check script loading
+        const scripts = addSection('2. Script Loading');
+        
+        window.scriptErrors = [];
+        window.onerror = function(msg, url, line, col, error) {
+            window.scriptErrors.push({msg, url, line, col, error: error ? error.stack : ''});
+            return false;
+        };
+    </script>
+    
+    <script>
+        log(scripts, 'Loading debugger.js...', 'warn');
+    </script>
+    <script src="debugger.js"></script>
+    <script>
+        if (window.createDebugger) {
+            log(scripts, 'debugger.js: createDebugger exists ✓', 'ok');
+        } else if (window.TopologyDebugger) {
+            log(scripts, 'debugger.js: TopologyDebugger class exists ✓', 'ok');
+        } else {
+            log(scripts, 'debugger.js: FAILED - no createDebugger', 'error');
+        }
+    </script>
+    
+    <script>
+        log(scripts, 'Loading topology-momentum.js...', 'warn');
+    </script>
+    <script src="topology-momentum.js"></script>
+    <script>
+        if (window.createMomentumEngine) {
+            log(scripts, 'topology-momentum.js: createMomentumEngine exists ✓', 'ok');
+        } else if (window.MomentumEngine) {
+            log(scripts, 'topology-momentum.js: MomentumEngine class exists ✓', 'ok');
+        } else {
+            log(scripts, 'topology-momentum.js: FAILED - no createMomentumEngine', 'error');
+        }
+    </script>
+    
+    <script>
+        log(scripts, 'Loading topology.js...', 'warn');
+    </script>
+    <script src="topology.js"></script>
+    <script>
+        if (window.TopologyEditor) {
+            log(scripts, 'topology.js: TopologyEditor class exists ✓', 'ok');
+        } else {
+            log(scripts, 'topology.js: FAILED - TopologyEditor not defined', 'error');
+        }
+        
+        // Show any errors that occurred
+        if (window.scriptErrors.length > 0) {
+            log(scripts, '\n--- Script Errors ---', 'error');
+            window.scriptErrors.forEach(e => {
+                log(scripts, 'Error: ' + e.msg + ' at line ' + e.line, 'error');
+                if (e.error) log(scripts, 'Stack: ' + e.error, 'error');
+            });
+        }
+    </script>
+    
+    <script>
+        // Test 3: Try creating editor
+        const editor = addSection('3. Editor Initialization');
+        
+        // Create a test canvas
+        const testCanvas = document.createElement('canvas');
+        testCanvas.id = 'test-canvas';
+        testCanvas.width = 800;
+        testCanvas.height = 600;
+        document.body.appendChild(testCanvas);
+        
+        try {
+            if (window.TopologyEditor) {
+                log(editor, 'Creating TopologyEditor instance...', 'warn');
+                const testEditor = new TopologyEditor(testCanvas);
+                log(editor, 'TopologyEditor created successfully! ✓', 'ok');
+                log(editor, '  objects.length: ' + testEditor.objects.length, 'ok');
+                log(editor, '  zoom: ' + testEditor.zoom, 'ok');
+                log(editor, '  panOffset: ' + JSON.stringify(testEditor.panOffset), 'ok');
+                
+                // Try drawing
+                try {
+                    testEditor.draw();
+                    log(editor, '  draw() called successfully ✓', 'ok');
+                } catch (e) {
+                    log(editor, '  draw() FAILED: ' + e.message, 'error');
+                    log(editor, '  Stack: ' + e.stack, 'error');
+                }
+            } else {
+                log(editor, 'Cannot test - TopologyEditor not loaded', 'error');
+            }
+        } catch (e) {
+            log(editor, 'TopologyEditor creation FAILED: ' + e.message, 'error');
+            log(editor, 'Stack: ' + e.stack, 'error');
+        }
+        
+        // Test 4: Check DOM elements
+        const dom = addSection('4. DOM Elements Check');
+        const requiredElements = [
+            'topology-canvas', 'color-picker', 'font-size', 'btn-router', 'btn-switch',
+            'btn-select', 'btn-link', 'context-menu', 'link-editor-modal', 'device-editor-modal'
+        ];
+        
+        requiredElements.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                log(dom, id + ': exists ✓', 'ok');
+            } else {
+                log(dom, id + ': MISSING!', 'error');
+            }
+        });
+        
+        // Summary
+        const summary = addSection('5. Summary');
+        const hasErrors = window.scriptErrors.length > 0 || !window.TopologyEditor;
+        if (hasErrors) {
+            log(summary, '❌ ISSUES FOUND - Check sections above for details', 'error');
+        } else {
+            log(summary, '✅ All basic checks passed!', 'ok');
+            log(summary, 'If the app still doesn\'t work, the issue might be:', 'warn');
+            log(summary, '  - CSS preventing canvas from being visible', 'warn');
+            log(summary, '  - Event handlers not working', 'warn');
+            log(summary, '  - Specific interaction code failing', 'warn');
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,255 @@
+======================================================================
+DNAAS PATH DISCOVERY REPORT (BD-AWARE)
+======================================================================
+Generated: 2026-01-01 21:36:33
+Source: 100.64.0.220
+Destination: N/A
+Status: SUCCESS
+
+----------------------------------------------------------------------
+DEVICE INVENTORY
+----------------------------------------------------------------------
+
+[YOR_PE-2]
+  Serial: 100.64.0.220
+  Management IP: 
+  Management IPv6: N/A
+  System Type: SA-36CD-S, Family: NCR
+  DNOS Version: DNOS [26.1.0] build [1_priv], Copyright 2025 DRIVENETS LTD.
+  DNAAS Interfaces: ge400-0/0/2, ge400-0/0/0
+  Last Seen: 2026-01-01T21:35:22.449418
+
+----------------------------------------------------------------------
+PATH TRACE
+----------------------------------------------------------------------
+
+[Hop 1] YOR_PE-2 (PE)
+  Serial: 100.64.0.220
+  IP: N/A
+  Egress: ge400-0/0/2
+    >>>
+
+[Hop 2] DNAAS-LEAF-B15 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.6
+  Ingress: ge100-0/0/6
+    >>>
+
+[Hop 3] DNAAS-SPINE-B09 (SPINE)
+  Serial: N/A
+  IP: 100.64.100.12
+  Ingress: ge100-0/0/12
+    >>>
+
+[Hop 4] DNAAS-SuperSpine-D04 (SUPERSPINE)
+  Serial: N/A
+  IP: 100.64.100.1
+  Ingress: ge100-4/0/6
+    >>>
+
+[Hop 5] DNAAS-SPINE-D14 (SPINE)
+  Serial: N/A
+  IP: 100.64.100.129
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 6] DNAAS-LEAF-D16 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.123
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 7] YOR_PE-1 (PE)
+  Serial: N/A
+  IP: N/A
+  Ingress: ge400-0/0/4
+    >>>
+
+[Hop 8] DNAAS-LEAF-B10 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.3
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 9] YOR_CL_PE-4 (PE)
+  Serial: N/A
+  IP: N/A
+  Ingress: ge100-18/0/0
+    >>>
+
+[Hop 10] DNAAS-LEAF-B14 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.5
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 11] DNAAS-LEAF-B16 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.7
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 12] YOR_PE-2 (PE)
+  Serial: N/A
+  IP: N/A
+  Ingress: ge400-0/0/0
+    >>>
+
+[Hop 13] DNAAS-LEAF-B15 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.6
+  Ingress: ge100-0/0/7
+
+----------------------------------------------------------------------
+LLDP NEIGHBOR DETAILS
+----------------------------------------------------------------------
+
+[YOR_PE-2] LLDP Neighbors:
+  ge400-0/0/0          -> DNAAS-LEAF-B15:ge100-0/0/6 [DNAAS]
+  ge400-0/0/2          -> DNAAS-LEAF-B15:ge100-0/0/7 [DNAAS]
+
+----------------------------------------------------------------------
+BRIDGE DOMAINS DISCOVERED
+----------------------------------------------------------------------
+
+[DNAAS-LEAF-B15] BD 0
+  Name: g_yor_v210
+  VLAN ID: 210
+  State: up
+  Interfaces:
+    - bundle-100.210
+    - bundle-60000.210
+
+[DNAAS-LEAF-B15] BD 0
+  Name: g_yor_v215_Spirent-PE-2
+  State: up
+  Interfaces:
+    - bundle-100.215
+    - bundle-60000.215
+
+[DNAAS-SPINE-B09] BD 0
+  Name: g_yor_v210
+  VLAN ID: 210
+  State: up
+  Interfaces:
+    - bundle-60000.210
+    - bundle-60001.210
+    - bundle-60003.210
+    - bundle-60004.210
+    - bundle-60005.210
+
+[DNAAS-SuperSpine-D04] BD 0
+  Name: g_yor_v210_BGP-REG_WAN
+  State: up
+  Interfaces:
+    - bundle-60004.210
+    - bundle-60007.210
+    - ge10-0/0/1.210
+
+[DNAAS-SPINE-D14] BD 0
+  Name: g_yor_v210_WAN
+  State: up
+  Interfaces:
+    - bundle-60000.210
+    - bundle-60004.210
+
+[DNAAS-LEAF-D16] BD 0
+  Name: g_yor_v210
+  VLAN ID: 210
+  State: up
+  Interfaces:
+    - bundle-60000.210
+    - ge100-0/0/4
+
+[DNAAS-LEAF-B10] BD 0
+  Name: g_yor_v210_WAN
+  State: up
+  Interfaces:
+    - bundle-60000.210
+    - ge100-0/0/3.210
+
+[DNAAS-LEAF-B14] BD 0
+  Name: g_yor_v210_BGP-REG_WAN
+  State: up
+  Interfaces:
+    - bundle-60000.210
+    - ge100-0/0/20.210
+
+[DNAAS-LEAF-B16] BD 0
+  Name: g_yor_v210-PE1-WAN
+  State: down
+  Interfaces:
+    - bundle-60000.210
+    - ge100-0/0/6
+
+[DNAAS-LEAF-B15] BD 0
+  Name: g_yor_v210
+  VLAN ID: 210
+  State: up
+  Interfaces:
+    - bundle-100.210
+    - bundle-60000.210
+
+[DNAAS-LEAF-B15] BD 0
+  Name: g_yor_v215_Spirent-PE-2
+  State: up
+  Interfaces:
+    - bundle-100.215
+    - bundle-60000.215
+
+----------------------------------------------------------------------
+LACP BUNDLES DISCOVERED
+----------------------------------------------------------------------
+
+[bundle-100]
+  State: unknown
+  Members:
+    - ge100-0/0/6
+    - ge100-0/0/7
+
+[bundle-60000]
+  State: unknown
+  Members:
+    - ge100-0/0/36
+    - ge100-0/0/37
+    - ge100-0/0/38
+
+[bundle-60001]
+  State: unknown
+  Members:
+    - ge100-0/0/0
+    - ge100-0/0/1
+    - ge100-0/0/2
+
+[bundle-60003]
+  State: unknown
+  Members:
+    - ge100-0/0/8
+    - ge100-0/0/9
+    - ge100-0/0/10
+
+[bundle-60004]
+  State: unknown
+  Members:
+    - ge100-0/0/12
+    - ge100-0/0/13
+    - ge100-0/0/14
+
+[bundle-60005]
+  State: unknown
+  Members:
+    - ge100-0/0/16
+    - ge100-0/0/17
+    - ge100-0/0/18
+
+[bundle-60007]
+  State: unknown
+  Members:
+    - ge100-4/0/12
+    - ge100-4/0/13
+    - ge100-5/0/12
+    - ge100-5/0/13
+
+======================================================================
+END OF REPORT
+======================================================================

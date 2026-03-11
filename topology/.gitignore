@@ -1,0 +1,33 @@
+# Logs and temporary files
+*.log
+*.tmp
+*.backup*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Dependencies
+node_modules/
+
+# Credentials (never commit)
+device_credentials.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# Backup files created during development
+*.backup_*
+*.temp_backup
+
+# Generated output
+output/
+
+

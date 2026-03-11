@@ -1,0 +1,83 @@
+# Topology Creator - Cursor Rules
+# ================================
+# These rules must be followed for ALL development in the Topology Creator project.
+
+## 🚫 NO EMOJIS RULE (CRITICAL)
+
+**NEVER use emojis anywhere in this codebase.**
+
+### Why:
+- Emojis render inconsistently across platforms and browsers
+- They add unnecessary bytes and complexity
+- SVG icons are more professional and customizable
+- Emojis can break in certain terminal/console environments
+
+### Instead of emojis:
+1. **For UI elements**: Use SVG icons from the icon library in index.html
+   - All icons are defined in `<svg style="display:none">` at the top of index.html
+   - Reference them with: `<svg><use href="#ico-iconname"/></svg>`
+   - Available icons: ico-alert, ico-bug, ico-warning, ico-error, ico-success, ico-info, 
+     ico-network, ico-link, ico-router, ico-discover, ico-copy, ico-edit, ico-delete, 
+     ico-save, ico-refresh, ico-close, ico-check, ico-palette, ico-label, ico-lock, 
+     ico-unlock, ico-pin, ico-target, ico-chart, ico-layers, ico-curve, ico-brush, 
+     ico-sparkle, ico-text, ico-search, ico-list, ico-import, ico-ruler, ico-up, 
+     ico-down, ico-left, ico-right, ico-menu, ico-play, ico-magnet, ico-hand, 
+     ico-rocket, ico-spectrum, ico-image, ico-minus, ico-gear
+
+2. **For debug/log messages**: Use text prefixes like:
+   - `[OK]` instead of ✅
+   - `[WARN]` instead of ⚠️
+   - `[ERROR]` instead of ❌
+   - `[INFO]` instead of ℹ️
+   - Descriptive text like `"Drag Started"` instead of `"🎯 Drag Started"`
+
+3. **For status indicators**: Use CSS-styled elements or text
+   - Colors work better than emojis for status
+   - Use CSS classes for visual states
+
+### Adding new icons:
+If you need an icon that doesn't exist:
+1. Add a new `<symbol>` in the SVG defs section of index.html
+2. Use consistent viewBox (24x24 is standard)
+3. Use currentColor for fills to inherit text color
+4. Follow the duotone pattern with opacity layers for depth
+
+---
+
+## File Structure
+
+- `index.html` - Main HTML with SVG icon library
+- `topology.js` - Core topology canvas logic
+- `styles.css` - All CSS styling with CSS variables for theming
+- `server.py` - FastAPI backend server
+
+## CSS Theming
+
+Use CSS variables for all colors:
+- `--dn-navy-deep` - Primary dark background
+- `--dn-cyan` - Primary accent color
+- `--dn-orange` - Secondary accent/action color  
+- `--dn-cloud` - Light text/background
+- Reference styles.css for full color palette
+
+## Canvas Drawing
+
+When drawing on canvas:
+- Use the existing drawing methods in TopologyCanvas class
+- Maintain consistent styling with theme colors
+- Use professional fonts (DM Sans, Space Grotesk, etc.)
+- Avoid hardcoded colors - use this.* properties
+
+## Code Style
+
+- Use ES6+ JavaScript features
+- Maintain 4-space indentation in JS
+- Use descriptive variable names
+- Comment complex logic
+- Keep functions focused and small
+
+
+
+
+
+

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head><title>Error Test</title></head>
+<body>
+<h1>Loading...</h1>
+<script>
+window.onerror = function(msg, url, line, col, error) {
+    document.body.innerHTML = '<h1 style="color:red">JavaScript Error</h1>' +
+        '<pre>' + msg + '\nLine: ' + line + '\nCol: ' + col + '\n' +
+        (error ? error.stack : '') + '</pre>';
+    return true;
+};
+</script>
+<script src="debugger.js"></script>
+<script src="topology-momentum.js"></script>
+<script src="topology.js"></script>
+<script>
+setTimeout(function() {
+    if (window.topologyEditor) {
+        document.body.innerHTML = '<h1 style="color:green">✅ Loaded successfully!</h1>';
+    } else {
+        document.body.innerHTML = '<h1 style="color:red">❌ Failed to create editor</h1>';
+    }
+}, 1000);
+</script>
+</body>
+</html>

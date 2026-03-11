@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Get Topology State</title>
+</head>
+<body>
+<h2>Get Current Topology State</h2>
+<button onclick="getState()" style="padding: 10px 20px; font-size: 16px;">📋 Get State from Console</button>
+<pre id="output" style="background: #1e1e1e; color: #0ff; padding: 20px; margin-top: 20px; overflow: auto; max-height: 600px;"></pre>
+
+<script>
+function getState() {
+    // Access main window's editor
+    const editor = window.opener?.editor || window.parent?.editor || window.editor;
+    
+    if (!editor) {
+        document.getElementById('output').textContent = 'ERROR: Cannot access editor. Make sure topology app is open.';
+        return;
+    }
+    
+    const objects = editor.objects || [];
+    const unboundLinks = objects.filter(o => o.type === 'unbound');
+    
+    let output = '═══ TOPOLOGY STATE ═══\n\n';
+    output += `Total objects: ${objects.length}\n`;
+    output += `Unbound links: ${unboundLinks.length}\n\n`;
+    
+    unboundLinks.forEach((link, i) => {
+        output += `━━━ UL-${i+1} (${link.id}) ━━━\n`;
+        output += `  Start: (${link.start.x.toFixed(1)}, ${link.start.y.toFixed(1)})\n`;
+        output += `  End: (${link.end.x.toFixed(1)}, ${link.end.y.toFixed(1)})\n`;
+        
+        if (link.mergedWith) {
+            output += `  mergedWith:\n`;
+            output += `    linkId: ${link.mergedWith.linkId}\n`;
+            output += `    connectionEndpoint: ${link.mergedWith.connectionEndpoint}\n`;
+            output += `    childConnectionEndpoint: ${link.mergedWith.childConnectionEndpoint}\n`;
+            output += `    parentFreeEnd: ${link.mergedWith.parentFreeEnd}\n`;
+            output += `    childFreeEnd: ${link.mergedWith.childFreeEnd}\n`;
+            output += `    mpNumber: ${link.mergedWith.mpNumber}\n`;
+        }
+        
+        if (link.mergedInto) {
+            output += `  mergedInto:\n`;
+            output += `    parentId: ${link.mergedInto.parentId}\n`;
+            output += `    parentEndpoint: ${link.mergedInto.parentEndpoint}\n`;
+            output += `    childEndpoint: ${link.mergedInto.childEndpoint}\n`;
+        }
+        
+        output += '\n';
+    });
+    
+    document.getElementById('output').textContent = output;
+    
+    // Also copy to clipboard
+    navigator.clipboard.writeText(output).then(() => {
+        alert('✅ State copied to clipboard!');
+    }).catch(() => {
+        alert('State displayed above - manually copy it');
+    });
+}
+</script>
+</body>
+</html>
+
+
+
+

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Test</title>
+    <style>
+        body { background: #1a1a1a; color: white; font-family: monospace; padding: 20px; }
+        #log { background: #2d2d2d; padding: 10px; border-radius: 5px; white-space: pre-wrap; max-height: 400px; overflow: auto; }
+        .error { color: #ff6b6b; }
+        .success { color: #2ecc71; }
+        .info { color: #3498db; }
+    </style>
+</head>
+<body>
+    <h1>JavaScript Load Test</h1>
+    <canvas id="topology-canvas" width="800" height="600" style="border: 1px solid #444;"></canvas>
+    <div id="log"></div>
+    
+    <script>
+        const log = document.getElementById('log');
+        function addLog(msg, type) {
+            const div = document.createElement('div');
+            div.className = type || '';
+            div.textContent = new Date().toISOString().substr(11, 8) + ' - ' + msg;
+            log.appendChild(div);
+            console.log(msg);
+        }
+        
+        window.onerror = function(msg, url, line, col, error) {
+            addLog('ERROR: ' + msg + ' at line ' + line, 'error');
+            return false;
+        };
+        
+        addLog('Starting load test...', 'info');
+    </script>
+    
+    <script>
+        addLog('Loading debugger.js...', 'info');
+    </script>
+    <script src="debugger.js" onerror="addLog('FAILED to load debugger.js', 'error')"></script>
+    <script>
+        addLog('debugger.js loaded, createDebugger exists: ' + !!window.createDebugger, window.createDebugger ? 'success' : 'error');
+    </script>
+    
+    <script>
+        addLog('Loading topology-momentum.js...', 'info');
+    </script>
+    <script src="topology-momentum.js" onerror="addLog('FAILED to load topology-momentum.js', 'error')"></script>
+    <script>
+        addLog('topology-momentum.js loaded, createMomentumEngine exists: ' + !!window.createMomentumEngine, window.createMomentumEngine ? 'success' : 'error');
+    </script>
+    
+    <script>
+        addLog('Loading topology.js...', 'info');
+    </script>
+    <script src="topology.js" onerror="addLog('FAILED to load topology.js', 'error')"></script>
+    <script>
+        addLog('topology.js loaded, TopologyEditor exists: ' + !!window.TopologyEditor, window.TopologyEditor ? 'success' : 'error');
+        
+        if (window.TopologyEditor) {
+            try {
+                addLog('Creating TopologyEditor instance...', 'info');
+                const canvas = document.getElementById('topology-canvas');
+                const editor = new TopologyEditor(canvas);
+                addLog('TopologyEditor created successfully!', 'success');
+                addLog('Editor objects count: ' + editor.objects.length, 'info');
+            } catch (e) {
+                addLog('FAILED to create TopologyEditor: ' + e.message, 'error');
+                addLog('Stack: ' + e.stack, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
