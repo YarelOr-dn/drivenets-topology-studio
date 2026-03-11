@@ -1,0 +1,16 @@
+{
+  "issue_key": "SW-234160",
+  "fetched_at": "2026-01-21T11:32:34.798800",
+  "data": {
+    "key": "SW-234160",
+    "id": "562199",
+    "summary": "Flowspec VPN | Topology creation ",
+    "fields": {
+      "summary": "Flowspec VPN | Topology creation ",
+      "customfield_11772": {
+        "value": "*Test Steps:*\r\n\r\n*Pass Criteria:*\r\n\r\n*Commands legend:*\r\n\r\n*Show commands legend:*\r\n\r\n*Variants:*\r\n\r\n*Negative Testing Flows:*"
+      }
+    },
+    "source": "mcp_jira"
+  }
+}

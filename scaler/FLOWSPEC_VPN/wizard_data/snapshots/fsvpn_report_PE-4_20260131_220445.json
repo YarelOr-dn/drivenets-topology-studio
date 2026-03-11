@@ -1,0 +1,42 @@
+{
+  "hostname": "PE-4",
+  "ip": "kvm108-cl408d-ncc0",
+  "timestamp": "2026-01-31T22:04:42.355897",
+  "dnos_version": "",
+  "summary": {
+    "total_rules": 0,
+    "bgp_total": 0,
+    "bgp_installed": 0,
+    "bgp_unsupported": 0,
+    "lp_total": 0,
+    "lp_installed": 0,
+    "lp_unsupported": 0,
+    "priority_conflicts": 0
+  },
+  "tcam": {
+    "ipv4_used": 0,
+    "ipv4_capacity": 12000,
+    "ipv6_used": 0,
+    "ipv6_capacity": 4000,
+    "bcm_pmf_entries": 0
+  },
+  "hw_counters": {
+    "rules_write_ok": 0,
+    "rules_write_fail": 0,
+    "policers_write_ok": 0,
+    "policers_write_fail": 0
+  },
+  "priority_reference": {
+    "local_policies_range": "0 - 1,999,999 (WINS - matched first)",
+    "bgp_flowspec_range": "2,000,000 - 4,000,000 (matched after local)",
+    "tcam_full_behavior": "First-installed wins when TCAM is full"
+  },
+  "bgp_rules": [],
+  "local_rules": [],
+  "conflicts": [],
+  "problems": [],
+  "warnings": [
+    "FlowSpec NOT in running config"
+  ],
+  "checks": []
+}

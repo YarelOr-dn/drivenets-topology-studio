@@ -1,0 +1,37 @@
+{
+  "192.168.165.53": {
+    "hostname": "R3_SA40_Eddie",
+    "device_id": "R3_SA40_Eddie",
+    "deleted_at": "2026-01-14T11:09:12.411658"
+  },
+  "192.168.168.107": {
+    "hostname": "R1_CL16_Eddie",
+    "device_id": "R1_CL16_Eddie",
+    "deleted_at": "2026-01-14T11:09:12.415633"
+  },
+  "192.168.163.199": {
+    "hostname": "R2_SA40_Eddie",
+    "device_id": "R2_SA40_Eddie",
+    "deleted_at": "2026-01-14T11:09:12.422166"
+  },
+  "192.168.166.66": {
+    "hostname": "R4_SA40_Eddie",
+    "device_id": "R4_SA40_Eddie",
+    "deleted_at": "2026-01-14T11:09:12.425688"
+  },
+  "WKY1C7VJ0001BP2": {
+    "hostname": "product_r2_BP2",
+    "device_id": "product_r2_bp2",
+    "deleted_at": "2026-01-14T11:09:12.429047"
+  },
+  "WDY1A77Y00042": {
+    "hostname": "product_r3-p",
+    "device_id": "product_r3_p",
+    "deleted_at": "2026-01-14T11:09:12.432625"
+  },
+  "WKY1BB7200007B1": {
+    "hostname": "NCP3_Alfasi_S-PE",
+    "device_id": "ncp3_alfasi_s_pe",
+    "deleted_at": "2026-01-26T11:21:55.105110"
+  }
+}

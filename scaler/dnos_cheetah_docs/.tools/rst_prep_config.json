@@ -1,0 +1,382 @@
+[
+    {
+        "GLOBAL_KNOBS": {
+            "IN_DIR": "..",
+            "OUT_DIR": "./out/dnos_cli",
+            "RENAME_RSTS_BASED_ON_CMD_NAME": false
+        }
+    },
+    {
+        "target": "BFD",
+        "dest": "Protocols/BFD",
+        "action": "MOVE_CONTENTS"
+    },
+    {
+        "target": "CLI Guidelines",
+        "action": "DELETE"
+    },
+    {
+        "target": "Community-list",
+        "dest": "Routing-policy",
+        "action": "MOVE_CONTENTS"
+    },
+    {
+        "target": "debug",
+        "dest": "Debug log Commands",
+        "action": "FLATTEN_AND_MOVE_CONTENTS"
+    },
+    {
+        "target": "forwarding-options",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "High-availability",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Interfaces",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "LDP",
+        "dest": "Protocols/LDP",
+        "action": "MOVE_CONTENTS"
+    },
+    {
+        "target": "Main Menu Commands",
+        "action": "DELETE"
+    },
+    {
+        "target": "MPLS",
+        "dest": "Protocols/MPLS",
+        "action": "MOVE_CONTENTS"
+    },
+    {
+        "target": "Multicast",
+        "dest": "Protocols/Multicast",
+        "action": "MOVE_CONTENTS"
+    },
+    {
+        "target": "nacm",
+        "dest": "NACM",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Network-services",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Protocols/bfd",
+        "dest": "Protocols/BFD",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Protocols",
+        "dest": "Protocols/BGP",
+		"files": ["bgp_class-of-service.rst", "bgp_maximum-sessions.rst", "bgp_nsr.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+	    "target": "Protocols",
+        "dest": "Protocols/VRRP",
+		"files": ["vrrp_class-of-service.rst", "vrrp_startup-delay.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "Protocols/lacp",
+        "dest": "Protocols/LACP",
+        "action": "FLATTEN"
+    },
+	{
+        "target": "Protocols/bgp",
+        "dest": "Protocols/BGP",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Protocols/isis",
+        "dest": "Protocols/ISIS",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Protocols/ldp",
+        "dest": "Protocols/LDP",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Protocols/lldp",
+        "dest": "Protocols/LLDP",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Protocols/mpls",
+        "dest": "Protocols/MPLS",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Protocols/msdp",
+        "dest": "Protocols/MSDP",
+        "action": "FLATTEN"
+	},
+    {
+        "target": "Protocols/ospf",
+        "dest": "Protocols/OSPF",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Protocols/ospfv3",
+        "dest": "Protocols/OSPFv3",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Protocols/pcep",
+        "dest": "Protocols/PCEP",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Protocols/pim",
+        "dest": "Protocols/PIM",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Protocols/rsvp",
+        "dest": "Protocols/RSVP",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Protocols/segment-routing",
+        "dest": "Protocols/Segment-routing",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Protocols/static",
+        "dest": "Protocols/Static",
+        "action": "FLATTEN"
+    },
+	{
+        "target": "Protocols/vrrp",
+        "dest": "Protocols/VRRP",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "QoS",
+        "dest": "QOS",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Routing-options",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Routing-policy",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "Segment-routing",
+        "dest": "Protocols/Segment-routing",
+        "action": "MOVE_CONTENTS"
+    },
+    {
+        "target": "Services",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "tracking-policy",
+        "action": "FLATTEN"
+    },
+	{
+        "target": "System",
+		"dest": "System/System Debug",
+		"files": ["system debug file.rst", "system debug file files.rst", "system debug file size.rst"],
+        "action": "MOVE_CONTENTS"
+    },    
+	{
+        "target": "System/alarms",
+        "action": "FLATTEN"
+    },
+	{
+        "target": "System/connectivity",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System/cprl",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System/diagnostics",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System/dns",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System/grpc",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System/high-availability",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System/ldap",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System/ncp",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System/netconf",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System/network-resources",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System/ntp",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System/snmp",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System/sztp",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System/utilization",
+        "action": "FLATTEN"
+    },
+    {
+        "target": "System",
+		"dest": "System/AAA-Server",
+		"files": ["system aaa overview.rst", "system aaa-server admin-state.rst", "system aaa-server authentication-order.rst", "system aaa-server class-of-service.rst", "system aaa-server fallback-on-reject.rst", "system aaa-server radius server authentication.rst", "system aaa-server radius server authorization.rst", "system aaa-server radius server password.rst", "system aaa-server radius server port.rst", "system aaa-server radius server retries.rst", "system aaa-server radius server retry-interval.rst", "system aaa-server radius server vrf.rst", "system aaa-server radius server.rst", "system aaa-server radius timers hold-down.rst", "system aaa-server radius timers retry-time.rst", "system aaa-server radius timers.rst", "system aaa-server radius.rst", "system aaa-server source-interface.rst", "system aaa-server tacacs authorization-type.rst", "system aaa-server tacacs server accounting.rst", "system aaa-server tacacs server admin-state.rst", "system aaa-server tacacs server authentication-protocol.rst", "system aaa-server tacacs server authentication.rst", "system aaa-server tacacs server authorization.rst", "system aaa-server tacacs server password.rst", "system aaa-server tacacs server port.rst", "system aaa-server tacacs server source-interface.rst", "system aaa-server tacacs server timeout.rst", "system aaa-server tacacs server vrf.rst", "system aaa-server tacacs server.rst", "system aaa-server tacacs timers hold-down.rst", "system aaa-server tacacs timers retry-time.rst", "system aaa-server tacacs timers.rst", "system aaa-server tacacs.rst", "system aaa-server.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+    {
+        "target": "System",
+		"dest": "System/Event-Manager",
+		"files": ["system event-manager event-policy admin-state.rst", "system event-manager event-policy event attribute.rst", "system event-manager event-policy event time-interval.rst", "system event-manager event-policy event trigger-condition.rst", "system event-manager event-policy event.rst", "system event-manager event-policy policy-iteration.rst", "system event-manager event-policy script-maxruntime.rst", "system event-manager event-policy script-name.rst", "system event-manager event-policy user.rst", "system event-manager event-policy.rst", "system event-manager generic-policy admin-state.rst", "system event-manager generic-policy script-name.rst", "system event-manager generic-policy user.rst", "system event-manager generic-policy.rst", "system event-manager periodic-policy admin-state.rst", "system event-manager periodic-policy policy-interval.rst", "system event-manager periodic-policy policy-iteration.rst", "system event-manager periodic-policy script-maxruntime.rst", "system event-manager periodic-policy script-name.rst", "system event-manager periodic-policy user.rst", "system event-manager periodic-policy.rst", "system event-manager.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/Hardware",
+		"files": ["system hardware model temperature-threshold.rst", "system hardware model.rst", "system hardware usb admin-state.rst", "system hardware usb.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+    {
+        "target": "System",
+		"dest": "System/FTP",
+		"files": ["System ftp  server vrf.rst", "system ftp server admin-state.rst", "system ftp server class-of-service.rst", "system ftp server data-connection-timeout.rst", "system ftp server idle-session-timeout.rst", "system ftp server max-sessions.rst", "system ftp server vrf client-list type.rst", "system ftp server vrf client-list.rst", "system ftp server.rst", "system ftp.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/ICMP",
+		"files": ["system icmp unreachable admin-state.rst", "system icmp unreachable.rst", "system icmp.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+ 	{
+        "target": "System",
+		"dest": "System/In-Band Management",
+		"files": ["system in-band-management access-list.rst", "system in-band-management dnor-server-vrf.rst", "system in-band-management source-interface.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/Logging",
+		"files": ["system logging file files.rst", "system logging file size.rst", "system logging file.rst", "system logging overview.rst", "system logging syslog chronological-ordering.rst", "system logging syslog class-of-service.rst", "system logging syslog event-group severity.rst", "system logging syslog facility.rst", "system logging syslog server admin-state.rst", "system logging syslog server facility.rst", "system logging syslog server port.rst", "system logging syslog server protocol.rst", "system logging syslog server severity.rst", "system logging syslog server.rst", "system logging syslog source-interface.rst", "system logging syslog suppress-event-list.rst", "system logging syslog timestamp-format utc-normalize.rst", "system logging syslog timestamp-format.rst", "system logging syslog.rst", "system logging system server source-interface.rst", "system logging.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/Login",
+		"files": ["system login banner.rst", "system login ipmi user password.rst", "system login ipmi user privilege.rst", "system login ipmi user.rst", "system login ipmi.rst", "system login ncm user password.rst", "system login ncm user role.rst", "system login ncm user.rst", "system login session-holdoff.rst", "system login session-retry.rst", "system login session-timeout.rst", "system login shell-timeout.rst", "system login techsupport-login.rst", "system login user description.rst", "system login user key ssh-rsa file.rst", "system login user key ssh-rsa terminal.rst", "system login user password.rst", "system login user role.rst", "system login user.rst", "system login.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/Management",
+		"files": ["system management vrf static address-familiy.rst","system management vrf static address-family route next-hop.rst", "system management vrf static.rst", "system management vrf.rst", "system management.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/NCC",
+		"files": ["system ncc description.rst","system ncc.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/NCF",
+		"files": ["system ncf admin-state.rst", "system ncf description.rst", "system ncf.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/NCM",
+		"files": ["system ncm description.rst", "system ncm.rst", "system ncp admin-state.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/NCP",
+		"files": ["system ncp description.rst", "system ncp hw-model.rst", "system ncp model.rst", "system ncp.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/NETCONF",
+		"files": ["system netconf class-of-service.rst", "system netconf max-sessions.rst", "system netconf response-envelope namespace-prefix.rst", "system netconf response-envelope.rst", "system netconf session-timeout.rst", "system netconf vrf client-list type.rst", "system netconf vrf client-list.rst", "system netconf.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+    {
+        "target": "System",
+		"dest": "System/NTP",
+		"files": ["system ntp authentication key.rst", "system ntp server admin-state.rst", "system ntp server iburst.rst", "system ntp server key.rst", "system ntp server prefer.rst", "system ntp server.rst", "system ntp source-interface.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/SNMP",
+		"files": ["system snmp class-of-service.rst", "system snmp community access.rst", "system snmp community admin-state.rst", "system snmp community client-list.rst", "system snmp community view.rst", "system snmp community.rst", "system snmp compatibility-mode cisco.rst", "system snmp compatibility-mode.rst", "system snmp packet-size.rst", "system snmp trap-server admin-state.rst", "system snmp trap-server community.rst", "system snmp trap-server max-throughput.rst", "system snmp trap-server port.rst", "system snmp trap-server source-interface.rst", "system snmp trap-server trap-source-port.rst", "system snmp trap-server version.rst", "system snmp trap-server.rst", "system snmp trap.rst", "system snmp user view.rst", "system snmp user.rst", "system snmp view.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/SSH",
+		"files": ["system ssh client admin-state.rst", "system ssh server admin-state.rst", "system ssh server class-of-service.rst", "system ssh server client-list type.rst", "system ssh server max-sessions.rst", "system ssh server vrf admin-state.rst", "system ssh server vrf client-list type.rst", "system ssh server vrf client-list.rst", "system ssh server vrf.rst", "system ssh server.rst", "system ssh.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/TCP",
+		"files": ["system tcp path-mtu-discovery host admin-state.rst", "system tcp path-mtu-discovery host.rst", "system tcp path-mtu-discovery tcp-probing admin-state.rst", "system tcp path-mtu-discovery tcp-probing.rst", "system tcp path-mtu-discovery.rst", "system tcp.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/TELNET",
+		"files": ["system telnet client admin-state.rst", "system telnet client.rst", "system telnet server admin-state.rst", "system telnet server class-of-service.rst", "system telnet server max-sessions.rst", "system telnet server vrf client-list type.rst", "system telnet server vrf client-list.rst", "system telnet server vrf.rst", "system telnet server.rst", "system telnet.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/Utilization",
+		"files": ["utilization.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "System",
+		"dest": "System/General System Commands",
+		"files": ["system info.rst", "system ipv4-fragmentation-in-transit admin-state.rst", "system name.rst", "system preferred-ncc.rst", "system timezone.rst", "system timing-mode.rst"],
+        "action": "MOVE_CONTENTS"
+    },
+	{
+        "target": "_Backlog",
+        "action": "DELETE"
+    }
+]

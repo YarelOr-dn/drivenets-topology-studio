@@ -1,0 +1,182 @@
+{
+  "hostname": "PE-1",
+  "ip": "wk31d7vv00023",
+  "timestamp": "2026-02-02T08:30:10.360454",
+  "dnos_version": "",
+  "summary": {
+    "total_rules": 0,
+    "bgp_total": 0,
+    "bgp_installed": 0,
+    "bgp_unsupported": 0,
+    "lp_total": 0,
+    "lp_installed": 0,
+    "lp_unsupported": 0,
+    "priority_conflicts": 0
+  },
+  "tcam": {
+    "ipv4_used": 0,
+    "ipv4_capacity": 12000,
+    "ipv6_used": 0,
+    "ipv6_capacity": 4000,
+    "bcm_pmf_entries": 0
+  },
+  "hw_counters": {
+    "rules_write_ok": 0,
+    "rules_write_fail": 0,
+    "policers_write_ok": 0,
+    "policers_write_fail": 0
+  },
+  "priority_reference": {
+    "local_policies_range": "0 - 1,999,999 (WINS - matched first)",
+    "bgp_flowspec_range": "2,000,000 - 4,000,000 (matched after local)",
+    "tcam_full_behavior": "First-installed wins when TCAM is full"
+  },
+  "bgp_rules": [],
+  "local_rules": [],
+  "conflicts": [],
+  "problems": [
+    "FlowSpec BGP configured but no sessions established"
+  ],
+  "warnings": [
+    "No VRFs configured with ipv4-flowspec",
+    "No FlowSpec BGP routes - check Local Policies if expected"
+  ],
+  "checks": [
+    {
+      "step": "3",
+      "component": "VRF",
+      "check": "VRF FlowSpec Config",
+      "status": "\u26a0",
+      "expected": "\u22651 VRF with ipv4-flowspec",
+      "actual": "0 VRFs configured"
+    },
+    {
+      "step": "3b",
+      "component": "VRF-Instance",
+      "check": "VRF FlowSpec Instance",
+      "status": "\u2139",
+      "expected": "VRFs with FlowSpec AF",
+      "actual": "No VRFs with FlowSpec address-family"
+    },
+    {
+      "step": "SAFI-133",
+      "component": "BGP",
+      "check": "FlowSpec (Global/Default VRF)",
+      "status": "\u26a0",
+      "expected": "\u22651 session Established",
+      "actual": "0/0 Established"
+    },
+    {
+      "step": "BGP-T",
+      "component": "BGP-Traces",
+      "check": "BGP FlowSpec Activity",
+      "status": "\u25cb",
+      "expected": "BGP traces accessible",
+      "actual": "Shell access failed: Failed to enter NCC shell"
+    },
+    {
+      "step": "2",
+      "component": "BGP",
+      "check": "FlowSpec Routes (any SAFI)",
+      "status": "\u26a0",
+      "expected": "\u22651 FlowSpec route",
+      "actual": "No FlowSpec routes received (may be using Local Policies only)"
+    },
+    {
+      "step": "4",
+      "component": "NCP",
+      "check": "Datapath Installation",
+      "status": "\u2717",
+      "expected": "All rules 'Installed'",
+      "actual": "Installed: 0, Failed: 0"
+    },
+    {
+      "step": "5",
+      "component": "wb_agent",
+      "check": "TCAM Status",
+      "status": "\u2713",
+      "expected": "tcam_errors = 0",
+      "actual": "entries: 0, unsupported: 0, tcam_errors: 0"
+    },
+    {
+      "step": "6",
+      "component": "wb_agent",
+      "check": "HW Counters",
+      "status": "\u2713",
+      "expected": "write_fail = 0",
+      "actual": "writes OK: 0, fails: 0"
+    },
+    {
+      "step": "BCM",
+      "component": "Hardware",
+      "check": "BCM PMF Entries",
+      "status": "\u25cb",
+      "expected": "BCM command available",
+      "actual": "Shell access failed: Connection timeout"
+    },
+    {
+      "step": "NCP",
+      "component": "Datapath",
+      "check": "NCP FlowSpec Status",
+      "status": "\u25cb",
+      "expected": "NCP FlowSpec command available",
+      "actual": "Command not available or NCP not accessible"
+    },
+    {
+      "step": "LP-5",
+      "component": "LocalPolicies",
+      "check": "Traffic Counters",
+      "status": "\u2139",
+      "expected": "Counters incrementing",
+      "actual": "0 packets matched (may be normal)"
+    },
+    {
+      "step": "LP-3",
+      "component": "LocalPolicy",
+      "check": "NCP Installation",
+      "status": "\u2139",
+      "expected": "Local policies at NCP level",
+      "actual": "No local policies configured or command not available"
+    },
+    {
+      "step": "v6",
+      "component": "BGP-IPv6",
+      "check": "IPv6-FlowSpec Sessions",
+      "status": "\u2139",
+      "expected": "Sessions if IPv6-FlowSpec configured",
+      "actual": "No IPv6-FlowSpec BGP sessions configured"
+    },
+    {
+      "step": "NCP",
+      "component": "Datapath",
+      "check": "NCP FlowSpec Status",
+      "status": "\u2713",
+      "expected": "All rules installed (xray: 0)",
+      "actual": "Installed: 0, Pending: 0, Failed: 0"
+    },
+    {
+      "step": "PRI",
+      "component": "Priority",
+      "check": "Conflict Analysis",
+      "status": "\u2713",
+      "expected": "No overlapping rules, or documented overrides",
+      "actual": "No conflicts - BGP:0 LP:0"
+    },
+    {
+      "step": "RNG",
+      "component": "Priority",
+      "check": "Range Validation",
+      "status": "\u2713",
+      "expected": "BGP: 2M-4M, Local: 0-2M",
+      "actual": "All rules in correct priority ranges"
+    },
+    {
+      "step": "POL",
+      "component": "Policer",
+      "check": "Rate-Limit Policers",
+      "status": "\u2139",
+      "expected": "Policers configured as needed",
+      "actual": "BGP: 0 with policer, LP: 0 with policer"
+    }
+  ]
+}

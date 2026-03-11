@@ -1,0 +1,50 @@
+protocols ospf instance area stub admin-state
+---------------------------------------------
+
+**Minimum user role:** operator
+
+This command enables/disables stub for the OSPF area.
+
+**Command syntax: admin-state [admin-state]**
+
+**Command mode:** config
+
+**Hierarchies**
+
+- protocols ospf instance area stub
+
+**Parameter table**
+
++-------------+---------------------------------------+--------------+----------+
+| Parameter   | Description                           | Range        | Default  |
++=============+=======================================+==============+==========+
+| admin-state | Enable STUB for OSPF in a given area. | | enabled    | disabled |
+|             |                                       | | disabled   |          |
++-------------+---------------------------------------+--------------+----------+
+
+**Example**
+::
+
+    dnRouter# configure
+    dnRouter(cfg)# protocols
+    dnRouter(cfg-protocols-ospf)# instance 1
+    dnRouter(cfg-protocols-ospf-inst)# area area-id
+    dnRouter(cfg-ospf-inst-area)# stub
+    dnRouter(cfg-inst-area-stub)# admin-state enabled
+    dnRouter(cfg-inst-area-stub)#
+
+
+**Removing Configuration**
+
+To revert the admin-state to its default value:
+::
+
+    dnRouter(cfg-inst-area-stub)# no admin-state
+
+**Command History**
+
++---------+--------------------+
+| Release | Modification       |
++=========+====================+
+| 18.1    | Command introduced |
++---------+--------------------+
