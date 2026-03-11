@@ -1,0 +1,285 @@
+{
+  "version": "1.0",
+  "objects": [
+    {
+      "id": "device_0",
+      "type": "device",
+      "deviceType": "router",
+      "x": 150,
+      "y": 300,
+      "radius": 40,
+      "rotation": 0,
+      "color": "#3498db",
+      "label": "YOR_PE-1",
+      "locked": false,
+      "visualStyle": "circle"
+    },
+    {
+      "id": "device_1",
+      "type": "device",
+      "deviceType": "router",
+      "x": 1050,
+      "y": 300,
+      "radius": 40,
+      "rotation": 0,
+      "color": "#3498db",
+      "label": "YOR_PE-2",
+      "locked": false,
+      "visualStyle": "circle"
+    },
+    {
+      "id": "device_2",
+      "type": "device",
+      "deviceType": "router",
+      "x": 350,
+      "y": 300,
+      "radius": 35,
+      "rotation": 0,
+      "color": "#e67e22",
+      "label": "DNAAS-LEAF-D16",
+      "locked": false,
+      "visualStyle": "circle"
+    },
+    {
+      "id": "device_3",
+      "type": "device",
+      "deviceType": "router",
+      "x": 850,
+      "y": 300,
+      "radius": 35,
+      "rotation": 0,
+      "color": "#e67e22",
+      "label": "DNAAS-LEAF-B15",
+      "locked": false,
+      "visualStyle": "circle"
+    },
+    {
+      "id": "device_4",
+      "type": "device",
+      "deviceType": "router",
+      "x": 600,
+      "y": 300,
+      "radius": 45,
+      "rotation": 0,
+      "color": "#9b59b6",
+      "label": "DNAAS Fabric",
+      "locked": false,
+      "visualStyle": "circle"
+    },
+    {
+      "id": "link_0",
+      "type": "link",
+      "originType": "QL",
+      "createdAt": 1735336800000,
+      "device1": "device_0",
+      "device2": "device_2",
+      "color": "#3498db",
+      "start": { "x": 190, "y": 300 },
+      "end": { "x": 315, "y": 300 },
+      "connectedStart": null,
+      "connectedEnd": null,
+      "style": "solid",
+      "width": 3,
+      "linkDetails": {
+        "interfaceA": "ge400-0/0/4",
+        "interfaceB": "ge100-0/0/4",
+        "vlanStack": "210",
+        "networkType": "L2-Service",
+        "bridgeDomain": "g_yor_v210"
+      }
+    },
+    {
+      "id": "link_1",
+      "type": "link",
+      "originType": "QL",
+      "createdAt": 1735336800001,
+      "device1": "device_2",
+      "device2": "device_4",
+      "color": "#e67e22",
+      "start": { "x": 385, "y": 300 },
+      "end": { "x": 555, "y": 300 },
+      "connectedStart": null,
+      "connectedEnd": null,
+      "style": "solid",
+      "width": 4,
+      "linkDetails": {
+        "interfaceA": "bundle-60000.210",
+        "interfaceB": "fabric-internal",
+        "vlanStack": "210",
+        "networkType": "L2-Service",
+        "bridgeDomain": "g_yor_v210"
+      }
+    },
+    {
+      "id": "link_2",
+      "type": "link",
+      "originType": "QL",
+      "createdAt": 1735336800002,
+      "device1": "device_4",
+      "device2": "device_3",
+      "color": "#e67e22",
+      "start": { "x": 645, "y": 300 },
+      "end": { "x": 815, "y": 300 },
+      "connectedStart": null,
+      "connectedEnd": null,
+      "style": "solid",
+      "width": 4,
+      "linkDetails": {
+        "interfaceA": "fabric-internal",
+        "interfaceB": "bundle-60000.210",
+        "vlanStack": "210",
+        "networkType": "L2-Service",
+        "bridgeDomain": "g_yor_v210"
+      }
+    },
+    {
+      "id": "link_3",
+      "type": "link",
+      "originType": "QL",
+      "createdAt": 1735336800003,
+      "device1": "device_3",
+      "device2": "device_1",
+      "color": "#3498db",
+      "start": { "x": 885, "y": 300 },
+      "end": { "x": 1010, "y": 300 },
+      "connectedStart": null,
+      "connectedEnd": null,
+      "style": "solid",
+      "width": 3,
+      "linkDetails": {
+        "interfaceA": "bundle-100.210",
+        "interfaceB": "bundle-100",
+        "vlanStack": "210",
+        "networkType": "L2-Service",
+        "bridgeDomain": "g_yor_v210"
+      }
+    },
+    {
+      "id": "text_0",
+      "type": "text",
+      "x": 600,
+      "y": 180,
+      "text": "BD: g_yor_v210",
+      "fontSize": "18px",
+      "fontFamily": "Arial, sans-serif",
+      "color": "#2ecc71",
+      "backgroundColor": "#1a1a2e",
+      "rotation": 0,
+      "locked": false
+    },
+    {
+      "id": "text_1",
+      "type": "text",
+      "x": 600,
+      "y": 210,
+      "text": "VLAN 210",
+      "fontSize": "14px",
+      "fontFamily": "Arial, sans-serif",
+      "color": "#95a5a6",
+      "backgroundColor": "#1a1a2e",
+      "rotation": 0,
+      "locked": false
+    },
+    {
+      "id": "text_2",
+      "type": "text",
+      "x": 150,
+      "y": 370,
+      "text": "PE-1",
+      "fontSize": "12px",
+      "fontFamily": "Arial, sans-serif",
+      "color": "#3498db",
+      "backgroundColor": "#1a1a2e",
+      "rotation": 0,
+      "locked": false
+    },
+    {
+      "id": "text_3",
+      "type": "text",
+      "x": 1050,
+      "y": 370,
+      "text": "PE-2",
+      "fontSize": "12px",
+      "fontFamily": "Arial, sans-serif",
+      "color": "#3498db",
+      "backgroundColor": "#1a1a2e",
+      "rotation": 0,
+      "locked": false
+    },
+    {
+      "id": "text_4",
+      "type": "text",
+      "x": 270,
+      "y": 260,
+      "text": "ge400-0/0/4",
+      "fontSize": "10px",
+      "fontFamily": "monospace",
+      "color": "#ecf0f1",
+      "backgroundColor": "#2c3e50",
+      "rotation": 0,
+      "locked": false
+    },
+    {
+      "id": "text_5",
+      "type": "text",
+      "x": 470,
+      "y": 260,
+      "text": "bundle-60000.210",
+      "fontSize": "10px",
+      "fontFamily": "monospace",
+      "color": "#ecf0f1",
+      "backgroundColor": "#2c3e50",
+      "rotation": 0,
+      "locked": false
+    },
+    {
+      "id": "text_6",
+      "type": "text",
+      "x": 730,
+      "y": 260,
+      "text": "bundle-60000.210",
+      "fontSize": "10px",
+      "fontFamily": "monospace",
+      "color": "#ecf0f1",
+      "backgroundColor": "#2c3e50",
+      "rotation": 0,
+      "locked": false
+    },
+    {
+      "id": "text_7",
+      "type": "text",
+      "x": 930,
+      "y": 260,
+      "text": "bundle-100.210",
+      "fontSize": "10px",
+      "fontFamily": "monospace",
+      "color": "#ecf0f1",
+      "backgroundColor": "#2c3e50",
+      "rotation": 0,
+      "locked": false
+    }
+  ],
+  "metadata": {
+    "deviceIdCounter": 5,
+    "linkIdCounter": 4,
+    "textIdCounter": 8,
+    "linkCurveMode": true,
+    "linkContinuousMode": true,
+    "linkStyle": "solid",
+    "showLinkTypeLabels": false,
+    "deviceNumbering": true,
+    "deviceCollision": false,
+    "movableDevices": true,
+    "magneticFieldStrength": 40,
+    "gridZoomEnabled": true,
+    "description": "Bridge Domain g_yor_v210 (VLAN 210) topology from PE-1 to PE-2 through DNAAS fabric"
+  }
+}
+
+
+
+
+
+
+
+

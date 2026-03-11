@@ -1,0 +1,1517 @@
+{
+  "devices": {
+    "wk31d7vv00023": {
+      "serial": "wk31d7vv00023",
+      "hostname": "PE-1",
+      "mgmt_ip": "",
+      "mgmt_ipv6": "",
+      "system_type": "SA-36CD-S, Family: NCR",
+      "dnos_version": "DNOS [26.1.0] build [10_priv], Copyright 2025 DRIVENETS LTD.",
+      "last_seen": "2026-01-12T17:11:13.435743",
+      "dnaas_interfaces": [
+        "ge400-0/0/4"
+      ],
+      "lldp_neighbors": [
+        {
+          "local_interface": "ge400-0/0/4",
+          "neighbor_name": "DNAAS-LEAF-D16",
+          "neighbor_interface": "ge100-0/0/4",
+          "ttl": 120,
+          "is_dnaas": true
+        }
+      ],
+      "all_mgmt_interfaces": [],
+      "interface_details": {
+        "ge400-0/0/4": {
+          "interface": "ge400-0/0/4",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        }
+      }
+    },
+    "100.64.0.220": {
+      "serial": "100.64.0.220",
+      "hostname": "YOR_PE-2",
+      "mgmt_ip": "",
+      "mgmt_ipv6": "",
+      "system_type": "SA-36CD-S, Family: NCR",
+      "dnos_version": "DNOS [26.1.0] build [1_priv], Copyright 2025 DRIVENETS LTD.",
+      "last_seen": "2026-01-04T15:58:34.492938",
+      "dnaas_interfaces": [
+        "ge400-0/0/0",
+        "ge400-0/0/2"
+      ],
+      "lldp_neighbors": [
+        {
+          "local_interface": "ge400-0/0/0",
+          "neighbor_name": "DNAAS-LEAF-B15",
+          "neighbor_interface": "ge100-0/0/6",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/2",
+          "neighbor_name": "DNAAS-LEAF-B15",
+          "neighbor_interface": "ge100-0/0/7",
+          "ttl": 120,
+          "is_dnaas": true
+        }
+      ],
+      "all_mgmt_interfaces": [],
+      "interface_details": {
+        "ge400-0/0/0": {
+          "interface": "ge400-0/0/0",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "100",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/2": {
+          "interface": "ge400-0/0/2",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "100",
+          "description": "",
+          "encapsulation": "ethernet"
+        }
+      }
+    },
+    "WK31D7VV00023": {
+      "serial": "WK31D7VV00023",
+      "hostname": "YOR_PE-1",
+      "mgmt_ip": "",
+      "mgmt_ipv6": "",
+      "system_type": "SA-36CD-S, Family: NCR",
+      "dnos_version": "DNOS [26.1.0] build [24_priv], Copyright 2026 DRIVENETS LTD.",
+      "last_seen": "2026-02-24T14:35:46.565528",
+      "dnaas_interfaces": [
+        "ge400-0/0/5",
+        "ge400-0/0/4"
+      ],
+      "lldp_neighbors": [
+        {
+          "local_interface": "ge400-0/0/12",
+          "neighbor_name": "YOR_PE-1",
+          "neighbor_interface": "ge400-0/0/13",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/13",
+          "neighbor_name": "YOR_PE-1",
+          "neighbor_interface": "ge400-0/0/12",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/4",
+          "neighbor_name": "DNAAS-LEAF-D16",
+          "neighbor_interface": "ge100-0/0/4",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/5",
+          "neighbor_name": "DNAAS-LEAF-D16",
+          "neighbor_interface": "ge100-0/0/5",
+          "ttl": 120,
+          "is_dnaas": true
+        }
+      ],
+      "all_mgmt_interfaces": [],
+      "interface_details": {
+        "ge400-0/0/5": {
+          "interface": "ge400-0/0/5",
+          "sub_interfaces": [
+            {
+              "name": "ge400-0/0/5.999",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "100.70.0.205/24",
+              "vlan": 999,
+              "mtu": 1518,
+              "service": "VRF (default)"
+            }
+          ],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/4": {
+          "interface": "ge400-0/0/4",
+          "sub_interfaces": [
+            {
+              "name": "ge400-0/0/4.12",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "12.12.12.1/29",
+              "vlan": 12,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge400-0/0/4.13",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "13.13.13.1/29",
+              "vlan": 13,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge400-0/0/4.14",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "14.14.14.1/29",
+              "vlan": 14,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            }
+          ],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        }
+      }
+    },
+    "YBW1F8VJ00002P1": {
+      "serial": "YBW1F8VJ00002P1",
+      "hostname": "R7-YBW1F8VJ00002P1,",
+      "mgmt_ip": "",
+      "mgmt_ipv6": "",
+      "system_type": "SA-32E-S, Family: NCR",
+      "dnos_version": "DNOS [26.1.0] build [153_dev], Copyright 2025 DRIVENETS LTD.",
+      "last_seen": "2026-01-06T12:19:10.273759",
+      "dnaas_interfaces": [],
+      "lldp_neighbors": [],
+      "all_mgmt_interfaces": [],
+      "interface_details": {}
+    },
+    "WK31D7VW00016": {
+      "serial": "WK31D7VW00016",
+      "hostname": "R2-WK31D7VW00016",
+      "mgmt_ip": "",
+      "mgmt_ipv6": "",
+      "system_type": "SA-36CD-S, Family: NCR",
+      "dnos_version": "DNOS [25.4.0] build [35], Copyright 2025 DRIVENETS LTD.",
+      "last_seen": "2026-01-06T21:15:26.038068",
+      "dnaas_interfaces": [
+        "ge400-0/0/14",
+        "ge400-0/0/13",
+        "ge400-0/0/16",
+        "ge400-0/0/15",
+        "ge400-0/0/12",
+        "ge400-0/0/18",
+        "ge400-0/0/5"
+      ],
+      "lldp_neighbors": [
+        {
+          "local_interface": "ge400-0/0/4",
+          "neighbor_name": "R6-YE41F7VP00007B1",
+          "neighbor_interface": "ge400-0/0/5",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/5",
+          "neighbor_name": "DNAAS-LEAF-A03",
+          "neighbor_interface": "ge100-0/0/12",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/7",
+          "neighbor_name": "R1-CL48",
+          "neighbor_interface": "ge100-1/0/9",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/11",
+          "neighbor_name": "R3_WDY1B77700018",
+          "neighbor_interface": "ge100-0/0/11",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/12",
+          "neighbor_name": "DNAAS-LEAF-A03",
+          "neighbor_interface": "ge100-0/0/17",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/13",
+          "neighbor_name": "DNAAS-LEAF-A03",
+          "neighbor_interface": "ge100-0/0/18",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/14",
+          "neighbor_name": "DNAAS-LEAF-A03",
+          "neighbor_interface": "ge100-0/0/19",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/15",
+          "neighbor_name": "DNAAS-LEAF-A03",
+          "neighbor_interface": "ge100-0/0/20",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/16",
+          "neighbor_name": "DNAAS-LEAF-A03",
+          "neighbor_interface": "ge100-0/0/21",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/18",
+          "neighbor_name": "DNAAS-LEAF-A03",
+          "neighbor_interface": "ge100-0/0/23",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/22",
+          "neighbor_name": "R1-CL48",
+          "neighbor_interface": "ge100-0/0/22",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/23",
+          "neighbor_name": "R1-CL48",
+          "neighbor_interface": "ge100-0/0/23",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/24",
+          "neighbor_name": "R1-CL48",
+          "neighbor_interface": "ge100-0/0/24",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/25",
+          "neighbor_name": "R1-CL48",
+          "neighbor_interface": "ge100-0/0/25",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/26",
+          "neighbor_name": "R4_WDY1B77200021",
+          "neighbor_interface": "ge100-0/0/26",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/28",
+          "neighbor_name": "R3_WDY1B77700018",
+          "neighbor_interface": "ge100-0/0/28",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/29",
+          "neighbor_name": "R1-CL48",
+          "neighbor_interface": "ge100-0/0/29",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/30",
+          "neighbor_name": "R1-CL48",
+          "neighbor_interface": "ge100-1/0/10",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/31",
+          "neighbor_name": "R1-CL48",
+          "neighbor_interface": "ge100-1/0/11",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/32",
+          "neighbor_name": "R1-CL48",
+          "neighbor_interface": "ge100-1/0/12",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/33",
+          "neighbor_name": "R1-CL48",
+          "neighbor_interface": "ge100-1/0/13",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/34",
+          "neighbor_name": "R1-CL48",
+          "neighbor_interface": "ge100-1/0/14",
+          "ttl": 120,
+          "is_dnaas": false
+        }
+      ],
+      "all_mgmt_interfaces": [],
+      "interface_details": {
+        "ge400-0/0/14": {
+          "interface": "ge400-0/0/14",
+          "sub_interfaces": [
+            {
+              "name": "ge400-0/0/14.2636",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "89.0.200.2/24",
+              "vlan": 2636,
+              "mtu": 9204,
+              "service": "VRF (default)"
+            }
+          ],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "To_OSPF_Broadcast_Core_Alt",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/13": {
+          "interface": "ge400-0/0/13",
+          "sub_interfaces": [
+            {
+              "name": "ge400-0/0/13.2635",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "89.0.100.2/24",
+              "vlan": 2635,
+              "mtu": 9204,
+              "service": "VRF (default)"
+            }
+          ],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/16": {
+          "interface": "ge400-0/0/16",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "2222",
+          "description": "DNAAS_LEAF_03_ge100-0/0/21",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/15": {
+          "interface": "ge400-0/0/15",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "** Line to DNAAS_LEAF **",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/12": {
+          "interface": "ge400-0/0/12",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/18": {
+          "interface": "ge400-0/0/18",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "222",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/5": {
+          "interface": "ge400-0/0/5",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "** To DNAAS_LEAF ge100-0/0/12 **",
+          "encapsulation": "ethernet"
+        }
+      }
+    },
+    "100.64.7.186": {
+      "serial": "100.64.7.186",
+      "hostname": "Q3D-Zohar,",
+      "mgmt_ip": "",
+      "mgmt_ipv6": "",
+      "system_type": "SA-32E-S, Family: NCR",
+      "dnos_version": "DNOS [26.2.0] build [4_priv], Copyright 2025 DRIVENETS LTD.",
+      "last_seen": "2026-01-08T12:38:11.903151",
+      "dnaas_interfaces": [],
+      "lldp_neighbors": [],
+      "all_mgmt_interfaces": [],
+      "interface_details": {}
+    },
+    "R1_CL16_Eddie": {
+      "serial": "CZ21280LVR",
+      "hostname": "R1_CL16_Eddie",
+      "mgmt_ip": "192.168.168.107",
+      "mgmt_ipv6": "",
+      "system_type": "CL-16",
+      "dnos_version": "DNOS [25.4.0.30_priv]",
+      "last_seen": "2026-01-12T08:00:13.903340",
+      "dnaas_interfaces": [],
+      "lldp_neighbors": [],
+      "all_mgmt_interfaces": [
+        {
+          "name": "mgmt0",
+          "admin_state": "enabled",
+          "oper_state": "up",
+          "ipv4": "192.168.168.107/20",
+          "ipv6": "",
+          "mtu": "1500",
+          "vrf": "mgmt0"
+        }
+      ],
+      "interface_details": {}
+    },
+    "R2_SA40_Eddie": {
+      "serial": "WDY1B47900001",
+      "hostname": "R2_SA40_Eddie",
+      "mgmt_ip": "192.168.163.199",
+      "mgmt_ipv6": "",
+      "system_type": "SA-40",
+      "dnos_version": "DNOS [26.1.0.1_priv]",
+      "last_seen": "2026-01-12T08:00:13.903368",
+      "dnaas_interfaces": [],
+      "lldp_neighbors": [],
+      "all_mgmt_interfaces": [
+        {
+          "name": "mgmt0",
+          "admin_state": "enabled",
+          "oper_state": "up",
+          "ipv4": "192.168.163.199/20",
+          "ipv6": "",
+          "mtu": "1500",
+          "vrf": "mgmt0"
+        }
+      ],
+      "interface_details": {}
+    },
+    "R3_SA40_Eddie": {
+      "serial": "WDY1B37H0001E",
+      "hostname": "R3_SA40_Eddie",
+      "mgmt_ip": "192.168.165.53",
+      "mgmt_ipv6": "",
+      "system_type": "SA-40",
+      "dnos_version": "DNOS [26.1.0.119_dev]",
+      "last_seen": "2026-01-12T08:00:13.903374",
+      "dnaas_interfaces": [],
+      "lldp_neighbors": [],
+      "all_mgmt_interfaces": [
+        {
+          "name": "mgmt0",
+          "admin_state": "enabled",
+          "oper_state": "up",
+          "ipv4": "192.168.165.53/20",
+          "ipv6": "",
+          "mtu": "1500",
+          "vrf": "mgmt0"
+        }
+      ],
+      "interface_details": {}
+    },
+    "R4_SA40_Eddie": {
+      "serial": "WDY1B77800019",
+      "hostname": "R4_SA40_Eddie",
+      "mgmt_ip": "192.168.166.66",
+      "mgmt_ipv6": "",
+      "system_type": "SA-40",
+      "dnos_version": "DNOS [26.1.0.119_dev]",
+      "last_seen": "2026-01-12T08:00:13.903379",
+      "dnaas_interfaces": [],
+      "lldp_neighbors": [],
+      "all_mgmt_interfaces": [
+        {
+          "name": "mgmt0",
+          "admin_state": "enabled",
+          "oper_state": "up",
+          "ipv4": "192.168.166.66/20",
+          "ipv6": "",
+          "mtu": "1500",
+          "vrf": "mgmt0"
+        }
+      ],
+      "interface_details": {}
+    },
+    "WK31C8V10001BP2": {
+      "serial": "WK31C8V10001BP2",
+      "hostname": "Slava_1_WK31C8V10001BP2(12-Jan-2026-16:34:08)",
+      "mgmt_ip": "",
+      "mgmt_ipv6": "",
+      "system_type": "SA-36CD-S, Family: NCR",
+      "dnos_version": "DNOS [26.1.0] build [25_priv], Copyright 2025 DRIVENETS LTD.",
+      "last_seen": "2026-01-12T14:34:10.925623",
+      "dnaas_interfaces": [
+        "ge400-0/0/30",
+        "ge400-0/0/2",
+        "ge400-0/0/29",
+        "ge400-0/0/3"
+      ],
+      "lldp_neighbors": [
+        {
+          "local_interface": "ge400-0/0/2",
+          "neighbor_name": "DNAAS-LEAF-B15",
+          "neighbor_interface": "ge100-0/0/20",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/3",
+          "neighbor_name": "DNAAS-LEAF-B15",
+          "neighbor_interface": "ge100-0/0/21",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/29",
+          "neighbor_name": "DNAAS-LEAF-B15",
+          "neighbor_interface": "ge100-0/0/18",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/30",
+          "neighbor_name": "DNAAS-LEAF-B15",
+          "neighbor_interface": "ge100-0/0/13",
+          "ttl": 120,
+          "is_dnaas": true
+        }
+      ],
+      "all_mgmt_interfaces": [],
+      "interface_details": {
+        "ge400-0/0/30": {
+          "interface": "ge400-0/0/30",
+          "sub_interfaces": [
+            {
+              "name": "ge400-0/0/30.251",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "95.95.95.1/24",
+              "vlan": 251,
+              "mtu": 1518,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge400-0/0/30.271",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "71.71.71.1/24",
+              "vlan": 271,
+              "mtu": 1518,
+              "service": "VRF (default)"
+            }
+          ],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/2": {
+          "interface": "ge400-0/0/2",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/29": {
+          "interface": "ge400-0/0/29",
+          "sub_interfaces": [
+            {
+              "name": "ge400-0/0/29.10",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "",
+              "vlan": 10,
+              "mtu": 1518,
+              "service": "EVPN (ins4_VPLS)"
+            },
+            {
+              "name": "ge400-0/0/29.12",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "",
+              "vlan": 12,
+              "mtu": 1518,
+              "service": "EVPN (ins2_VPLS)"
+            },
+            {
+              "name": "ge400-0/0/29.13",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "",
+              "vlan": 13,
+              "mtu": 1518,
+              "service": "EVPN (ins3_VPLS)"
+            },
+            {
+              "name": "ge400-0/0/29.14",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "",
+              "vlan": 14,
+              "mtu": 1518,
+              "service": "EVPN (ins4_VPLS)"
+            },
+            {
+              "name": "ge400-0/0/29.15",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "",
+              "vlan": 15,
+              "mtu": 1518,
+              "service": "EVPN-VPWS (ins2)"
+            }
+          ],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/3": {
+          "interface": "ge400-0/0/3",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        }
+      }
+    },
+    "100.64.1.35": {
+      "serial": "100.64.1.35",
+      "hostname": "YOR_PE-1",
+      "mgmt_ip": "",
+      "mgmt_ipv6": "",
+      "system_type": "SA-36CD-S, Family: NCR",
+      "dnos_version": "DNOS [26.1.0] build [16_priv], Copyright 2025 DRIVENETS LTD.",
+      "last_seen": "2026-01-29T07:55:26.266422",
+      "dnaas_interfaces": [
+        "ge400-0/0/4",
+        "ge400-0/0/5"
+      ],
+      "lldp_neighbors": [
+        {
+          "local_interface": "ge400-0/0/4",
+          "neighbor_name": "DNAAS-LEAF-D16",
+          "neighbor_interface": "ge100-0/0/4",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/5",
+          "neighbor_name": "DNAAS-LEAF-D16",
+          "neighbor_interface": "ge100-0/0/5",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/12",
+          "neighbor_name": "YOR_PE-1",
+          "neighbor_interface": "ge400-0/0/13",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/13",
+          "neighbor_name": "YOR_PE-1",
+          "neighbor_interface": "ge400-0/0/12",
+          "ttl": 120,
+          "is_dnaas": false
+        }
+      ],
+      "all_mgmt_interfaces": [],
+      "interface_details": {
+        "ge400-0/0/4": {
+          "interface": "ge400-0/0/4",
+          "sub_interfaces": [
+            {
+              "name": "ge400-0/0/4.12",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "12.12.12.1/29",
+              "vlan": 12,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge400-0/0/4.13",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "13.13.13.1/29",
+              "vlan": 13,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge400-0/0/4.14",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "14.14.14.1/29",
+              "vlan": 14,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            }
+          ],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/5": {
+          "interface": "ge400-0/0/5",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        }
+      }
+    },
+    "wk3lld7vv00023": {
+      "serial": "wk3lld7vv00023",
+      "hostname": "YOR_PE-1",
+      "mgmt_ip": "",
+      "mgmt_ipv6": "",
+      "system_type": "SA-36CD-S, Family: NCR",
+      "dnos_version": "DNOS [26.1.0] build [24_priv], Copyright 2026 DRIVENETS LTD.",
+      "last_seen": "2026-02-24T14:44:37.164249",
+      "dnaas_interfaces": [
+        "ge400-0/0/4",
+        "ge400-0/0/5"
+      ],
+      "lldp_neighbors": [
+        {
+          "local_interface": "ge400-0/0/4",
+          "neighbor_name": "DNAAS-LEAF-D16",
+          "neighbor_interface": "ge100-0/0/4",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/5",
+          "neighbor_name": "DNAAS-LEAF-D16",
+          "neighbor_interface": "ge100-0/0/5",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge400-0/0/12",
+          "neighbor_name": "YOR_PE-1",
+          "neighbor_interface": "ge400-0/0/13",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge400-0/0/13",
+          "neighbor_name": "YOR_PE-1",
+          "neighbor_interface": "ge400-0/0/12",
+          "ttl": 120,
+          "is_dnaas": false
+        }
+      ],
+      "all_mgmt_interfaces": [],
+      "interface_details": {
+        "ge400-0/0/4": {
+          "interface": "ge400-0/0/4",
+          "sub_interfaces": [
+            {
+              "name": "ge400-0/0/4.12",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "12.12.12.1/29",
+              "vlan": 12,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge400-0/0/4.13",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "13.13.13.1/29",
+              "vlan": 13,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge400-0/0/4.14",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "14.14.14.1/29",
+              "vlan": 14,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            }
+          ],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge400-0/0/5": {
+          "interface": "ge400-0/0/5",
+          "sub_interfaces": [
+            {
+              "name": "ge400-0/0/5.999",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "100.70.0.205/24",
+              "vlan": 999,
+              "mtu": 1518,
+              "service": "VRF (default)"
+            }
+          ],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        }
+      }
+    },
+    "YOR_CL_PE-4": {
+      "serial": "YOR_CL_PE-4",
+      "hostname": "SIT-URI-R250-SA,",
+      "mgmt_ip": "",
+      "mgmt_ipv6": "",
+      "system_type": "SA-40C8CD, Family: NCR",
+      "dnos_version": "DNOS [26.1.0] build [323_dev], Copyright 2026 DRIVENETS LTD.",
+      "last_seen": "2026-02-25T09:34:16.451085",
+      "dnaas_interfaces": [
+        "ge100-18/0/5",
+        "ge100-18/0/0",
+        "ge100-18/0/1",
+        "ge100-18/0/6"
+      ],
+      "lldp_neighbors": [
+        {
+          "local_interface": "ge100-6/0/2",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/3",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/3",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/2",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/4",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/5",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/5",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/4",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/6",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/7",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/7",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/6",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/8",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/9",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/9",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/8",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/10",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/11",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/11",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/10",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/12",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/13",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/13",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/12",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/14",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/15",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/15",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/14",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/20",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/21",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/21",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/20",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/22",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/23",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/23",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/22",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/24",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/25",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/25",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/24",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/26",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/27",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/27",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/26",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/28",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/29",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/29",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/28",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/30",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/31",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/31",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/30",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/32",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/33",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/33",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/32",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/34",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/35",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/35",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/34",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-18/0/0",
+          "neighbor_name": "DNAAS-LEAF-B10",
+          "neighbor_interface": "ge100-0/0/3",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge100-18/0/1",
+          "neighbor_name": "DNAAS-LEAF-B10",
+          "neighbor_interface": "ge100-0/0/4",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge100-18/0/5",
+          "neighbor_name": "DN-LEAF1.dev.drivenets.net",
+          "neighbor_interface": "Ethernet8/5/1",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge100-18/0/6",
+          "neighbor_name": "DNAAS-LEAF-B10",
+          "neighbor_interface": "ge100-0/0/5",
+          "ttl": 120,
+          "is_dnaas": true
+        }
+      ],
+      "all_mgmt_interfaces": [],
+      "interface_details": {
+        "ge100-18/0/5": {
+          "interface": "ge100-18/0/5",
+          "sub_interfaces": [],
+          "speed": "",
+          "bundle": "",
+          "description": "",
+          "encapsulation": ""
+        },
+        "ge100-18/0/0": {
+          "interface": "ge100-18/0/0",
+          "sub_interfaces": [],
+          "speed": "",
+          "bundle": "",
+          "description": "",
+          "encapsulation": ""
+        },
+        "ge100-18/0/1": {
+          "interface": "ge100-18/0/1",
+          "sub_interfaces": [],
+          "speed": "",
+          "bundle": "",
+          "description": "",
+          "encapsulation": ""
+        },
+        "ge100-18/0/6": {
+          "interface": "ge100-18/0/6",
+          "sub_interfaces": [],
+          "speed": "",
+          "bundle": "",
+          "description": "",
+          "encapsulation": ""
+        }
+      }
+    },
+    "kvm108-cl408d-ncc0": {
+      "serial": "kvm108-cl408d-ncc0",
+      "hostname": "YOR_CL_PE-4(01-Mar-2026-15:06:20)",
+      "mgmt_ip": "",
+      "mgmt_ipv6": "",
+      "system_type": "CL-86, Family: NCR",
+      "dnos_version": "DNOS [26.1.0] build [27_priv], Copyright 2026 DRIVENETS LTD.",
+      "last_seen": "2026-03-01T13:06:30.985664",
+      "dnaas_interfaces": [
+        "ge100-18/0/1",
+        "ge100-18/0/5",
+        "ge100-18/0/0",
+        "ge100-18/0/6"
+      ],
+      "lldp_neighbors": [
+        {
+          "local_interface": "ge100-6/0/2",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/3",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/3",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/2",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/4",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/5",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/5",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/4",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/6",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/7",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/7",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/6",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/8",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/9",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/9",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/8",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/10",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/11",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/11",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/10",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/12",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/13",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/13",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/12",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/14",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/15",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/15",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/14",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/20",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/21",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/21",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/20",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/22",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/23",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/23",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/22",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/24",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/25",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/25",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/24",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/26",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/27",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/27",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/26",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/28",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/29",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/29",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/28",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/30",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/31",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/31",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/30",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/32",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/33",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/33",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/32",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/34",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/35",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-6/0/35",
+          "neighbor_name": "YOR_CL_PE-4",
+          "neighbor_interface": "ge100-6/0/34",
+          "ttl": 120,
+          "is_dnaas": false
+        },
+        {
+          "local_interface": "ge100-18/0/0",
+          "neighbor_name": "DNAAS-LEAF-B10",
+          "neighbor_interface": "ge100-0/0/3",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge100-18/0/1",
+          "neighbor_name": "DNAAS-LEAF-B10",
+          "neighbor_interface": "ge100-0/0/4",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge100-18/0/5",
+          "neighbor_name": "DN-LEAF1.dev.drivenets.net",
+          "neighbor_interface": "Ethernet8/5/1",
+          "ttl": 120,
+          "is_dnaas": true
+        },
+        {
+          "local_interface": "ge100-18/0/6",
+          "neighbor_name": "DNAAS-LEAF-B10",
+          "neighbor_interface": "ge100-0/0/5",
+          "ttl": 120,
+          "is_dnaas": true
+        }
+      ],
+      "all_mgmt_interfaces": [],
+      "interface_details": {
+        "ge100-18/0/1": {
+          "interface": "ge100-18/0/1",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge100-18/0/5": {
+          "interface": "ge100-18/0/5",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge100-18/0/0": {
+          "interface": "ge100-18/0/0",
+          "sub_interfaces": [
+            {
+              "name": "ge100-18/0/0.14",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "14.14.14.4/29",
+              "vlan": 14,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge100-18/0/0.24",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "24.24.24.4/29",
+              "vlan": 24,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge100-18/0/0.34",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "34.34.34.4/29",
+              "vlan": 34,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge100-18/0/0.45",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "45.45.45.4/29",
+              "vlan": 45,
+              "mtu": 9220,
+              "service": "VRF (default)"
+            },
+            {
+              "name": "ge100-18/0/0.219",
+              "admin": "enabled",
+              "oper": "up",
+              "ipv4": "49.49.49.4/28",
+              "vlan": 219,
+              "mtu": 9220,
+              "service": "VRF (ALPHA)"
+            }
+          ],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        },
+        "ge100-18/0/6": {
+          "interface": "ge100-18/0/6",
+          "sub_interfaces": [],
+          "speed": "100Gbps,",
+          "bundle": "",
+          "description": "",
+          "encapsulation": "ethernet"
+        }
+      }
+    }
+  },
+  "last_updated": "2026-03-01T13:06:30.987832"
+}

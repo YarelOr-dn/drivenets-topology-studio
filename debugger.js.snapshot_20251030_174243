@@ -1,0 +1,572 @@
+// Real-Time Debugger for Topology Editor
+// Provides visual feedback for debugging and testing
+// Auto-integrates with ALL editor operations
+
+class TopologyDebugger {
+    constructor(editor) {
+        this.editor = editor;
+        this.logs = [];
+        this.maxLogs = 30;
+        // Default to ENABLED on first visit
+        const storedEnabled = localStorage.getItem('debugger_enabled');
+        this.enabled = storedEnabled === null ? true : storedEnabled === 'true';
+        this.minimized = localStorage.getItem('debugger_minimized') === 'true';
+        this.position = JSON.parse(localStorage.getItem('debugger_position') || '{"top": 60, "right": 10}');
+        this.createDebugPanel();
+        this.makeDraggable();
+        this.startMonitoring();
+        this.interceptEditorMethods();
+        
+        // Set debugger button visibility based on debugger state
+        setTimeout(() => {
+            const debuggerBtn = document.getElementById('btn-debugger-top');
+            if (debuggerBtn) {
+                debuggerBtn.style.display = this.enabled ? 'none' : 'flex';
+                console.log('Debugger button visibility:', this.enabled ? 'hidden (debugger visible)' : 'visible (debugger closed)');
+            }
+        }, 100);
+        
+        console.log('Debugger created - enabled:', this.enabled, 'panel display:', this.enabled ? 'block' : 'none');
+    }
+
+    createDebugPanel() {
+        const panel = document.createElement('div');
+        panel.id = 'debug-panel';
+        
+        // Calculate left position from right position for initial placement
+        const initialLeft = window.innerWidth - this.position.right - 380;
+        
+        panel.style.cssText = `
+            position: fixed;
+            top: ${this.position.top}px;
+            left: ${initialLeft}px;
+            width: 380px;
+            max-height: ${this.minimized ? '40px' : '85vh'};
+            background: rgba(0, 0, 0, 0.95);
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            border: 2px solid #0f0;
+            border-radius: 8px;
+            z-index: 10000;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+            display: ${this.enabled ? 'block' : 'none'};
+            transition: max-height 0.3s ease;
+            will-change: transform;
+        `;
+
+        panel.innerHTML = `
+            <div id="debug-header" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 2px solid #0f0; cursor: move; background: rgba(0, 255, 0, 0.1);">
+                <span style="font-weight: bold; color: #0ff; user-select: none;">⚡ DEBUGGER</span>
+                <div style="display: flex; gap: 5px;">
+                    <button id="debug-minimize" style="background: #0af; color: #fff; border: none; padding: 2px 8px; cursor: pointer; border-radius: 3px; font-weight: bold;" title="Minimize/Maximize">${this.minimized ? '□' : '_'}</button>
+                    <button id="debug-clear" style="background: #f60; color: #fff; border: none; padding: 2px 8px; cursor: pointer; border-radius: 3px;" title="Clear Log">Clear</button>
+                    <button id="debug-close" style="background: #f00; color: #fff; border: none; padding: 2px 8px; cursor: pointer; border-radius: 3px; font-weight: bold;" title="Close Debugger">✕</button>
+                </div>
+            </div>
+            <div id="debug-body" style="padding: 10px; overflow-y: auto; max-height: calc(85vh - 40px); display: ${this.minimized ? 'none' : 'block'};">
+                <div id="debug-status" style="margin-bottom: 10px; padding: 8px; background: rgba(0, 255, 0, 0.1); border-radius: 4px;">
+                    <div id="debug-status-content">Initializing...</div>
+                </div>
+                <div style="margin-bottom: 8px; padding: 5px; background: rgba(255, 255, 0, 0.1); border-radius: 4px;">
+                    <div style="font-weight: bold; color: #ff0; margin-bottom: 4px;">📊 HISTORY STATE:</div>
+                    <div id="debug-history" style="color: #0ff;">...</div>
+                </div>
+                <div style="margin-bottom: 8px; padding: 5px; background: rgba(255, 165, 0, 0.1); border-radius: 4px;">
+                    <div style="font-weight: bold; color: #fa0; margin-bottom: 4px;">🔍 ZOOM/PAN STATE:</div>
+                    <div id="debug-zoom" style="color: #fff;">...</div>
+                </div>
+                <div style="margin-bottom: 8px; padding: 5px; background: rgba(255, 20, 147, 0.1); border-radius: 4px;">
+                    <div style="font-weight: bold; color: #ff1493; margin-bottom: 4px;">🧲 MAGNETIC FIELD:</div>
+                    <div id="debug-magnetic" style="color: #fff; font-size: 10px;">...</div>
+                </div>
+                <div style="margin-bottom: 8px; padding: 5px; background: rgba(0, 255, 255, 0.1); border-radius: 4px;">
+                    <div style="font-weight: bold; color: #0ff; margin-bottom: 4px;">🎯 CURRENT STATE:</div>
+                    <div id="debug-current" style="color: #fff;">...</div>
+                </div>
+                <div style="margin-bottom: 8px; padding: 5px; background: rgba(255, 0, 0, 0.1); border-radius: 4px;">
+                    <div style="font-weight: bold; color: #f00; margin-bottom: 4px;">⚠️ COLLISION TRACKING:</div>
+                    <div id="debug-collision" style="color: #fff; font-size: 10px;">...</div>
+                </div>
+                <div style="margin-bottom: 8px; padding: 5px; background: rgba(138, 43, 226, 0.1); border-radius: 4px;">
+                    <div style="font-weight: bold; color: #ba55d3; margin-bottom: 4px;">🎨 UI BUTTON STATES:</div>
+                    <div id="debug-ui-buttons" style="color: #fff; font-size: 10px;">...</div>
+                </div>
+                <div style="margin-bottom: 8px; padding: 5px; background: rgba(0, 255, 127, 0.1); border-radius: 4px;">
+                    <div style="font-weight: bold; color: #00ff7f; margin-bottom: 4px;">📍 CLICK TRACKING:</div>
+                    <div id="debug-click-track" style="color: #fff; font-size: 10px;">Waiting for placement...</div>
+                </div>
+                <div style="font-weight: bold; color: #f0f; margin-bottom: 4px;">📜 EVENT LOG:</div>
+                <div id="debug-log" style="max-height: 150px; overflow-y: auto; background: rgba(255, 0, 255, 0.05); padding: 5px; border-radius: 4px;">
+                    <div style="color: #888;">Waiting for events...</div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(panel);
+
+        // Close button
+        document.getElementById('debug-close').addEventListener('click', () => {
+            this.enabled = false;
+            panel.style.display = 'none';
+            localStorage.setItem('debugger_enabled', 'false');
+            
+            // Show debugger button in top bar
+            const debuggerBtn = document.getElementById('btn-debugger-top');
+            if (debuggerBtn) {
+                debuggerBtn.style.display = 'flex';
+            }
+            
+            console.log('Debugger closed. Press D or click Debug button to reopen.');
+        });
+
+        // Minimize button
+        document.getElementById('debug-minimize').addEventListener('click', () => {
+            this.minimized = !this.minimized;
+            const body = document.getElementById('debug-body');
+            const btn = document.getElementById('debug-minimize');
+            
+            if (this.minimized) {
+                body.style.display = 'none';
+                panel.style.maxHeight = '40px';
+                btn.textContent = '□';
+            } else {
+                body.style.display = 'block';
+                panel.style.maxHeight = '85vh';
+                btn.textContent = '_';
+            }
+            
+            localStorage.setItem('debugger_minimized', this.minimized);
+        });
+
+        // Clear button
+        document.getElementById('debug-clear').addEventListener('click', () => {
+            this.logs = [];
+            this.updateLogDisplay();
+        });
+
+        this.panel = panel;
+        this.header = document.getElementById('debug-header');
+    }
+
+    makeDraggable() {
+        let isDragging = false;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+
+        this.header.addEventListener('mousedown', (e) => {
+            if (e.target.tagName === 'BUTTON') return; // Don't drag when clicking buttons
+            
+            isDragging = true;
+            
+            // Calculate offset from mouse to panel's current position
+            const rect = this.panel.getBoundingClientRect();
+            dragOffsetX = e.clientX - rect.left;
+            dragOffsetY = e.clientY - rect.top;
+            
+            // Disable transitions for smooth dragging
+            this.panel.style.transition = 'none';
+            this.panel.style.cursor = 'grabbing';
+            this.header.style.cursor = 'grabbing';
+            
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            e.preventDefault();
+            
+            // Calculate new position (left-based for smoother dragging)
+            let newLeft = e.clientX - dragOffsetX;
+            let newTop = e.clientY - dragOffsetY;
+            
+            // Keep panel within viewport bounds
+            const panelWidth = this.panel.offsetWidth;
+            const panelHeight = this.panel.offsetHeight;
+            const maxLeft = window.innerWidth - panelWidth;
+            const maxTop = window.innerHeight - panelHeight;
+            
+            // Clamp position to stay within screen
+            newLeft = Math.max(0, Math.min(newLeft, maxLeft));
+            newTop = Math.max(0, Math.min(newTop, maxTop));
+            
+            // Apply position using left/top instead of right/top for smoother dragging
+            this.panel.style.left = newLeft + 'px';
+            this.panel.style.top = newTop + 'px';
+            this.panel.style.right = 'auto'; // Disable right positioning
+            
+            // Store position for persistence (convert to right-based for storage)
+            this.position.top = newTop;
+            this.position.right = window.innerWidth - newLeft - panelWidth;
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                this.panel.style.transition = '';
+                this.panel.style.cursor = '';
+                this.header.style.cursor = 'move';
+                
+                // Save position to localStorage
+                localStorage.setItem('debugger_position', JSON.stringify(this.position));
+            }
+        });
+    }
+
+    interceptEditorMethods() {
+        // Auto-intercept common editor methods to provide automatic logging
+        const originalMethods = {
+            saveState: this.editor.saveState,
+            undo: this.editor.undo,
+            redo: this.editor.redo,
+            deleteSelected: this.editor.deleteSelected,
+            addDeviceAtPosition: this.editor.addDeviceAtPosition,
+            createLink: this.editor.createLink,
+            createUnboundLink: this.editor.createUnboundLink,
+            setMode: this.editor.setMode,
+            toggleDevicePlacementMode: this.editor.toggleDevicePlacementMode
+        };
+
+        // This is already done in the main file via this.debugger.logX() calls
+        // Just ensure any future methods can easily log
+    }
+
+    log(message, type = 'info') {
+        const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 2 });
+        const colors = {
+            info: '#0ff',
+            success: '#0f0',
+            warning: '#ff0',
+            error: '#f00',
+            action: '#f0f'
+        };
+        
+        this.logs.push({
+            time: timestamp,
+            message: message,
+            type: type,
+            color: colors[type] || '#fff'
+        });
+
+        // Keep only last N logs
+        if (this.logs.length > this.maxLogs) {
+            this.logs.shift();
+        }
+
+        this.updateLogDisplay();
+    }
+
+    updateLogDisplay() {
+        const logContainer = document.getElementById('debug-log');
+        if (!logContainer) return;
+
+        if (this.logs.length === 0) {
+            logContainer.innerHTML = '<div style="color: #888;">No events yet...</div>';
+            return;
+        }
+
+        logContainer.innerHTML = this.logs.map(log => 
+            `<div style="color: ${log.color}; margin-bottom: 3px; border-left: 3px solid ${log.color}; padding-left: 5px;">
+                <span style="opacity: 0.6;">[${log.time}]</span> ${log.message}
+            </div>`
+        ).join('');
+
+        // Auto-scroll to bottom
+        logContainer.scrollTop = logContainer.scrollHeight;
+    }
+
+    updateStatus() {
+        const statusContent = document.getElementById('debug-status-content');
+        const historyDiv = document.getElementById('debug-history');
+        const zoomDiv = document.getElementById('debug-zoom');
+        const magneticDiv = document.getElementById('debug-magnetic');
+        const currentDiv = document.getElementById('debug-current');
+        const collisionDiv = document.getElementById('debug-collision');
+        const uiButtonsDiv = document.getElementById('debug-ui-buttons');
+
+        if (!statusContent || !historyDiv || !zoomDiv || !magneticDiv || !currentDiv || !collisionDiv || !uiButtonsDiv) return;
+
+        const ed = this.editor;
+
+        // Main status
+        const initStatus = ed.initializing ? '🔴 INITIALIZING' : '🟢 READY';
+        statusContent.innerHTML = `
+            <strong>${initStatus}</strong> | Objects: <span style="color: #0ff;">${ed.objects.length}</span> | 
+            Mode: <span style="color: #ff0;">${(ed.currentMode || 'base').toUpperCase()}</span>
+        `;
+
+        // History state
+        const histIndex = ed.historyIndex !== undefined ? ed.historyIndex : 'undefined';
+        const histLen = ed.history ? ed.history.length : 0;
+        const canUndo = ed.historyIndex > 0;
+        const canRedo = ed.historyIndex < (ed.history?.length || 0) - 1;
+        
+        historyDiv.innerHTML = `
+            Index: <span style="color: ${canUndo ? '#0f0' : '#f00'};">${histIndex}</span> / 
+            Length: <span style="color: #0ff;">${histLen}</span><br>
+            Can Undo: <span style="color: ${canUndo ? '#0f0' : '#f00'};">${canUndo ? 'YES' : 'NO'}</span> | 
+            Can Redo: <span style="color: ${canRedo ? '#0f0' : '#f00'};">${canRedo ? 'YES' : 'NO'}</span>
+        `;
+
+        // Zoom/Pan state
+        const zoomPercent = Math.round((ed.zoom || 1) * 100);
+        const panX = Math.round(ed.panOffset?.x || 0);
+        const panY = Math.round(ed.panOffset?.y || 0);
+        const zoomColor = zoomPercent === 100 ? '#0ff' : (zoomPercent > 100 ? '#0f0' : '#fa0');
+        
+        zoomDiv.innerHTML = `
+            Zoom: <span style="color: ${zoomColor}; font-weight: bold;">${zoomPercent}%</span> 
+            <span style="color: #888;">(${ed.zoom?.toFixed(2)})</span><br>
+            Pan: <span style="color: #0ff;">x=${panX}, y=${panY}</span><br>
+            Limits: <span style="color: ${zoomPercent <= 50 ? '#f00' : '#888'};">50%</span> - 
+            <span style="color: ${zoomPercent >= 300 ? '#f00' : '#888'};">300%</span>
+        `;
+        
+        // Magnetic Field state
+        const magneticStrength = ed.magneticFieldStrength || 40;
+        const curvesEnabled = ed.linkCurveMode;
+        const affectedLinks = curvesEnabled ? ed.objects.filter(o => o.type === 'link' || o.type === 'unbound').length : 0;
+        const magneticColor = magneticStrength > 0 ? (magneticStrength > 50 ? '#f00' : '#0f0') : '#888';
+        
+        magneticDiv.innerHTML = `
+            Strength: <span style="color: ${magneticColor}; font-weight: bold;">${magneticStrength}</span>/80<br>
+            Curves: <span style="color: ${curvesEnabled ? '#0f0' : '#f00'};">${curvesEnabled ? 'ON' : 'OFF'}</span> | 
+            Links: <span style="color: #0ff;">${affectedLinks}</span><br>
+            <span style="color: #888; font-size: 9px;">
+                Code: drawLink() [4577-4756]<br>
+                Update: updateMagneticField() [2695]
+            </span>
+        `;
+
+        // Current state
+        const devices = ed.objects.filter(o => o.type === 'device').length;
+        const links = ed.objects.filter(o => o.type === 'link').length;
+        const unboundLinks = ed.objects.filter(o => o.type === 'unbound').length;
+        const texts = ed.objects.filter(o => o.type === 'text').length;
+        
+        currentDiv.innerHTML = `
+            Devices: <span style="color: #0ff;">${devices}</span> | 
+            Links: <span style="color: #0ff;">${links}</span> | 
+            UL: <span style="color: #fa0;">${unboundLinks}</span> | 
+            Text: <span style="color: #0ff;">${texts}</span><br>
+            Selected: <span style="color: #ff0;">${ed.selectedObjects.length}</span> | 
+            MultiSelect: <span style="color: ${ed.multiSelectMode ? '#0f0' : '#888'};">${ed.multiSelectMode ? 'ON' : 'OFF'}</span><br>
+            Dragging: <span style="color: ${ed.dragging ? '#f00' : '#888'};">${ed.dragging ? 'YES' : 'NO'}</span> | 
+            Placing: <span style="color: ${ed.placingDevice ? '#f00' : '#888'};">${ed.placingDevice || 'NO'}</span>
+        `;
+
+        // Collision tracking
+        const collisionEnabled = ed.deviceCollision;
+        const collisionColor = collisionEnabled ? '#0f0' : '#888';
+        
+        // Check for actual overlaps in current state
+        let overlappingPairs = [];
+        if (collisionEnabled) {
+            const deviceObjs = ed.objects.filter(o => o.type === 'device');
+            for (let i = 0; i < deviceObjs.length; i++) {
+                for (let j = i + 1; j < deviceObjs.length; j++) {
+                    const d1 = deviceObjs[i];
+                    const d2 = deviceObjs[j];
+                    const dx = d1.x - d2.x;
+                    const dy = d1.y - d2.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const minDist = (d1.radius || 30) + (d2.radius || 30) + 3;
+                    
+                    if (dist < minDist) {
+                        overlappingPairs.push(`${d1.label || 'D1'}-${d2.label || 'D2'}`);
+                    }
+                }
+            }
+        }
+        
+        collisionDiv.innerHTML = `
+            Enabled: <span style="color: ${collisionColor}; font-weight: bold;">${collisionEnabled ? 'ON' : 'OFF'}</span><br>
+            ${collisionEnabled ? `
+                Overlaps: <span style="color: ${overlappingPairs.length > 0 ? '#f00' : '#0f0'};">
+                    ${overlappingPairs.length > 0 ? overlappingPairs.join(', ') : 'NONE ✓'}
+                </span><br>
+                <span style="color: #888; font-size: 9px;">
+                    Code: checkDeviceCollision() [2573]<br>
+                    Multi-device: handleMouseMove() [1073-1106]
+                </span>
+            ` : '<span style="color: #888;">Not monitoring overlaps</span>'}
+        `;
+
+        // UI Button States - Check actual button classes vs expected states
+        const numberingBtn = document.getElementById('btn-device-numbering');
+        const collisionBtn = document.getElementById('btn-device-collision');
+        const curveBtn = document.getElementById('btn-link-curve');
+        const chainBtn = document.getElementById('btn-link-continuous');
+        
+        let uiIssues = [];
+        
+        // Check numbering button
+        if (numberingBtn) {
+            const hasActive = numberingBtn.classList.contains('active');
+            const expected = ed.deviceNumbering;
+            if (hasActive !== expected) {
+                uiIssues.push(`Numbering: ${expected ? 'ON' : 'OFF'} but button is ${hasActive ? 'GREEN' : 'RED'}`);
+            }
+            const numberingColor = hasActive === expected ? '#0f0' : '#f00';
+            const numberingStatus = `Numbering: <span style="color: ${numberingColor};">${ed.deviceNumbering ? 'ON' : 'OFF'} ${hasActive ? '(🟢)' : '(🔴)'}</span>`;
+            uiButtonsDiv.innerHTML = numberingStatus;
+        } else {
+            uiButtonsDiv.innerHTML = '<span style="color: #f00;">Buttons not found!</span>';
+        }
+        
+        // Add collision button check
+        if (collisionBtn) {
+            const hasActive = collisionBtn.classList.contains('active');
+            const expected = ed.deviceCollision;
+            if (hasActive !== expected) {
+                uiIssues.push(`Collision: ${expected ? 'ON' : 'OFF'} but button is ${hasActive ? 'GREEN' : 'RED'}`);
+            }
+            const collisionStatus = `<br>Collision: <span style="color: ${hasActive === expected ? '#0f0' : '#f00'};">${ed.deviceCollision ? 'ON' : 'OFF'} ${hasActive ? '(🟢)' : '(🔴)'}</span>`;
+            uiButtonsDiv.innerHTML += collisionStatus;
+        }
+        
+        // Show issues if any
+        if (uiIssues.length > 0) {
+            uiButtonsDiv.innerHTML += `<br><span style="color: #f00; font-size: 9px;">⚠️ ${uiIssues.join('<br>')}</span>`;
+        }
+    }
+
+    startMonitoring() {
+        // Update status every 100ms
+        setInterval(() => this.updateStatus(), 100);
+
+        // Intercept console.log to capture important messages
+        const originalLog = console.log;
+        const self = this;
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            
+            const message = args.join(' ');
+            
+            // Capture important messages
+            if (message.includes('saveState called')) {
+                self.log('💾 State saved', 'success');
+            } else if (message.includes('undo() called')) {
+                self.log('↩️ Undo requested', 'action');
+            } else if (message.includes('redo() called')) {
+                self.log('↪️ Redo requested', 'action');
+            } else if (message.includes('Restoring state')) {
+                self.log('🔄 ' + message.substring(0, 50), 'success');
+            } else if (message.includes('Cannot undo') || message.includes('Cannot redo')) {
+                self.log('⚠️ ' + message, 'warning');
+            } else if (message.includes('hideShortcuts')) {
+                self.log('❌ Shortcuts closed', 'info');
+            } else if (message.includes('hideTextEditor')) {
+                self.log('❌ Text editor closed', 'info');
+            } else if (message.includes('hideLinkDetails')) {
+                self.log('❌ Link details closed', 'info');
+            }
+        };
+
+        // Intercept console.error to capture errors
+        const originalError = console.error;
+        console.error = function(...args) {
+            originalError.apply(console, args);
+            self.log('❌ ERROR: ' + args.join(' '), 'error');
+        };
+
+        // Intercept console.warn to capture warnings
+        const originalWarn = console.warn;
+        console.warn = function(...args) {
+            originalWarn.apply(console, args);
+            self.log('⚠️ ' + args.join(' '), 'warning');
+        };
+    }
+
+    // Manual logging methods for editor to call
+    logAction(action) {
+        this.log('🔹 ' + action, 'action');
+    }
+
+    logSuccess(message) {
+        this.log('✅ ' + message, 'success');
+    }
+
+    logWarning(message) {
+        this.log('⚠️ ' + message, 'warning');
+    }
+
+    logError(message) {
+        this.log('❌ ' + message, 'error');
+    }
+
+    logInfo(message) {
+        this.log('ℹ️ ' + message, 'info');
+    }
+
+    // Helper: Log any editor state change
+    logStateChange(propertyName, oldValue, newValue) {
+        this.log(`🔄 ${propertyName}: ${oldValue} → ${newValue}`, 'info');
+    }
+
+    // Helper: Log object operations
+    logObjectOperation(operation, objectType, count = 1) {
+        const emoji = {
+            'add': '➕',
+            'delete': '🗑️',
+            'move': '↔️',
+            'resize': '📐',
+            'rotate': '🔄',
+            'link': '🔗',
+            'select': '👆',
+            'deselect': '👋'
+        };
+        
+        const icon = emoji[operation.toLowerCase()] || '🔹';
+        this.log(`${icon} ${operation} ${count} ${objectType}${count > 1 ? 's' : ''}`, 'action');
+    }
+
+    // Enable debugger from code
+    show() {
+        this.enabled = true;
+        this.panel.style.display = 'block';
+        localStorage.setItem('debugger_enabled', 'true');
+        
+        // Hide debugger button in top bar
+        const debuggerBtn = document.getElementById('btn-debugger-top');
+        if (debuggerBtn) {
+            debuggerBtn.style.display = 'none';
+        }
+    }
+
+    hide() {
+        this.enabled = false;
+        this.panel.style.display = 'none';
+        localStorage.setItem('debugger_enabled', 'false');
+        
+        // Show debugger button in top bar
+        const debuggerBtn = document.getElementById('btn-debugger-top');
+        if (debuggerBtn) {
+            debuggerBtn.style.display = 'flex';
+        }
+    }
+
+    toggle() {
+        if (this.enabled) {
+            this.hide();
+        } else {
+            this.show();
+        }
+    }
+}
+
+// Make debugger available globally
+window.createDebugger = function(editor) {
+    return new TopologyDebugger(editor);
+};
+
+// Global shortcut: Press Shift+D+D (double D) to toggle debugger from anywhere
+window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'd' && e.shiftKey && window.debugger) {
+        window.debugger.toggle();
+        e.preventDefault();
+    }
+});
+

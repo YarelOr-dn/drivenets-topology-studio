@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MP Drag Test</title>
+</head>
+<body>
+<h2>MP Dragging Test Case</h2>
+<pre>
+Setup:
+UL-1 --MP-1-- UL-2 --MP-2-- UL-3
+
+When dragging MP-1 (UL-2's start):
+1. stretchingLink = UL-2
+2. stretchingEndpoint = 'start'
+3. isMiddleLink = true (UL-2 has both mergedWith and mergedInto)
+4. Partner should be UL-1 (parent via mergedInto)
+
+Expected updates:
+✓ UL-2.start.x/y = newX, newY (MP-1 moves)
+✓ UL-1.end.x/y = newX, newY (MP-1 on partner)
+✗ UL-2.end.x/y = unchanged (MP-2 stays)
+✗ UL-3.start.x/y = unchanged (MP-2 on child)
+
+Problem: MP-2 appears twice in screenshot
+This means UL-2.end and/or UL-3.start are being set to different values
+</pre>
+
+<h3>Debug Checklist:</h3>
+<ol>
+    <li>Open browser console (F12)</li>
+    <li>Create chain: UL-1 → UL-2 → UL-3</li>
+    <li>Click MP-1 to grab it</li>
+    <li>Check console logs - should show:
+        <ul>
+            <li>"Dragging MP on MIDDLE LINK"</li>
+            <li>"Partner: link_X (parent)"</li>
+            <li>"Updating partner link_X.end"</li>
+            <li>"Stretching link_Y.start"</li>
+        </ul>
+    </li>
+    <li>If it's updating anything else (like .end on the middle link), that's the bug!</li>
+</ol>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

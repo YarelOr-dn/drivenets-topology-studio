@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Topology Creator</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Top Bar with Utilities -->
+    <div class="top-bar">
+        <div class="top-bar-file" style="display:inline-block; margin-right:8px;">
+            <button class="top-bar-btn" id="btn-file-menu" title="File">
+                <svg width="20" height="20" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" fill="none"/><path d="M14 2v6h6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+                File
+            </button>
+        </div>
+        <button class="top-bar-btn" id="btn-delete-top" title="Delete Selected">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" stroke-width="2" fill="none"/>
+            </svg>
+            Delete
+        </button>
+        <button class="top-bar-btn" id="btn-clear-top" title="Clear Canvas">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
+                <path d="M8 12h8" stroke="currentColor" stroke-width="2"/>
+            </svg>
+            Clear
+        </button>
+        <button class="top-bar-btn" id="btn-save-top" title="Save Topology">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" stroke="currentColor" stroke-width="2" fill="none"/>
+                <path d="M7 3v5h8M17 21v-8H7v8" stroke="currentColor" stroke-width="2" fill="none"/>
+            </svg>
+            Save
+        </button>
+        <button class="top-bar-btn" id="btn-load-top" title="Load Topology">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+                <path d="M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4M17 9l-5-5-5 5M12 4v12" stroke="currentColor" stroke-width="2" fill="none"/>
+            </svg>
+            Load
+        </button>
+        <button class="top-bar-btn" id="btn-shortcuts-top" title="Keyboard Shortcuts">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+                <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" stroke-width="2" fill="none"/>
+                <path d="M8 8h8M8 12h6M8 16h8" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            Shortcuts
+        </button>
+        <button class="top-bar-btn" id="btn-debugger-top" title="Open Debugger (D)">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" fill="currentColor"/>
+                <circle cx="12" cy="8" r="1.5" fill="#0f0"/>
+                <circle cx="12" cy="12" r="1.5" fill="#0f0"/>
+                <circle cx="12" cy="16" r="1.5" fill="#0f0"/>
+            </svg>
+            <span style="color: #0f0; font-weight: bold;">Debug</span>
+        </button>
+        <button class="top-bar-btn" id="btn-theme-toggle" title="Toggle Dark Mode">
+            <svg width="20" height="20" viewBox="0 0 24 24" id="theme-icon">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" fill="currentColor"/>
+            </svg>
+            <span id="theme-text">Dark</span>
+        </button>
+    </div>
+    
+    <div class="toolbar" id="left-toolbar">
+        <button class="toolbar-toggle" id="toolbar-toggle" title="Collapse/Expand Toolbar">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+                <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" fill="none"/>
+            </svg>
+        </button>
+        <div class="toolbar-section">
+            <div id="mode-indicator" style="padding: 10px; background: #2c3e50; border-radius: 4px; margin-bottom: 10px; text-align: center; font-weight: bold;">
+                <span id="mode-text">BASE MODE</span>
+            </div>
+            <div id="step-counter" style="padding: 8px; background: #34495e; border-radius: 4px; text-align: center; font-size: 12px; color: #ecf0f1;">
+                <span style="opacity: 0.7;">Step:</span> <span id="step-number" style="font-weight: bold; color: #3498db;">0</span>
+            </div>
+        </div>
+        
+        <div class="toolbar-section">
+            <h3>Devices</h3>
+            <button class="tool-btn" id="btn-router" title="Add Router">
+                <svg width="24" height="24" viewBox="0 0 24 24">
+                    <rect x="2" y="6" width="20" height="12" rx="2" fill="currentColor"/>
+                    <circle cx="6" cy="12" r="1.5" fill="white"/>
+                    <circle cx="12" cy="12" r="1.5" fill="white"/>
+                    <circle cx="18" cy="12" r="1.5" fill="white"/>
+                </svg>
+                Router
+            </button>
+            <button class="tool-btn" id="btn-switch" title="Add Switch">
+                <svg width="24" height="24" viewBox="0 0 24 24">
+                    <rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/>
+                    <line x1="8" y1="8" x2="16" y2="8" stroke="white" stroke-width="1.5"/>
+                    <line x1="8" y1="12" x2="16" y2="12" stroke="white" stroke-width="1.5"/>
+                    <line x1="8" y1="16" x2="16" y2="16" stroke="white" stroke-width="1.5"/>
+                </svg>
+                Switch
+            </button>
+            <div class="sub-option-box">
+                <button class="sub-option-btn active" id="btn-device-numbering" title="Auto-Number Devices">
+                    <svg width="16" height="16" viewBox="0 0 24 24">
+                        <text x="12" y="18" text-anchor="middle" font-size="16" font-weight="bold" fill="currentColor">123</text>
+                    </svg>
+                    <span class="status-text">Numbering: ON</span>
+                </button>
+                <button class="sub-option-btn" id="btn-device-collision" title="Device Collision - Prevent Overlapping">
+                    <svg width="16" height="16" viewBox="0 0 24 24">
+                        <circle cx="9" cy="12" r="5" stroke="currentColor" stroke-width="2" fill="none"/>
+                        <circle cx="15" cy="12" r="5" stroke="currentColor" stroke-width="2" fill="none"/>
+                    </svg>
+                    <span class="status-text">Collision: OFF</span>
+                </button>
+                <div style="padding: 8px; background: rgba(0,0,0,0.3); border-radius: 4px; margin-top: 6px;">
+                    <label style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 11px; font-weight: 600;">
+                        <span>🧲 Magnetic Field</span>
+                        <span id="magnetic-field-value" style="background: #3498db; padding: 2px 6px; border-radius: 3px; font-weight: bold;">40</span>
+                    </label>
+                    <input type="range" id="magnetic-field-slider" min="1" max="80" value="40" 
+                           style="width: 100%; height: 6px; background: linear-gradient(to right, #e74c3c, #f39c12, #27ae60); border-radius: 3px; outline: none; appearance: none; -webkit-appearance: none;">
+                </div>
+            </div>
+        </div>
+        
+        <div class="toolbar-section">
+            <h3>Edit</h3>
+            <button class="tool-btn" id="btn-undo" title="Undo (⌘+Z)">
+                <svg width="24" height="24" viewBox="0 0 24 24">
+                    <path d="M3 7v6h6M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" stroke="currentColor" stroke-width="2" fill="none"/>
+                </svg>
+                Undo
+            </button>
+            <button class="tool-btn" id="btn-redo" title="Redo (⌘+Y)">
+                <svg width="24" height="24" viewBox="0 0 24 24">
+                    <path d="M21 7v6h-6M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" stroke="currentColor" stroke-width="2" fill="none"/>
+                </svg>
+                Redo
+            </button>
+        </div>
+        
+        <div class="toolbar-section">
+            <h3>Tools / Modes</h3>
+            <button class="tool-btn" id="btn-base" title="Base Mode - Default State">
+                <svg width="24" height="24" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
+                    <path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2"/>
+                </svg>
+                Base Mode
+            </button>
+            <button class="tool-btn active" id="btn-select" title="Select Tool">
+                <svg width="24" height="24" viewBox="0 0 24 24">
+                    <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" fill="currentColor"/>
+                </svg>
+                Select
+            </button>
+            <button class="tool-btn" id="btn-link" title="Link Tool">
+                <svg width="24" height="24" viewBox="0 0 24 24">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor" stroke-width="2" fill="none"/>
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor" stroke-width="2" fill="none"/>
+                </svg>
+                Link
+            </button>
+            <div class="sub-option-box">
+                <button class="sub-option-btn active" id="btn-link-curve" title="Curve Links Around Devices">
+                    <svg width="16" height="16" viewBox="0 0 24 24">
+                        <path d="M5 12 Q12 6, 19 12" stroke="currentColor" stroke-width="2" fill="none"/>
+                    </svg>
+                    <span class="status-text">Curve: ON</span>
+                </button>
+                <button class="sub-option-btn active" id="btn-link-continuous" title="Continuous Linking - Chain Links Together">
+                    <svg width="16" height="16" viewBox="0 0 24 24">
+                        <path d="M5 12h4M15 12h4" stroke="currentColor" stroke-width="2"/>
+                        <circle cx="9" cy="12" r="2" fill="currentColor"/>
+                        <circle cx="15" cy="12" r="2" fill="currentColor"/>
+                        <path d="M9 12l6 0" stroke="currentColor" stroke-width="2" stroke-dasharray="2,2"/>
+                    </svg>
+                    <span class="status-text">Chain: ON</span>
+                </button>
+            </div>
+            <button class="tool-btn" id="btn-text" title="Add Text">
+                <svg width="24" height="24" viewBox="0 0 24 24">
+                    <path d="M4 20h16" stroke="currentColor" stroke-width="2"/>
+                    <path d="M6 20V4h8l4 4v12" stroke="currentColor" stroke-width="2" fill="none"/>
+                    <path d="M8 12h8M8 8h4M8 16h6" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+                Text
+            </button>
+        </div>
+        
+        <div class="toolbar-section">
+            <h3>Properties</h3>
+            <div class="prop-group">
+                <label>Color:</label>
+                <input type="color" id="color-picker" value="#4CAF50">
+            </div>
+            <div class="prop-group" id="device-props" style="display: none;">
+                <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #ecf0f1;">Size (Radius):</label>
+                <input type="number" id="device-radius" min="10" max="100" value="30" step="1" pattern="[0-9]*" style="width: 100%; padding: 8px; font-size: 14px;">
+                <small style="display: block; color: #bdc3c7; font-size: 11px; margin-top: 3px;">Numbers only, Enter to apply</small>
+            </div>
+            <div class="prop-group" id="device-label-props" style="display: none;">
+                <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #ecf0f1;">Label (max 20):</label>
+                <input type="text" id="device-label" maxlength="20" placeholder="R, S, or custom" pattern="[\x00-\x7F]*" style="width: 100%; padding: 8px; font-size: 14px;">
+                <small style="display: block; color: #bdc3c7; font-size: 11px; margin-top: 3px;">ASCII chars, Enter to apply</small>
+            </div>
+            <div class="prop-group" id="text-props" style="display: none;">
+                <label>Font Size:</label>
+                <input type="number" id="font-size" min="8" max="72" value="14">
+            </div>
+            <div class="prop-group" id="text-rotation-props" style="display: none;">
+                <label>Rotation:</label>
+                <input type="range" id="rotation-slider" min="0" max="360" value="0">
+                <span id="rotation-value">0°</span>
+            </div>
+        </div>
+        
+        <div class="toolbar-section">
+            <h3>Zoom</h3>
+            <button class="tool-btn" id="btn-zoom-in" title="Zoom In">
+                <svg width="24" height="24" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
+                    <path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2"/>
+                </svg>
+                Zoom In
+            </button>
+            <button class="tool-btn" id="btn-zoom-out" title="Zoom Out">
+                <svg width="24" height="24" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
+                    <path d="M8 12h8" stroke="currentColor" stroke-width="2"/>
+                </svg>
+                Zoom Out
+            </button>
+            <button class="tool-btn" id="btn-zoom-reset" title="Reset Zoom">
+                <svg width="24" height="24" viewBox="0 0 24 24">
+                    <path d="M12 2v4M12 18v4M2 12h4M18 12h4" stroke="currentColor" stroke-width="2" fill="none"/>
+                    <circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2" fill="none"/>
+                </svg>
+                Reset Zoom
+            </button>
+            <div style="margin-top: 8px; font-size: 12px; color: #ecf0f1; opacity: 0.85; text-align: center;">
+                Zoom: <span id="zoom-indicator">100%</span>
+            </div>
+        </div>
+    </div>
+    
+    <div class="canvas-container">
+        <canvas id="topology-canvas"></canvas>
+        <!-- Vertical Scrollbar -->
+        <div class="vertical-scrollbar" id="vertical-scrollbar">
+            <div class="scrollbar-thumb" id="vertical-thumb"></div>
+        </div>
+        <!-- Horizontal Scrollbar -->
+        <div class="horizontal-scrollbar" id="horizontal-scrollbar">
+            <div class="scrollbar-thumb" id="horizontal-thumb"></div>
+        </div>
+        <!-- Navigation Indicator / HUD -->
+        <div id="hud" style="position: absolute; right: 8px; bottom: 8px; background: rgba(0,0,0,0.6); color: #ecf0f1; padding: 6px 10px; border-radius: 4px; font-size: 12px; pointer-events: none;">Grid: (–, –) | Mode: BASE</div>
+    </div>
+
+    <!-- File Menu Modal -->
+    <div id="file-menu-modal" class="modal">
+        <div class="modal-content" style="max-width: 420px;">
+            <div class="modal-header"><h2>File</h2><button class="modal-close" id="close-file-menu">&times;</button></div>
+            <div class="modal-body">
+                <div class="prop-group">
+                    <label>Current File:</label>
+                    <div id="current-file-name" style="font-weight:600;color:#ecf0f1;">(none)</div>
+                </div>
+                <div class="prop-group" style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="tool-btn" id="btn-new-topology">New Topology</button>
+                    <button class="tool-btn" id="btn-open-topology">Open...</button>
+                    <button class="tool-btn" id="btn-save-topology">Save</button>
+                    <button class="tool-btn" id="btn-save-as-topology">Save As...</button>
+                </div>
+                <div class="prop-group">
+                    <small>Files are saved locally (browser storage) and you can also export/import JSON.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Advanced Text Editor Modal -->
+    <div id="text-editor-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>Edit Text</h2>
+                <button class="modal-close" id="close-text-editor">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="prop-group">
+                    <label>Text Content:</label>
+                    <input type="text" id="editor-text-content" placeholder="Enter text">
+                </div>
+                <div class="prop-group">
+                    <label>Font Size:</label>
+                    <input type="number" id="editor-font-size" min="8" max="72" value="14">
+                </div>
+                <div class="prop-group">
+                    <label>Color:</label>
+                    <input type="color" id="editor-text-color" value="#333333">
+                </div>
+                <div class="prop-group">
+                    <label>Rotation:</label>
+                    <input type="range" id="editor-rotation" min="0" max="360" value="0">
+                    <span id="editor-rotation-value">0°</span>
+                </div>
+                <div class="prop-group">
+                    <label>Text Align:</label>
+                    <select id="editor-text-align">
+                        <option value="left">Left</option>
+                        <option value="center" selected>Center</option>
+                        <option value="right">Right</option>
+                    </select>
+                </div>
+                <div class="modal-footer" style="margin-top: 20px;">
+                    <button class="tool-btn" id="btn-text-editor-apply">Apply</button>
+                    <button class="tool-btn" id="btn-text-editor-cancel">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Link Details Modal -->
+    <div id="link-details-modal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2>Link Connection Details</h2>
+                <button class="modal-close" id="close-link-details">&times;</button>
+            </div>
+            <div class="modal-body">
+                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                    <thead>
+                        <tr style="background: #34495e; color: white;">
+                            <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Device</th>
+                            <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Interface</th>
+                            <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">VLAN</th>
+                            <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Transceiver</th>
+                            <th style="padding: 10px; text-align: center; border: 1px solid #ddd; width: 60px;">↔</th>
+                            <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Transceiver</th>
+                            <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">VLAN</th>
+                            <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Interface</th>
+                            <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Device</th>
+                        </tr>
+                    </thead>
+                    <tbody id="link-details-table">
+                        <!-- Populated dynamically -->
+                    </tbody>
+                </table>
+                <div class="modal-footer">
+                    <button class="tool-btn" id="btn-save-link-details">Save Changes</button>
+                    <button class="tool-btn" id="btn-add-interface-labels">Add Interface Labels</button>
+                    <button class="tool-btn" id="btn-close-link-details">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <input type="file" id="file-input" accept=".json" style="display: none;">
+    
+    <!-- Context Menu -->
+    <div id="context-menu" class="context-menu">
+        <div class="context-menu-item" id="ctx-duplicate">Duplicate</div>
+        <div class="context-menu-item" id="ctx-add-text">Add Adjacent Text</div>
+        <div class="context-menu-item" id="ctx-toggle-curve" style="display:none;">Toggle Curve (This Link)</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="ctx-change-color">Change Color</div>
+        <div class="context-menu-item" id="ctx-change-size">Change Size</div>
+        <div class="context-menu-item" id="ctx-change-label">Change Label</div>
+        <div class="context-menu-item" id="ctx-lock" style="display:none;">🔒 Lock</div>
+        <div class="context-menu-item" id="ctx-unlock" style="display:none;">🔓 Unlock</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" id="ctx-delete">Delete</div>
+    </div>
+    
+    <!-- Shortcuts Modal -->
+    <div id="shortcuts-modal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2>Controls & Shortcuts</h2>
+                <button class="modal-close" id="close-shortcuts">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Keyboard Section -->
+                <div class="shortcut-section">
+                    <div class="shortcut-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <span style="font-size: 18px; font-weight: bold;">⌨️ KEYBOARD</span>
+                        <span class="shortcut-toggle">▼</span>
+                    </div>
+                    <div class="shortcut-section-content">
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Cmd/Ctrl + S</span>
+                            <span class="shortcut-desc">Save topology</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Cmd/Ctrl + Z</span>
+                            <span class="shortcut-desc">Undo</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Cmd/Ctrl + Y</span>
+                            <span class="shortcut-desc">Redo</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Cmd/Ctrl + T</span>
+                            <span class="shortcut-desc">Change text size when text selected</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Cmd/Ctrl + L</span>
+                            <span class="shortcut-desc">Create unbound link</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Delete / Backspace</span>
+                            <span class="shortcut-desc">Delete selected objects</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Escape</span>
+                            <span class="shortcut-desc">Exit mode / Close modal</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Space + Drag</span>
+                            <span class="shortcut-desc">Pan canvas</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">D</span>
+                            <span class="shortcut-desc">Toggle Debugger</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mouse Section -->
+                <div class="shortcut-section">
+                    <div class="shortcut-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <span style="font-size: 18px; font-weight: bold;">🖱️ MOUSE</span>
+                        <span class="shortcut-toggle">▼</span>
+                    </div>
+                    <div class="shortcut-section-content">
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Left Click</span>
+                            <span class="shortcut-desc">Select / Place / Create</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Right Click</span>
+                            <span class="shortcut-desc">Context menu / Exit mode</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Middle Click / Space + Drag</span>
+                            <span class="shortcut-desc">Pan canvas</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Mouse Wheel</span>
+                            <span class="shortcut-desc">Zoom in/out at cursor</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Ctrl + Wheel</span>
+                            <span class="shortcut-desc">Precise zoom</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Double Click</span>
+                            <span class="shortcut-desc">Edit label / Open details</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Drag</span>
+                            <span class="shortcut-desc">Move objects / Marquee select</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Alt + Click Device</span>
+                            <span class="shortcut-desc">Quick link start</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Hold Zoom +/-</span>
+                            <span class="shortcut-desc">Continuous zoom (5%/step)</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Click Scrollbar</span>
+                            <span class="shortcut-desc">Jump to position</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Touchpad Section -->
+                <div class="shortcut-section">
+                    <div class="shortcut-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <span style="font-size: 18px; font-weight: bold;">👆 TOUCHPAD</span>
+                        <span class="shortcut-toggle">▼</span>
+                    </div>
+                    <div class="shortcut-section-content">
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">2-Finger Pinch</span>
+                            <span class="shortcut-desc">Zoom at cursor</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">2-Finger Scroll</span>
+                            <span class="shortcut-desc">Pan canvas</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">3-Finger Tap Device</span>
+                            <span class="shortcut-desc">Link mode from device</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">3-Finger Tap Background</span>
+                            <span class="shortcut-desc">Create unbound link</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key">Long Press</span>
+                            <span class="shortcut-desc">Multi-select mode</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="debugger.js"></script>
+    <script src="topology.js"></script>
+</body>
+</html>
+

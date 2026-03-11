@@ -1,0 +1,380 @@
+{
+  "version": "1.0",
+  "objects": [
+    {
+      "id": "device_0",
+      "type": "device",
+      "deviceType": "router",
+      "x": 600.0,
+      "y": 320,
+      "radius": 50,
+      "rotation": 0,
+      "color": "#9b59b6",
+      "label": "DNAAS-SPINE-D14",
+      "locked": false,
+      "visualStyle": "server",
+      "deviceSerial": "",
+      "sshConfig": {
+        "host": "DNAAS-SPINE-D14",
+        "hostBackup": "100.64.100.129",
+        "user": "sisaev",
+        "password": "Drive1234!"
+      }
+    },
+    {
+      "id": "device_1",
+      "type": "device",
+      "deviceType": "router",
+      "x": 600.0,
+      "y": 540,
+      "radius": 50,
+      "rotation": 0,
+      "color": "#e67e22",
+      "label": "DNAAS-LEAF-D16",
+      "locked": false,
+      "visualStyle": "server",
+      "deviceSerial": "",
+      "sshConfig": {
+        "host": "DNAAS-LEAF-D16",
+        "hostBackup": "100.64.101.123",
+        "user": "sisaev",
+        "password": "Drive1234!"
+      }
+    },
+    {
+      "id": "device_2",
+      "type": "device",
+      "deviceType": "router",
+      "x": 570.0,
+      "y": 760,
+      "radius": 45,
+      "rotation": 0,
+      "color": "#3498db",
+      "label": "YOR_PE-1(05-Jan-2026-13:55:10)",
+      "locked": false,
+      "visualStyle": "classic",
+      "deviceSerial": "wk31d7vv00023",
+      "sshConfig": {
+        "host": "",
+        "hostBackup": "wk31d7vv00023",
+        "user": "dnroot",
+        "password": "dnroot"
+      }
+    },
+    {
+      "id": "device_3",
+      "type": "device",
+      "deviceType": "router",
+      "x": 600.0,
+      "y": 760,
+      "radius": 45,
+      "rotation": 0,
+      "color": "#3498db",
+      "label": "YOR_PE-1",
+      "locked": false,
+      "visualStyle": "classic",
+      "deviceSerial": ""
+    },
+    {
+      "id": "link_0",
+      "type": "link",
+      "originType": "QL",
+      "device1": "device_2",
+      "device2": "device_1",
+      "color": "#3498db",
+      "start": {
+        "x": 570.0,
+        "y": 710
+      },
+      "end": {
+        "x": 600.0,
+        "y": 590
+      },
+      "style": "solid",
+      "width": 3,
+      "linkDetails": {
+        "interfaceA": "ge400-0/0/4",
+        "interfaceB": "ge100-0/0/4",
+        "description": "YOR_PE-1(05-Jan-2026-13:55:10) to DNAAS-LEAF-D16",
+        "speedA": "100Gbps,",
+        "bundleA": "",
+        "subInterfacesA": [
+          "ge400-0/0/4.12",
+          "ge400-0/0/4.13",
+          "ge400-0/0/4.14"
+        ],
+        "vlansA": [
+          12,
+          13,
+          14
+        ],
+        "bridgeDomains": [
+          {
+            "bd_id": 0,
+            "bd_name": "g_yor_v210",
+            "vlan_id": 210,
+            "state": "up"
+          },
+          {
+            "bd_id": 0,
+            "bd_name": "g_mgmt_v999",
+            "vlan_id": 999,
+            "state": "up"
+          },
+          {
+            "bd_id": 0,
+            "bd_name": "g_yor_v214",
+            "vlan_id": 214,
+            "state": "up"
+          }
+        ],
+        "adminStateB": "enabled",
+        "interfaceConfigsB": {
+          "ge100-0/0/4": {
+            "interface": "ge100-0/0/4",
+            "encapsulation": null,
+            "vlan_id": null,
+            "inner_vlan": null,
+            "rewrite_ingress": null,
+            "rewrite_egress": null,
+            "l2_service": false,
+            "admin_state": "enabled",
+            "oper_state": null,
+            "raw_config": "show configure interface ge100-0/0/4 | no-more\r\nDNAAS-LEAF-D16(05-Jan-2026-13:55:27)# show configure interface ge100-0/0/4 | no-more\r\n-------------------------------------------^\r\nERROR: Unknown word: 'configure'.\r\nDNAAS-LEAF-D16# "
+          }
+        }
+      }
+    },
+    {
+      "id": "link_1",
+      "type": "link",
+      "originType": "QL",
+      "device1": "device_1",
+      "device2": "device_0",
+      "color": "#3498db",
+      "start": {
+        "x": 600.0,
+        "y": 490
+      },
+      "end": {
+        "x": 600.0,
+        "y": 370
+      },
+      "style": "solid",
+      "width": 3,
+      "linkDetails": {
+        "interfaceA": "ge100-0/0/36",
+        "interfaceB": "ge100-0/0/12",
+        "description": "DNAAS-LEAF-D16 to DNAAS-SPINE-D14",
+        "bridgeDomains": [
+          {
+            "bd_id": 0,
+            "bd_name": "g_yor_v210",
+            "vlan_id": 210,
+            "state": "up"
+          },
+          {
+            "bd_id": 0,
+            "bd_name": "g_yor_v210",
+            "vlan_id": 210,
+            "state": "unknown"
+          },
+          {
+            "bd_id": 0,
+            "bd_name": "g_mgmt_v999",
+            "vlan_id": 999,
+            "state": "up"
+          },
+          {
+            "bd_id": 0,
+            "bd_name": "g_yor_v214",
+            "vlan_id": 214,
+            "state": "up"
+          }
+        ]
+      }
+    },
+    {
+      "id": "link_2",
+      "type": "link",
+      "originType": "QL",
+      "device1": "device_1",
+      "device2": "device_3",
+      "color": "#3498db",
+      "start": {
+        "x": 600.0,
+        "y": 590
+      },
+      "end": {
+        "x": 600.0,
+        "y": 710
+      },
+      "style": "solid",
+      "width": 3,
+      "linkDetails": {
+        "interfaceA": "ge100-0/0/4",
+        "interfaceB": "ge400-0/0/4",
+        "description": "DNAAS-LEAF-D16 to YOR_PE-1",
+        "bridgeDomains": [
+          {
+            "bd_id": 0,
+            "bd_name": "g_yor_v210",
+            "vlan_id": 210,
+            "state": "up"
+          },
+          {
+            "bd_id": 0,
+            "bd_name": "g_mgmt_v999",
+            "vlan_id": 999,
+            "state": "up"
+          },
+          {
+            "bd_id": 0,
+            "bd_name": "g_yor_v214",
+            "vlan_id": 214,
+            "state": "up"
+          }
+        ],
+        "adminStateA": "enabled",
+        "interfaceConfigsA": {
+          "ge100-0/0/4": {
+            "interface": "ge100-0/0/4",
+            "encapsulation": null,
+            "vlan_id": null,
+            "inner_vlan": null,
+            "rewrite_ingress": null,
+            "rewrite_egress": null,
+            "l2_service": false,
+            "admin_state": "enabled",
+            "oper_state": null,
+            "raw_config": "show configure interface ge100-0/0/4 | no-more\r\nDNAAS-LEAF-D16(05-Jan-2026-13:55:27)# show configure interface ge100-0/0/4 | no-more\r\n-------------------------------------------^\r\nERROR: Unknown word: 'configure'.\r\nDNAAS-LEAF-D16# "
+          }
+        }
+      }
+    },
+    {
+      "id": "bd_text_0",
+      "type": "text",
+      "x": 80,
+      "y": 120,
+      "text": "g_yor_v210\nType: Global\nVLAN: 210",
+      "fontSize": 12,
+      "color": "#3498db",
+      "rotation": 0,
+      "showBackground": true,
+      "backgroundColor": "#3498db20",
+      "backgroundOpacity": 90,
+      "strokeColor": "#3498db",
+      "strokeWidth": 1
+    },
+    {
+      "id": "bd_text_1",
+      "type": "text",
+      "x": 80,
+      "y": 200,
+      "text": "g_yor_v214\nType: Global\nVLAN: 214",
+      "fontSize": 12,
+      "color": "#e74c3c",
+      "rotation": 0,
+      "showBackground": true,
+      "backgroundColor": "#e74c3c20",
+      "backgroundOpacity": 90,
+      "strokeColor": "#e74c3c",
+      "strokeWidth": 1
+    },
+    {
+      "id": "bd_text_2",
+      "type": "text",
+      "x": 80,
+      "y": 280,
+      "text": "g_mgmt_v999\nType: Global\nVLAN: 999",
+      "fontSize": 12,
+      "color": "#2ecc71",
+      "rotation": 0,
+      "showBackground": true,
+      "backgroundColor": "#2ecc7120",
+      "backgroundOpacity": 90,
+      "strokeColor": "#2ecc71",
+      "strokeWidth": 1
+    }
+  ],
+  "metadata": {
+    "name": "DNAAS Path Discovery",
+    "created": "2026-01-05T11:55:36.427455",
+    "source": "wk31d7vv00023",
+    "destination": "",
+    "bridge_domains": [
+      {
+        "name": "g_yor_v210",
+        "type": "global",
+        "vlan": 210,
+        "color": "#3498db",
+        "device": "DNAAS-LEAF-D16",
+        "interfaces": [
+          "bundle-60000.210",
+          "ge100-0/0/4"
+        ]
+      },
+      {
+        "name": "g_mgmt_v999",
+        "type": "global",
+        "vlan": 999,
+        "color": "#e74c3c",
+        "device": "DNAAS-LEAF-D16",
+        "interfaces": [
+          "bundle-60000.999",
+          "ge100-0/0/5.999"
+        ]
+      },
+      {
+        "name": "g_yor_v214",
+        "type": "global",
+        "vlan": 214,
+        "color": "#2ecc71",
+        "device": "DNAAS-LEAF-D16",
+        "interfaces": [
+          "bundle-60000.214",
+          "ge100-0/0/5.214"
+        ]
+      }
+    ],
+    "bundles": {
+      "bundle-60000": {
+        "bundle_id": "bundle-60000",
+        "name": "",
+        "members": [
+          "ge100-0/0/36",
+          "ge100-0/0/37",
+          "ge100-0/0/38"
+        ],
+        "state": "unknown",
+        "partner_system_id": "84:40:76:00:a5:54"
+      }
+    },
+    "config_changes": [],
+    "bridge_domains_colors": [
+      {
+        "vlan": 210,
+        "color": "#3498db",
+        "bd_names": [
+          "g_yor_v210"
+        ]
+      },
+      {
+        "vlan": 214,
+        "color": "#e74c3c",
+        "bd_names": [
+          "g_yor_v214"
+        ]
+      },
+      {
+        "vlan": 999,
+        "color": "#2ecc71",
+        "bd_names": [
+          "g_mgmt_v999"
+        ]
+      }
+    ],
+    "view_mode": "combined"
+  }
+}

@@ -1,0 +1,135 @@
+======================================================================
+DNAAS PATH DISCOVERY REPORT
+======================================================================
+Generated: 2025-12-29 17:18:40
+Source: wk31d7vv00023
+Destination: 100.64.0.220
+Status: SUCCESS
+
+----------------------------------------------------------------------
+DEVICE INVENTORY
+----------------------------------------------------------------------
+
+[YOR_PE-1]
+  Serial: wk31d7vv00023
+  Management IP: 
+  Management IPv6: N/A
+  System Type: SA-36CD-S, Family: NCR
+  DNOS Version: DNOS [26.1.0] build [1_priv], Copyright 2025 DRIVENETS LTD.
+  DNAAS Interfaces: ge400-0/0/4
+  Last Seen: 2025-12-29T17:16:38.705497
+
+[YOR_PE-2]
+  Serial: 100.64.0.220
+  Management IP: 
+  Management IPv6: N/A
+  System Type: SA-36CD-S, Family: NCR
+  DNOS Version: DNOS [26.1.0] build [1_priv], Copyright 2025 DRIVENETS LTD.
+  DNAAS Interfaces: None detected
+  Last Seen: 2025-12-29T17:16:44.921603
+
+----------------------------------------------------------------------
+PATH TRACE
+----------------------------------------------------------------------
+
+[Hop 1] YOR_PE-1 (PE)
+  Serial: wk31d7vv00023
+  IP: N/A
+  Egress: ge400-0/0/4
+    >>>
+
+[Hop 2] DNAAS-LEAF-D16 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.123
+  Ingress: ge100-0/0/4
+    >>>
+
+[Hop 3] DNAAS-SPINE-D14 (SPINE)
+  Serial: N/A
+  IP: 100.64.100.129
+  Ingress: ge100-0/0/12
+    >>>
+
+[Hop 4] DNAAS-LEAF-D12-NCP3 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.51
+  Ingress: ge400-0/0/31
+    >>>
+
+[Hop 5] DNAAS-LEAF-D13 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.52
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 6] DNAAS-SuperSpine-D04 (SUPERSPINE)
+  Serial: N/A
+  IP: 100.64.100.1
+  Ingress: ge100-4/0/12
+    >>>
+
+[Hop 7] DNAAS-SPINE-A08 (SPINE)
+  Serial: N/A
+  IP: 100.64.100.134
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 8] DNAAS-LEAF-A01 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.18
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 9] DNAAS-LEAF-A02 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.19
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 10] DNAAS-LEAF-A03 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.23
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 11] DNAAS-LEAF-A04 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.1
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 12] DNAAS-LEAF-A05-1 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.12
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 13] DNAAS-LEAF-A05-2 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.13
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 14] DNAAS-LEAF-A06 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.20
+  Ingress: ge100-0/0/36
+    >>>
+
+[Hop 15] DNAAS-LEAF-A07 (LEAF)
+  Serial: N/A
+  IP: 100.64.101.21
+  Ingress: ge100-0/0/36
+
+----------------------------------------------------------------------
+LLDP NEIGHBOR DETAILS
+----------------------------------------------------------------------
+
+[YOR_PE-1] LLDP Neighbors:
+  ge400-0/0/4          -> DNAAS-LEAF-D16:ge100-0/0/4 [DNAAS]
+
+[YOR_PE-2] LLDP Neighbors:
+
+======================================================================
+END OF REPORT
+======================================================================

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test</title>
+</head>
+<body>
+    <canvas id="topology-canvas"></canvas>
+    <script>
+        window.onerror = function(msg, url, line, col, error) {
+            document.body.innerHTML = '<h1 style="color:red">JS Error!</h1><pre>' + 
+                msg + '\nLine: ' + line + '\nCol: ' + col + '</pre>';
+            return true;
+        };
+    </script>
+    <script src="topology.js"></script>
+    <script>
+        if (window.TopologyEditor) {
+            document.body.innerHTML = '<h1 style="color:green">✅ Script loaded OK!</h1>';
+        } else {
+            document.body.innerHTML = '<h1 style="color:orange">⚠️ TopologyEditor not defined</h1>';
+        }
+    </script>
+</body>
+</html>

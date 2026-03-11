@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JS Error Test</title>
+    <script>
+        window.onerror = function(msg, url, line, col, error) {
+            document.body.innerHTML = '<h1 style="color:red">JavaScript Error:</h1>' +
+                '<pre>' + msg + '\n' +
+                'Line: ' + line + ', Col: ' + col + '\n' +
+                'File: ' + url + '\n' +
+                (error ? 'Stack: ' + error.stack : '') + '</pre>';
+            return true;
+        };
+    </script>
+</head>
+<body>
+    <h1>Loading scripts...</h1>
+    <script src="debugger.js"></script>
+    <script src="topology-momentum.js"></script>
+    <script src="topology.js"></script>
+    <script>
+        if (window.topologyEditor) {
+            document.body.innerHTML += '<h2 style="color:green">✅ All scripts loaded!</h2>';
+        } else {
+            document.body.innerHTML += '<h2 style="color:red">❌ topologyEditor not created!</h2>';
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Topology Module Test Suite</title>
+    <style>
+        body {
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            background: #1a1a2e;
+            color: #eee;
+            padding: 20px;
+            margin: 0;
+        }
+        h1 {
+            color: #00d4ff;
+            margin-bottom: 10px;
+        }
+        .summary {
+            background: #16213e;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+        .summary.pass { border-left: 4px solid #00ff88; }
+        .summary.fail { border-left: 4px solid #ff4757; }
+        #results {
+            background: #0f0f1a;
+            padding: 15px;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            font-size: 13px;
+            line-height: 1.6;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        button {
+            background: #00d4ff;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #00b8e6;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Topology Module Test Suite</h1>
+    
+    <div class="controls">
+        <button onclick="runTests('all')">Run All Tests</button>
+        <button onclick="runTests('events')">Events</button>
+        <button onclick="runTests('geometry')">Geometry</button>
+        <button onclick="runTests('platform')">Platform</button>
+        <button onclick="runTests('integration')">Integration</button>
+    </div>
+    
+    <div id="summary" class="summary">Click a button to run tests</div>
+    <pre id="results">Test output will appear here...</pre>
+    
+    <!-- Load modules in order -->
+    <script src="topology-events.js"></script>
+    <script src="topology-geometry.js"></script>
+    <script src="topology-platform-data.js"></script>
+    <script src="topology-tests.js"></script>
+    
+    <script>
+        // Capture console output
+        const resultsEl = document.getElementById('results');
+        const summaryEl = document.getElementById('summary');
+        let logBuffer = [];
+        
+        const originalLog = console.log;
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            logBuffer.push(args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
+            resultsEl.textContent = logBuffer.join('\n');
+        };
+        
+        function runTests(type) {
+            logBuffer = [];
+            resultsEl.textContent = 'Running tests...';
+            
+            let result;
+            if (type === 'all') {
+                result = TopologyTests.runAll();
+            } else if (type === 'integration') {
+                result = TopologyTests.runIntegration();
+            } else {
+                result = TopologyTests.runModule(type);
+            }
+            
+            summaryEl.textContent = `Results: ${result.passed}/${result.total} passed (${result.passRate}%)`;
+            summaryEl.className = 'summary ' + (result.allPassed ? 'pass' : 'fail');
+        }
+        
+        // Auto-run on load
+        setTimeout(() => runTests('all'), 100);
+    </script>
+</body>
+</html>
