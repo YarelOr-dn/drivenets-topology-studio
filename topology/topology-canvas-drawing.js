@@ -38,6 +38,7 @@ window.CanvasDrawing = {
     },
 
     drawDevice(editor, device, unused = false, skipLabelArg = false) {
+        this._initBadgeClickHandlers(editor);
         const isSelected = editor.selectedObject === device || editor.selectedObjects.includes(device);
         const style = device.visualStyle || 'circle';
         
@@ -63,7 +64,11 @@ window.CanvasDrawing = {
                 editor.drawDeviceCircle(device, isSelected);
                 break;
         }
-        
+
+        if (!device._hostnameMismatch) {
+            device._badgeWorlds = null;
+        }
+
         // Skip label drawing if requested (labels drawn in separate pass for layering on top of links)
         // But still draw selection highlight and handles
         
@@ -1192,61 +1197,732 @@ window.CanvasDrawing = {
      * @param {Object} device - Device object
      */
     drawTerminalButton(editor, device) {
-        // Only draw if button position was calculated (device selected with SSH config)
         if (!device._terminalBtnPos) return;
-        
+
         const btn = device._terminalBtnPos;
         const btnX = btn.x;
         const btnY = btn.y;
         const btnRadius = btn.radius;
-        
-        editor.ctx.save();
-        
-        // Check if mouse is hovering over button
         const isHovered = editor._hoveredTerminalBtn === device.id;
-        
-        // Draw button shadow
+
+        const sshCfg = device.sshConfig || {};
+        const lastMethod = sshCfg._lastWorkingMethod || '';
+        const devMode = device._deviceMode || '';
+        const isConsole = lastMethod === 'console' || lastMethod === 'virsh_console'
+            || devMode === 'GI' || devMode === 'RECOVERY';
+
+        const fillNormal = isConsole ? '#e67e22' : '#27ae60';
+        const fillHover  = isConsole ? '#f39c12' : '#2ecc71';
+
+        editor.ctx.save();
+
         editor.ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
         editor.ctx.shadowBlur = 6 / editor.zoom;
         editor.ctx.shadowOffsetX = 2 / editor.zoom;
         editor.ctx.shadowOffsetY = 2 / editor.zoom;
-        
-        // Draw button background
+
         editor.ctx.beginPath();
         editor.ctx.arc(btnX, btnY, btnRadius, 0, Math.PI * 2);
-        editor.ctx.fillStyle = isHovered ? '#2ecc71' : '#27ae60';
+        editor.ctx.fillStyle = isHovered ? fillHover : fillNormal;
         editor.ctx.fill();
-        
-        // Draw border
+
         editor.ctx.shadowColor = 'transparent';
         editor.ctx.strokeStyle = '#ffffff';
         editor.ctx.lineWidth = 2 / editor.zoom;
         editor.ctx.stroke();
-        
-        // Draw terminal icon (simple console/terminal shape)
-        const iconSize = 8 / editor.zoom;
+
+        const s = 8 / editor.zoom;
         editor.ctx.strokeStyle = '#ffffff';
         editor.ctx.lineWidth = 1.5 / editor.zoom;
         editor.ctx.lineCap = 'round';
         editor.ctx.lineJoin = 'round';
-        
-        // Terminal prompt: >_
-        editor.ctx.beginPath();
-        // Arrow/chevron
-        editor.ctx.moveTo(btnX - iconSize * 0.6, btnY - iconSize * 0.3);
-        editor.ctx.lineTo(btnX - iconSize * 0.1, btnY);
-        editor.ctx.lineTo(btnX - iconSize * 0.6, btnY + iconSize * 0.3);
-        editor.ctx.stroke();
-        
-        // Cursor underscore
-        editor.ctx.beginPath();
-        editor.ctx.moveTo(btnX + iconSize * 0.1, btnY + iconSize * 0.3);
-        editor.ctx.lineTo(btnX + iconSize * 0.6, btnY + iconSize * 0.3);
-        editor.ctx.stroke();
-        
+
+        if (isConsole) {
+            // Console cable icon: RJ45 connector + cable
+            const top = btnY - s * 0.55;
+            editor.ctx.strokeRect(btnX - s * 0.35, top, s * 0.7, s * 0.4);
+            // Pins
+            editor.ctx.lineWidth = 1 / editor.zoom;
+            for (const dx of [-0.15, 0, 0.15]) {
+                editor.ctx.beginPath();
+                editor.ctx.moveTo(btnX + s * dx, top + s * 0.08);
+                editor.ctx.lineTo(btnX + s * dx, top + s * 0.28);
+                editor.ctx.stroke();
+            }
+            // Cable
+            editor.ctx.lineWidth = 1.8 / editor.zoom;
+            editor.ctx.beginPath();
+            editor.ctx.moveTo(btnX, top + s * 0.4);
+            editor.ctx.lineTo(btnX, btnY + s * 0.1);
+            editor.ctx.stroke();
+            // Wavy section
+            editor.ctx.lineWidth = 1.2 / editor.zoom;
+            editor.ctx.beginPath();
+            editor.ctx.moveTo(btnX, btnY + s * 0.1);
+            editor.ctx.quadraticCurveTo(btnX - s * 0.3, btnY + s * 0.3, btnX, btnY + s * 0.5);
+            editor.ctx.stroke();
+        } else {
+            // Terminal prompt: >_
+            editor.ctx.beginPath();
+            editor.ctx.moveTo(btnX - s * 0.6, btnY - s * 0.3);
+            editor.ctx.lineTo(btnX - s * 0.1, btnY);
+            editor.ctx.lineTo(btnX - s * 0.6, btnY + s * 0.3);
+            editor.ctx.stroke();
+            editor.ctx.beginPath();
+            editor.ctx.moveTo(btnX + s * 0.1, btnY + s * 0.3);
+            editor.ctx.lineTo(btnX + s * 0.6, btnY + s * 0.3);
+            editor.ctx.stroke();
+        }
+
         editor.ctx.restore();
     },
 
+    // =========================================================================
+    // DEVICE BADGE SYSTEM
+    // Three badge types: config (green), upgrade (orange), mismatch (crimson)
+    // Positioned as detached perfect circles above the device
+    // =========================================================================
+
+    _BADGE_DEFS: {
+        config:       { fill: '#27ae60', glow: '39,174,96'   },
+        upgrade:      { fill: '#e67e22', glow: '230,126,34'  },
+        upgradeFail:  { fill: '#e74c3c', glow: '231,76,60'   },
+        mismatch:     { fill: '#8e44ad', glow: '142,68,173'  }
+    },
+
+    _getDeviceBadges(device) {
+        const badges = [];
+        if (device._activeConfigJob) {
+            badges.push({ type: 'config' });
+        }
+        if (device._upgradeFailedJob) {
+            badges.push({ type: 'upgradeFail' });
+        } else if (device._activeUpgradeJob || device._upgradeInProgress) {
+            badges.push({ type: 'upgrade' });
+        }
+        if (device._hostnameMismatch) {
+            badges.push({ type: 'mismatch', dismissed: !!device._mismatchDismissed });
+        }
+        return badges;
+    },
+
+    _getBadgeAnchor(device) {
+        const r = device.radius || 30;
+        const style = device.visualStyle || 'circle';
+        const gap = 10;
+        switch (style) {
+            case 'classic': return { x: 0, y: -(r * 0.4 + gap) };
+            case 'hex':     return { x: 0, y: -(r + gap) };
+            case 'server':  return { x: 0, y: -(r * 0.85 + gap) };
+            case 'simple':
+            case 'circle':
+            default:        return { x: 0, y: -(r + gap) };
+        }
+    },
+
+    drawDeviceBadges(editor) {
+        this._startJobWatcher(editor);
+        const devices = (editor.objects || []).filter(o => {
+            if (o.type !== 'device' || o._hidden) return false;
+            return o._activeConfigJob || o._activeUpgradeJob || o._upgradeInProgress || o._upgradeFailedJob || o._hostnameMismatch;
+        });
+        if (devices.length === 0) {
+            if (editor._badgePulseTimer) {
+                clearInterval(editor._badgePulseTimer);
+                editor._badgePulseTimer = null;
+            }
+            return;
+        }
+        for (const device of devices) {
+            const badges = this._getDeviceBadges(device);
+            if (badges.length > 0) {
+                this._drawBadgeRow(editor, device, badges);
+            } else {
+                device._badgeWorlds = null;
+            }
+        }
+        const hasPulse = devices.some(d =>
+            (d._hostnameMismatch && !d._mismatchDismissed) || d._activeConfigJob || d._activeUpgradeJob || d._upgradeInProgress || d._upgradeFailedJob
+        );
+        if (hasPulse && !editor._badgePulseTimer) {
+            const tick = () => {
+                const still = (editor.objects || []).some(o =>
+                    o.type === 'device' && !o._hidden && (
+                        (o._hostnameMismatch && !o._mismatchDismissed) || o._activeConfigJob || o._activeUpgradeJob || o._upgradeInProgress || o._upgradeFailedJob
+                    )
+                );
+                if (still) {
+                    editor.requestDraw?.();
+                    editor._badgePulseTimer = requestAnimationFrame(tick);
+                } else {
+                    editor._badgePulseTimer = null;
+                }
+            };
+            editor._badgePulseTimer = requestAnimationFrame(tick);
+        }
+    },
+
+    _drawBadgeRow(editor, device, badges) {
+        const z = editor.zoom;
+        const badgeR = 7 / z;
+        const badgeGap = 5 / z;
+        const anchor = this._getBadgeAnchor(device);
+        const totalWidth = badges.length * (badgeR * 2) + (badges.length - 1) * badgeGap;
+        const startX = anchor.x - totalWidth / 2 + badgeR;
+
+        editor.ctx.save();
+        editor.ctx.translate(device.x, device.y);
+        editor.ctx.rotate((device.rotation || 0) * Math.PI / 180);
+
+        const rot = (device.rotation || 0) * Math.PI / 180;
+        const cos = Math.cos(rot), sin = Math.sin(rot);
+        device._badgeWorlds = [];
+
+        badges.forEach((badge, i) => {
+            const bx = startX + i * (badgeR * 2 + badgeGap);
+            const by = anchor.y;
+            const def = this._BADGE_DEFS[badge.type];
+            this._drawSingleBadge(editor, bx, by, badgeR, badge, def, z);
+            device._badgeWorlds.push({
+                type: badge.type,
+                x: device.x + cos * bx - sin * by,
+                y: device.y + sin * bx + cos * by,
+                r: badgeR
+            });
+        });
+
+        editor.ctx.restore();
+    },
+
+    _drawSingleBadge(editor, bx, by, r, badge, def, z) {
+        const isMismatch = badge.type === 'mismatch';
+        const isFailed = badge.type === 'upgradeFail';
+        const isActive = badge.type === 'config' || badge.type === 'upgrade';
+        const dismissed = isMismatch && badge.dismissed;
+        const pulse = (isMismatch && !dismissed)
+            ? (0.5 + 0.5 * Math.sin(Date.now() * 0.004))
+            : isFailed ? (0.5 + 0.5 * Math.sin(Date.now() * 0.005))
+            : isActive ? (0.5 + 0.5 * Math.sin(Date.now() * 0.003)) : 0;
+
+        if ((isMismatch && !dismissed) || isActive || isFailed) {
+            const glowR = r * (2.2 + pulse * 0.5);
+            const glow = editor.ctx.createRadialGradient(bx, by, r * 0.3, bx, by, glowR);
+            glow.addColorStop(0, `rgba(${def.glow}, ${0.35 + pulse * 0.15})`);
+            glow.addColorStop(1, `rgba(${def.glow}, 0)`);
+            editor.ctx.beginPath();
+            editor.ctx.arc(bx, by, glowR, 0, Math.PI * 2);
+            editor.ctx.fillStyle = glow;
+            editor.ctx.fill();
+        }
+
+        editor.ctx.save();
+        editor.ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+        editor.ctx.shadowBlur = 4 / z;
+        editor.ctx.shadowOffsetY = 1.5 / z;
+        editor.ctx.beginPath();
+        editor.ctx.arc(bx, by, r, 0, Math.PI * 2);
+        editor.ctx.fillStyle = dismissed ? 'rgba(70, 70, 80, 0.4)' : def.fill;
+        editor.ctx.fill();
+        editor.ctx.restore();
+
+        editor.ctx.beginPath();
+        editor.ctx.arc(bx, by, r, 0, Math.PI * 2);
+        editor.ctx.strokeStyle = dismissed
+            ? 'rgba(255,255,255,0.1)'
+            : `rgba(255,255,255,${0.5 + pulse * 0.15})`;
+        editor.ctx.lineWidth = 1.6 / z;
+        editor.ctx.stroke();
+
+        const hlGrad = editor.ctx.createLinearGradient(bx, by - r, bx, by);
+        hlGrad.addColorStop(0, `rgba(255,255,255,${dismissed ? 0.05 : 0.22})`);
+        hlGrad.addColorStop(1, 'rgba(255,255,255,0)');
+        editor.ctx.beginPath();
+        editor.ctx.arc(bx, by - r * 0.12, r * 0.82, Math.PI, 0);
+        editor.ctx.closePath();
+        editor.ctx.fillStyle = hlGrad;
+        editor.ctx.fill();
+
+        this._drawBadgeIcon(editor, bx, by, r, badge.type, dismissed, z);
+    },
+
+    _drawBadgeIcon(editor, bx, by, r, type, dismissed, z) {
+        const color = dismissed ? 'rgba(255,255,255,0.3)' : '#ffffff';
+        switch (type) {
+            case 'mismatch': {
+                const fs = Math.round(10 / z);
+                editor.ctx.font = `800 ${fs}px -apple-system, BlinkMacSystemFont, sans-serif`;
+                editor.ctx.textAlign = 'center';
+                editor.ctx.textBaseline = 'middle';
+                if (!dismissed) {
+                    editor.ctx.shadowColor = 'rgba(0,0,0,0.35)';
+                    editor.ctx.shadowBlur = 2 / z;
+                }
+                editor.ctx.fillStyle = color;
+                editor.ctx.fillText('!', bx, by + 0.3 / z);
+                editor.ctx.shadowColor = 'transparent';
+                editor.ctx.shadowBlur = 0;
+                break;
+            }
+            case 'config': {
+                editor.ctx.strokeStyle = color;
+                editor.ctx.lineWidth = 1.2 / z;
+                editor.ctx.lineCap = 'round';
+                const lineLen = r * 0.5;
+                const lineGap = r * 0.3;
+                for (let i = -1; i <= 1; i++) {
+                    editor.ctx.beginPath();
+                    editor.ctx.moveTo(bx - lineLen, by + i * lineGap);
+                    editor.ctx.lineTo(bx + lineLen, by + i * lineGap);
+                    editor.ctx.stroke();
+                }
+                break;
+            }
+            case 'upgrade': {
+                editor.ctx.strokeStyle = color;
+                editor.ctx.lineWidth = 1.3 / z;
+                editor.ctx.lineCap = 'round';
+                editor.ctx.lineJoin = 'round';
+                const aH = r * 0.42;
+                const aW = r * 0.38;
+                editor.ctx.beginPath();
+                editor.ctx.moveTo(bx - aW, by + aH * 0.15);
+                editor.ctx.lineTo(bx, by - aH);
+                editor.ctx.lineTo(bx + aW, by + aH * 0.15);
+                editor.ctx.stroke();
+                editor.ctx.beginPath();
+                editor.ctx.moveTo(bx, by - aH);
+                editor.ctx.lineTo(bx, by + aH);
+                editor.ctx.stroke();
+                break;
+            }
+            case 'upgradeFail': {
+                editor.ctx.strokeStyle = color;
+                editor.ctx.lineWidth = 1.3 / z;
+                editor.ctx.lineCap = 'round';
+                editor.ctx.lineJoin = 'round';
+                const ufH = r * 0.42;
+                const ufW = r * 0.38;
+                editor.ctx.beginPath();
+                editor.ctx.moveTo(bx - ufW, by + ufH * 0.15);
+                editor.ctx.lineTo(bx, by - ufH);
+                editor.ctx.lineTo(bx + ufW, by + ufH * 0.15);
+                editor.ctx.stroke();
+                editor.ctx.beginPath();
+                editor.ctx.moveTo(bx, by - ufH);
+                editor.ctx.lineTo(bx, by + ufH);
+                editor.ctx.stroke();
+                break;
+            }
+        }
+    },
+
+    _hitTestAnyBadge(editor, clientX, clientY) {
+        const rect = editor.canvas.getBoundingClientRect();
+        const screenX = clientX - rect.left;
+        const screenY = clientY - rect.top;
+        const adjustedPanX = Math.round(editor.panOffset.x) + 0.5;
+        const adjustedPanY = Math.round(editor.panOffset.y) + 0.5;
+        const worldX = (screenX - adjustedPanX) / editor.zoom;
+        const worldY = (screenY - adjustedPanY) / editor.zoom;
+        const devices = (editor.objects || []).filter(
+            o => o.type === 'device' && o._badgeWorlds && o._badgeWorlds.length > 0
+        );
+        for (const dev of devices) {
+            for (const b of dev._badgeWorlds) {
+                const dx = worldX - b.x, dy = worldY - b.y;
+                const hitR = b.r + 4 / editor.zoom;
+                if (dx * dx + dy * dy <= hitR * hitR) {
+                    return { device: dev, type: b.type };
+                }
+            }
+        }
+        return null;
+    },
+
+    _initBadgeClickHandlers(editor) {
+        if (editor._badgeClickBound) return;
+        editor._badgeClickBound = true;
+        const self = this;
+
+        // Shared handler for both pointerdown and mousedown.
+        // pointerdown fires FIRST and calls handleMouseDown internally,
+        // so we must intercept it in capture phase to prevent device selection.
+        const onDown = (e) => {
+            const hit = self._hitTestAnyBadge(editor, e.clientX, e.clientY);
+            if (hit) {
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                e.preventDefault();
+                if (window.hideDeviceSelectionToolbar) window.hideDeviceSelectionToolbar(editor);
+                editor.selectedObject = null;
+                editor.selectedObjects = [];
+                editor._badgeClickPending = { ...hit, x: e.clientX, y: e.clientY };
+            }
+        };
+
+        editor.canvas.addEventListener('pointerdown', onDown, true);
+        editor.canvas.addEventListener('mousedown', onDown, true);
+
+        const onUp = (e) => {
+            const pending = editor._badgeClickPending;
+            if (!pending) return;
+            editor._badgeClickPending = null;
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            self._handleBadgeClick(editor, pending);
+        };
+
+        editor.canvas.addEventListener('pointerup', onUp, true);
+        editor.canvas.addEventListener('mouseup', onUp, true);
+
+        const onClick = (e) => {
+            if (self._hitTestAnyBadge(editor, e.clientX, e.clientY)) {
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                e.preventDefault();
+            }
+        };
+
+        editor.canvas.addEventListener('click', onClick, true);
+
+        editor.canvas.addEventListener('mousemove', (e) => {
+            const hit = self._hitTestAnyBadge(editor, e.clientX, e.clientY);
+            if (hit) {
+                if (!editor._badgeCursorActive) {
+                    editor._badgeCursorActive = true;
+                    editor._badgeCursorPrev = editor.canvas.style.cursor;
+                    editor.canvas.style.cursor = 'pointer';
+                }
+            } else if (editor._badgeCursorActive) {
+                editor._badgeCursorActive = false;
+                editor.canvas.style.cursor = editor._badgeCursorPrev || '';
+            }
+        });
+    },
+
+    _handleBadgeClick(editor, pending) {
+        const { device, type, x, y } = pending;
+        switch (type) {
+            case 'mismatch':
+                this._showMismatchPopup(editor, device, x, y);
+                break;
+            case 'config':
+                this._openConfigPanel(editor, device);
+                break;
+            case 'upgrade':
+                this._openUpgradeWizard(editor, device);
+                break;
+            case 'upgradeFail':
+                this._openFailedUpgradeDetails(editor, device);
+                break;
+        }
+    },
+
+    _openFailedUpgradeDetails(editor, device) {
+        if (!device._upgradeFailedJob) return;
+        const job = device._upgradeFailedJob;
+        if (typeof ScalerGUI !== 'undefined' && ScalerGUI.showProgress) {
+            ScalerGUI.showProgress(job.jobId, job.name || 'Failed upgrade', {
+                upgradeDevices: job.devices || [],
+                upgradeSshHosts: job.sshHosts || {},
+            });
+        }
+    },
+
+    _startJobWatcher(editor) {
+        if (editor._jobWatcherStarted) return;
+        editor._jobWatcherStarted = true;
+        if (typeof ScalerAPI === 'undefined' || !ScalerAPI.getJobs) return;
+
+        let failCount = 0;
+        const BASE_INTERVAL = 3000;
+        const MAX_INTERVAL = 30000;
+
+        const poll = async () => {
+            try {
+                const data = await ScalerAPI.getJobs();
+                failCount = 0;
+                const jobs = data?.jobs || [];
+                const active = jobs.filter(j =>
+                    j.status !== 'completed' && j.status !== 'failed' && j.status !== 'cancelled'
+                );
+                const failed = jobs.filter(j =>
+                    j.status === 'failed' && (j.job_type === 'upgrade' || j.job_type === 'wait_and_upgrade'
+                        || /upgrade|image/i.test(j.job_name || ''))
+                );
+                const deviceMap = {};
+                for (const job of active) {
+                    const isUpgrade = /upgrade|image|build/i.test(job.job_name || '')
+                        || job.job_type === 'build_monitor';
+                    const dids = [];
+                    if (job.device_id) dids.push(job.device_id);
+                    if (Array.isArray(job.devices)) {
+                        for (const d of job.devices) { if (d && !dids.includes(d)) dids.push(d); }
+                    }
+                    for (const did of dids) {
+                        if (!deviceMap[did]) deviceMap[did] = {};
+                        if (isUpgrade) {
+                            deviceMap[did].upgrade = { jobId: job.job_id, name: job.job_name || 'Upgrade', phase: job.phase || job.status || '', percent: job.percent || 0 };
+                        } else {
+                            deviceMap[did].config = { jobId: job.job_id, name: job.job_name || 'Config push', phase: job.phase || job.status || '', percent: job.percent || 0 };
+                        }
+                    }
+                }
+                const failedDevMap = {};
+                let dismissedKeys = [];
+                try {
+                    const raw = localStorage.getItem('scaler_dismissed_upgrade_failures');
+                    const parsed = JSON.parse(raw || '[]');
+                    dismissedKeys = Array.isArray(parsed) ? parsed : [];
+                } catch (_) { dismissedKeys = []; }
+                const isDismissed = (jid, did) => dismissedKeys.includes(`${jid}:${did}`);
+                for (const job of failed) {
+                    const jid = job.job_id || '';
+                    const dids = [];
+                    if (job.device_id) dids.push(job.device_id);
+                    if (Array.isArray(job.devices)) {
+                        for (const d of job.devices) { if (d && !dids.includes(d)) dids.push(d); }
+                    }
+                    const ds = job.device_state || {};
+                    for (const did of dids) {
+                        const devState = ds[did] || {};
+                        if (devState.status === 'failed' || devState.phase === 'interrupted' || job.status === 'failed') {
+                            if (jid && isDismissed(jid, did)) continue;
+                            failedDevMap[did] = {
+                                jobId: jid,
+                                name: job.job_name || 'Upgrade',
+                                phase: devState.phase || job.phase || 'failed',
+                                devices: job.devices || [],
+                                sshHosts: job.ssh_hosts || {},
+                            };
+                        }
+                    }
+                }
+                let changed = false;
+                for (const obj of (editor.objects || [])) {
+                    if (obj.type !== 'device') continue;
+                    const entry = deviceMap[obj.label] || null;
+                    const newCfg = entry?.config || null;
+                    const newUpg = entry?.upgrade || null;
+                    const newFail = failedDevMap[obj.label] || null;
+                    if (!!obj._activeConfigJob !== !!newCfg || !!obj._activeUpgradeJob !== !!newUpg || !!obj._upgradeFailedJob !== !!newFail) changed = true;
+                    obj._activeConfigJob = newCfg;
+                    obj._activeUpgradeJob = newUpg;
+                    obj._upgradeFailedJob = newFail;
+                }
+                if (Object.keys(failedDevMap).length === 0) {
+                    const fBanner = document.getElementById('upgrade-failed-banner');
+                    if (fBanner) fBanner.remove();
+                }
+                if (changed && editor.requestDraw) editor.requestDraw();
+            } catch (_) {
+                failCount++;
+            }
+            const delay = Math.min(BASE_INTERVAL * Math.pow(2, failCount), MAX_INTERVAL);
+            this._jobWatcherTimeout = setTimeout(poll, delay);
+        };
+        poll();
+    },
+
+    _stopJobWatcher() {
+        if (this._jobWatcherInterval) {
+            clearInterval(this._jobWatcherInterval);
+            this._jobWatcherInterval = null;
+        }
+        if (this._jobWatcherTimeout) {
+            clearTimeout(this._jobWatcherTimeout);
+            this._jobWatcherTimeout = null;
+        }
+    },
+
+    _openConfigPanel(editor, device) {
+        if (!device._activeConfigJob) return;
+        const job = device._activeConfigJob;
+        if (typeof ScalerGUI !== 'undefined' && ScalerGUI.showProgress) {
+            ScalerGUI.showProgress(job.jobId, job.name);
+        }
+    },
+
+    _openUpgradeWizard(editor, device) {
+        if (!device._activeUpgradeJob) return;
+        const job = device._activeUpgradeJob;
+        if (typeof ScalerGUI !== 'undefined' && ScalerGUI._showRunningUpgradeProgress) {
+            ScalerGUI._showRunningUpgradeProgress({
+                job_id: job.jobId,
+                job_name: job.name,
+                devices: job.devices || [],
+                ssh_hosts: job.sshHosts || {},
+            });
+        } else if (typeof ScalerGUI !== 'undefined' && ScalerGUI.showProgress) {
+            ScalerGUI.showProgress(job.jobId, job.name);
+        }
+    },
+
+    _showMismatchPopup(editor, device, screenX, screenY) {
+        this._hideMismatchPopup();
+        if (window.hideDeviceSelectionToolbar) window.hideDeviceSelectionToolbar(editor);
+        const identity = device._identity;
+        const cfgHost = identity?.config_hostname || device._configHostname || 'unknown';
+        const canvasLabel = (device.label || '').trim() || 'unknown';
+        const sshHost = device.sshConfig?.host || device.sshConfig?.hostBackup || '';
+        const hasSsh = !!sshHost;
+        const isDark = editor.darkMode;
+
+        const accentColor = '#8e44ad';
+        const accentLight = isDark ? '#c39bd3' : '#6c3483';
+
+        const popup = document.createElement('div');
+        popup.id = 'mismatch-badge-popup';
+        popup.style.cssText = `
+            position: fixed; left: ${screenX + 12}px; top: ${screenY - 12}px;
+            z-index: 20000; min-width: 300px; max-width: 360px;
+            background: ${isDark ? '#1e1e30' : '#ffffff'};
+            color: ${isDark ? '#d8d8e8' : '#1a1a2e'};
+            border: 1px solid ${isDark ? 'rgba(142,68,173,0.4)' : 'rgba(142,68,173,0.5)'};
+            border-radius: 10px; overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.35);
+            pointer-events: auto;
+        `;
+
+        const hdrBg = isDark ? 'rgba(142,68,173,0.12)' : 'rgba(142,68,173,0.06)';
+        const mutedColor = isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)';
+        const btnBase = `padding:7px 0;font-size:12px;border-radius:6px;cursor:pointer;font-weight:500;
+            border:none;width:100%;text-align:left;padding-left:12px;padding-right:12px;`;
+
+        popup.innerHTML = `
+            <div style="padding:10px 14px 8px;background:${hdrBg};border-bottom:1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'};">
+                <div style="font-weight:700;font-size:13px;color:${accentColor};margin-bottom:6px;">Name Mismatch</div>
+                <div style="font-size:11px;color:${mutedColor};line-height:1.5;">
+                    The canvas label does not match the hostname<br>configured on the device's running config.
+                </div>
+            </div>
+            <div style="padding:10px 14px 6px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <div style="font-size:11px;">
+                        <span style="color:${mutedColor};">Canvas:</span>
+                        <strong style="color:${accentLight};margin-left:4px;">${canvasLabel}</strong>
+                    </div>
+                    <div style="font-size:16px;color:${mutedColor};padding:0 8px;">!=</div>
+                    <div style="font-size:11px;">
+                        <span style="color:${mutedColor};">Device:</span>
+                        <strong style="color:${accentLight};margin-left:4px;">${cfgHost}</strong>
+                    </div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:4px;">
+                    <button type="button" data-act="rename-canvas" style="${btnBase}
+                        background:${isDark ? 'rgba(142,68,173,0.15)' : 'rgba(142,68,173,0.08)'};
+                        color:${accentLight};
+                    ">Rename canvas label to <strong>${cfgHost}</strong></button>
+                    <button type="button" data-act="rename-device" ${!hasSsh ? 'disabled' : ''} style="${btnBase}
+                        background:${isDark ? 'rgba(52,152,219,0.12)' : 'rgba(52,152,219,0.08)'};
+                        color:${hasSsh ? (isDark ? '#7ec8e3' : '#1a6fa0') : mutedColor};
+                        ${!hasSsh ? 'opacity:0.5;cursor:not-allowed;' : ''}
+                    ">Change device hostname to <strong>${canvasLabel}</strong>${!hasSsh ? ' <span style="font-size:10px;">(no SSH)</span>' : ''}</button>
+                    <button type="button" data-act="dismiss" style="${btnBase}
+                        background:transparent;color:${mutedColor};
+                    ">Dismiss</button>
+                </div>
+            </div>
+        `;
+
+        const self = this;
+
+        popup.querySelector('[data-act="rename-canvas"]').onclick = (ev) => {
+            ev.stopPropagation();
+            if (cfgHost && cfgHost !== 'unknown') {
+                if (editor.applyRename) {
+                    editor.applyRename(device, cfgHost);
+                } else {
+                    if (editor.saveState) editor.saveState();
+                    device.label = cfgHost;
+                    if (window.checkDeviceMismatchLive) window.checkDeviceMismatchLive(device);
+                    editor.draw();
+                }
+            }
+            self._hideMismatchPopup();
+        };
+
+        const renameDeviceBtn = popup.querySelector('[data-act="rename-device"]');
+        if (hasSsh) {
+            renameDeviceBtn.onclick = (ev) => {
+                ev.stopPropagation();
+                self._pushHostnameChange(editor, device, canvasLabel, sshHost, popup);
+            };
+        }
+
+        popup.querySelector('[data-act="dismiss"]').onclick = (ev) => {
+            ev.stopPropagation();
+            device._mismatchDismissed = true;
+            editor.draw();
+            self._hideMismatchPopup();
+        };
+
+        popup.querySelectorAll('button:not(:disabled)').forEach(btn => {
+            btn.onmouseenter = () => { btn.style.filter = 'brightness(1.15)'; };
+            btn.onmouseleave = () => { btn.style.filter = ''; };
+        });
+
+        document.body.appendChild(popup);
+        const br = popup.getBoundingClientRect();
+        if (br.right > window.innerWidth) popup.style.left = `${screenX - br.width - 12}px`;
+        if (br.bottom > window.innerHeight) popup.style.top = `${screenY - br.height - 12}px`;
+        setTimeout(() => {
+            const outsideClick = (ev) => {
+                if (!popup.contains(ev.target)) {
+                    self._hideMismatchPopup();
+                    document.removeEventListener('mousedown', outsideClick, true);
+                }
+            };
+            document.addEventListener('mousedown', outsideClick, true);
+        }, 80);
+    },
+
+    async _pushHostnameChange(editor, device, newHostname, sshHost, popup) {
+        const btn = popup.querySelector('[data-act="rename-device"]');
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+        btn.style.cursor = 'wait';
+        const self = this;
+        const deviceId = device.label || device.deviceSerial || device.serial || '';
+
+        btn.innerHTML = '<span style="opacity:0.7;">Changing hostname...</span>';
+        try {
+            const result = await ScalerAPI.setHostname(deviceId, newHostname, sshHost);
+            if (result?.status === 'error') {
+                btn.innerHTML = `<span style="color:#e74c3c;">Failed: ${result.commit_output || 'Push error'}</span>`;
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+                return;
+            }
+            device._configHostname = newHostname;
+            if (device._identity) device._identity.config_hostname = newHostname;
+            if (window.checkDeviceMismatchLive) window.checkDeviceMismatchLive(device);
+            editor.draw();
+            if (device._hostnameMismatch) {
+                btn.innerHTML = '<span style="color:#8e44ad;">Device renamed, but canvas label still differs</span>';
+            } else {
+                btn.innerHTML = '<span style="color:#27ae60;">Hostname changed -- names match</span>';
+            }
+            btn.style.opacity = '1';
+            setTimeout(() => self._hideMismatchPopup(), 1500);
+            if (deviceId && window.DeviceMonitor?.refreshDevice) {
+                setTimeout(() => window.DeviceMonitor.refreshDevice(deviceId, true), 1500);
+            }
+        } catch (err) {
+            btn.innerHTML = `<span style="color:#e74c3c;">Error: ${err.message || 'Connection failed'}</span>`;
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+        }
+    },
+
+    _hideMismatchPopup() {
+        const existing = document.getElementById('mismatch-badge-popup');
+        if (existing) existing.remove();
+    },
 };
 
 console.log('[topology-canvas-drawing.js] CanvasDrawing loaded');

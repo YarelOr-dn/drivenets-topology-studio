@@ -3,6 +3,8 @@
 import http.server
 import socketserver
 import os
+import io
+import gzip
 import json
 import glob
 import subprocess
@@ -12,7 +14,7 @@ import time
 import urllib.request
 import urllib.error
 
-PORT = 8080
+PORT = int(os.environ.get('TOPOLOGY_PORT', 8888))
 DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 BUG_EVIDENCE_DIR = os.path.expanduser("~/SCALER/FLOWSPEC_VPN/bug_evidence")
 DISCOVERY_API = "http://localhost:8765"
@@ -21,6 +23,18 @@ XRAY_CONFIG_PATH = os.path.expanduser("~/.xray_config.json")
 XRAY_CAPTURES = {}  # capture_id -> { process, status, output_lines, pcap_path, error }
 CUSTOM_SECTIONS_DIR = os.path.expanduser("~/.topology_sections")
 CUSTOM_SECTIONS_CONFIG = os.path.join(CUSTOM_SECTIONS_DIR, "_sections.json")
+
+_GZIP_TYPES = {
+    'text/html', 'text/css', 'text/javascript', 'application/javascript',
+    'application/json', 'text/plain', 'image/svg+xml', 'application/xml',
+}
+_GZIP_MIN_SIZE = 256
+_STATIC_CACHE_SECS = 86400 * 7  # 7 days for versioned assets
+_BACKUP_PREFIXES = ('topology_WORKING_BACKUP_', 'bundle.js')
+
+# In-memory cache for gzipped static files: {filepath: (mtime, gzipped_bytes, raw_size)}
+_gz_cache = {}
+_gz_cache_lock = threading.Lock()
 
 # Shared state for service monitor (updated by monitor thread, read by Handler and __main__)
 _child_procs = {"discovery": None, "bridge": None}
@@ -31,21 +45,151 @@ _restart_timestamps = []  # (timestamp, service_name) for crash-loop detection
 _monitor_lock = threading.Lock()
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=DIRECTORY, **kwargs)
     
     def end_headers(self):
-        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-        self.send_header('Pragma', 'no-cache')
-        self.send_header('Expires', '0')
         self.send_header('Access-Control-Allow-Origin', '*')
+        if not hasattr(self, '_cache_set'):
+            self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
         super().end_headers()
-    
+
+    def _set_cache_headers(self, path_str):
+        """Set smart cache headers: long cache for versioned static assets, no-cache for API."""
+        if '?v=' in self.path or '?v=' in path_str:
+            self.send_header('Cache-Control', 'public, max-age=60')
+            self._cache_set = True
+        elif path_str.endswith(('.js', '.css', '.woff2', '.woff', '.ttf')):
+            self.send_header('Cache-Control', 'public, max-age=60')
+            self._cache_set = True
+
+    def _accepts_gzip(self):
+        return 'gzip' in self.headers.get('Accept-Encoding', '')
+
+    def _gzip_bytes(self, data):
+        buf = io.BytesIO()
+        with gzip.GzipFile(fileobj=buf, mode='wb', compresslevel=6) as gz:
+            gz.write(data)
+        return buf.getvalue()
+
     def _send_json(self, data, status=200):
+        body = json.dumps(data).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
+        if self._accepts_gzip() and len(body) >= _GZIP_MIN_SIZE:
+            body = self._gzip_bytes(body)
+            self.send_header('Content-Encoding', 'gzip')
+        self.send_header('Content-Length', str(len(body)))
         self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
+        self.wfile.write(body)
+
+    def do_GET(self):
+        """Override to add gzip and smart caching for static file serving."""
+        path = self.path.split("?")[0]
+
+        # Block serving backup files
+        basename = os.path.basename(path)
+        if any(basename.startswith(p) for p in _BACKUP_PREFIXES):
+            self._send_json({"detail": "Backup files are not served"}, 403)
+            return
+
+        # Let API routes through (proxied responses handle their own encoding)
+        if path.startswith("/api/") or path.startswith("/debug-dnos-"):
+            return self._do_GET_api_routes()
+
+        # Static file serving with gzip
+        return self._serve_static_gzipped()
+
+    def do_HEAD(self):
+        """HEAD returns same headers as GET but no body."""
+        path = self.path.split("?")[0]
+        basename = os.path.basename(path)
+        if any(basename.startswith(p) for p in _BACKUP_PREFIXES):
+            self.send_response(403)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        if path.startswith("/api/") or path.startswith("/debug-dnos-"):
+            return super().do_HEAD()
+        fpath = self.translate_path(self.path)
+        if os.path.isdir(fpath):
+            for idx in ("index.html", "index.htm"):
+                if os.path.exists(os.path.join(fpath, idx)):
+                    fpath = os.path.join(fpath, idx)
+                    break
+        if not os.path.isfile(fpath):
+            self.send_error(404, "File not found")
+            return
+        raw_size = os.path.getsize(fpath)
+        ctype = self.guess_type(fpath)
+        self.send_response(200)
+        self.send_header('Content-Type', ctype)
+        self._set_cache_headers(self.path)
+        base_ctype = ctype.split(';')[0].strip()
+        if self._accepts_gzip() and base_ctype in _GZIP_TYPES and raw_size >= _GZIP_MIN_SIZE:
+            self.send_header('Content-Encoding', 'gzip')
+            self.send_header('Vary', 'Accept-Encoding')
+        self.send_header('Content-Length', str(raw_size))
+        self.end_headers()
+
+    def _serve_static_gzipped(self):
+        """Serve static files with gzip compression and in-memory cache."""
+        path = self.translate_path(self.path)
+        if os.path.isdir(path):
+            for index in ("index.html", "index.htm"):
+                idx = os.path.join(path, index)
+                if os.path.exists(idx):
+                    path = idx
+                    break
+
+        if not os.path.isfile(path):
+            self.send_error(404, "File not found")
+            return
+
+        ctype = self.guess_type(path)
+        base_ctype = ctype.split(';')[0].strip()
+        can_gzip = base_ctype in _GZIP_TYPES
+        want_gzip = self._accepts_gzip() and can_gzip
+
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            self.send_error(404, "File not found")
+            return
+
+        # Check in-memory cache (keyed by filepath + mtime)
+        cached = _gz_cache.get(path)
+        if cached and cached[0] == mtime:
+            raw_bytes, gz_bytes = cached[1], cached[2]
+        else:
+            try:
+                with open(path, 'rb') as f:
+                    raw_bytes = f.read()
+            except OSError:
+                self.send_error(404, "File not found")
+                return
+            if can_gzip and len(raw_bytes) >= _GZIP_MIN_SIZE:
+                gz_bytes = self._gzip_bytes(raw_bytes)
+            else:
+                gz_bytes = None
+            with _gz_cache_lock:
+                _gz_cache[path] = (mtime, raw_bytes, gz_bytes)
+
+        body = gz_bytes if (want_gzip and gz_bytes) else raw_bytes
+
+        self.send_response(200)
+        self.send_header('Content-Type', ctype)
+        self._set_cache_headers(self.path)
+        if want_gzip and gz_bytes:
+            self.send_header('Content-Encoding', 'gzip')
+            self.send_header('Vary', 'Accept-Encoding')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _handle_health(self):
         """Return aggregated status of serve + discovery_api + scaler_bridge."""
@@ -108,7 +252,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         else:
             upstream = self.path.replace("/api/dnaas/", "/api/", 1)
         url = DISCOVERY_API + upstream
-        timeout = 30 if method == "GET" else 300
+        if "device-gitcommit" in self.path:
+            timeout = 12
+        elif "enable-lldp" in self.path and method == "GET":
+            timeout = 5
+        elif method == "GET":
+            timeout = 10
+        elif "device-stack-live" in self.path:
+            timeout = 20
+        else:
+            timeout = 60
         last_error = None
         for attempt in range(2):
             try:
@@ -119,20 +272,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     data = resp.read()
                     self.send_response(resp.status)
                     self.send_header('Content-Type', resp.headers.get('Content-Type', 'application/json'))
+                    self.send_header('Content-Length', str(len(data)))
                     self.end_headers()
                     self.wfile.write(data)
                 return
             except urllib.error.HTTPError as e:
+                err_body = e.read() if e.fp else b'{"error":"upstream error"}'
                 self.send_response(e.code)
                 self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(err_body)))
                 self.end_headers()
-                err_body = e.read() if e.fp else b'{"error":"upstream error"}'
                 self.wfile.write(err_body)
                 return
             except (urllib.error.URLError, OSError, TimeoutError) as e:
                 last_error = e
                 if attempt == 0:
-                    time.sleep(2)
+                    time.sleep(1)
         detail = "Check if discovery_api.py is running on port 8765"
         try:
             hurl = DISCOVERY_API + "/api/health"
@@ -142,9 +297,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             detail = "discovery_api.py is not responding on port 8765 -- may need restart"
         self._send_json({
-            "error": f"Discovery API unavailable: {last_error}",
+            "error": "Discovery API unavailable",
             "endpoint": upstream,
-            "detail": detail
+            "detail": f"{detail} (upstream: {upstream})"
         }, 502)
 
     def _proxy_sse_stream(self):
@@ -183,14 +338,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     data = resp.read()
                     self.send_response(resp.status)
                     self.send_header("Content-Type", resp.headers.get("Content-Type", "application/json"))
+                    self.send_header("Content-Length", str(len(data)))
                     self.end_headers()
                     self.wfile.write(data)
                     return
             except urllib.error.HTTPError as e:
+                err_body = e.read() if e.fp else b'{"detail":"upstream error"}'
+                try:
+                    json.loads(err_body)
+                except (json.JSONDecodeError, ValueError):
+                    msg = err_body.decode("utf-8", errors="replace")[:200]
+                    err_body = json.dumps({"detail": msg}).encode("utf-8")
                 self.send_response(e.code)
                 self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(err_body)))
                 self.end_headers()
-                err_body = e.read() if e.fp else b'{"detail":"upstream error"}'
                 self.wfile.write(err_body)
                 return
             except Exception as e:
@@ -639,13 +801,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         t.start()
         return capture_id
 
-    def do_GET(self):
+    def _do_GET_api_routes(self):
         path = self.path.split("?")[0]
         if path.startswith("/api/dnaas/") or path.startswith("/api/network-mapper/"):
             return self._proxy_to_discovery("GET")
         if path.startswith("/api/config/push/progress/"):
             return self._proxy_sse_stream()
-        if path.startswith("/api/config/") or path.startswith("/api/operations/") or path.startswith("/api/wizard/"):
+        if path.startswith("/api/config/") or path.startswith("/api/operations/") or path.startswith("/api/wizard/") or path.startswith("/api/mirror/"):
+            return self._proxy_to_scaler_bridge("GET")
+        if path.startswith("/api/ssh-pool/"):
+            return self._proxy_to_scaler_bridge("GET")
+        if path == "/api/ssh/check-port":
             return self._proxy_to_scaler_bridge("GET")
         if path == "/api/health":
             return self._handle_health()
@@ -715,19 +881,34 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         raw_ssh = o.get("ssh_host") or ""
                         ip = raw_mgmt if raw_mgmt and _re.match(r"^\d+\.\d+\.\d+\.\d+$", raw_mgmt) else (raw_ssh if _re.match(r"^\d+\.\d+\.\d+\.\d+$", raw_ssh) else raw_mgmt or "")
                         serial = o.get("serial_number", "")
+                        op_sys_type = (o.get("system_type") or o.get("deploy_system_type") or "").strip()
                         existing = dev_by_name.get(dirname.lower())
-                        if existing and not existing.get("ip") and ip:
-                            existing["ip"] = ip
-                            existing["mgmt_ip"] = ip
+                        if existing:
+                            if not existing.get("ip") and ip:
+                                existing["ip"] = ip
+                                existing["mgmt_ip"] = ip
+                            # operational.json is authoritative for system_type (overrides stale device_inventory)
+                            if op_sys_type:
+                                existing["system_type"] = op_sys_type
+                                existing["platform"] = op_sys_type
                         if not existing:
                             for d in devices:
-                                if serial and d.get("serial", "").lower() == serial.lower() and not d.get("ip") and ip:
-                                    d["ip"] = ip
-                                    d["mgmt_ip"] = ip
+                                if serial and d.get("serial", "").lower() == serial.lower():
+                                    if op_sys_type:
+                                        d["system_type"] = op_sys_type
+                                        d["platform"] = op_sys_type
+                                    if not d.get("ip") and ip:
+                                        d["ip"] = ip
+                                        d["mgmt_ip"] = ip
                                     break
                             else:
-                                entry = {"id": dirname, "name": dirname, "hostname": dirname,
-                                         "ip": ip, "mgmt_ip": ip, "serial": serial, "source": "scaler_cache"}
+                                entry = {
+                                    "id": dirname, "name": dirname, "hostname": dirname,
+                                    "ip": ip, "mgmt_ip": ip, "serial": serial, "source": "scaler_cache",
+                                }
+                                if op_sys_type:
+                                    entry["system_type"] = op_sys_type
+                                    entry["platform"] = op_sys_type
                                 if dirname.lower() not in dev_by_name:
                                     devices.append(entry)
                                     dev_by_name[dirname.lower()] = entry
@@ -738,7 +919,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             device_id = path.split("/api/devices/")[1].split("/")[0]
             device_id = urllib.parse.unquote(device_id)
             action = path.split(device_id + "/")[1].split("/")[0] if (device_id + "/") in path else None
-            if action == "context":
+            if action in ("context", "git-commit"):
+                return self._proxy_to_scaler_bridge("GET")
+            if action == "resolve":
                 return self._proxy_to_scaler_bridge("GET")
             if action in ("test", "sync"):
                 return self._send_json({"status": "ok", "message": f"{action} not available"})
@@ -757,7 +940,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         "password": "dnroot"
                     })
             except Exception:
-                return self._send_json({"error": f"Device not found: {device_id}"}, 404)
+                try:
+                    fallback_url = SCALER_BRIDGE_API + f"/api/devices/{urllib.parse.quote(device_id)}/resolve"
+                    req = urllib.request.Request(fallback_url)
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        data = json.loads(resp.read())
+                        return self._send_json({
+                            "id": data.get("id", device_id),
+                            "hostname": data.get("hostname", device_id),
+                            "ip": data.get("ip", "") or data.get("mgmt_ip", ""),
+                            "serial": data.get("serial", ""),
+                            "source": data.get("source", "scaler_bridge"),
+                            "username": data.get("username", "dnroot"),
+                            "password": data.get("password", "dnroot")
+                        })
+                except Exception:
+                    return self._send_json({"error": f"Device not found: {device_id}"}, 404)
         if path.startswith("/api/sections"):
             result = self._handle_sections_get(path)
             if result is not None:
@@ -779,7 +977,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 resp["mac_delivery_failed"] = True
                 resp["local_pcap_path"] = entry.get("local_pcap_path", entry["pcap_path"])
             return self._send_json(resp)
-        super().do_GET()
+        if path.startswith("/api/xray/download/"):
+            cid = path.split("/")[-1]
+            entry = XRAY_CAPTURES.get(cid)
+            if not entry:
+                self.send_error(404, "Capture not found")
+                return
+            pcap_path = entry.get("local_pcap_path") or entry.get("pcap_path")
+            if not pcap_path or not os.path.isfile(pcap_path):
+                self.send_error(404, "Pcap file not found")
+                return
+            try:
+                with open(pcap_path, "rb") as f:
+                    data = f.read()
+                fname = os.path.basename(pcap_path)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/vnd.tcpdump.pcap")
+                self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            except OSError as e:
+                self.send_error(500, str(e))
+            return
+        if path.startswith("/api/"):
+            return self._send_json({"detail": f"No handler for GET {path}"}, 404)
+        self._serve_static_gzipped()
     
     def do_POST(self):
         content_length = int(self.headers.get('Content-Length', 0))
@@ -789,7 +1012,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path.startswith("/api/dnaas/") or path.startswith("/api/network-mapper/"):
             return self._proxy_to_discovery("POST", body)
-        if path.startswith("/api/config/") or path.startswith("/api/operations/") or path.startswith("/api/wizard/"):
+        if path.startswith("/api/config/") or path.startswith("/api/operations/") or path.startswith("/api/wizard/") or path.startswith("/api/mirror/"):
+            return self._proxy_to_scaler_bridge("POST", body)
+        if path.startswith("/api/ssh-pool/"):
+            return self._proxy_to_scaler_bridge("POST", body)
+        if path == "/api/ssh/probe":
+            return self._proxy_to_scaler_bridge("POST", body)
+        if path == "/api/ssh/discover-console":
+            return self._proxy_to_scaler_bridge("POST", body)
+        if path == "/api/ssh/pdu-power":
+            return self._proxy_to_scaler_bridge("POST", body)
+        if path == "/api/ssh/console-scan":
+            return self._proxy_to_scaler_bridge("POST", body)
+        if path == "/api/ssh/discover-ncc-mgmt":
             return self._proxy_to_scaler_bridge("POST", body)
         if path == "/api/devices/discover":
             return self._proxy_to_scaler_bridge("POST", body)
@@ -797,7 +1032,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             parts = path[len("/api/devices/"):].rstrip("/").split("/")
             device_id = urllib.parse.unquote(parts[0]) if parts else ""
             action = parts[1] if len(parts) > 1 else None
-            if device_id and action == "test":
+            if device_id and action in ("test", "set-hostname", "stack-live"):
                 return self._proxy_to_scaler_bridge("POST", body)
             if device_id and action == "sync":
                 return self._handle_device_sync(device_id)
@@ -933,13 +1168,48 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     return self._send_json({"error": "host required"}, 400)
                 if not all(c.isalnum() or c in ".-_:" for c in host):
                     return self._send_json({"error": "Invalid host"}, 400)
-                result = subprocess.run(
+                # 1) Clear on server
+                srv = subprocess.run(
                     ["ssh-keygen", "-R", host],
                     capture_output=True, text=True, timeout=5
                 )
+                server_ok = srv.returncode == 0
+                # 2) Clear on Mac via sshpass SSH (same method as packet capture verify-mac)
+                cfg = self._xray_config_read()
+                mac = cfg.get("mac", {})
+                mac_ip = mac.get("ip_vpn", "")
+                mac_user = mac.get("user", os.environ.get("USER", "dn"))
+                mac_pass = mac.get("password", "")
+                mac_ok = False
+                mac_msg = ""
+                if mac_ip and mac_user:
+                    env = os.environ.copy()
+                    env["SSHPASS"] = mac_pass
+                    try:
+                        _cmd = (
+                            f'sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 '
+                            f'-o LogLevel=ERROR {mac_user}@{mac_ip} '
+                            f'"ssh-keygen -R {host} 2>&1; echo __OK__"'
+                        )
+                        result_mac = subprocess.run(
+                            _cmd, shell=True, env=env,
+                            capture_output=True, text=True, timeout=15
+                        )
+                        mac_ok = result_mac.returncode == 0 and "__OK__" in result_mac.stdout
+                        mac_msg = f"Cleared on Mac ({mac_ip}) as {mac_user}" if mac_ok else f"Mac SSH command failed: {result_mac.stderr.strip()}"
+                    except subprocess.TimeoutExpired:
+                        mac_msg = f"Mac SSH timed out ({mac_ip})"
+                    except Exception as _e:
+                        mac_msg = f"Mac SSH failed ({mac_ip}): {_e}"
+                else:
+                    mac_msg = "Mac IP not configured -- set it in Packet Capture settings"
                 return self._send_json({
-                    "ok": result.returncode == 0,
-                    "output": (result.stdout + result.stderr).strip()
+                    "ok": server_ok or mac_ok,
+                    "server_cleared": server_ok,
+                    "mac_cleared": mac_ok,
+                    "mac_ip": mac_ip,
+                    "message": mac_msg,
+                    "output": (srv.stdout + srv.stderr).strip()
                 })
             except Exception as e:
                 return self._send_json({"error": str(e)}, 500)
@@ -1003,6 +1273,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     })
             except Exception as e:
                 return self._send_json({"reachable": False, "error": str(e)})
+        if path.startswith("/api/"):
+            return self._send_json({"detail": f"No handler for POST {path}"}, 404)
         self.send_error(404, "Not found")
 
     def do_DELETE(self):
@@ -1012,6 +1284,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             device_id = urllib.parse.unquote(parts[0]) if parts else ""
             if device_id:
                 return self._handle_device_delete(device_id)
+        if path.startswith("/api/"):
+            return self._send_json({"detail": f"No handler for DELETE {path}"}, 404)
         self.send_error(404, "Not found")
 
     def _handle_device_delete(self, device_id):
@@ -1233,6 +1507,18 @@ if __name__ == "__main__":
     monitor_thread.start()
 
     try:
+        try:
+            req = urllib.request.Request(DISCOVERY_API + "/api/health", method="HEAD")
+            urllib.request.urlopen(req, timeout=3)
+            print("[INFO] Health check: discovery_api (8765) reachable")
+        except Exception as e:
+            print(f"[WARN] Health check: discovery_api (8765) not reachable: {e}")
+        try:
+            req = urllib.request.Request(SCALER_BRIDGE_API + "/docs", method="HEAD")
+            urllib.request.urlopen(req, timeout=3)
+            print("[INFO] Health check: scaler_bridge (8766) reachable")
+        except Exception as e:
+            print(f"[WARN] Health check: scaler_bridge (8766) not reachable: {e}")
         with ThreadedHTTPServer(("0.0.0.0", PORT), Handler) as httpd:
             print(f"Serving at http://0.0.0.0:{PORT}")
             httpd.serve_forever()

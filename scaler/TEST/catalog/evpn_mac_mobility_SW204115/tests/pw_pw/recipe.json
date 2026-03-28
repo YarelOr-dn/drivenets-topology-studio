@@ -1,0 +1,75 @@
+{
+  "id": "TEST_mac_mob_pw_pw_SW205199",
+  "name": "MAC Mobility | PW <-> PW | Sticky/Non-sticky",
+  "type": "functional",
+  "feature": "evpn-mac-mobility",
+  "source": "jira:SW-204115 / SW-205199",
+  "jira_key": "SW-205199",
+  "parent_category": "SW-204115",
+  "created": "2026-03-20",
+  "reference_table": "PW->PW: no RT-2 change; suppression NO; local loop NO; update ARP; no new RT-2",
+  "device_requirements": {"type": "any", "features": ["evpn", "two-pw"], "min_ncp_count": 1},
+  "prerequisites": [
+    {"id": "two_pw", "check": "two_pseudowires_or_paths", "fix_via": "Second PW attachment in lab"}
+  ],
+  "show_commands_validated": {
+    "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more": "SHOW_COMMANDS line 10091 -- Single MAC lookup",
+    "show evpn arp-table instance {evpn_name} | no-more": "SHOW_COMMANDS line 9116 -- ARP entries",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding state and flags",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more": "Ghost MAC detection",
+    "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
+  },
+  "invalid_commands": {
+    "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use: show evpn mac-table instance {name}",
+    "show interfaces brief": "DOES NOT EXIST. Use: show interfaces description"
+  },
+  "scenarios": [
+    {
+      "id": "SC01_pw1_to_pw2",
+      "name": "PW1 -> PW2: no RT-2 churn; no suppression; no local loop count",
+      "phases": {
+        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} mac {test_mac} | no-more"]},
+        "trigger": {"action": "move_pw1_to_pw2"},
+        "verify": {"expect": {"no_rt2_change": true, "no_suppression": true, "no_local_loop": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true}}
+      }
+    },
+    {
+      "id": "SC02_arp_update",
+      "name": "Accept move; ARP updated; no new RT-2",
+      "phases": {
+        "verify": {
+          "show_commands": ["show evpn arp-table instance {evpn_name} | no-more"],
+          "expect": {"arp_updated": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true}
+        }
+      }
+    }
+  ],
+  "runtime_parameters": {
+    "evpn_name": {"resolve": "runtime"},
+    "test_mac": {"resolve": "runtime"}
+  },
+  "verdict": {"layers": 6, "stop_on_fail": false},
+  "counter_commands": [
+    {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+  ],
+  "counter_expectations": [
+    {"label": "mac_count", "rule": "no_decrease", "description": "MAC count must not drop"},
+    {"label": "ghost_mac_count", "rule": "zero", "description": "No ghost MACs after scenario"}
+  ],
+  "event_expectations": [
+    {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "No BGP notifications"},
+    {"event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED", "expect": "absent", "description": "No suppression on normal operations"}
+  ],
+  "health_checks": {
+    "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager", "neighbour_manager"],
+    "check_crashes": true,
+    "check_alarms": true
+  },
+  "cleanup_commands": ["no debug evpn mac-mobility", "no set logging terminal"],
+  "config_baseline": {
+    "sections": ["network-services evpn", "protocols bgp"],
+    "full_config": false,
+    "ignore_patterns": ["last-modified", "commit-id"]
+  }
+}

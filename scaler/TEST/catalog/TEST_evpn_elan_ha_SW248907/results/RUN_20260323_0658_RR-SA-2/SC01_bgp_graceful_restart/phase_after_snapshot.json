@@ -1,0 +1,53 @@
+{
+  "phase_name": "after_snapshot",
+  "started_at": "2026-03-23T06:59:44.147+00:00",
+  "completed_at": "2026-03-23T06:59:54.538+00:00",
+  "duration_sec": 10.391,
+  "command_count": 5,
+  "commands": [
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-03-23T06:59:44.147+00:00",
+      "duration_ms": 2078,
+      "phase": "after_snapshot",
+      "output_length": 516,
+      "output_preview": "BGP router identifier 2.2.2.2, local AS number 123\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Advertised  Up/Down   State/PfxAccepted\n  1.1.1.1         4    1234567         14          6    0     0       2           0 00:00:05                   1\n  4.4.4.4         4    1234567         18          9    0     0       2           0 00:00:07                   0\n\nTotal number of established neighbors with L2vpn EVPN 2/2\n\nTotal number of NSR capabl"
+    },
+    {
+      "command": "show evpn summary | no-more",
+      "timestamp": "2026-03-23T06:59:46.226+00:00",
+      "duration_ms": 2078,
+      "phase": "after_snapshot",
+      "output_length": 716,
+      "output_preview": "Global EVPN parameters\nMAC table limit per EVI : 64000\nMAC table aging time    : 320s\nControl Word            : enabled\nFAT Label               : disabled\nE-Tree Leaf Label       : 1032383\n\nNumber of EVPN instances       : 1\nTotal local MAC addresses      : 1\nTotal local MAC-IPs            : 0\nTotal remote MAC addresses     : 0\nTotal remote MAC-IPs           : 0\nTotal VPLS MAC addresses       : 0\nTotal MAC addresses            : 1\nTotal MAC-IPs                  : 0\nTotal suppressed MAC addresses"
+    },
+    {
+      "command": "show evpn instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-03-23T06:59:48.305+00:00",
+      "duration_ms": 2073,
+      "phase": "after_snapshot",
+      "output_length": 1046,
+      "output_preview": "EVPN: HA_TEST_ELAN\n  EVI ID : 1\n  Seamless-integration : disabled\n  Number of EVPN neighbors  : 1\n    Number of EVPN interfaces : 2\n    | Associated interfaces   | State   / Forwarding State                                   | Uptime              | Actual Local Homing Type    | ESI                             | Learned MACs   |\n    +-------------------------+--------------------------------------------------------------+---------------------+-----------------------------+------------------------"
+    },
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-03-23T06:59:50.379+00:00",
+      "duration_ms": 2075,
+      "phase": "after_snapshot",
+      "output_length": 716,
+      "output_preview": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ------------------"
+    },
+    {
+      "command": "show system | no-more",
+      "timestamp": "2026-03-23T06:59:52.454+00:00",
+      "duration_ms": 2083,
+      "phase": "after_snapshot",
+      "output_length": 1386,
+      "output_preview": "System Name: RR-SA-2, System-Id: 9ab8e9ca-b61c-456e-bbed-0ce2729c30ed\nSystem Type: SA-36CD-S, Family: NCR\nEnterprise-Id: 49739\nDescription: DRIVENETS Network Cloud Router\nSystem status: running \nSystem Start Time: 19-Mar-2026 23:31:34 UTC+02:00 (Israel)\nSystem Uptime: 3 days, 9:28:20\nSystem Boot Uptime: 3 days, 9:29:17\nVersion: DNOS [26.2.0] build [20_priv], Copyright 2026 DRIVENETS LTD.\nPatch: N/A\nEnvironment:\n\tLocation: N/A\n\tFloor: N/A\n\tRack: N/A\nContact: support@drivenets.com\nFabric Minimum L"
+    }
+  ],
+  "parsed_values": {
+    "after_mac_count": 1
+  },
+  "anomalies": []
+}

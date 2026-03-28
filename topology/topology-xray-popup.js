@@ -879,7 +879,11 @@ window.XrayPopup = {
                 editor.showToast('Enter device host (IP) to capture', 'warning');
                 return;
             }
-            device.sshConfig = { host: sshHost, user: sshUser, password: sshPass };
+            device.sshConfig = {
+                ...(device.sshConfig || {}),
+                host: sshHost, user: sshUser, password: sshPass,
+                _userSavedHost: sshHost, _userSavedUser: sshUser, _userSavedPass: sshPass
+            };
             device.deviceAddress = `${sshUser}@${sshHost}`;
             if (editor.saveState) editor.saveState();
             dutHost = sshHost;
@@ -1210,8 +1214,24 @@ window.XrayPopup = {
             }
         };
 
+        const downloadBtn = document.createElement('button');
+        downloadBtn.textContent = 'Download';
+        downloadBtn.style.cssText = `
+            padding: 6px 14px; border-radius: 6px; border: none;
+            background: rgba(39,174,96,0.9); color: #fff; font-size: 12px;
+            font-weight: 600; cursor: pointer; white-space: nowrap;
+        `;
+        downloadBtn.onmouseenter = () => { downloadBtn.style.opacity = '0.85'; };
+        downloadBtn.onmouseleave = () => { downloadBtn.style.opacity = '1'; };
+        downloadBtn.onclick = () => {
+            if (this._activeCapture) {
+                window.location.href = '/api/xray/download/' + this._activeCapture;
+            }
+        };
+
         row.appendChild(input);
         row.appendChild(retryBtn);
+        row.appendChild(downloadBtn);
         statusEl.appendChild(row);
     },
 
@@ -1250,11 +1270,12 @@ window.XrayPopup = {
             return;
         }
 
+        const sharkSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" style="vertical-align:middle;margin-right:4px;"><circle cx="11" cy="11" r="7" stroke="#fff" stroke-width="2" fill="rgba(255,255,255,0.12)"/><path class="xray-shark-fin" d="M11 13 C11 13 9.2 7.5 11 5 C12.8 7.5 11 13 11 13 Z" fill="#fff" stroke="none" opacity="0.95"/><path d="M21 21l-4.35-4.35" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>`;
         if (btn) {
             if (secs > 0) {
-                btn.innerHTML = `<span style="font-variant-numeric: tabular-nums;">${secs}s</span> remaining &mdash; Stop`;
+                btn.innerHTML = `${sharkSvg}<span style="font-variant-numeric: tabular-nums;">${secs}s</span> remaining &mdash; Stop`;
             } else {
-                btn.innerHTML = 'Delivering to Mac...';
+                btn.innerHTML = `${sharkSvg}Delivering to Mac...`;
                 btn.disabled = true;
             }
         }

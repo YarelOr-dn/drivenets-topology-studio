@@ -1,0 +1,20 @@
+[
+  {
+    "command": "show bgp l2vpn evpn summary | no-more",
+    "timestamp": "2026-03-23T08:31:57.930+00:00",
+    "duration_ms": 1418,
+    "phase": "mid_check",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-03-23T08:31:59.348+00:00",
+    "duration_ms": 200,
+    "phase": "mid_check",
+    "output_length": 35,
+    "output_preview": "  ETH TAG: 0\n    MAC table is empty",
+    "output_full": "  ETH TAG: 0\n    MAC table is empty"
+  }
+]

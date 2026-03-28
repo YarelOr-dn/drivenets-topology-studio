@@ -271,11 +271,11 @@ expect \"#\"
 send \"show lldp neighbor | no-more\r\"
 expect \"#\"
 send \"run start shell\r\"
-expect -re {[Pp]assword|#}
+expect -re {[Pp]assword}
 send \"dnroot\r\"
-expect \"#\"
-send \"cat ./gitcommit\r\"
-expect \"#\"
+expect -re {#|\\\$}
+send \"cat .gitcommit\r\"
+expect -re {#|\\\$}
 send \"exit\r\"
 expect \"#\"
 send \"show config | no-more\r\"
@@ -430,10 +430,10 @@ RECEOF
     fi
     
     # ========================================================================
-    # PARSE GIT COMMIT (from run start shell + cat ./gitcommit output)
+    # PARSE GIT COMMIT (from run start shell + cat .gitcommit output)
     # ========================================================================
     local git_commit=""
-    git_commit=$(sed -n '/cat.*gitcommit/,$p' "$output" 2>/dev/null | grep -oE '^[a-fA-F0-9]{7,40}$' | head -1)
+    git_commit=$(sed -n '/cat.*\.gitcommit/,$p' "$output" 2>/dev/null | grep -oE '^[a-fA-F0-9]{7,40}(-[^ ]+)?$' | head -1)
     git_commit="${git_commit:-}"
     
     # ========================================================================

@@ -112,7 +112,11 @@ window.TouchHandler = {
                     const oldZoom = editor.zoom;
                     const newZoom = Math.max(0.05, Math.min(3, editor.zoom * zoomFactor));
                     
-                    const rect = editor.canvas.getBoundingClientRect();
+                    if (!editor._pinchRect || !editor._pinchRectTs || performance.now() - editor._pinchRectTs > 500) {
+                        editor._pinchRect = editor.canvas.getBoundingClientRect();
+                        editor._pinchRectTs = performance.now();
+                    }
+                    const rect = editor._pinchRect;
                     const centerX = currentCenter.x - rect.left;
                     const centerY = currentCenter.y - rect.top;
                     
@@ -123,11 +127,16 @@ window.TouchHandler = {
                     
                     editor.panOffset.x = centerX - worldX * newZoom;
                     editor.panOffset.y = centerY - worldY * newZoom;
-                    editor.savePanOffset();
                     
                     editor.lastPinchDistance = currentDistance;
-                    editor.updateZoomIndicator();
-                    editor.draw();
+                    editor._viewportOnly = true;
+                    if (!editor._pinchRafId) {
+                        editor._pinchRafId = requestAnimationFrame(() => {
+                            editor._pinchRafId = null;
+                            editor.draw();
+                            editor.updateZoomIndicator();
+                        });
+                    }
                 }
             }
             
@@ -139,9 +148,14 @@ window.TouchHandler = {
                 if (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1) {
                     editor.panOffset.x += deltaX;
                     editor.panOffset.y += deltaY;
-                    editor.savePanOffset();
-                    editor.updateScrollbars();
-                    editor.draw();
+                    editor._viewportOnly = true;
+                    if (!editor._pinchRafId) {
+                        editor._pinchRafId = requestAnimationFrame(() => {
+                            editor._pinchRafId = null;
+                            editor.draw();
+                            editor.updateScrollbars();
+                        });
+                    }
                 }
             }
             
@@ -180,7 +194,9 @@ window.TouchHandler = {
             editor.pinching = false;
             editor.lastPinchDistance = null;
             editor.lastTwoFingerCenter = null;
+            editor._pinchRect = null;
             editor.gestureState.fingerCount = 0;
+            editor.savePanOffset();
             editor.handleMouseUp(e);
         } else if (e.touches.length === 1) {
             editor.pinching = false;

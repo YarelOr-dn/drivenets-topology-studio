@@ -908,8 +908,8 @@ def cmd_bgp_peer(args):
         bgp_attrs["Enable4ByteDutAsNum"] = "TRUE"
         bgp_attrs["AsNum4Byte"] = str(args.as_num)
         bgp_attrs["DutAsNum4Byte"] = str(args.dut_as)
-        bgp_attrs["AsNum"] = str(min(args.as_num, 65535))
-        bgp_attrs["DutAsNum"] = str(min(args.dut_as, 65535))
+        bgp_attrs["AsNum"] = "23456"  # AS_TRANS per RFC 6793
+        bgp_attrs["DutAsNum"] = "23456"
     else:
         bgp_attrs["AsNum"] = str(args.as_num)
         bgp_attrs["DutAsNum"] = str(args.dut_as)
@@ -943,6 +943,9 @@ def cmd_bgp_peer(args):
             requested_afis = list(afi_map.keys())
             break
 
+    is_ibgp = args.as_num == args.dut_as
+    route_as_path = "" if is_ibgp else str(args.as_num)
+
     for afi_name in requested_afis:
         afi_key = afi_name.lower().strip()
         if afi_key not in afi_map:
@@ -952,7 +955,7 @@ def cmd_bgp_peer(args):
         try:
             route_cfg = stc.create(obj_type, under=bgp, **extra_attrs)
             try:
-                stc.config(route_cfg, AsPath=str(args.as_num))
+                stc.config(route_cfg, AsPath=route_as_path)
             except Exception:
                 pass
             if afi_key == "ipv6-flowspec":
@@ -972,6 +975,7 @@ def cmd_bgp_peer(args):
 
     dev_match["bgp_handle"] = bgp
     dev_match["as_num"] = args.as_num
+    dev_match["dut_as"] = args.dut_as
     dev_match["negotiated_afis"] = negotiated_afis
     save_session(sess)
 
@@ -1043,6 +1047,8 @@ def cmd_add_afi(args):
     existing = dev_match.get("negotiated_afis", [])
 
     peer_as = dev_match.get("as_num", 65100)
+    dut_as = dev_match.get("dut_as", 0)
+    route_as_path = "" if peer_as == dut_as else str(peer_as)
 
     for afi_key in requested:
         if afi_key in existing:
@@ -1055,7 +1061,7 @@ def cmd_add_afi(args):
         try:
             route_cfg = stc.create(obj_type, under=bgp_handle, **extra_attrs)
             try:
-                stc.config(route_cfg, AsPath=str(peer_as))
+                stc.config(route_cfg, AsPath=route_as_path)
             except Exception:
                 pass
             if afi_key == "ipv6-flowspec":
@@ -1156,7 +1162,9 @@ def cmd_add_routes(args):
         print(f"ERROR: Device '{args.device_name}' has no BGP config. Run 'bgp-peer' first.")
         sys.exit(1)
     next_hop = args.next_hop or dev_match["ip"]
-    as_path = args.as_path or str(dev_match.get("as_num", "65200"))
+    peer_as = dev_match.get("as_num", 65200)
+    dut_as = dev_match.get("dut_as", 0)
+    as_path = args.as_path or ("" if peer_as == dut_as else str(peer_as))
 
     if args.afi in ("ipv4", "ipv4-unicast"):
         route_cfg = stc.create(
@@ -1548,8 +1556,8 @@ def cmd_ecmp(args):
         bgp_attrs["Enable4ByteDutAsNum"] = "TRUE"
         bgp_attrs["AsNum4Byte"] = str(args.as_num)
         bgp_attrs["DutAsNum4Byte"] = str(args.dut_as)
-        bgp_attrs["AsNum"] = str(min(args.as_num, 65535))
-        bgp_attrs["DutAsNum"] = str(min(args.dut_as, 65535))
+        bgp_attrs["AsNum"] = "23456"  # AS_TRANS per RFC 6793
+        bgp_attrs["DutAsNum"] = "23456"
     else:
         bgp_attrs["AsNum"] = str(args.as_num)
         bgp_attrs["DutAsNum"] = str(args.dut_as)
@@ -1595,6 +1603,9 @@ def cmd_ecmp(args):
             requested_afis = list(afi_map.keys())
             break
 
+    ecmp_is_ibgp = args.as_num == args.dut_as
+    ecmp_as_path = "" if ecmp_is_ibgp else str(args.as_num)
+
     for afi_name in requested_afis:
         afi_key = afi_name.lower().strip()
         if afi_key not in afi_map:
@@ -1603,7 +1614,7 @@ def cmd_ecmp(args):
         obj_type, extra_attrs = afi_map[afi_key]
         try:
             route_cfg = stc.create(obj_type, under=bgp, **extra_attrs)
-            stc.config(route_cfg, AsPath=str(args.as_num))
+            stc.config(route_cfg, AsPath=ecmp_as_path)
             if afi_key == "ipv6-flowspec":
                 _fix_ipv6_flowspec_safi(stc, route_cfg, bgp)
             negotiated_afis.append(afi_key)
@@ -1615,7 +1626,7 @@ def cmd_ecmp(args):
         "BgpIpv4RouteConfig",
         under=bgp,
         NextHop=base_ip,
-        AsPath=str(args.as_num),
+        AsPath=ecmp_as_path,
     )
     net_block = stc.get(route_cfg, "children-Ipv4NetworkBlock")
     if net_block:
@@ -1645,6 +1656,7 @@ def cmd_ecmp(args):
         "inner_vlan": getattr(args, "inner_vlan", None),
         "bgp_handle": bgp,
         "as_num": args.as_num,
+        "dut_as": args.dut_as,
         "negotiated_afis": negotiated_afis,
         "route_prefix": args.prefix,
         "route_count": args.route_count,

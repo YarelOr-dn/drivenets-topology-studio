@@ -785,7 +785,7 @@ class LinkManager {
  */
 window.LinkUtils = {
     repairCorruptedLinks(editor) {
-        console.log('🔧 Starting link repair...');
+        console.log('[LinkRepair] Starting link repair...');
         let repairCount = 0;
         
         const devices = editor.objects.filter(o => o.type === 'device');
@@ -821,7 +821,7 @@ window.LinkUtils = {
             const endCorrupted = endDist > threshold || isNaN(link.end.x) || isNaN(link.end.y);
             
             if (startCorrupted || endCorrupted) {
-                console.log(`🔧 Repairing link ${link.id}: startDist=${startDist.toFixed(0)}, endDist=${endDist.toFixed(0)}`);
+                console.log(`[LinkRepair] Repairing link ${link.id}: startDist=${startDist.toFixed(0)}, endDist=${endDist.toFixed(0)}`);
                 
                 const device1 = link.device1 ? editor.objects.find(o => o.id === link.device1) : null;
                 const device2 = link.device2 ? editor.objects.find(o => o.id === link.device2) : null;
@@ -886,7 +886,7 @@ window.LinkUtils = {
         editor.objects.forEach(link => {
             if (link.type !== 'link') return;
             if (link.x !== undefined || link.y !== undefined) {
-                console.log(`🔧 Cleaning Quick Link ${link.id}: removing corrupted x/y`);
+                console.log(`[LinkRepair] Cleaning Quick Link ${link.id}: removing corrupted x/y`);
                 delete link.x;
                 delete link.y;
                 repairCount++;
@@ -894,12 +894,16 @@ window.LinkUtils = {
         });
         
         if (repairCount > 0) {
-            console.log(`✅ Repaired ${repairCount} corrupted links`);
+            console.log(`[OK] Repaired ${repairCount} corrupted links`);
             editor.updateAllConnectionPoints();
             editor.draw();
-            editor.saveTopology();
+            if (typeof editor.saveTopology === 'function') {
+                editor.saveTopology();
+            } else if (window.FileOps && window.FileOps.quickSaveTopology) {
+                window.FileOps.quickSaveTopology(editor);
+            }
         } else {
-            console.log('✅ No corrupted links found');
+            console.log('[OK] No corrupted links found');
         }
         
         return repairCount;

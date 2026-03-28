@@ -1,0 +1,25 @@
+{
+  "test_id": "TEST_evpn_elan_ha_SW248907",
+  "device": "RR-SA-2",
+  "overall": "ERROR",
+  "total_elapsed_sec": 178.7376036643982,
+  "scenarios": [
+    {
+      "scenario_id": "SC01_bgp_graceful_restart",
+      "scenario_name": "BGP Graceful Restart",
+      "overall": "ERROR",
+      "convergence_sec": null,
+      "trigger_timestamp": "",
+      "debug_hint": "",
+      "layers": [
+        {
+          "layer": "exception",
+          "status": "ERROR",
+          "detail": "unhashable type: 'slice'",
+          "evidence": "",
+          "elapsed_sec": 0.0
+        }
+      ]
+    }
+  ]
+}

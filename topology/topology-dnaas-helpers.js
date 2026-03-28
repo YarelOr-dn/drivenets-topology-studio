@@ -1215,12 +1215,15 @@ to help discover DNAAS neighbors.
                 skipHostKey: sshConfig.skipHostKey || false
             };
             
-            // Start the LLDP enable job
+            // Start the LLDP enable job (10s timeout -- if API is down, fail fast)
+            const _lldpCtrl = new AbortController();
+            const _lldpTimer = setTimeout(() => _lldpCtrl.abort(), 10000);
             const startResponse = await fetch(`${lldpBase}/enable-lldp`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody)
-            });
+                body: JSON.stringify(requestBody),
+                signal: _lldpCtrl.signal
+            }).finally(() => clearTimeout(_lldpTimer));
             
             if (!startResponse.ok) {
                 const err = await startResponse.json();
@@ -1243,20 +1246,39 @@ to help discover DNAAS neighbors.
             const maxAttempts = 480; // 4 minutes max (480 x 500ms)
             let consecutive404 = 0;
             const MAX_404 = 10;
+            let consecutiveErrors = 0;
+            const MAX_ERRORS = 6;
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
                 await new Promise(resolve => setTimeout(resolve, 500));
                 
-                const statusResponse = await fetch(`${lldpBase}/enable-lldp/status?job_id=${encodeURIComponent(jobId)}`);
+                let statusResponse;
+                try {
+                    const _sCtrl = new AbortController();
+                    const _sTimer = setTimeout(() => _sCtrl.abort(), 5000);
+                    statusResponse = await fetch(`${lldpBase}/enable-lldp/status?job_id=${encodeURIComponent(jobId)}`, { signal: _sCtrl.signal }).finally(() => clearTimeout(_sTimer));
+                } catch (fetchErr) {
+                    consecutiveErrors++;
+                    if (consecutiveErrors >= MAX_ERRORS) {
+                        throw new Error(`LLDP status check failed ${MAX_ERRORS} times (network error). Discovery API may be down.`);
+                    }
+                    continue;
+                }
                 if (!statusResponse.ok) {
                     if (statusResponse.status === 404) {
                         consecutive404++;
                         if (consecutive404 >= MAX_404) {
                             throw new Error('LLDP job not found on server (discovery API may have restarted). Try again.');
                         }
+                    } else {
+                        consecutiveErrors++;
+                        if (consecutiveErrors >= MAX_ERRORS) {
+                            throw new Error(`LLDP status check failed ${MAX_ERRORS} times (HTTP ${statusResponse.status}). Discovery API may be down.`);
+                        }
                     }
                     continue;
                 }
                 consecutive404 = 0;
+                consecutiveErrors = 0;
                 
                 const status = await statusResponse.json();
                 
@@ -2632,13 +2654,13 @@ to help discover DNAAS neighbors.
                     console.log(`[DNAAS] Enriching "${obj.label}" with managed device SSH config`);
                     obj.sshConfig = obj.sshConfig || {};
                     if (matchedDevice.ip) {
-                        if (!hostIsIP) {
-                            obj.sshConfig.lldpHostname = obj.sshConfig.host;
+                        obj.sshConfig._enrichedMgmtIp = matchedDevice.ip;
+                        if (!obj.sshConfig.host) {
+                            obj.sshConfig.host = matchedDevice.ip;
                         }
-                        obj.sshConfig.host = matchedDevice.ip;
                     }
-                    if (matchedDevice.username) obj.sshConfig.user = matchedDevice.username;
-                    if (matchedDevice.password) obj.sshConfig.password = matchedDevice.password;
+                    if (matchedDevice.username && !obj.sshConfig.user) obj.sshConfig.user = matchedDevice.username;
+                    if (matchedDevice.password && !obj.sshConfig.password) obj.sshConfig.password = matchedDevice.password;
                     obj.sshConfig.enrichedFromManaged = true;
                     obj.sshConfig.managedDeviceId = matchedDevice.id || matchedDevice.hostname;
                 } else if (!hostIsIP) {
@@ -2662,10 +2684,10 @@ to help discover DNAAS neighbors.
                             if (!match) return;
                             if (match.mgmt_ip) {
                                 obj.sshConfig = obj.sshConfig || {};
-                                if (!isValidIP(obj.sshConfig.host)) {
-                                    obj.sshConfig.lldpHostname = obj.sshConfig.host;
+                                obj.sshConfig._enrichedMgmtIp = match.mgmt_ip;
+                                if (!obj.sshConfig.host) {
+                                    obj.sshConfig.host = match.mgmt_ip;
                                 }
-                                obj.sshConfig.host = match.mgmt_ip;
                                 obj.sshConfig.enrichedFromNM = true;
                                 console.log(`[DNAAS] NM resolved "${key}" -> ${match.mgmt_ip}`);
                             }

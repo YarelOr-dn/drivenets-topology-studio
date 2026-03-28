@@ -63,8 +63,8 @@ def parse_existing_multihoming(config: str) -> dict:
         # Fallback: search entire config for interface+ESI patterns
         mh_section = config
     
-    # Parse interface -> ESI mappings
-    iface_pattern = r'interface\s+(ph\S+)\s*\n\s*esi\s+arbitrary\s+value\s+([0-9a-fA-F:]+)'
+    # Parse interface -> ESI mappings (all interface types: ph*, ge*, bundle-*, etc.)
+    iface_pattern = r'interface\s+(\S+)\s*\n\s*esi\s+arbitrary\s+value\s+([0-9a-fA-F:]+)'
     for match in re.finditer(iface_pattern, mh_section, re.IGNORECASE):
         iface_name = match.group(1)
         esi_value = match.group(2)

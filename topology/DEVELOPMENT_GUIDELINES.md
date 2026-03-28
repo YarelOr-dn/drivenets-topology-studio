@@ -16,11 +16,19 @@
 | Momentum physics | `topology-momentum.js` |
 | History/undo | `topology-history.js` |
 
+### Cursor /XDN (unified topology + scaler context)
+
+- **Skill:** `~/.cursor/skills/xdn-topology-mastery/` (`SKILL.md`, `architecture-reference.md`, `api-reference.md`, `bul-reference.md`, `editing-patterns.md`, `learning.md`).
+- **Slash command:** `/XDN` in Cursor (also under repo `.cursor/commands/XDN.md` when using this workspace).
+- **Learning:** `~/.topology_learning.json` -- after substantive topology/scaler sessions or `/XDN learn`, run `python3 ~/.cursor/tools/prune_learning.py --command xdn --sync-only` so `learned_index.md` stays current.
+
 ### Scaler Bridge API (scaler_bridge.py, port 8766)
 
-The bridge wraps scaler-wizard modules for the topology app. serve.py proxies `/api/config/*`, `/api/operations/*`, `/api/devices/discover`, `/api/devices/{id}/test`, and `/api/devices/{id}/context` to it.
+The bridge wraps scaler-wizard modules for the topology app. serve.py proxies `/api/config/*`, `/api/operations/*`, `/api/devices/discover`, `/api/devices/{id}/test`, `/api/devices/{id}/context`, `/api/ssh/probe`, `/api/ssh/check-port`, `/api/ssh/discover-ncc-mgmt`, and related `/api/ssh/*` helpers to it.
 
-**Terminal-to-GUI parity (see `.cursor/rules/scaler-terminal-gui-parity.mdc`):** Every new API endpoint MUST have a corresponding `ScalerAPI.js` method and `scaler-gui.js` wizard entry point. No terminal-only or GUI-only features. Full chain: `config_builders.py` -> terminal wizard -> `scaler_bridge.py` -> `scaler-api.js` -> `scaler-gui.js`.
+**DNOS device communication (SSH):** Shared library `scaler/scaler/dnos_session.py` provides `DNOSSession` (prompt-based show commands, optional `SSHConnectionPool` reuse via `client=`, `config_mode` / `commit` / `send_config_set`). Bridge routes use `topology/routes/_device_comm.py` (`DeviceCommHelper`: `run_show`, `run_show_batch`, `fetch_running_config`, `get_session`). Optional `scaler/scaler/dnos_netmiko.py` wraps Netmiko `generic` for one-off commands. Raw WebSocket terminal, upgrade flows, and `connection_strategy.py` stay on paramiko as documented in the Netmiko integration plan.
+
+**Terminal-to-GUI parity (documented in `~/.cursor/skills/xdn-topology-mastery/SKILL.md` section "Scaler: five-layer parity"; run `/XDN` in Cursor to load):** Every new API endpoint MUST have a corresponding `ScalerAPI.js` method and a scaler GUI entry point (see `scaler-gui*.js` bundles). No terminal-only or GUI-only features. Full chain: `config_builders.py` -> terminal wizard -> `scaler_bridge.py` -> `scaler-api.js` -> `scaler-gui.js` (+ domain modules as needed).
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
@@ -41,9 +49,14 @@ The bridge wraps scaler-wizard modules for the topology app. serve.py proxies `/
 | `/api/operations/validate` | POST | Validate DNOS config (config, hierarchy, check_limits, check_interface_order). Returns valid, errors, warnings, suggestions. |
 | `/api/config/templates` | GET | List policy templates |
 | `/api/config/templates/generate` | POST | Generate from template |
-| `/api/operations/delete-hierarchy` | POST | Delete config hierarchy (dry_run) |
-| `/api/operations/push` | POST | Push config to device (merge/replace/dry_run). Returns job_id. When dry_run, holds SSH after commit check for commit/cancel. |
-| `/api/config/push/progress/{job_id}` | GET | SSE stream for push progress (phase, percent, terminal lines, done, success, awaiting_decision) |
+| `/api/config/delete-hierarchy-options` | GET | List hierarchies for Delete Hierarchy GUI (display, command, warning). |
+| `/api/config/flowspec-dependency-check` | POST | FlowSpec dependency check. Body: `{ device_id, ssh_host }`. Returns `{ issues: [{ component, issue, severity, fix_command, fix_description }], passed }`. |
+| `/api/config/scan-ips` | POST | Scan device config for used IPv4/IPv6. Body: `{ device_id, ssh_host, parent_interface?, ipv4_prefix?, ipv6_prefix?, count?, check_ipv4?, check_ipv6? }`. Returns `used_ips`, `suggestion`, `overlap_check` (when check params provided). Used by interface wizard IP collision detection. |
+| `/api/config/push/estimate` | POST | Get push time estimates. Body: `{ config?, device_id?, ssh_host? }`. Returns estimates for terminal_paste, file_upload, lofd from timing_history.json. |
+| `/api/operations/delete-hierarchy` | POST | Delete config hierarchy (dry_run). Body: `{ device_id, hierarchy, dry_run, ssh_host?, sub_path? }`. |
+| `/api/operations/push` | POST | Push config. Body: `{ device_id, config, dry_run, push_method: "terminal_paste"|"file_upload", load_mode: "merge"|"override", ssh_host?, job_name? }`. Returns job_id. |
+| `/api/config/push/progress/{job_id}` | GET | SSE stream for push progress (phase, percent, terminal lines, elapsed_seconds, estimated_remaining_seconds, done, success, awaiting_decision) |
+| `/api/operations/{job_id}/cancel` | POST | Cancel push job (mid-paste abort or discard held). Sets _cancel_requested for running jobs; calls cancel_held_session for awaiting_decision. |
 | `/api/operations/push/{job_id}/commit` | POST | Commit held config on same SSH session (after dry_run when check passed) |
 | `/api/operations/push/{job_id}/cancel` | POST | Cancel held config (discard candidate) and close SSH session |
 | `/api/operations/push/{job_id}/cleanup` | POST | Cleanup dirty candidate on device after failed commit check (connects fresh) |
@@ -53,27 +66,47 @@ The bridge wraps scaler-wizard modules for the topology app. serve.py proxies `/
 | `/api/operations/jobs/{job_id}` | DELETE | Remove job from history |
 | `/api/config/limits/{device_id}` | GET | Platform limits (max_subifs) from limits.json |
 | `/api/devices/discover` | POST | SSH discover device by IP, add to inventory |
+| `/api/devices/{id}/resolve` | GET | Resolve device to mgmt_ip (scaler_bridge fallback when discovery_api down) |
+| `/api/ssh/probe` | POST | Probe connection methods (TCP reachability). Body: `{ device_id, ssh_host? }`. Returns `{ methods, recommended, device_state }`. |
+| `/api/ssh/discover-console` | POST | Discover console path via Zohar's CSV DB (primary, ~700 devices) or Device42 API (fallback). Body: `{ device_id, serial_number?, ssh_host? }`. Returns `{ console_server, port, pdu_entries, source, serial_no }`. Auto-saves to console_mappings.json. |
+| `/api/ssh/pdu-power` | POST | PDU power action via Zohar's PDU mapping. Body: `{ serial_number?, device_id?, action: reboot\|off\|on\|status, pdu_host?, outlet? }`. Looks up PDU from Zohar's DB if host/outlet not given. |
+| `/api/ssh-pool/evict` | POST | Evict pooled SSH client(s). Body: `{ ip, device_id? }`. Pool is keyed by mgmt IPv4; when `ip` is not dotted IPv4, optional `device_id` (canvas label) is used with `_resolve_mgmt_ip` to evict the resolved IP. Returns `evicted`, `evicted_keys`. |
+| WebSocket `/api/terminal/ws` | WS | In-browser terminal. Params: `device_id`, `ssh_host`, `method`. Browser builds URL via `ScalerAPI.getBridgeWebSocketOrigin()` (honors `baseUrl` host/port; else page hostname :8766). Streams stdin/stdout via paramiko. |
 | `/api/config/scan-existing` | POST | Scan device for existing sub-ids, VRFs, EVIs, L3 conflicts. Body: `{ device_id, ssh_host, scan_type: "interfaces"\|"services"\|"vrfs"\|"all" }`. Returns `existing_sub_ids`, `l3_conflicts`, `l2_sub_ids`, `outer_inner_map` (QinQ), `sub_id_details`, `next_free`, `config_fetched_at`. Used by interface wizard collision check and encap overlap detection. |
 | `/api/config/detect-pattern` | POST | Detect interface pattern (dot1q/qinq, stepping_tag, last_vlan, last_sub_id, suggested_next_vlan) from device config. Body: `{ device_id, ssh_host, parent_interface }`. Used for auto-fill in subif flow. |
-| `/api/mirror/analyze` | POST | Analyze source vs target config for mirror. Body: `{ source_device_id, target_device_id, ssh_hosts?: [src_ip, tgt_ip] }`. Returns `source_summary`, `target_summary`, `smart_diff`, `interface_map`. |
-| `/api/mirror/generate` | POST | Generate mirrored config. Body: `{ source_device_id, target_device_id, ssh_hosts, interface_map, section_selection?, output_mode: "full"\|"diff_only" }`. Returns `config`, `summary`, `line_count`, `diff_stats`. |
+| `/api/mirror/analyze` | POST | Analyze source vs target config for mirror. Body: `{ source_device_id, target_device_id, ssh_hosts?: [src_ip, tgt_ip], lldp_neighbors?: [] }`. Returns `source_summary`, `target_summary`, `smart_diff`, `interface_map`, `smart_suggestions` (bgp_neighbors, wan_ips, service_ips, lldp_mapping). |
+| `/api/mirror/generate` | POST | Generate mirrored config. Body: `{ source_device_id, target_device_id, ssh_hosts, interface_map, ip_mapping?: { source_ip: target_ip }, section_selection?, section_actions?, output_mode: "full"\|"diff_only" }`. Returns `config`, `summary`, `line_count`, `diff_stats`. |
 | `/api/mirror/preview-diff` | POST | Preview diff of proposed mirrored config vs target running. Body: `{ target_device_id, config, ssh_host }`. Returns `diff_text`, `lines_added`, `lines_removed`. |
-| `/api/operations/image-upgrade/builds` | POST | List recent builds with image artifacts for a branch (includes failed + sanitizer). Body: `{ branch, limit?, max_results? }`. Returns `{ branch, builds: [{build_number, result, display_name, age_hours, is_expired, is_sanitizer, has_dnos, has_gi, has_baseos}] }`. |
+| `/api/operations/image-upgrade/branches` | POST | List dev/release branches from Jenkins. Body: `{ type: "dev"|"release"|"all" }`. Returns `{ branches: [{name, url}], type }`. |
+| `/api/operations/image-upgrade/branch-switch` | POST | Detect branch switch (e.g. dev_v25 -> dev_v26). Body: `{ current_version, target_version }`. Returns `{ is_switch, current_branch, target_branch, requires_delete_deploy }`. |
+| `/api/operations/image-upgrade/compat` | POST | Version compatibility report. Body: `{ source_version, target_version, config_text? }`. Returns `{ severity, incompatible_count, recommendation, ... }`. |
+| `/api/operations/image-upgrade/builds` | POST | List recent builds with image artifacts for a branch. Body: `{ branch, limit?, max_results?, include_failed? }`. When `include_failed=false` (default), only SUCCESS builds. When `include_failed=true`, includes FAILED builds with valid DNOS/GI/BaseOS artifacts. Returns `{ branch, builds: [...] }`. |
 | `/api/operations/image-upgrade/resolve-url` | POST | Resolve Jenkins URL to build info. Body: `{ url }`. Returns `{ branch, build_number, dnos_url, gi_url, baseos_url, is_sanitizer, is_expired, result }`. |
 | `/api/operations/image-upgrade/stack` | POST | Get stack URLs for branch + build. Body: `{ branch, build_number }`. Returns `{ dnos_url, gi_url, baseos_url, is_sanitizer, is_expired }`. |
+| `/api/operations/image-upgrade/plan` | POST | Per-device upgrade plan. Body: `{ device_ids, ssh_hosts, target_branch?, target_build_number?, target_version?, dnos_url? }`. SSHs to each device, detects mode (DNOS/GI/RECOVERY), current version, upgrade_type (normal/delete_deploy/gi_deploy/blocked). Returns `{ devices: { id: { mode, current_version, target_version, upgrade_type, reason, warnings, components } } }`. |
+| `/api/operations/image-upgrade` | POST | Execute image upgrade. Body: `{ device_ids, ssh_hosts, branch, build_number, components, upgrade_type, device_plans?, max_concurrent?, dnos_url, gi_url, baseos_url, ... }`. Supports per-device plans and parallel execution (ThreadPoolExecutor). Returns `{ job_id }`. |
+| `/api/config/{device_id}/save` | POST | Save generated config for later push. Body: `{ config }`. Writes to device config dir as wizard_*.txt. |
+| `/api/config/generate/undo` | POST | Generate undo config from pushed config. Body: `{ config_text }` or `{ job_id }`. Returns `{ config }`. |
+| `/api/operations/image-upgrade/build-status/{job_id}` | GET | Poll build status. Query `?latest=true` for lastBuild (trigger monitoring). |
+| `/api/operations/image-upgrade/build-log/{branch}` | GET | Get Jenkins console log. Query `?build_number=N` (optional). |
 
 **Config generation**: All `generate/*` endpoints use `scaler.wizard.config_builders` (pure DNOS generators). No frontend DNOS string construction. GUI previews always call backend API with full params. The terminal wizard (`interactive_scale.py`) also calls `config_builders.build_from_expansion()` for config generation, ensuring terminal and GUI produce identical DNOS output.
 
-**Type-aware generation** (`config_builders.py`): Two categories with different output rules:
-- **Basic types** (bundle, ph, irb): Parent gets `admin-state enabled` only. Sub-ifs get `admin-state` + VLAN + IP. No l2-service, MPLS, flowspec, BFD, or MTU.
-- **Physical types** (ge100, ge400, ge10): Full E/7 flow. Sub-ifs support L2 mode (l2-service) OR L3 mode (IP, MPLS, flowspec, BFD, MTU). L2 and L3 are mutually exclusive.
-- **Loopback**: `admin-state` + optional description + optional IPv4 (/32). No sub-interfaces.
+**Sub-interface-only policy**: Both CLI and GUI wizards only create sub-interfaces on existing physical/bundle parents. Physical interface creation is not supported (hardware-defined). Legacy types (bundle, ph, irb, loopback) are retained in `config_builders.py` for backward compatibility but are not exposed in any menu or wizard.
 
-**Config push**: `POST /api/operations/push` uses `ConfigPusher` from scaler. Progress streamed via SSE at `GET /api/config/push/progress/{job_id}`. The SSE stream includes `terminal` (new SSH output lines since last poll) via `live_output_callback` piped from ConfigPusher. ScalerAPI.connectPushProgress uses EventSource for real-time progress and terminal streaming.
+**Config push**: `POST /api/operations/push` uses `ConfigPusher` from scaler. Progress streamed via SSE at `GET /api/config/push/progress/{job_id}`. The SSE stream includes `terminal` (new SSH output lines since last poll) via `live_output_callback` piped from ConfigPusher. ScalerAPI.connectPushProgress uses EventSource for real-time progress and terminal streaming. For upgrade jobs, SSE also includes `device_state` (per-device status, phase, percent, error); `onDeviceState` callback renders per-device progress rows.
+
+**Push methods**: `push_method` (terminal_paste | file_upload) and `load_mode` (merge | override). Terminal paste: SSH paste + commit. File upload: SCP to /config/ + `load merge` or `load override` + commit. Best for large configs.
+
+**Cancel button**: High-visibility (white text, X icon). During paste: `POST /api/operations/{job_id}/cancel` sets _cancel_requested; paste loop aborts, sends `cancel`+`exit` on device to discard candidate. During held state: same endpoint calls cancel_held_session. Candidate config is always cleaned on device.
 
 **Hold-and-commit flow** (dry_run): When `dry_run=true`, backend uses `push_config_terminal_check_and_hold()` which pastes config, runs commit check, and keeps SSH session alive. Job enters `awaiting_decision` state. Frontend shows Commit Now / Cancel (discard) buttons in the progress panel. User clicks Commit -> `POST /api/operations/push/{job_id}/commit` sends commit on same session. User clicks Cancel -> `POST /api/operations/push/{job_id}/cancel` sends cancel+exit. No second push job. When commit check fails, Cleanup button calls `POST /api/operations/push/{job_id}/cleanup` to connect fresh and run cancel on device.
 
-**Running Commits Panel**: `ScalerGUI.openCommitsPanel()` opens a persistent panel that polls `GET /api/operations/jobs` every 2s. Shows job cards with status dot (gray=pending, cyan=running, green=completed, red=failed), progress bar, and expand/minimize. Expanded cards show a live terminal view with SSH output. Error lines highlighted red; DNOS errors parsed with `suggestErrorFix()` (patterns: "already exists", "limit exceeded", "Hook failed"). Retry button re-submits via `POST /api/operations/jobs/{job_id}/retry`. Accessible via "Commits" button in Scaler CONFIG menu with active-job badge. Job history persisted to `~/.scaler_push_history.json` (max 50 jobs, terminal truncated to 200 lines on completion).
+**Timing learning**: On push completion, `save_timing_record()` writes to `scaler/db/timing_history.json`. `get_accurate_push_estimates()` uses this for per-method estimates. SSE stream includes `elapsed_seconds` and `estimated_remaining_seconds`.
+
+**IP awareness**: `scan_used_ips()` and `suggest_next_ip_range()` in config_builders.py. Interface wizard IP step calls `ScalerAPI.scanIPs()` for used IPs and overlap check. Collision banner + "Use suggested" button (like VLAN encap).
+
+**Running Commits Panel**: `ScalerGUI.openCommitsPanel()` opens a persistent panel that polls `GET /api/operations/jobs` every 2s. Shows job cards with status dot (gray=pending, cyan=running, green=completed, red=failed), progress bar, and expand/minimize. Expanded cards show a live terminal view with SSH output. For upgrade jobs, per-device rows (device_state) shown above terminal. Error lines highlighted red; DNOS errors parsed with `suggestErrorFix()` (patterns: "already exists", "limit exceeded", "Hook failed"). Retry button re-submits via `POST /api/operations/jobs/{job_id}/retry`. Accessible via "Commits" button in Scaler CONFIG menu with active-job badge. Job history persisted to `~/.scaler_push_history.json` (max 50 jobs, terminal truncated to 200 lines on completion).
 
 **Push parity**: All wizards (Interface, Service, VRF, Bridge Domain, FlowSpec, Routing Policy, BGP, IGP) share the same push flow: Review step (generates config, shows preview, validation, optional diff) -> Push step (dry_run / merge / replace / clipboard+SSH). All route through `ScalerAPI.pushConfig()` -> `ScalerGUI.showProgress()` -> commits panel. `ssh_host` is included in all push calls from `deviceContext.mgmt_ip`.
 
@@ -81,13 +114,21 @@ The bridge wraps scaler-wizard modules for the topology app. serve.py proxies `/
 
 **Re-run on different device** (Phase 4c): Both per-wizard Last Run card and global History panel wire "Re-run on different device" to `openMirrorWizard(sourceId)`. User selects target device; Mirror Wizard runs analyze -> generate -> diff vs target -> push. Uses ConfigMirror from `mirror_config.py` for device-agnostic config adaptation.
 
-**Mirror Config Wizard**: `openMirrorWizard(prefillSourceId?, prefillTargetId?)` - when source is pre-filled (e.g. from history), only target selector shown. Flow: Analyze (fetch configs, compare) -> Generate Config (diff-only) -> Show diff vs target -> Push to Target. Uses `ScalerAPI.mirrorAnalyze()`, `mirrorGenerate()`, `mirrorPreviewDiff()`.
+**Mirror Config Wizard**: `openMirrorWizard(prefillSourceId?, prefillTargetId?)` uses WizardController with 4 steps: (1) Devices -- source + target dropdowns, (2) Smart Mapping -- auto-runs `ScalerAPI.mirrorAnalyze()`, shows editable tables for interface mapping, BGP neighbor IPs, WAN IPs, service IPs, LLDP mapping from `smart_suggestions`, (3) Analyze -- stat cards (add/modify/delete/identical) and per-section action selects (keep/edit/skip/delete), (4) Review -- auto-generates config via `mirrorGenerate()` with `ip_mapping`, shows preview + optional diff toggle via `mirrorPreviewDiff()`. Push on complete via `ScalerAPI.pushConfig()`. When prefilled, device dropdowns are pre-selected. **WizardController fix**: `renderNavigation()` uses `nav.querySelector()` instead of `document.getElementById()` to bind Next/Back/Skip, avoiding stale panel button binding when multiple wizards exist in DOM.
+
+**Multihoming ESI Wizard**: `openMultihomingWizard()` uses WizardController with 3 steps: (1) Device Pair -- checkbox select exactly 2, ESI prefix input, redundancy mode (single-active/all-active), RT matching toggle, (2) Compare -- auto-runs `ScalerAPI.compareMultihoming()`, shows matching/device1-only/device2-only stat cards with re-compare button, (3) Sync -- review summary with key-value rows, push via `ScalerAPI.syncMultihoming()`. Backend uses correct DNOS format (`esi arbitrary value {value}`).
 
 **Collision check** (Phase 3b): Interface wizard encap step and review step, when `interfaceType === 'subif'` and parent exists, call `ScalerAPI.scanExisting()`. Encap step shows early overlap banner with Continue/Skip/Override. Review step shows final safety-net warning. Options: Skip conflicts (passes `skip_vlans` to generate), Start after existing (auto-sets vlanStart), Override. `config_builders.build_interface_config` accepts `skip_vlans` to skip conflicting VLAN IDs during generation (terminal-style vlan_offset).
 
-**Reusable step components** (Phase 4A): `ScalerGUI._buildPushStep(opts)` returns a Push step with configurable `radioName`, `includeClipboard`, `infoText`. `_buildReviewStep(opts)`, `_buildInterfaceSelector(opts)`, `_buildAddressFamilySelector(opts)` provide shared HTML/collectData for wizard steps. VRF, Bridge Domain, FlowSpec, Routing Policy, and Service wizards use `_buildPushStep`.
+**Reusable step components** (Phase 4A): `ScalerGUI._buildPushStep(opts)` returns a Push step with configurable `radioName`, `includeClipboard`, `infoText`. `_buildDecisionStep(opts)` returns a Decision step (Save for Later / Push Config / Next Section) with `wizardType` and `getCreatedData`. `_buildReviewStep(opts)`, `_buildInterfaceSelector(opts)`, `_buildAddressFamilySelector(opts)` provide shared HTML/collectData for wizard steps. Interface, BGP, IGP wizards insert Decision step before Push. VRF, Bridge Domain, FlowSpec, Routing Policy, and Service wizards use `_buildPushStep`.
+
+**Config Push Quality Fixes** (2026): (1) **API baseUrl**: All `fetch('/api/...')` in scaler-api.js use `ScalerAPI._api(path)` for remote server access. (2) **Time-based progress**: config_pusher.py progress percentages are phase-time-proportional (connect, paste, commit-check, commit) with 2s tick during long phases. (3) **QinQ naming**: build_interface_config uses inner VLAN as sub-if suffix when outer_step=0. (4) **Undo config**: `build_undo_config()` parses pushed config and emits delete commands; Undo button in push result dialog. (5) **Save for Later**: `POST /api/config/{device_id}/save` stores config to device dir; Decision step "Save for Later" option.
 
 **Scaler menu order** (Phase 4C): Configuration Wizards: Interface, Service, VRF, Bridge Domain, BGP, IGP, FlowSpec, Routing Policy, Multihoming (matches terminal wizard hierarchy order).
+
+**Scaler GUI Overhaul** (2026): Upgrade, Scale, and Multihoming wizards use topology canvas devices only (`_getWizardDeviceList()`). `window.ScalerGUI` is set so the device toolbar "Upgrade Stack" button can call `openUpgradeWizard()`. `_getWizardDeviceList` returns `ssh_host` for fast backend resolution. Upgrade wizard: 5-step WizardController (Devices, Source, Build, Compare, Execute) with branch browse, Jenkins URL, version comparison, branch-switch detection, compatibility report. Scale wizard: 3-step (Devices, Scale, Review) with scale suggestions in header. Multihoming wizard: 3-step (Device Pair, Compare, Sync). All multi-device wizards have context panels with Refresh and stale indicator (>5 min). Wired APIs: `wizardSuggestions` (What's Next), `detectBGPNeighbors` (BGP wizard), `detectScaleSuggestions` (Scale wizard), `validatePolicy` (Routing Policy), `getSmartDefaults` (BGP prefill).
+
+**Upgrade wizard instant load** (Mar 2026): Eliminated the blocking `getDeviceContext()` loop that fetched full device context (config, interfaces, VRFs, etc.) over SSH for each device. The upgrade wizard only needs stack versions and mode, which DeviceMonitor already caches as `device._stackData`. New flow: (1) Wizard opens instantly using `_stackData` from DeviceMonitor cache + ScalerGUI `_deviceContexts` cache. `deviceStatus` is pre-populated from `_parseStackVersions(_stackData.components)`. (2) Phase 1 background: `getUpgradeDeviceStatus(ids, sshHosts, cachedOnly=true)` reads from `operational.json` server-side (~10ms/device, no SSH) to fill in mode and validate versions. (3) Phase 2 background: `getUpgradeDeviceStatus(ids, sshHosts, false)` does live SSH for definitive mode + install status. Refresh button unchanged (full SSH). Backend: `GET /api/operations/image-upgrade/device-status?cached_only=true` reads `operational.json` stack_components, dnos_url, device_state -- no SSH connection. Result: wizard opens in <200ms vs previous 10+ seconds blocking.
 
 **Cross-wizard dependency warnings** (Phase 4D): `_getWizardDependencyWarnings(wizardType, data)` returns context-based warnings (e.g. VRF needs sub-interfaces, FlowSpec name conflict, Multihoming ESI). `_renderDependencyWarnings(warnings)` displays them. VRF Interface Attachment step shows when no sub-interfaces exist.
 
@@ -97,7 +138,7 @@ The bridge wraps scaler-wizard modules for the topology app. serve.py proxies `/
 
 **Platform limits**: The sub-interfaces step validates total count against `GET /api/config/limits/{device_id}` (sources `limits.json` vlan_pool max_capacity, default 20480). Warning shown if `count * subifCount > max_subifs`.
 
-ScalerAPI (scaler-api.js) methods: getDevices, getDevice, getDeviceContext, testConnection, syncDevice, syncConfig, generateInterfaces, generateServices, generateBGP, generateIGP, batchGenerate, previewConfigDiff, validateConfig, compareConfigs, getConfigDiff, getInterfaces, getTemplates, generateTemplate, discoverDevice, deleteHierarchyOp, pushConfig, commitHeldJob, cancelHeldJob, cleanupHeldJob, connectPushProgress, getJobs, getJob, retryJob, deleteJob, getLimits, scanExisting, detectPattern, mirrorAnalyze, mirrorGenerate, mirrorPreviewDiff, getBuildsForBranch, resolveJenkinsUrl, getBuildStack.
+ScalerAPI (scaler-api.js) methods: getDevices, getDevice, getDeviceContext, testConnection, syncDevice, syncConfig, generateInterfaces, generateServices, generateBGP, generateIGP, batchGenerate, previewConfigDiff, validateConfig, compareConfigs, getConfigDiff, getInterfaces, getTemplates, generateTemplate, discoverDevice, getDeleteHierarchyOptions, deleteHierarchyOp, flowspecDependencyCheck, getPushEstimate, pushConfig, commitHeldJob, cancelHeldJob, cancelOperation, cleanupHeldJob, connectPushProgress (supports onDeviceState for upgrade jobs), getJobs, getJob, retryJob, deleteJob, getLimits, scanExisting, scanIPs, detectPattern, mirrorAnalyze, mirrorGenerate, mirrorPreviewDiff, getBuildsForBranch, resolveJenkinsUrl, getBuildStack, getUpgradePlan, imageUpgrade (accepts device_plans, max_concurrent).
 
 ### Smart Wizard Suggestions (DeviceContextCache)
 
@@ -106,7 +147,7 @@ Wizards (Interface, Service, VRF, BGP, IGP) use a cached-then-live device contex
 - **Device resolution by SSH**: Canvas labels are NOT backend device IDs. Resolution uses `sshConfig.host` (which may be an IP, hostname, or serial number) as the primary key. `_resolveDeviceId(label)` extracts SSH credentials from the canvas device object. `ScalerAPI.getDeviceContext(deviceId, live, sshHost)` passes `ssh_host` to the backend.
 - **Central IP resolution** (`_resolve_mgmt_ip(device_id, ssh_host)` in `scaler_bridge.py`): ALL endpoints use this single function. Uses cached `_build_scaler_ops_index()` (60s TTL) that indexes all `operational.json` files by serial, hostname, mgmt_ip, and dir name. Chain: 1) `ssh_host` is IP -> direct match in index; 2) `ssh_host` is serial/hostname -> match in index; 3) `device_id` exact match in index; 4) discovery API `_resolve_device`; 5) `device_inventory.json` fuzzy match; 6) partial name match (e.g. `PE-1` matches `YOR_PE-1`). Returns `(mgmt_ip, scaler_device_id, resolved_via)`. Results cached for 120s in `_resolve_cache`. Raises 503 if all fail.
 - **NEVER add `_resolve_device()` calls directly in endpoints** -- always use `_resolve_mgmt_ip`. The discovery API frequently returns empty `mgmt_ip`; the central function handles all fallbacks.
-- **Context builder** (`_get_device_context`): Uses `_resolve_mgmt_ip` first, then tries `_get_cached_config(scaler_device_id)`. Falls back to `_get_cached_config(device_id)` and `_get_cached_config(hostname)`. Returns `resolved_ip` field so frontend shows the actual IP.
+- **Context builder** (`_get_device_context`): Uses `_resolve_mgmt_ip` first, then tries `_get_cached_config(scaler_device_id)`. Falls back to `_get_cached_config(device_id)` and `_get_cached_config(hostname)`. Reads stack and git_commit from `operational.json`. When `live=True` and stack/git_commit are missing, fetches via SSH (`show system stack | no-more`, `run start shell` + `cat .gitcommit`) and writes back to operational.json for caching. Returns `resolved_ip` field so frontend shows the actual IP.
 - **DeviceContextCache**: `ScalerGUI.getDeviceContext(deviceId)` returns cached context if fresh (<60s), else fetches. `refreshDeviceContextLive(deviceId)` fetches live and updates cache. `invalidateDeviceContext(deviceId)` clears cache.
 - **Instant wizard loading**: All wizards (Interface, Service, VRF, BGP, IGP) open instantly with cached data. If no fresh cache exists, the wizard renders immediately with a "Loading..." state, then fetches context in the background and re-renders when ready.
 - **Cross-wizard awareness**: `recordWizardChange(deviceId, changeType, details)` logs wizard changes to `_wizardChangeLog`. `getDeviceContext()` merges pending changes into the returned context so the next wizard sees updated free interfaces, next EVI/bundle numbers, etc. Changes persist for 5 minutes. Devices with pending changes show a "changed" badge in the device selector.
@@ -120,21 +161,16 @@ The VRF wizard creates L3VPN VRF instances via `build_service_config(service_typ
 
 ### Interface Wizard Architecture (7 Steps)
 
-The Interface Wizard has full parity with the scaler-wizard terminal backend. Steps are **dynamically composed per type** using `stepBuilder` -- the step indicator shows only relevant steps for the selected type:
+The Interface Wizard creates sub-interfaces on existing physical/bundle parent interfaces. Only `subif` type is exposed in CLI and GUI (physical interface creation is not supported -- they are hardware-defined). Steps use `stepBuilder` for dynamic composition:
 
 | Type | Steps (in order) | Count |
 |------|-------------------|-------|
-| **Loopback** | Type → IP & Description → Review → Push | 4 |
-| **Bundle** | Type → Bundle Members → Sub-ifs & IP → Encap → Review → Push | 6 |
-| **PH / IRB** | Type → Sub-ifs & IP → Encap → Review → Push | 5 |
+| **Sub-interface** | Type → Parent Selection → Mode & Features → Encap → Review → Decision → Push | 7 |
 | **GE100/GE400/GE10** | Type → Location → Mode & Features → Encap → Review → Push | 6 |
 
 When the user changes the type in Step 0 and clicks Next, the WizardController calls `stepBuilder(data)` to recompose the step array, dependencies, and keys. The step indicator re-renders with only the relevant dots.
 
-**Step 3 per-type feature gating** (matches terminal wizard exactly):
-- **Loopback**: Description field, IPv4 address (/32). No sub-ifs, no L2/MPLS/etc.
-- **Bundle/PH/IRB** (basic): Sub-ifs + VLAN + IP addressing (IPv4/IPv6/dual, 3 step modes). No L2 Service, MPLS, Flowspec, BFD, or MTU.
-- **GE100/GE400/GE10** (physical): Sub-ifs + VLAN + Interface Mode selector (L2 vs L3). L2 mode: l2-service, hides IP/L3 features. L3 mode: IP, MPLS, Flowspec, BFD, MTU.
+**Mode & Features step** (sub-interface): Interface Mode selector (L2 vs L3). L2 mode: l2-service enabled, hides IP/L3 features. L3 mode: IP addressing (IPv4/IPv6/dual, multiple step modes), MPLS, Flowspec, BFD, MTU, Description.
 
 **Dual-stack IP**: When `ipVersion=dual`, separate IPv4 and IPv6 start/prefix fields. Params: `ip_start`, `ip_prefix` (IPv4), `ipv6_start`, `ipv6_prefix` (IPv6).
 
@@ -197,6 +233,7 @@ The topology editor uses a modular architecture with wrapper modules that provid
 | `topology-link-details.js` | `window.LinkDetailsHandlers` | Link editor modal, VLAN validation, link details table |
 | `topology-shape-methods.js` | `window.ShapeMethods` | Shape creation, hit detection, resize handles, toolbar |
 | `topology-selection-popups.js` | `window.SelectionPopups` | Device style palette, link width/style/curve options, LLDP submenu |
+| `topology-device-monitor.js` | `window.DeviceMonitor` | Background poll: immediate _tick(false) on init (disk cache), then 5-min _tick(true) (live SSH); populates _stackData, _lldpData, _gitCommit; active NCC resolution for clusters; fires device:context-updated |
 | `topology-link-geometry.js` | `window.LinkGeometry` | Link hit detection, distance calculations, BUL chain analysis |
 | `topology-text-attachment.js` | `window.TextAttachment` | Text-to-link attachment, nearest link, adjacent text |
 
@@ -212,6 +249,45 @@ The topology editor uses a modular architecture with wrapper modules that provid
 | Module | Class | Property | Purpose |
 |--------|-------|----------|---------|
 | `topology-tests.js` | TopologyTests | `window.TopologyTests` | Automated test suite |
+
+#### Scaler GUI (modular bundles, 2026-03-23)
+
+The scaler UI is split from the former monolith (`scaler-gui.js.bak` backup). **Core** defines `const ScalerGUI = { ... }` and assigns `window.ScalerGUI`; extension scripts call `Object.assign(window.ScalerGUI, { ... })` inside an IIFE. **`scaler-gui-init.js`** runs last and registers `DOMContentLoaded` -> `ScalerGUI.init()`.
+
+| Script (load order) | Role |
+|----------------------|------|
+| `scaler-gui.js` | State, shared utilities, `WizardController`, device-context cache + shared step builders (`_buildPushStep`, `_buildDecisionStep`, ...), panels, main menu, `handleMenuAction`, `showNotification`, `escapeHtml` |
+| `scaler-gui-history.js` | Wizard run history panel, commits panel |
+| `scaler-gui-devices.js` | Canvas device list helpers (`_getWizardDeviceList`, ...), device manager, device selector, sync-all, quick-load, compare/sync/delete/batch/templates/add-device |
+| `scaler-gui-wizards-network.js` | Interface, service, VRF, bridge-domain, multihoming wizards |
+| `scaler-gui-wizards-routing.js` | Routing policy, BGP, IGP wizards |
+| `scaler-gui-wizards-security.js` | XRAY settings, FlowSpec, FlowSpec VPN, system config, mirror wizards |
+| `scaler-gui-progress.js` | `showProgress` (WebSocket job UI), `_analyzeCommitError` |
+| `scaler-gui-upgrade.js` | Upgrade failure/active banners, `_checkRunningUpgrades`, image upgrade / scale / stag wizards, `ScalerAPI.imageUpgrade` / `stagCheck` / `scaleUpDown` patches |
+| `scaler-gui-init.js` | `DOMContentLoaded` -> `ScalerGUI.init()` |
+
+**Load order matters**: `scaler-gui-progress.js` must load before `scaler-gui-upgrade.js` because `init()` calls `_checkRunningUpgrades()` which uses `showProgress`. Wizard bundles: `wizards-network` then `wizards-routing` then `wizards-security` (all extend `window.ScalerGUI`).
+
+#### Scaler bridge backend (FastAPI routers, 2026-03-23)
+
+`topology/scaler_bridge.py` is a thin app factory; route handlers live under `topology/routes/`:
+
+| Module | Role |
+|--------|------|
+| `routes/bridge_helpers.py` | Shared helpers (device resolution, SSH, config summaries, push job persistence, device context for wizards) |
+| `routes/_state.py` | `_push_jobs`, `_push_jobs_lock` |
+| `routes/ssh.py` | `/api/ssh*`, `/api/ssh-pool/*`, WebSocket `/api/terminal/ws` |
+| `routes/config.py` | `/api/config/*`, `/api/mirror/*`, delete-hierarchy options |
+| `routes/operations.py` | validate, push, jobs, multihoming, stag, scale |
+| `routes/upgrade.py` | `/api/operations/image-upgrade/*`, cancel job, startup recovery (`_recover_active_*`) |
+| `routes/devices.py` | `/api/devices/*`, `/api/wizard/suggestions` |
+| `routes/operations_stub.py` | Catch-all 501 for unimplemented `/api/operations/*` (mounted **last**) |
+
+Regenerate from monolith backup: `python3 topology/scripts/split_scaler_bridge.py` (reads `scaler_bridge.py.bak_split` or `scaler_bridge.py`).
+
+**Regenerate splits** (after editing `scaler-gui.js.bak`): `python3 topology/scripts/split_scaler_gui.py` (writes `scaler-gui.js` and the bundle files).
+
+**Adding a new wizard**: implement `openFooWizard` on `ScalerGUI` in the appropriate bundle (or `scaler-gui-wizards-<domain>.js`), add a `data-action` / `handleMenuAction` entry in core, and bump `?v=` in `index.html` for every touched JS/CSS file.
 
 ### Using Modules
 
@@ -438,6 +514,7 @@ Objects are selected based on visual stacking order: higher-layer objects have p
 | Text | `showTextSelectionToolbar(textObj)` | `text-selection-toolbar` | Left-click to select |
 | Device | `showDeviceSelectionToolbar(device)` | `device-selection-toolbar` | Left-click to select |
 | Link | `showLinkSelectionToolbar(link, clickPos?)` | `link-selection-toolbar` | Left-click to select |
+| Shape | `showShapeSelectionToolbar(shape)` | `shape-selection-toolbar` | Left-click to select |
 
 **Toolbar Behavior:**
 - Appears 150ms after selection (prevents showing during drag)
@@ -469,14 +546,26 @@ toolbar.style.cssText = `
 this.hideAllSelectionToolbars(); // Hides text, device, and link toolbars
 ```
 
-**Device Toolbar Options:** SSH, Rename, Color, Style, Duplicate, Lock, Delete
-- SSH → `handleContextSSHAddress()`
+**Device Toolbar Options:** SSH, Rename, Color, Style, Duplicate, Lock, Layer, Delete
+- SSH → Click: always opens SSH dialog (`showSSHAddressDialog`) for credentials, probe methods, and settings. The small terminal button drawn on the canvas device (top-left when selected) calls `openTerminalToDevice(device)` for direct iTerm connect.
 - Rename → `showRenamePopup(device)`
 - Color → `showColorPalettePopup(device, 'device')`
 - Style → `showDeviceStylePalette(device)`
 - Duplicate → `duplicateSelected()`
 - Lock → toggle `device.locked`
+- Layer → Layer widget (down/up arrows, badge with dropdown: Bring to Front, Move Forward, Move Backward, Send to Back, Reset to Default). Uses `editor.getObjectLayer`, `editor.moveObjectForward/Backward`, `editor.moveObjectToFront/ToBack`, `editor.resetObjectLayer`. Same widget in device, link, shape, text toolbars.
 - Delete → `deleteSelected()`
+
+**Device Toolbar Tables (LLDP, Stack, Git Commit) and DeviceMonitor (Mar 2026)**
+
+Device toolbar submenu (Stack button) opens LLDP Table, Stack Table, and Git Commit. All use cache-first open for instant display when data exists on the device object.
+
+- **Cache-first open**: Stack dialog checks `device._stackData`; LLDP checks `device._lldpData`; Git Commit checks `device._gitCommit`. If present, render immediately with timestamp (no toast). "Refresh" fetches fresh data via fallback chain (cache first, then SSH). Refresh button toasts: success only; errors toast on load failure.
+- **DeviceMonitor** (`topology-device-monitor.js`): Singleton that polls all canvas devices with SSH credentials. On init: runs `_tick(false)` after 2s delay (reads from operational.json, ~50ms/device). Then every 5 min: `_tick(true)` (live SSH via `ScalerAPI.getDeviceContext`). Stores results on `device._stackData`, `device._lldpData`, `device._gitCommit` with timestamps. For cluster devices (subType cluster, nccN pattern): uses `_resolveActiveNcc(device)` via `DnaasHelpers._findActiveNcc` to target active NCC IP. Batches: 5 devices concurrent, 2s delay between batches (scales to 1000+ devices). Fires `device:context-updated` CustomEvent so open dialogs auto-refresh.
+- **AbortController**: Stack and LLDP dialogs use `AbortController` when switching devices; in-flight fetches are aborted to avoid stale data.
+- **Git Commit**: Cursor-style code-block popup with SVG copy icon (#ico-copy), checkmark feedback on copy, `safeClipboardWrite`. Handles 502 with "Discovery API unavailable". Caches `device._gitCommit` and `device._gitCommitFetchedAt`.
+- **serve.py**: `/api/dnaas/device-gitcommit` proxy timeout 15s (was 300s). Startup health check logs discovery_api and scaler_bridge reachability. 502 responses include upstream path in detail.
+- **topology-notifications.js**: `_FRIENDLY_502_EXACT` includes `/api/dnaas/device-gitcommit` so 502 from this endpoint does not show raw error toast (caller shows friendly message).
 
 **Link Toolbar Options:** Add Text, Color, Width, Style, Curve, Duplicate, Delete
 - Add Text → `showAdjacentTextMenu(link)`
@@ -507,7 +596,26 @@ this.hideAllSelectionToolbars(); // Hides text, device, and link toolbars
 
 ---
 
-## 🐛 Recent Fixes (Jan 2026)
+## Recent Fixes (Jan 2026)
+
+### SSH Dialog UX Overhaul (Mar 2026)
+**Problem**: SSH dialog had broken Discover Console (display-only), connection methods hidden behind Auto-Switch, Open in-browser terminal ignoring selected method, Virsh Console only copying command, password in toasts, recovery modal calling non-existent `openSshDialog`.
+**Fix**: Redesigned `topology-ssh-dialog.js`: compact credential row, methods section always visible with auto-probe on open and debounced re-probe on host change. Per-method Connect buttons open external terminal directly. Discover Console results inject clickable method rows with Connect. Removed Auto-Switch checkbox and in-browser terminal button. Toolbar SSH button: click=connect if configured, right-click=settings. Recovery modal fixed to call `showSSHAddressDialog`. Removed password from toasts; replaced emojis with [OK]/[WARN]/[INFO] prefixes.
+**Files**: topology-ssh-dialog.js, topology-object-detection.js, topology-device-toolbar.js, index.html.
+
+**Fast-connect always-probe (Mar 2026):** The toolbar SSH button (`openTerminalToDevice`) always probes via `ScalerAPI.probeConnection()` before connecting -- no `autoSwitch` flag required. The probe auto-discovers the best method and updates `sshConfig.host` if the saved host is stale. For non-cluster devices it prefers a reachable IP-based method (for iTerm), falling back to serial/hostname (web terminal). For clusters it auto-selects `virsh_console` with KVM credentials and the running NCC VM. The saved `sshConfig.host` is persisted when the probe finds a different reachable IP, so subsequent connections go to the correct address.
+
+**Cursor /XDN deep reference (Mar 2026):** For agents, full SSH-GUI flow (probe method keys, IPv4 vs non-IP connect split, WebSocket origin, cluster NCP vs NCC console, pool eviction, troubleshooting) lives in `~/.cursor/skills/xdn-topology-mastery/ssh-reference.md`. Load with `/XDN ssh` or read `SKILL.md` section 7 in that folder.
+
+**SSH pool evict + terminal WS (Mar 2026):** `POST /api/ssh-pool/evict` accepts optional `device_id` and resolves non-IPv4 `ip` to mgmt IP before evicting. `ScalerAPI.evictSSHPoolConnection(ip, deviceId)` and SSH dialog save / device delete pass the canvas label. `ScalerAPI.getBridgeWebSocketOrigin()` + `topology-terminal.js` align WebSocket with `ScalerAPI.baseUrl` for remote-bridge setups.
+
+**Web terminal multi-tab (Mar 2026):** `window.TerminalPanel` manages multiple sessions in one bottom panel. VS Code-style tab strip (scrollable): each tab has status dot, device label, method badge, and close (X). `TerminalPanel.open(opts)` dedupes by tab key (`deviceId|method|host` or virsh `deviceId|method|kvmHost|ncc`). Same key focuses existing tab; new key adds a tab. Per-tab: xterm instance, WebSocket, heartbeat, SearchAddon. Shared: font size (localStorage), panel height, drag-resize. Minimize collapses to tab strip + toolbar only (tabs stay clickable). Context menu: Close Tab, Close Other Tabs, Reconnect Tab. Panel X closes all tabs.
+
+**Terminal reliability (Mar 2026):** Auto-reconnect on abnormal WebSocket close with exponential backoff (1s, 2s, 4s, max 3 attempts). Server-initiated close ('eof'/'closed' message) sets `_noAutoReconnect` to prevent reconnect loops. Heartbeat pong timeout (25s): if no pong after ping, force-close and trigger reconnect. Connection timeout (30s): if WebSocket not OPEN by deadline, close with error. `onerror` calls `ws.close()` for consistent cleanup. Debounced resize handler (100ms). Tab close picks left neighbor. Ctrl+Tab / Ctrl+Shift+Tab cycles tabs. Search bar closed on tab switch.
+
+**DNOS iTerm preference (Mar 2026):** The canvas terminal button (top-left on selected device) calls `openTerminalToDevice` which routes to iTerm when the host is an IP and the device is NOT in GI/RECOVERY mode. This applies to **both standalone and cluster** devices. The non-GI/RECOVERY override is the first check in `openTerminalToDevice` (before cluster/standalone branching). Virsh console and web terminal are only used for GI/RECOVERY mode (pre-DNOS boot) or when no IP is available. The **toolbar SSH button** always opens the SSH dialog for credentials and settings. Host classification: IPs -> iTerm; serials -> web terminal (bridge resolves).
+
+**Connect button fixes (Mar 2026):** SSH dialog per-method Connect button now updates `hostInput.value` to the row's host before calling `doConnect` (prevents stale host in sshConfig). Double-click protection via opacity + pointerEvents. Clipboard write uses `.then()`/`.catch()` for accurate success/fail feedback ("Password copied" vs "Paste password manually"). Stale `_lastProbeResult` cleared when host input is emptied. Probe returns 0 reachable methods -> returns early with warning (no longer attempts connection to unreachable host). Probe failure shows user-facing notification.
 
 ### Remote Access via Server IP (Mar 2026)
 **Problem**: When the app is accessed via `http://<server-ip>:8080/` instead of localhost, `navigator.clipboard.writeText()` fails (requires HTTPS or localhost). Copy-to-clipboard features (config push, link table, SSH command, debugger) silently failed.
@@ -883,6 +991,42 @@ Manual testing:
 
 ---
 
+## Console Discovery & PDU Power (Zohar's DB)
+
+The topology app integrates Zohar Keiserman's lab console database for device recovery operations.
+
+### Data Sources (hosted on `zkeiserman-dev`)
+
+| File | Path on server | Local cache | Purpose |
+|------|---------------|-------------|---------|
+| Console CSV | `/home/dn/console_db/console_devices.csv` | `/tmp/console_devices_cache.csv` | Serial -> Console Server + Port (~700 devices) |
+| PDU Mapping | `/home/dn/console_db/pdu_mapping.json` | `/tmp/pdu_mapping_cache.json` | Serial -> PDU host + outlet (power cycling) |
+| PDU CLI Config | `/home/dn/console_db/pdu_cli_config.json` | `/tmp/pdu_cli_config_cache.json` | PDU host -> CLI type (dev_outlet vs ol) |
+
+### Discovery Priority Chain
+
+1. **Zohar's CSV DB** (primary) -- fetched via SFTP from `zkeiserman-dev`, cached 1 hour
+2. **Device42 API** (fallback) -- requires `~/.device42_config.json`
+3. **console_mappings.json** (cached results) -- auto-saved after any discovery
+
+### Connection Strategy Integration (`connection_strategy.py`)
+
+`get_console_config_for_device(hostname)` resolution order:
+1. `console_mappings.json` multi-server format
+2. `console_mappings.json` legacy single-server format
+3. `console_mappings.json` device_to_console lookup
+4. Zohar's CSV (by serial from `operational.json`)
+
+### Frontend Flow
+
+1. SSH dialog "Discover Console" button -> `ScalerAPI.discoverConsole()` -> `POST /api/ssh/discover-console`
+2. Results show console server, port, PDU info in the SSH dialog
+3. If PDU entries found, "Power Cycle (PDU)" button appears
+4. Power cycle -> `ScalerAPI.pduPower()` -> `POST /api/ssh/pdu-power`
+5. Auto-switch probe includes console as a viable method when discovered
+
+---
+
 ## Debug-DNOS Topology Integration
 
 The topology app integrates with `/debug-dnos` bug evidence system:
@@ -1052,12 +1196,21 @@ interacting with a dialog. The Stack dialog's refresh button (which fetches SSH 
 5-10 seconds) was the trigger point -- during the async wait, any keystroke was processed
 by the canvas editor.
 
-**Fixes applied (6 files):**
-- `topology-keyboard.js`: Added dialog guard at top of `handleKeyDown` -- checks for ANY
-  open dialog element (`#stack-table-dialog`, `#lldp-table-dialog`, `#xray-popup`,
-  `.scaler-wizard-overlay`, `[role="dialog"]`, etc.). When a dialog is open, ALL shortcuts
-  are blocked except Escape (which closes the dialog). Also added confirmation prompt to
-  Ctrl+X (clear canvas).
+**Fixes applied (6+ files):**
+- `topology-keyboard.js`: Dialog guard at top of `handleKeyDown` uses `document.querySelector`
+  to check for interactive modal/overlay elements by ID. Covers: enable-LLDP overlay, DNAAS
+  dialogs, save/export pickers, style palettes, width/curve/style popups, text/link/device
+  editor modals (`.show` qualifier), recovery modal, shortcuts modal. All popup elements are
+  created dynamically and removed on close, so DOM existence = visible. **Read-only panels
+  (Stack, LLDP, XRAY, git-commit) are intentionally excluded** so canvas shortcuts work while
+  viewing reference data -- those panels use defense-in-depth via `stopPropagation` on their
+  own keydown/keyup handlers. Also added confirmation prompt to Ctrl+X (clear canvas).
+- `index.html`: Canvas element has `tabindex="0"` so it can receive keyboard focus. Required
+  for remote access (server IP URL) where the browser may not auto-focus the page content.
+- `topology.js`: `canvas.focus()` called after editor construction to grab keyboard focus.
+- `topology-mouse-down.js`: `canvas.focus({ preventScroll: true })` on every mousedown to
+  maintain keyboard focus after clicking the canvas.
+- `styles.css`: `#topology-canvas { outline: none; }` suppresses browser focus outline.
 - `topology-stack-dialog.js`: Added keyboard event isolation (`stopPropagation` on keydown
   and keyup). Set `tabindex=-1` and auto-focus on open. Defense in depth.
 - `topology-lldp-dialog.js`: Same keyboard isolation pattern.
@@ -1072,7 +1225,7 @@ by the canvas editor.
 2. `dialog.addEventListener('keyup', (e) => { e.stopPropagation(); });`
 3. `dialog.tabIndex = -1;` (allows focus)
 4. `dialog.focus();` after appending to document.body
-5. An `id` attribute that matches the selector list in the keyboard handler's dialog guard.
+5. An `id` attribute that matches the selector list in the keyboard handler's dialog guard (for interactive modals that should block canvas shortcuts).
 
 **Recovery commands (browser console):**
 - `checkAutoSave()` -- shows all backup sources with object counts and timestamps
@@ -1236,3 +1389,470 @@ or CLI `?` completion on device. Full process name list cached in
 3. `~/.cursor/dnos-cli-completions.json` -- cached dynamic values (process names, VRF names).
 4. `run_show_command` on device -- only for uncached dynamic arguments.
 Rule: `~/.cursor/rules/dnos-cli-completion-protocol.mdc`
+
+## Lab recovery runbook (2026-03-20)
+
+Reference: PE-4 cluster GI stack stuck (`gi-manager` 0/0), RR-SA-2 / PE-1 pre-delete config restore.
+
+### PE-4 (YOR_CL_PE-4) NCC1 -- GI stack repair
+
+1. From KVM: `ssh dn@100.64.6.6` (lab password), `sudo virsh console --force kvm108-cl408d-ncc1`.
+2. Serial login: `dn` / `drivenets` when at `login:`.
+3. If `gi-manager` is 0/0 and `docker service ps` shows `Rejected` / placement errors, run the **full cleaner** from Confluence QA page *Deployed SA Instead of Cluster - How to Recover Cluster* (docker swarm leave, prune, clear `ncc_id` / `cluster_id` / deploy-plans, `node_flavor`, reboot). Option A (`docker swarm leave --force` only) was not enough in this incident.
+4. After reboot, confirm `docker service ls`: `gi-agent` and `gi-manager` both **1/1**.
+5. DNOS deploy: `POST /api/operations/image-upgrade` with `upgrade_type` `gi_deploy`, URLs from `SCALER/db/configs/YOR_CL_PE-4/operational.json`, and `device_plans["YOR_CL_PE-4"].deploy_params` including `system_type` **CL-86**, `deploy_name` **YOR_CL_PE-4**, `ncc_id` **1** (active NCC1; do not rely on standby NCC0 for image pull per cluster behavior).
+
+### Config restore via `/api/operations/push`
+
+| Device | Source file | Notes |
+|--------|-------------|--------|
+| RR-SA-2 | `SCALER/db/configs/RR-SA-2/pre_delete_backup_sanitized.txt` | `push_method`: `file_upload`, `load_mode`: `merge`. Job completed with merge + commit. |
+| YOR_PE-1 | `SCALER/db/configs/PE-1/pre_delete_backup_20260313_114931.txt` | Use config body from **line 55** onward (strip header comments). Push with `ssh_host` **100.64.4.200** when that is the live MGMT IP. |
+
+### Push / IP resolution fixes (same serial, two config dirs)
+
+When both `PE-1/` and `YOR_PE-1/` exist with the same `serial_number`, `operational.json` can disagree on `mgmt_ip`. Fixes applied:
+
+- **`scaler_bridge._resolve_mgmt_ip`**: If `ssh_host` is an IPv4, always use that literal address for TCP; still resolve `scaler_id` from the ops index when the IP is a key (`ssh_ip_literal:`).
+- **`scaler.utils.get_ssh_hostname`**: If `device.ip` (IPv4) differs from `mgmt_ip` in the ops file loaded by `device.hostname`, prefer **`device.ip`** so API-requested targets are not overridden by stale ops.
+
+After changing these modules, sync live paths (`CURSOR/scaler_bridge.py`, `SCALER/scaler/utils.py`) and let uvicorn reload (or restart the bridge).
+
+## Image Upgrade Wizard: DNOS vs GI mismatch (2026-03-21)
+
+**Cause:** `operational.json` `device_state` values **`UPGRADING`** and **`DEPLOYING`** were classified as **GI** (same bucket as `GI`, `BASEOS_SHELL`). After an image job finished, a stale `UPGRADING`/`DEPLOYING` left in ops made the wizard and canvas show **GI** while the device was already on **DNOS**.
+
+**Fix:**
+
+- **`scaler/connection_strategy.py`**: `UPGRADING` / `DEPLOYING` return `""` from `classify_device_state`; removed from `GI_STATES`.
+- **`scaler_bridge._device_status_from_cache`**: If mode is still empty but `dnos_ver` is present and `upgrade_in_progress` is false, set mode **DNOS**.
+- **`scaler-gui.js`**: Wizard merge no longer overwrites **canvas DNOS** with cached GI-like modes; `_classifyDeviceState` aligned with Python.
+- **`topology-device-monitor.js`**: Transient `UPGRADING`/`DEPLOYING` from context API do not force **GI** on the canvas (preserve prior mode or `unknown`).
+
+## Cluster NCC management IP discovery (2026-03-21)
+
+For KVM-backed clusters, DNOS CLI is reached reliably via **virsh console** from the KVM host. A **second** SSH session (background) can run `show interfaces management | no-more` on that console path, parse the IPv4, verify **dnroot/dnroot** SSH to that IP, then persist `ncc_mgmt_ip` and `ncc_mgmt_verified_at` in `SCALER/db/configs/<scaler_id>/operational.json`.
+
+| Piece | Location |
+|-------|----------|
+| Discovery (blocking worker) | `scaler_bridge._discover_ncc_mgmt_ip_sync`, shared virsh setup `_open_virsh_ncc_shell_channel` |
+| API | `POST /api/ssh/discover-ncc-mgmt`, `GET /api/ssh/check-port` |
+| Proxy (serve.py) | Same pattern as `/api/ssh/probe` |
+| Probe enrichment | `probe_connection` adds `ncc_mgmt_ip` / `ncc_mgmt_verified_at` when present in ops |
+| GUI | `ScalerAPI.discoverNccMgmtIp`, `ScalerAPI.checkPort`; `topology-object-detection.js` opens **iTerm to cached `_nccMgmtIp`** when port 22 is reachable, else web virsh + background discovery |
+
+`topology-object-detection.js` calls `_fireBackgroundNccDiscovery` after opening the virsh web terminal so the user session is not blocked.
+
+## KVM cluster: dynamic `operational.json` + normal image upgrade (2026-03-21)
+
+**Problem:** For `ncc_type: kvm`, `mgmt_ip` was often the **KVM host** (e.g. `100.64.6.6`). `_run_normal_upgrade` used `_ssh_connect_basic(mgmt_ip)`, which lands on BaseOS/Ubuntu, not DNOS CLI. `delete_deploy` / `gi_deploy` already used `connect_for_upgrade` (virsh-capable).
+
+**Behavior now:**
+
+| Trigger | `operational.json` updates |
+|---------|----------------------------|
+| `POST /api/ssh/discover-ncc-mgmt` (verified NCC IP) | `ncc_mgmt_ip`, `ncc_mgmt_verified_at`, and **`mgmt_ip` / `ssh_host`** set to that NCC IPv4 |
+| `POST /api/ssh/probe` for `ncc_type == kvm` | First reachable **`ssh_mgmt` or `ssh_ncc`** IPv4 in probe results updates **`mgmt_ip` / `ssh_host`** if different (atomic write with `last_working_method` when applicable) |
+
+**Normal upgrade (`_run_device_upgrade`, `upgrade_type == normal`):**
+
+- If `ncc_type == kvm` (after console_mappings merge + re-read of `operational.json`): use cached **`ncc_mgmt_ip`** with **dnroot/dnroot** for `_run_normal_upgrade`.
+- If KVM cluster but **no** `ncc_mgmt_ip`: **`connect_for_upgrade`** then `_run_normal_upgrade(..., pre_connected=(ssh, channel))`.
+
+**GUI:** `_getWizardDeviceList` sets `ssh_host` / `ip` from **`sshConfig._nccMgmtIp`** when `_isCluster` so the Image Upgrade wizard passes the NCC target in `ssh_hosts`.
+
+**Code:** `scaler_bridge.py` (`probe_connection`, `discover_ncc_mgmt_ip_endpoint`, `_run_normal_upgrade`, `_run_device_upgrade`); `scaler-gui.js` (`_getCanvasDeviceObjects`, `_getWizardDeviceList`).
+
+## Major version jump detection -- forced delete_deploy (2026-03-20)
+
+**CRITICAL RULE:** When the target DNOS major version differs from the current DNOS major version (e.g. v25.x -> v26.x), the upgrade MUST use `delete_deploy`, NEVER `normal` (target-stack load + install). Loading v26 images into a v25 BaseOS causes crashes and DNOS recovery mode.
+
+**Detection points (all three must agree):**
+
+| Layer | How it detects | Location |
+|-------|---------------|----------|
+| **Frontend (Plan step)** | Compares `curMaj` vs `tgtMaj` from parsed stack versions. Shows "MAJOR JUMP" badge in Compare step. Forces `upgrade_type: 'delete_deploy'` in device plan. | `scaler-gui.js`, Upgrade Plan step render |
+| **Backend (`_run_device_upgrade`)** | Reads `dnos_version` from `operational.json`, extracts major from target DNOS URL via `_extract_version_from_dnos_url`. If majors differ, overrides `upgrade_type` to `delete_deploy`. | `scaler_bridge.py`, `_run_device_upgrade` |
+| **Backend (`wait_and_upgrade` auto-plan)** | Same comparison during auto-plan generation. Logs `[WARN] Major version jump` and sets `_ut = "delete_deploy"`. | `scaler_bridge.py`, `_wait_then_upgrade` |
+
+**Cluster upgrade with direct SSH auth fallback (2026-03-20):**
+
+When upgrading KVM cluster devices via direct SSH to the NCC mgmt IP, the code now tests SSH auth before committing. If `dnroot/dnroot` fails (e.g. post-deploy VIP credentials not set), it falls back to `connect_for_upgrade` (virsh console through KVM host).
+
+**Cluster operational fetch: virsh console fallback (2026-03-23):**
+
+`_fetch_all_operational_via_ssh` now accepts `scaler_device_id` and falls back to `_fetch_ops_via_virsh_fallback` when direct SSH auth fails (common on KVM clusters where NCCs don't accept password SSH). The fallback:
+1. Reads cluster info from `operational.json` (kvm_host, kvm_host_credentials, ncc_vms, active_ncc_vm)
+2. Tries each NCC VM in order (stored active first, then others), connecting via `_open_virsh_ncc_shell_channel`
+3. Detects standby NCCs (bash `$` prompt after dncli fails) and skips to next
+4. Sends `show system stack | no-more` and `show lldp neighbors | no-more` through the virsh channel
+5. Enters shell (`run start shell` + password) and runs `cat /.gitcommit` to get the git commit hash
+6. Updates `active_ncc_vm` in operational.json when the stored value was stale
+This also required fixing `_open_virsh_ncc_shell_channel` to handle the dncli sudo password prompt (sends `dnroot` / `drivenets` / `drive1234!`).
+Root cause: PE-4's NCC at 100.64.4.98 rejects password SSH entirely; only virsh console from KVM host works.
+`_fetch_git_commit_via_ssh` and `get_device_git_commit` endpoint also fall back to virsh for cluster devices.
+The `_send_and_recv` channel helper was fixed to check the FULL accumulated output for the CLI prompt (last line ending with `#` or `>`), not individual chunks -- checking individual chunks would falsely match the command echo containing the hostname prompt.
+Also fixed: `routes/ssh.py` was missing top-level `import time, json, os, re` causing probe_connection to crash with NameError (HTTP 500).
+
+**Stack-live and git-commit performance (2026-03-23):**
+
+Added `POST /api/devices/{id}/stack-live` endpoint in `routes/devices.py` -- calls `_fetch_all_operational_via_ssh` (with virsh fallback) instead of discovery_api's direct paramiko SSH. The frontend `_fetchStackLive` tries this scaler_bridge endpoint first, falling back to discovery_api only if needed.
+The `get_device_git_commit` endpoint now checks `operational.json` cache before SSH/virsh. After the first virsh fetch, git_commit is cached and subsequent calls return in <5ms. The git commit popup in `topology-selection-popups.js` was also optimized: removed the slow `DeviceMonitor.refreshDevice` call from the fetch chain and goes straight to the fast `ScalerAPI.getDeviceGitCommit` endpoint.
+
+**WARNING -- uvicorn --reload kills background jobs:**
+
+The `_push_jobs` dictionary is in-memory. If `scaler_bridge.py` is modified while a `wait_and_upgrade` background thread is running, uvicorn's `--reload` restarts the process and kills the thread. NEVER sync `scaler_bridge.py` to the live path while a Wait & Upgrade job is active.
+
+## Install prompt handling -- `_send_install_command` (2026-03-21)
+
+**Problem:** `_run_normal_upgrade` used `_send_wait("request system target-stack install", 15)` which does NOT detect or answer the `Do you want to continue? (yes/no)` confirmation prompt. The device would time out waiting for "yes" and the install never happened. This caused upgrades to report "complete" without actually installing new images.
+
+**Fix:** New `_send_install_command(chan, _log)` function (modeled after `_send_deploy_command`):
+
+- Clears channel buffer before sending
+- Polls every 0.5s for `yes/no`, `y/n`, `do you want`, or `continue` in output
+- Sends `yes\n` when prompt detected
+- Handles socket close (expected -- device reboots after install)
+- 60s timeout (120 iterations x 0.5s)
+
+**Post-install verification:** New `_post_install_verify` function runs after `_run_normal_upgrade`:
+
+- Waits 60s initial (device rebooting)
+- Reconnects via SSH every 20s (timeout 600s)
+- Runs `show system install | no-more`
+- Verifies each component version from URL appears in install output
+- Logs PASS/FAIL per component (observational -- does not raise)
+
+| Function | Purpose | Prompt handling |
+|----------|---------|----------------|
+| `_make_send_wait` | Generic send-and-wait for `#`/`>` prompt | NO -- bare `_send_wait` never answers yes/no |
+| `_send_deploy_command` | `request system deploy` with yes/no | YES -- polls + auto-answers |
+| `_send_install_command` | `request system target-stack install` with yes/no | YES -- polls + auto-answers |
+| `_send_load_cmd` (in `_load_images_on_channel`) | `request system target-stack load` with overwrite prompt | YES -- checks `continue?`, `(yes/no)`, `overwrite` + Ctrl+C to background |
+
+**RULE:** Any DNOS command that can prompt the user (`delete`, `deploy`, `install`, `load`) must use a prompt-aware sender, NOT `_send_wait`.
+
+## Image loading in GI mode -- Ctrl+C background + proper progress polling (2026-03-22)
+
+**Problem:** `_send_load_cmd` sent `request system target-stack load <url>` and answered `yes`, but in GI mode this command shows inline download progress and blocks the terminal prompt until download completes. The code never sent Ctrl+C to background the download, so all subsequent polling commands (`show system stack`) received garbage output or timed out. Additionally, `_poll_load_progress` used `show system stack` (which only shows images AFTER download+untar is complete) instead of `show system target-stack load | no-more` (which shows real-time `Progress: XX%`).
+
+**Fix (two parts):**
+
+1. `_send_load_cmd`: After answering `yes` and detecting `"Download in progress"` or `"started target-stack load"`, sends `\x03` (Ctrl+C) to background the download and return the `#` prompt. The download continues in the background per DNOS docs.
+
+2. `_poll_load_progress`: Now uses `show system target-stack load | no-more` as PRIMARY source -- parses `Task status: in-progress/complete/failed` and `Progress: XX%`. Falls back to `show system stack` Target column only for final confirmation.
+
+**Monitoring commands (correct usage):**
+
+| Command | What it shows | When to use |
+|---------|--------------|-------------|
+| `show system target-stack load \| no-more` | Active download progress, Task status, Progress % | During download polling |
+| `show system target-stack load history` | Completed/failed load tasks | After download for history |
+| `show system stack` | Current + Target stack versions | After download complete to verify |
+
+**Timeouts:** `max_wait` increased from 300s to 600s (large images), `stall_threshold` from 120s to 180s (network latency). Stall detection now tracks time since last progress change, not absolute elapsed time.
+
+## Pre-deploy image verification and config repair (2026-03-21)
+
+### Pre-deploy image verification
+
+Before `request system deploy`, the flow now verifies that ALL expected images are present in the target-stack:
+
+- Parses `show system stack` output for components with non-empty Target column
+- Compares against the URL list (DNOS, GI, BaseOS)
+- **BLOCKS deploy** with `RuntimeError` if any expected component is missing
+
+This prevents the previous failure mode where deploy was sent with empty target-stack, and the device deployed with old/no images.
+
+### Smart config repair after delete+deploy
+
+`_post_deploy_config_repair` was rewritten to handle version-incompatible config:
+
+1. **Full rollback attempt**: `rollback 1` + `commit`
+2. **If commit fails**: Parse error output for specific failure patterns:
+   - `configuration item 'X' is not supported` -- hierarchy removed
+   - `Unknown word 'X'` -- keyword renamed
+   - `invalid value` / `invalid keyword` -- syntax changed
+3. **Partial repair**: Load rollback, `delete` each failed hierarchy, commit remainder
+4. **Report to GUI**: Each failed hierarchy includes path, reason, and category
+
+Config repair failure categories for user-friendly reporting:
+
+| Category | Meaning |
+|----------|---------|
+| FlowSpec | FlowSpec syntax may differ between versions |
+| BGP | Neighbor/AF structure changed |
+| Interface | Interface naming differs |
+| VRF/Services | Hierarchy restructured |
+| Routing Policy | New vs old policy language |
+| IGP/MPLS | Protocol config syntax changed |
+| System | System-level config changed |
+
+### Automatic gi-manager recovery (stuck deploy detection)
+
+Added to `_post_deploy_verify` -- automatically detects and recovers from stuck gi-manager after a failed deploy. This handles the scenario where:
+
+- Deploy was sent (e.g. v25 GI trying to deploy v26 images)
+- Device reboots but comes back with old GI still running
+- gi-manager Docker service is stuck at 0/0 replicas
+- `gicli` is not available, `dncli` fails with "CLI is N/A"
+
+**Pre-flight detection** (before loading images -- handles devices ALREADY stuck from a previous attempt):
+
+- `_preflight_gi_health(job_id, device_id, chan, ssh, scaler_hostname, _log)` runs in both `_run_gi_deploy_upgrade` and `_run_delete_deploy_upgrade` (already-in-GI path)
+- Tests GI CLI by running `show system stack | no-more` -- if the response doesn't contain table markers, GI CLI is broken
+- If broken: navigates to bash, checks gi-manager, runs cleaner if stuck, waits for reboot, reconnects
+- Returns new `(ssh, chan, ncc_id, recovered)` tuple so callers use the fresh connection
+
+**Post-deploy detection** (in the post-deploy verify loop):
+
+1. Track how long the device has been in GI mode (`gi_first_seen_at`)
+2. After 10 minutes (`GI_STALL_THRESHOLD = 600s`) with no install progress:
+   - Navigate to NCC bash shell via `_ensure_ncc_bash` (echo probe to distinguish bash from CLI)
+   - Run `_check_gi_manager_health`: checks `docker service ls` for gi-manager replicas and `docker ps` for container version
+   - If gi-manager is stuck (0/0 or missing): trigger automatic recovery
+
+**Recovery steps** (`_run_gi_manager_recovery` -- full Confluence cleaner):
+
+1. `sudo docker swarm leave --force`
+2. `sudo docker system prune -a -f --volumes`
+3. `sudo rm -f /etc/drivenets/ncc_id /etc/drivenets/cluster_id /etc/drivenets/deploy-plans /etc/drivenets/node_flavor`
+4. `sudo reboot`
+
+**Post-recovery retry** (back in the verify loop):
+
+1. Wait for NCC to come back in GI mode (fresh gi-manager)
+2. Reload all images via `_load_images_on_channel`
+3. Re-send `request system deploy`
+4. Continue waiting for DNOS mode (timeout reset for the retry)
+
+**Safety**: Recovery is attempted only once per deploy (`gi_recovery_attempted` flag). Only triggers when `url_list` and `deploy_params` are provided (both `_run_gi_deploy_upgrade` and `_run_delete_deploy_upgrade` pass these).
+
+**GUI phases**: `gi-recovery` (cleanup + reboot) and `gi-recovery-reload` (reloading images after recovery) are shown in the progress panel.
+
+**Source**: Confluence QA "Deployed SA Instead of Cluster" recovery procedure. Validated on PE-4 (2026-03-20).
+
+### Image Upgrade Wizard -- config hint (plan step)
+
+Short orange info lines (not a wall of text):
+
+- **GI deploy:** Clarifies no full system delete; config re-apply after DNOS; failures in log.
+- **Delete + deploy:** Back up before delete, restore after DNOS; CLI mismatches in log.
+
+Do not use the old single block that said "system delete + deploy" for GI-only plans (incorrect).
+
+### Upgrade failure dismiss (canvas red badge)
+
+When an image upgrade job fails, devices show a red **upgrade failed** badge. Dismiss is persisted in `localStorage` under `scaler_dismissed_upgrade_failures` as keys `jobId:deviceLabel` so the job watcher does not re-apply the badge. Actions: **Dismiss** / **New upgrade** on the bottom failure banner, and **Dismiss alert** / **New upgrade** on the completed failure progress panel.
+
+### GUI device mode states
+
+The upgrade wizard now supports these device mode badges (not just DNOS/GI):
+
+| State | Badge color | When shown |
+|-------|-------------|------------|
+| DNOS | Green | Normal operation |
+| GI | Cyan | GI/BASEOS_SHELL/ONIE |
+| RECOVERY | Red | DN_RECOVERY |
+| DEPLOYING | Orange (pulsing) | Deploy in progress |
+| INSTALLING | Orange (pulsing) | Image install in progress |
+| UPGRADING | Cyan (pulsing) | Upgrade flow active |
+| BOOT | Purple (pulsing) | Device booting |
+| FAILED/ERROR | Red (bold) | Operation failed |
+| UNREACHABLE | Light red | SSH timeout/failure |
+| CONFIG_REPAIR | Yellow (pulsing) | Config restoration in progress |
+
+## Cluster post-upgrade recovery: NCP/NCF stuck disconnected (2026-03-22)
+
+After `request system delete` + fresh DNOS deploy on a CL-86 cluster, only the active NCC
+gets DNOS. All NCPs, NCFs, standby NCC, NCM remain `disconnected` if their GI agents fail
+to register with the CMC on the new NCC. Full investigation methodology and remediation
+steps are documented in `CLUSTER_POST_UPGRADE_RECOVERY.md`.
+
+**Quick diagnosis checklist**:
+1. `show system` -- NCPs/NCFs show `disconnected`, zero uptime, empty serial
+2. `show system install` -- only NCC tasks completed, zero NCP/NCF tasks
+3. `show system backplane` -- NCM ctrl ports UP but nodes show `unavailable-node`
+4. `run start shell ncc <id>` then `ip netns exec host_ns ip neigh show` -- NCPs have ctrl-bond IPs but refuse SSH on port 22
+5. CMC log (`cluster_manager_supervisor.log`) shows `CMC_SYS_EVENT_ACTIVE_DOWNSTREAM_EVENT` looping to `disconnected_nces`
+
+**Root cause**: NCP GI agents are not running after system delete. The NCPs have network
+connectivity (BaseOS level) but SSH/GI agent containers have not started.
+
+**BGP flapping** (ACTIVE -> CONNECT every 10s) is a symptom: no NCP = no data plane
+interfaces = no BGP peering possible with external neighbors.
+
+**Remediation**: Console access to NCP (via IPMI or console server), then restart GI agent
+or power-cycle. See `CLUSTER_POST_UPGRADE_RECOVERY.md` for full procedure.
+
+## Legacy cluster deploy rule: ncc-id is autodetected by GI (2026-03-22)
+
+For legacy clusters (CL-* system types with NCM + NCC, no NCCM):
+- **NCM port 49 = NCC-0**, **NCM port 50 = NCC-1** (hardcoded in NCC ID allocation)
+- The GI CLI **autodetects the ncc-id** via NCM LLDP at boot. The `ncc-id` parameter in
+  `request system deploy` **MUST match the autodetected ID** or GI rejects with:
+  `Cannot deploy with ncc id that doesn't match the auto detected id`
+- Example: `kvm108-cl408d-ncc1` is connected to NCM port 50, so GI autodetects it as NCC-1.
+  Deploying with `ncc-id 0` is REJECTED. Must use `ncc-id 1`.
+
+**Key learning (2026-03-22)**: The earlier assumption that "always deploy with ncc-id 0"
+was wrong. GI validates ncc-id against hardware detection. The cluster instability
+(NCPs/NCFs disconnected) was NOT caused by ncc-id mismatch -- GI rejects mismatches outright.
+The NCP/NCF disconnect is a separate issue (physical hardware not joining Docker Swarm).
+
+**GUI behavior** (Image Upgrade Wizard):
+- `scaler-gui.js`: upgrade plan builder tags CL-* devices with `is_cluster: true`, `system_type`.
+  CLI preview shows `ncc-id autodetected by GI (NCM LLDP)` for deploy/delete-deploy.
+  The `ncc_id` field is set to `'autodetect'` -- actual value must come from the device.
+- `topology-ssh-dialog.js`: Cluster Components section shows NCM port mapping info.
+- `devices.json`: PE-4 platform corrected from "NCP" to "CL-86" with `system_type: "CL-86"`.
+
+**Source**: Confluence "NCC ID allocation post G.I." (page 2291892416) confirms the port mapping.
+
+## Cluster preflight checks for upgrade wizard (2026-03-22)
+
+Before deploying a cluster device, the upgrade wizard backend runs a preflight check:
+1. Detects cluster devices by `system_type` starting with `CL-`
+2. SSHes to the KVM host (from `connection_strategy` console config)
+3. Runs `virsh list --all` to check all NCC VMs
+4. If any NCC VM is **shut off**, the deployment is **BLOCKED** with a clear error
+
+**Why this matters (incident 2026-03-22):**
+- PE-4 deployment failed because `kvm108-cl408d-ncc0` VM was shut off (autostart=disabled)
+- Only NCC-1 was running, so deploy went with `ncc-id 1` (autodetected by GI)
+- Starting NCC-0 later (with old BaseOS 2.2610019013 vs NCC-1's 2.2620259017) caused
+  a version mismatch that crashed DNOS on NCC-1 (routing_engine container went down)
+- Both NCCs ended up in GI mode with no DNOS running
+
+**Implementation:**
+- `scaler_bridge.py`: `_cluster_preflight_check(scaler_id)` function, called from
+  `image_upgrade_plan` endpoint's `_check_device`. Returns VM states, blocks if shut off.
+- `scaler-gui.js`: Renders `upgrade-plan-preflight-fail` div with red alert showing which
+  VMs are shut off and which KVM host to fix them on.
+- `styles.css`: `.upgrade-plan-row--preflight-fail` and `.upgrade-plan-preflight-fail` classes.
+
+**What the preflight checks:**
+| Check | Blocked if |
+|-------|-----------|
+| All NCC VMs running | Any VM is shut off |
+| VM count vs expected | Fewer running than expected (warning only) |
+| KVM host reachable | Cannot connect to KVM (warning, not block) |
+
+## NCC selector in upgrade wizard (2026-03-22)
+
+For cluster devices (CL-*), the upgrade wizard now shows an **NCC selector dropdown**
+in the upgrade plan table. This lets the user choose which NCC VM the deployment will
+target and what `ncc-id` value to use in the `request system deploy` command.
+
+**How it works:**
+1. The `_cluster_preflight_check` backend function discovers running NCC VMs via
+   `virsh list --all` on the KVM host.
+2. It infers each VM's NCC ID from the VM name convention (e.g., `*-ncc0` -> NCC-0,
+   `*-ncc1` -> NCC-1). This matches the GI autodetection from NCM LLDP port mapping.
+3. The preflight result includes `ncc_options[]` -- an array of running NCC VMs with
+   their inferred `ncc_id`, `vm_name`, and display `label`.
+4. The frontend (`scaler-gui.js`) renders a `<select>` dropdown for cluster devices
+   showing these NCC options. The user's selection updates `device_plans[did].deploy_params.ncc_id`.
+5. The backend respects the frontend-provided `ncc_id` -- it only falls back to
+   `operational.json` values when no `ncc_id` was provided by the frontend.
+
+**Data flow:**
+- Preflight: `_cluster_preflight_check` -> `cluster_preflight.ncc_options[]`
+- Frontend: user selects NCC -> `plan.devices[did].deploy_params.ncc_id = N`
+- Execution: `_do_one(did)` -> `plan.get("deploy_params", {})` -> `_run_device_upgrade`
+- Deploy: `_send_deploy_command(chan, sys_type, d_name, ncc_id, _log)`
+
+**CLI preview:** Shows the selected NCC-ID and VM name in the Execute step
+(e.g., `PE-4: delete + deploy (full wipe | ncc-id 0 (kvm108-cl408d-ncc0))`).
+
+**Fallback:** If no NCC selector data is available (preflight failed or not a cluster),
+the deploy command falls back to the existing `ncc_id` from `operational.json` or
+defaults to 0, with the GI retry logic flipping to `1 - ncc_id` on mismatch.
+
+## Upgrade wizard: system_type source priority and GI Compare (2026-03-22)
+
+**Problem:** `device_inventory.json` (DNAAS cache) can hold stale `system_type` strings
+such as `SA-40C8CD, Family: NCR` for a cluster device, while `operational.json` under
+`~/SCALER/db/configs/<device_id>/` has the correct value (e.g. `CL-86`).
+
+**Fix (`serve.py` `/api/devices/`):** When merging `operational.json`, always apply
+`system_type` / `deploy_system_type` onto the device entry so scaler cache wins over
+inventory noise.
+
+**Frontend (`scaler-gui.js`):**
+- `_sanitizeWizardSystemType()` strips comma/`Family:` garbage and only keeps values
+  that match `_WIZARD_KNOWN_SYS_TYPES` (GI CLI system-type list).
+- `_getWizardDeviceListSync()` + `_mergeWizardDeviceListFromApi()` let the Image
+  Upgrade Wizard open immediately; `GET /api/devices/` runs in the background to
+  fill `platform` / mgmt IP.
+- Compare step: if **all** selected devices are GI mode, branch-switch and
+  compatibility alerts are hidden; the GI banner includes system type (when known),
+  NCC hint for CL-* clusters, and a sample `request system deploy system-type ... name ...` line.
+
+## Wrong system type deploy prevention (2026-03-22)
+
+**Problem**: Deploying a device (especially a cluster) with the wrong `system_type` causes
+catastrophic persistent contamination. On clusters, ALL NCEs (NCPs, NCFs, standby NCC)
+keep the wrong `cluster_type` in `/golden_data/cm/cluster_type`. They refuse to join the
+new cluster. Recovery requires running the cleaner script on every affected NCE manually.
+
+**Root cause from PE-4 incident (2026-03-22)**: NCPs had `cluster_type=SA-36CD-S` from
+an old deploy while the NCC was redeployed as CL-86. NCPs refused to join, showed
+`disconnected` with zero uptime/serial. Fix: ran Confluence cleaner on both NCPs via
+SSH -p 2222 (dn/drivenets). Source: [Deployed SA Instead of Cluster - How to Recover Cluster](https://drivenets.atlassian.net/wiki/spaces/QA/pages/5186093236).
+
+**Detection (3 layers)**:
+
+1. **GUI Wizard** (`scaler-gui.js`):
+   - `_buildClientPlan()` tracks `previous_system_type` from `deviceContexts` and detects
+     SA<->CL category changes. Sets `system_type_changed` and `system_type_category_change`.
+   - Upgrade Plan table row shows red `upgrade-plan-systype-warn--critical` banner for
+     SA<->CL changes with guidance about the cleaner script.
+   - `collectData` blocks SA<->CL changes with "click Next again to confirm" pattern
+     (`_sysTypeChangeAcknowledged` flag).
+
+2. **Backend** (`scaler_bridge.py`):
+   - `_check_system_type_change()` called before every deploy in `_run_delete_deploy_upgrade`
+     and `_run_gi_deploy_upgrade`.
+   - Compares `deploy_params.system_type` with `operational.json`'s stored type.
+   - Logs `[CRITICAL]` warning for SA<->CL changes with recovery instructions and Confluence link.
+   - Persists `previous_system_type`, `system_type_change_detected`, `system_type_change_at`
+     to `operational.json`.
+
+3. **Post-deploy monitoring**: If NCPs stay `disconnected` for >15min after NCC is `active-up`,
+   the progress terminal output suggests the cleaner script.
+
+**Key persistent files on NCEs** that cause wrong type:
+- `/golden_data/cm/cluster_type` -- deployed type (SA-36CD-S vs CL-86)
+- `/run/lock/nce_id`, `/var/opt/.ncc_id`, `/var/opt/.element_id` -- identity
+- `/etc/cluster_id`, `/etc/node_flavor` -- cluster binding
+- `/var/tmp/deploy-plans/*` -- cached plans
+
+**Cursor rule**: `~/.cursor/rules/wrong-system-type-deploy-prevention.mdc` has the full
+cleaner script, access methods, symptom matrix, and recovery procedure.
+
+**CSS classes**: `.upgrade-plan-systype-warn`, `.upgrade-plan-systype-warn--critical`,
+`.upgrade-plan-row--systype-critical` in `styles.css`.
+
+## Platform model accepts any system type string (2026-03-22)
+
+**Problem**: The `Platform` enum in `scaler/scaler/models.py` only had `NCP`, `NCM`, `NCP5`.
+Devices with `platform: "CL-86"` (like PE-4) failed Pydantic validation silently in
+`DeviceManager.list_devices()`, making them invisible in the scaler CLI and wizard.
+
+**Fix**: Changed `Device.platform` from `Platform` enum to `str` field. Added `system_type`
+and `connection_method` fields to the `Device` model. The `Platform` enum is kept for backward
+compatibility with `WizardState` and `ValidationResult` internal models only.
+
+**Key changes**:
+- `scaler/scaler/models.py`: `Device.platform` is now `str`, added `system_type` and
+  `connection_method` optional fields
+- `scaler/scaler/device_manager.py`: `add_device()` and `update_device()` accept string
+  platform and new fields
+- `scaler/scaler/interactive_scale.py`: References to `Platform.DNOS` (which never existed)
+  and `Platform.NCP` replaced with string `"NCP"`. WizardState creation gracefully handles
+  non-enum platform values.
+- `topology/scaler_bridge.py`: `_get_device_context()` now falls back to `operational.json`
+  for `system_type` when device inventory doesn't have it
+- `topology/topology-device-monitor.js`: Caches `system_type` from device context on
+  `device._systemType` for instant wizard access

@@ -1,0 +1,151 @@
+{
+  "id": "TEST_mac_mob_basic_SW205160",
+  "name": "MAC Mobility | Basic Learning",
+  "type": "functional",
+  "feature": "evpn-mac-mobility",
+  "source": "jira:SW-204115 / SW-205160",
+  "jira_key": "SW-205160",
+  "parent_category": "SW-204115",
+  "created": "2026-03-20",
+  "device_requirements": {
+    "type": "any",
+    "features": ["evpn", "bgp-l2vpn-evpn", "seamless-integration"],
+    "min_ncp_count": 1
+  },
+  "prerequisites": [
+    {"id": "bgp_evpn", "check": "bgp_l2vpn_evpn_established", "fix_via": "Manual BGP L2VPN EVPN"},
+    {"id": "evpn_instance", "check": "evpn_instance_exists", "fix_via": "config_generator + validate_config"},
+    {"id": "mac_learned", "check": "traffic_or_spirent", "fix_via": "/SPIRENT or DNAAS path"}
+  ],
+  "show_commands_validated": {
+    "show bgp l2vpn evpn summary | no-more": "BGP L2VPN EVPN neighbors",
+    "show evpn summary | no-more": "EVPN instance list",
+    "show evpn mac-table instance {evpn_name} | no-more": "MAC entries",
+    "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more": "Single MAC",
+    "show bridge-domain instance | no-more": "BD operational state",
+    "show evpn mac-table detail instance {evpn_name} | no-more": "Detailed MAC with sequence/flags (note: 'detail' keyword comes BEFORE 'instance')",
+    "show evpn instance {evpn_name} detail | no-more": "VALID - detailed instance info (corrected: this command IS valid)",
+    "show evpn mac summary | no-more": "Global MAC count summary",
+    "show evpn mac-table instance {evpn_name} local | no-more": "Only locally-learned MACs",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "Datapath MAC entries (NCP-level)",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more": "Ghost MAC detection",
+    "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
+  },
+  "invalid_commands": {
+    "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use: show evpn mac-table instance {name}",
+    "show interfaces brief": "DOES NOT EXIST. Use: show interfaces description"
+  },
+  "scenarios": [
+    {
+      "id": "SC01_learn_local_ac",
+      "name": "Learn MAC from local AC; expect Type-2 advertised",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show bgp l2vpn evpn summary | no-more"
+          ]
+        },
+        "trigger": {"action": "traffic_on_ac1", "method": "spirent_or_manual"},
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more"
+          ],
+          "expect": {
+            "source_contains": ["local", "ac"],
+            "rt2_advertised": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC02_learn_remote_evpn",
+      "name": "Learn MAC from remote EVPN RT-2",
+      "phases": {
+        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
+        "trigger": {"action": "remote_pe_traffic"},
+        "verify": {
+          "show_commands": ["show evpn mac-table instance {evpn_name} | no-more"],
+          "expect": {
+            "source_contains": ["bgp", "evpn", "remote"],
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC03_learn_vpls_pw",
+      "name": "Learn MAC from VPLS PW (dynamic)",
+      "phases": {
+        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
+        "trigger": {"action": "traffic_via_pw"},
+        "verify": {
+          "show_commands": ["show evpn mac-table instance {evpn_name} | no-more"],
+          "expect": {
+            "source_contains": ["pw", "pseudo", "vpls"],
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC04_table_counts",
+      "name": "Verify MAC table counts and forwarding continuity",
+      "phases": {
+        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
+        "verify": {
+          "show_commands": [
+            "show evpn summary | no-more",
+            "show bridge-domain instance | no-more"
+          ],
+          "expect": {
+            "mac_count_stable_or_grows": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    }
+  ],
+  "runtime_parameters": {
+    "evpn_name": {"resolve": "runtime", "from": "show evpn summary"},
+    "test_mac": {"resolve": "runtime", "from": "show evpn mac-table"},
+    "active_ncc_id": {"resolve": "runtime", "from": "show system"}
+  },
+  "verdict": {"layers": 8, "stop_on_fail": false},
+  "counter_commands": [
+    {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+  ],
+  "counter_expectations": [
+    {"label": "mac_count", "rule": "no_decrease", "description": "MAC count must not drop"},
+    {"label": "ghost_mac_count", "rule": "zero", "description": "No ghost MACs after scenario"}
+  ],
+  "event_expectations": [
+    {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "No BGP notifications"},
+    {"event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED", "expect": "absent", "description": "No suppression on normal operations"}
+  ],
+  "health_checks": {
+    "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager", "neighbour_manager"],
+    "check_crashes": true,
+    "check_alarms": true
+  },
+  "cleanup_commands": ["no debug evpn mac-mobility", "no set logging terminal"],
+  "config_baseline": {
+    "sections": ["network-services evpn", "protocols bgp"],
+    "full_config": false,
+    "ignore_patterns": ["last-modified", "commit-id"]
+  }
+}

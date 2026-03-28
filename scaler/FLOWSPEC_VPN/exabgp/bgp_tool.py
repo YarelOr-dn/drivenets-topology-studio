@@ -500,6 +500,92 @@ def cmd_inject(args):
         sys.exit(1)
 
 
+def _build_vpls_pw_cmd(action, rd, ve_id, base, offset, size, next_hop, rt,
+                        control_word=True, fat_label=False, mtu=0):
+    """Build ExaBGP announce/withdraw vpls-pw command string.
+
+    L2Info Extended Community (RFC 4761) control byte mapping for DNOS:
+      bit 1 (0x02) = control-word (C)
+      bit 2 (0x04) = FAT-label-receive (Fr)
+      bit 3 (0x08) = FAT-label-send (Fs)
+    """
+    control_byte = 0
+    if control_word:
+        control_byte |= 0x02
+    if fat_label:
+        control_byte |= 0x0C
+    l2info_hex = f"0x800A13{control_byte:02X}{mtu:04X}0000"
+
+    ec_list = [f"target:{rt}", l2info_hex]
+    ec_str = "[ " + " ".join(ec_list) + " ]"
+
+    return (
+        f"{action} vpls-pw rd {rd} endpoint {ve_id} base {base} "
+        f"offset {offset} size {size} next-hop {next_hop} "
+        f"extended-community {ec_str}"
+    )
+
+
+def cmd_vpls(args):
+    """Inject or withdraw a VPLS pseudowire route."""
+    session_id = args.session_id
+    log_path = session.setup_log(session_id)
+
+    session_data = session.load_session(session_id)
+    if not session_data:
+        print(f"ERROR: No session found: {session_id}")
+        sys.exit(1)
+
+    action = "withdraw" if args.withdraw else "announce"
+    route = _build_vpls_pw_cmd(
+        action=action,
+        rd=args.rd,
+        ve_id=args.ve_id,
+        base=args.base,
+        offset=args.offset,
+        size=args.size,
+        next_hop=args.next_hop,
+        rt=args.rt,
+        control_word=not args.no_control_word,
+        fat_label=args.fat_label,
+        mtu=args.mtu,
+    )
+
+    session.log(f"VPLS {action}: {route}", log_path)
+
+    if not pipe.write_route(route, log_path):
+        print(json.dumps({"status": "error", "error": "Failed to write to ExaBGP pipe"}))
+        sys.exit(1)
+
+    ts = session.now_iso()
+    if action == "announce":
+        if "injected_routes" not in session_data:
+            session_data["injected_routes"] = []
+        session_data["injected_routes"].append({"route": route, "injected_at": ts})
+    else:
+        announce_form = route.replace("withdraw", "announce", 1)
+        session_data["injected_routes"] = [
+            r for r in session_data.get("injected_routes", [])
+            if (r.get("route", r) if isinstance(r, dict) else r) != announce_form
+        ]
+
+    session.save_session(session_id, session_data)
+    print(json.dumps({
+        "status": "ok",
+        "action": action,
+        "route": route,
+        "vpls": {
+            "rd": args.rd,
+            "ve_id": args.ve_id,
+            "base": args.base,
+            "offset": args.offset,
+            "size": args.size,
+            "next_hop": args.next_hop,
+            "rt": args.rt,
+        },
+    }))
+
+
 def cmd_withdraw(args):
     """Withdraw route(s) via named pipe. Supports --route, --last, or --all."""
     session_id = args.session_id
@@ -1397,6 +1483,20 @@ def main():
     p_eng_inject.add_argument("--action")
     p_eng_inject.add_argument("--grpc-port", default="50051")
 
+    p_vpls = subparsers.add_parser("vpls", help="Inject/withdraw VPLS pseudowire route")
+    p_vpls.add_argument("--session-id", required=True)
+    p_vpls.add_argument("--rd", required=True, help="Route Distinguisher (e.g. 3.3.3.3:500)")
+    p_vpls.add_argument("--ve-id", type=int, required=True, help="VPLS Edge ID (endpoint)")
+    p_vpls.add_argument("--base", type=int, required=True, help="Label base")
+    p_vpls.add_argument("--offset", type=int, default=1, help="Label offset (default: 1)")
+    p_vpls.add_argument("--size", type=int, default=8, help="Label block size (default: 8)")
+    p_vpls.add_argument("--next-hop", required=True, help="MPLS next-hop IP")
+    p_vpls.add_argument("--rt", required=True, help="Route target (e.g. 100:100)")
+    p_vpls.add_argument("--withdraw", action="store_true", help="Withdraw instead of announce")
+    p_vpls.add_argument("--no-control-word", action="store_true", help="Disable control word flag")
+    p_vpls.add_argument("--fat-label", action="store_true", help="Enable FAT label flags")
+    p_vpls.add_argument("--mtu", type=int, default=0, help="L2 MTU (default: 0)")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -1420,6 +1520,7 @@ def main():
         "engine-start": cmd_engine_start,
         "engine-stop": cmd_engine_stop,
         "engine-inject": cmd_engine_inject,
+        "vpls": cmd_vpls,
     }
 
     commands[args.command](args)

@@ -104,8 +104,10 @@ class DeviceManager:
         ip: str,
         username: str = "dnroot",
         password: str = None,
-        platform: Platform = Platform.NCP,
-        description: str = None
+        platform: str = "NCP",
+        description: str = None,
+        system_type: str = None,
+        connection_method: str = None
     ) -> Device:
         """Add a new device.
         
@@ -127,14 +129,17 @@ class DeviceManager:
         # Encode password
         encoded_password = Device.encode_password(password) if password else ""
         
+        plat_str = platform.value if isinstance(platform, Platform) else str(platform)
         device = Device(
             id=device_id,
             hostname=hostname,
             ip=ip,
             username=username,
             password=encoded_password,
-            platform=platform,
-            description=description
+            platform=plat_str,
+            system_type=system_type or "",
+            description=description,
+            connection_method=connection_method or ""
         )
         
         db = self._load_db()
@@ -168,10 +173,12 @@ class DeviceManager:
         ip: str = None,
         username: str = None,
         password: str = None,
-        platform: Platform = None,
+        platform: str = None,
         description: str = None,
         last_sync: datetime = None,
-        management_ip: str = None
+        management_ip: str = None,
+        system_type: str = None,
+        connection_method: str = None
     ) -> Optional[Device]:
         """Update a device.
         
@@ -202,6 +209,10 @@ class DeviceManager:
                     d["last_sync"] = last_sync.isoformat() if isinstance(last_sync, datetime) else last_sync
                 if management_ip is not None:
                     d["management_ip"] = management_ip
+                if system_type is not None:
+                    d["system_type"] = system_type
+                if connection_method is not None:
+                    d["connection_method"] = connection_method
                 
                 db["devices"][i] = d
                 self._save_db(db)

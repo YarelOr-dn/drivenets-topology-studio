@@ -757,6 +757,7 @@ window.ToolbarSetup = {
                 }
                 
                 editor.draw();
+                editor.scheduleAutoSave();
             });
         }
         
@@ -1151,9 +1152,10 @@ window.ToolbarSetup = {
         const gridLinesBtn = document.getElementById('btn-grid-lines');
         if (gridLinesBtn) {
             gridLinesBtn.addEventListener('click', () => editor.toggleGridLines());
-            // Set initial state (grid is ON by default)
             if (editor.gridZoomEnabled) {
                 gridLinesBtn.classList.add('active', 'grid-on');
+            } else {
+                gridLinesBtn.classList.remove('active', 'grid-on');
             }
         }
         

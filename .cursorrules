@@ -25,20 +25,23 @@ or text prefixes like `[OK]`, `[WARN]`, `[ERROR]`, `[INFO]`.
 | **HTML entry** | `topology/index.html` |
 | **Styles** | `topology/styles.css` |
 | **Dev guidelines** | `topology/DEVELOPMENT_GUIDELINES.md` |
-| **Scaler GUI** | `topology/scaler-gui.js` |
+| **Scaler GUI** | `topology/scaler-gui.js` (core) + `scaler-gui-*.js` bundles; splitter `topology/scripts/split_scaler_gui.py`, backup `topology/scaler-gui.js.bak` |
 | **Scaler API client** | `topology/scaler-api.js` |
-| **Scaler bridge** | `topology/scaler_bridge.py` |
+| **Scaler bridge** | `topology/scaler_bridge.py` (app factory) + `topology/routes/*.py` (FastAPI routers); splitter `topology/scripts/split_scaler_bridge.py`, backup `topology/scaler_bridge.py.bak_split` |
 | **Backend servers** | `topology/serve.py`, `topology/discovery_api.py` |
 | **Scaler library** | `scaler/scaler/` (Python package) |
 | **Wizard modules** | `scaler/scaler/wizard/` |
 | **Config builders** | `scaler/scaler/wizard/config_builders.py` |
 | **Config pusher** | `scaler/scaler/config_pusher.py` |
+| **DNOS SSH session** | `scaler/scaler/dnos_session.py` (`DNOSSession`, `InteractiveSSHSession`) |
+| **Netmiko (optional)** | `scaler/scaler/dnos_netmiko.py` |
+| **Bridge device comm** | `topology/routes/_device_comm.py` (`DeviceCommHelper`) |
 
 ## What to Read Before Editing
 
 1. **Always:** `topology/DEVELOPMENT_GUIDELINES.md`
 2. **Target module** you're editing
-3. **Skills** based on what you're doing (see topology-alias rule)
+3. **Session:** run `/XDN` for Topology Creator + scaler GUI context; skill `~/.cursor/skills/xdn-topology-mastery/`
 
 ## Code Style
 

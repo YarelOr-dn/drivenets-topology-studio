@@ -1,0 +1,47 @@
+[
+  {
+    "command": "show bgp l2vpn evpn summary | no-more",
+    "timestamp": "2026-03-23T08:14:30.981+00:00",
+    "duration_ms": 200,
+    "phase": "after_snapshot",
+    "output_length": 383,
+    "output_preview": "BGP router identifier 4.4.4.4, local AS number 1234567\nBGP table node count 1\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567         17         17    0     0       0 00:00:22                   2\n\nTotal number of established neighbors with L2vpn EVPN 1/1\n\nTotal number of NSR capable BGP sessions 0",
+    "output_full": "BGP router identifier 4.4.4.4, local AS number 1234567\nBGP table node count 1\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567         17         17    0     0       0 00:00:22                   2\n\nTotal number of established neighbors with L2vpn EVPN 1/1\n\nTotal number of NSR capable BGP sessions 0"
+  },
+  {
+    "command": "show evpn summary | no-more",
+    "timestamp": "2026-03-23T08:14:31.182+00:00",
+    "duration_ms": 50,
+    "phase": "after_snapshot",
+    "output_length": 716,
+    "output_preview": "Global EVPN parameters\nMAC table limit per EVI : 64000\nMAC table aging time    : 320s\nControl Word            : enabled\nFAT Label               : disabled\nE-Tree Leaf Label       : 1032383\n\nNumber of EVPN instances       : 1\nTotal local MAC addresses      : 0\nTotal local MAC-IPs            : 0\nTotal remote MAC addresses     : 1\nTotal remote MAC-IPs           : 0\nTotal VPLS MAC addresses       : 0\nTotal MAC addresses            : 1\nTotal MAC-IPs                  : 0\nTotal suppressed MAC addresses",
+    "output_full": "Global EVPN parameters\nMAC table limit per EVI : 64000\nMAC table aging time    : 320s\nControl Word            : enabled\nFAT Label               : disabled\nE-Tree Leaf Label       : 1032383\n\nNumber of EVPN instances       : 1\nTotal local MAC addresses      : 0\nTotal local MAC-IPs            : 0\nTotal remote MAC addresses     : 1\nTotal remote MAC-IPs           : 0\nTotal VPLS MAC addresses       : 0\nTotal MAC addresses            : 1\nTotal MAC-IPs                  : 0\nTotal suppressed MAC addresses : 0\nTotal number of interfaces/up  : 0/0\nTotal number of EVPN neighbors : 1\nTotal number of VPLS neighbors : 0\nTotal Local MH ESIs            : 0\nTotal Local MH ACs             : 0\nTotal Local MH VPLS ACs        : 0"
+  },
+  {
+    "command": "show evpn instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-03-23T08:14:31.232+00:00",
+    "duration_ms": 100,
+    "phase": "after_snapshot",
+    "output_length": 650,
+    "output_preview": "EVPN: HA_TEST_ELAN\n  EVI ID : 1\n  Seamless-integration : disabled\n  Number of EVPN neighbors  : 1\n    Number of EVPN interfaces : 0\n    | Associated interfaces   | State   / Forwarding State                                   | Uptime              | Actual Local Homing Type    | ESI                             | Learned MACs   |\n    +-------------------------+--------------------------------------------------------------+---------------------+-----------------------------+------------------------",
+    "output_full": "EVPN: HA_TEST_ELAN\n  EVI ID : 1\n  Seamless-integration : disabled\n  Number of EVPN neighbors  : 1\n    Number of EVPN interfaces : 0\n    | Associated interfaces   | State   / Forwarding State                                   | Uptime              | Actual Local Homing Type    | ESI                             | Learned MACs   |\n    +-------------------------+--------------------------------------------------------------+---------------------+-----------------------------+---------------------------------+----------------+\n  \n    (I) - DF Election Highest Preference, Invert Preference is enabled for this interface.\n  \n    (L) - Leaf Interface."
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-03-23T08:14:31.333+00:00",
+    "duration_ms": 200,
+    "phase": "after_snapshot",
+    "output_length": 735,
+    "output_preview": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ------------------",
+    "output_full": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ----------------------------------------------------------------------------------------------------------------------------\n    B>        | 00:de:ad:00:01:01    |                               | 2.2.2.2                | 258         | Single-homed      "
+  },
+  {
+    "command": "show system | no-more",
+    "timestamp": "2026-03-23T08:14:31.534+00:00",
+    "duration_ms": 150,
+    "phase": "after_snapshot",
+    "output_length": 2971,
+    "output_preview": "System Name: YOR_CL_PE-4, System-Id: 1095cfe0-7fc5-4701-ad03-28a8385f5820\nSystem Type: CL-86, Family: NCR\nEnterprise-Id: 49739\nDescription: DRIVENETS Network Cloud Router\nSystem status: running \nSystem Start Time: 22-Mar-2026 22:03:49 UTC+02:00 (Israel)\nSystem Uptime: 0 days, 12:10:42\nSystem Boot Uptime: 0 days, 12:11:54\nVersion: DNOS [26.2.0] build [23_priv], Copyright 2026 DRIVENETS LTD.\nPatch: N/A\nEnvironment:\n\tLocation: N/A\n\tFloor: N/A\n\tRack: N/A\nContact: support@drivenets.com\nFabric Minimum",
+    "output_full": "System Name: YOR_CL_PE-4, System-Id: 1095cfe0-7fc5-4701-ad03-28a8385f5820\nSystem Type: CL-86, Family: NCR\nEnterprise-Id: 49739\nDescription: DRIVENETS Network Cloud Router\nSystem status: running \nSystem Start Time: 22-Mar-2026 22:03:49 UTC+02:00 (Israel)\nSystem Uptime: 0 days, 12:10:42\nSystem Boot Uptime: 0 days, 12:11:54\nVersion: DNOS [26.2.0] build [23_priv], Copyright 2026 DRIVENETS LTD.\nPatch: N/A\nEnvironment:\n\tLocation: N/A\n\tFloor: N/A\n\tRack: N/A\nContact: support@drivenets.com\nFabric Minimum Links: 1\nFabric Minimum NCF: 1\nDynamic Fabric State: disabled\nNCC switchovers: 0\nLast NCC switchover: N/A\nEscalation-stop-failovers\n  Max-failover(remaining): 2(2)\n  Failover-period(remaining): 30min(0 days, 0:30:00)\nRecovery-mode: supported\nBGP NSR: ready\n\n\n| Type | Id     | Admin    | Operational                        | Model           | Uptime              | Description                | Serial Number        |\n+------+--------+----------+------------------------------------+-----------------+---------------------+----------------------------+----------------------+\n| NCC  | 0      |          | active-up                          | X86             | 0 days, 12:10:42    | dn-ncc-0                   | kvm108-cl408d-ncc0   |\n| NCC  | 1      |          | standby-up                         | X86             | 0 days, 11:55:53    | dn-ncc-1                   | kvm108-cl408d-ncc1   |\n| NCF  | 0      | enabled  | up                                 | NCF-48CD        | 0 days, 10:23:36    | dn-ncf-0                   | WEB19B7G00012-P2     |\n| NCF  | 1      | enabled  | disconnected                       | NCF-48CD        | 0 days, 00:00:00    | dn-ncf-1                   |                      |\n| NCF  | 2      | enabled  | disconnected                       | NCF-48CD        | 0 days, 00:00:00    | dn-ncf-2                   |                      |\n| NCF  | 3      | enabled  | disconnected                       | NCF-48CD        | 0 days, 00:00:00    | dn-ncf-3                   |                      |\n| NCF  | 4      | enabled  | disconnected                       | NCF-48CD        | 0 days, 00:00:00    | dn-ncf-4                   |                      |\n| NCF  | 5      | enabled  | disconnected                       | NCF-48CD        | 0 days, 00:00:00    | dn-ncf-5                   |                      |\n| NCP  | 6      | enabled  | disconnected                       | NCP-40C         | 0 days, 00:00:00    | dn-ncp-6                   |                      |\n| NCP  | 18     | enabled  | up                                 | NCP-40C         | 0 days, 10:23:00    | dn-ncp-18                  | WDY19C7M00013-P3     |\n| NCM  | A0     |          | up                                 | NCM-48X-6C      | 0 days, 12:09:44    | dn-ncm-A0                  | AAF1944AAAJ          |\n| NCM  | B0     |          | disconnected                       | NCM-48X-6C      | 0 days, 00:00:00    | dn-ncm-B0                  |                      |"
+  }
+]

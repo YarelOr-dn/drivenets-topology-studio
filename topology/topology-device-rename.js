@@ -348,7 +348,6 @@ function applyRename(editor, device, newLabel, fontSettings = null) {
         if (editor.saveState) editor.saveState();
         device.label = newLabel.trim() || device.label;
         
-        // Apply font settings if provided
         if (fontSettings) {
             device.fontFamily = fontSettings.fontFamily;
             device.labelSize = fontSettings.fontSize;
@@ -357,7 +356,39 @@ function applyRename(editor, device, newLabel, fontSettings = null) {
             device.fontStyle = fontSettings.fontStyle;
         }
         
+        checkDeviceMismatchLive(device);
         editor.draw();
+    }
+}
+
+function checkDeviceMismatchLive(device) {
+    if (!device || device.type !== 'device') return;
+    const cfgHost = device._identity?.config_hostname || device._configHostname;
+    if (!cfgHost) {
+        if (device.sshConfig?.host || device.sshConfig?.hostBackup) {
+            const did = device.label || device.deviceSerial || device.serial || '';
+            if (did && window.DeviceMonitor?.refreshDevice && !device._mismatchRefreshPending) {
+                device._mismatchRefreshPending = true;
+                window.DeviceMonitor.refreshDevice(did, true).finally(() => {
+                    device._mismatchRefreshPending = false;
+                });
+            }
+        }
+        return;
+    }
+    const label = (device.label || '').trim();
+    const mismatch = label !== '' && cfgHost !== label;
+    const prev = device._hostnameMismatch;
+    device._hostnameMismatch = mismatch;
+    if (device._identity) {
+        device._identity.hostname_mismatch = mismatch;
+        device._identity.canvas_label = label;
+    }
+    if (!mismatch) {
+        device._mismatchDismissed = false;
+        device._badgeWorlds = null;
+    } else if (!prev && mismatch) {
+        device._mismatchDismissed = false;
     }
 }
 
@@ -373,5 +404,6 @@ function hideRenamePopup() {
 window.showRenamePopup = showRenamePopup;
 window.applyRename = applyRename;
 window.hideRenamePopup = hideRenamePopup;
+window.checkDeviceMismatchLive = checkDeviceMismatchLive;
 
 console.log('[topology-device-rename.js] Device rename module loaded');

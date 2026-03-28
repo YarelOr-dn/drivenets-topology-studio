@@ -24,6 +24,10 @@ window.MouseDownHandler = {
         }
         editor._lastMouseDownEventTime = eventTime;
         
+        if (editor.canvas && document.activeElement !== editor.canvas) {
+            editor.canvas.focus({ preventScroll: true });
+        }
+        
         // ENHANCED: Log with input device type differentiation
         // FIXED: Prevent duplicate logging when both pointer and mouse events fire
         if (editor.debugger && !editor._skipMouseLog) {
@@ -560,6 +564,41 @@ window.MouseDownHandler = {
         let clickedObject = null;
         if (!editor.rotatingText && !editor.resizingText) {
             clickedObject = editor.findObjectAt(pos.x, pos.y);
+            
+            // SELECTION GUARD: If a link/UL is selected and findObjectAt returned a
+            // DIFFERENT link, check if the click is near the selected link's body.
+            // Prevents accidental selection switch when overlapping links exist (e.g.,
+            // new UL created on top of an existing link like iBGP).
+            // Handles both Unbound Links (start/end) and Quick Links (_renderedEndpoints).
+            if (clickedObject &&
+                (clickedObject.type === 'link' || clickedObject.type === 'unbound') &&
+                editor.selectedObject &&
+                (editor.selectedObject.type === 'link' || editor.selectedObject.type === 'unbound') &&
+                clickedObject !== editor.selectedObject) {
+                const sel = editor.selectedObject;
+                let sx, sy, ex, ey;
+                if (sel.type === 'unbound' && sel.start && sel.end) {
+                    sx = sel.start.x; sy = sel.start.y; ex = sel.end.x; ey = sel.end.y;
+                } else if (sel._renderedEndpoints) {
+                    sx = sel._renderedEndpoints.startX; sy = sel._renderedEndpoints.startY;
+                    ex = sel._renderedEndpoints.endX; ey = sel._renderedEndpoints.endY;
+                } else if (editor.getLinkRenderedEndpoints && editor.getLinkRenderedEndpoints(sel)) {
+                    const ep = editor.getLinkRenderedEndpoints(sel);
+                    sx = ep.startX; sy = ep.startY; ex = ep.endX; ey = ep.endY;
+                } else {
+                    sx = sy = ex = ey = null;
+                }
+                if (sx != null) {
+                    const margin = 12 / editor.zoom;
+                    const minX = Math.min(sx, ex) - margin;
+                    const maxX = Math.max(sx, ex) + margin;
+                    const minY = Math.min(sy, ey) - margin;
+                    const maxY = Math.max(sy, ey) + margin;
+                    if (pos.x >= minX && pos.x <= maxX && pos.y >= minY && pos.y <= maxY) {
+                        clickedObject = editor.selectedObject;
+                    }
+                }
+            }
         }
         
         // Legacy device/shape handle checks kept as fallback for objects found by findObjectAt

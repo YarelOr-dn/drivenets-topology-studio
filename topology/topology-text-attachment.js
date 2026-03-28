@@ -83,13 +83,24 @@ window.TextAttachment = {
             }
         }
         
-        return nearestLink ? {
+        if (!nearestLink) return null;
+
+        // Check if another text box is already attached at this location
+        const tSnap = nearestT;
+        const occupied = editor.objects.some(obj => {
+            if (obj.type !== 'text' || obj.linkId !== nearestLink.id) return false;
+            const existingT = obj.linkAttachT !== undefined ? obj.linkAttachT : 0.5;
+            return Math.abs(existingT - tSnap) < 0.08;
+        });
+        if (occupied) return null;
+
+        return {
             link: nearestLink,
             distance: nearestDistance,
-            t: nearestT, // 0-1 parametric position
+            t: nearestT,
             point: nearestPoint,
-            position: editor.getAttachmentPositionFromT(nearestT) // 'left', 'middle', 'right'
-        } : null;
+            position: editor.getAttachmentPositionFromT(nearestT)
+        };
     },
 
     getClosestPointOnCurvedLink(editor, px, py, link, linkStart, linkEnd) {

@@ -444,6 +444,77 @@ function showShapeSelectionToolbar(editor, shape) {
         return container;
     };
     
+    // Layer widget: badge + dropdown (submenu style, like LLDP/System Stack)
+    const createLayerWidget = (obj) => {
+        const widget = document.createElement('div');
+        widget.className = 'layer-widget';
+        widget.style.cssText = 'display: inline-flex; align-items: center; gap: 1px;';
+        const badgeColor = 'rgba(255,255,255,0.85)';
+        const badgeBg = 'rgba(255,255,255,0.08)';
+        const badgeBorder = 'rgba(255,255,255,0.1)';
+        const updateBadge = () => {
+            badge.textContent = editor.getObjectLayer ? editor.getObjectLayer(obj) : 20;
+        };
+        const applyLayerAction = (fn) => {
+            if (!editor[fn] || !obj) return;
+            editor.saveState && editor.saveState();
+            editor[fn](obj);
+            editor.draw && editor.draw();
+            updateBadge();
+            setTimeout(() => showShapeSelectionToolbar(editor, obj), 50);
+        };
+        const badge = document.createElement('button');
+        badge.className = 'layer-badge';
+        badge.style.cssText = `min-width: 28px; height: 26px; padding: 0 6px; border: 1px solid ${badgeBorder}; background: ${badgeBg}; color: ${badgeColor}; font-size: 11px; font-family: monospace; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; justify-content: center;`;
+        updateBadge();
+        badge.onmousedown = (e) => { e.stopPropagation(); e.preventDefault(); };
+        let dropdown = null;
+        const items = [
+            { label: 'Bring to Front', fn: 'moveObjectToFront' },
+            { label: 'Move Forward', fn: 'moveObjectForward' },
+            { label: 'Move Backward', fn: 'moveObjectBackward' },
+            { label: 'Send to Back', fn: 'moveObjectToBack' },
+            null,
+            { label: 'Reset to Default', fn: 'resetObjectLayer' }
+        ];
+        const closeDropdown = () => {
+            if (dropdown) { dropdown.remove(); dropdown = null; }
+            document.removeEventListener('mousedown', outsideClick);
+        };
+        const outsideClick = (e) => {
+            if (dropdown && !dropdown.contains(e.target) && e.target !== badge) closeDropdown();
+        };
+        badge.onclick = (e) => {
+            e.stopPropagation(); e.preventDefault();
+            if (dropdown) { closeDropdown(); return; }
+            dropdown = document.createElement('div');
+            dropdown.style.cssText = `position: fixed; z-index: 100002; min-width: 160px; background: rgba(15, 15, 25, 0.85); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 10px; padding: 4px 0; box-shadow: 0 4px 30px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08); backdrop-filter: blur(24px) saturate(200%); -webkit-backdrop-filter: blur(24px) saturate(200%);`;
+            items.forEach((item) => {
+                if (!item) { const sep = document.createElement('div'); sep.style.cssText = 'height: 1px; background: rgba(255,255,255,0.1); margin: 4px 6px;'; dropdown.appendChild(sep); return; }
+                const div = document.createElement('div');
+                div.style.cssText = `padding: 6px 12px; cursor: pointer; font-size: 12px; border-radius: 6px; margin: 0 4px; color: ${badgeColor};`;
+                div.textContent = item.label;
+                div.onmouseenter = () => { div.style.background = 'rgba(255,255,255,0.12)'; };
+                div.onmouseleave = () => { div.style.background = 'transparent'; };
+                div.onmousedown = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+                div.onclick = (ev) => { ev.stopPropagation(); ev.preventDefault(); applyLayerAction(item.fn); closeDropdown(); };
+                dropdown.appendChild(div);
+            });
+            document.body.appendChild(dropdown);
+            const r = badge.getBoundingClientRect();
+            dropdown.style.left = `${r.left + r.width / 2 - 80}px`;
+            dropdown.style.top = `${r.bottom + 6}px`;
+            setTimeout(() => document.addEventListener('mousedown', outsideClick), 10);
+        };
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position: relative; display: inline-flex; align-items: center;';
+        wrap.appendChild(badge);
+        widget.appendChild(wrap);
+        badge.onmouseenter = () => { badge.style.background = 'rgba(255,255,255,0.12)'; if (editor._showToolbarTooltip) editor._showToolbarTooltip(badge, 'Layer (click for menu)'); };
+        badge.onmouseleave = () => { badge.style.background = badgeBg; if (editor._hideToolbarTooltip) editor._hideToolbarTooltip(); };
+        return widget;
+    };
+
     // Helper to create icon button with tooltip
     const createIconBtn = (iconId, tooltip, onClick, options = {}) => {
         const { isDestructive = false, isActive = false, color = null, autoClose = true } = options;
@@ -572,6 +643,9 @@ function showShapeSelectionToolbar(editor, shape) {
         },
         { isActive: shape.locked, autoClose: false }
     ));
+    
+    // Layer widget
+    actionsRow.appendChild(createLayerWidget(shape));
     
     // Merge to Background button - toggle, keeps toolbar open
     actionsRow.appendChild(createIconBtn(

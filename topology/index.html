@@ -10,19 +10,48 @@
     <link rel="icon" type="image/png" href="branding/extracted/OUR_LOGO_p1_i5_180x180.png">
     <link rel="apple-touch-icon" href="branding/extracted/OUR_LOGO_p1_i5_180x180.png">
     <script>
-    // CURSOR FIX: Suppress "Save As" dialog on refresh
-    window.addEventListener('beforeunload', function(e) {
-        // Setting to empty string suppresses the dialog
-        // Don't use delete or other methods - just set to empty
-        e.returnValue = '';
-        return '';
-    });
+    // No beforeunload handler -- auto-save handles persistence.
+    // Previously this set e.returnValue='', which in some browsers
+    // triggers a "Leave site?" confirmation dialog blocking R-refresh.
     </script>
-    <!-- Google Fonts for Text Tool -->
+    <script>
+    // Pre-load label repair: fix corrupted device labels in localStorage
+    // BEFORE the topology constructor reads them.  Runs synchronously so
+    // loadAutoSave() always sees clean data.
+    (function() {
+        try {
+            var REPAIRS = { 'Bitch': 'RR-SA-2' };
+            var keys = ['topology_autosave', 'topology_autosave_backup'];
+            for (var k = 0; k < keys.length; k++) {
+                var raw = localStorage.getItem(keys[k]);
+                if (!raw) continue;
+                var changed = false;
+                for (var bad in REPAIRS) {
+                    if (raw.indexOf('"' + bad + '"') === -1) continue;
+                    var data = JSON.parse(raw);
+                    if (!data.objects) continue;
+                    for (var i = 0; i < data.objects.length; i++) {
+                        var obj = data.objects[i];
+                        if (obj.type === 'device' && obj.label === bad) {
+                            obj.label = REPAIRS[bad];
+                            changed = true;
+                        }
+                    }
+                    if (changed) {
+                        localStorage.setItem(keys[k], JSON.stringify(data));
+                        console.warn('[PreLoadLabelFix] Repaired "' + bad + '" -> "' + REPAIRS[bad] + '" in ' + keys[k]);
+                    }
+                }
+            }
+        } catch (e) { console.error('[PreLoadLabelFix]', e); }
+    })();
+    </script>
+    <!-- Google Fonts for Text Tool (async, non-render-blocking) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=Caveat:wght@400;700&family=Comic+Neue:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=20260311c">
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=Caveat:wght@400;700&family=Comic+Neue:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=Caveat:wght@400;700&family=Comic+Neue:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"></noscript>
+    <link rel="stylesheet" href="styles.css?v=20260323b">
     <style>
     /* App Icon System - Custom SVG Icons */
     .ico { display: inline-block; width: 1em; height: 1em; vertical-align: -0.125em; margin-right: 3px; }
@@ -326,6 +355,12 @@
         <path d="M2 14l10 5 10-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         <path d="M2 19l10 5 10-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
     </symbol>
+    <symbol id="ico-layer-up" viewBox="0 0 24 24">
+        <path d="M7 14l5-5 5 5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="ico-layer-down" viewBox="0 0 24 24">
+        <path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
     <symbol id="ico-curve" viewBox="0 0 24 24">
         <path d="M3 18C6 10 10 5 21 5" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.25"/>
         <path d="M3 17C6 10 10 6 21 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
@@ -560,6 +595,20 @@
         <!-- Cursor line _ -->
         <path d="M13 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
     </symbol>
+    <symbol id="ico-console" viewBox="0 0 24 24">
+        <!-- Console cable in rounded square (matches terminal icon shape) -->
+        <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="2" fill="none"/>
+        <!-- RJ45/serial connector top -->
+        <rect x="9" y="7" width="6" height="3.5" rx="0.8" stroke="currentColor" stroke-width="1.4" fill="none"/>
+        <line x1="10.5" y1="8" x2="10.5" y2="9.5" stroke="currentColor" stroke-width="1"/>
+        <line x1="12" y1="8" x2="12" y2="9.5" stroke="currentColor" stroke-width="1"/>
+        <line x1="13.5" y1="8" x2="13.5" y2="9.5" stroke="currentColor" stroke-width="1"/>
+        <!-- Cable -->
+        <path d="M12 10.5v2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M12 13c0 1.2-1.5 1.5-1.5 2.5s1.5 1.3 1.5 1.3s1.5-.3 1.5-1.3-1.5-1.3-1.5-2.5" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+        <!-- DB9 connector bottom -->
+        <path d="M9.5 17h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </symbol>
     <symbol id="ico-reset" viewBox="0 0 24 24">
         <!-- Circular arrow reset icon -->
         <path d="M12 5v4l3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
@@ -567,6 +616,50 @@
     </symbol>
 </svg>
 <body>
+    <!-- Splash screen (visible instantly, removed by TopologyEditor init) -->
+    <div id="app-splash" style="position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;background:#0a0a14;transition:opacity .5s">
+        <div style="text-align:center">
+            <svg width="200" height="56" viewBox="0 0 200 56">
+                <!-- Left device node -->
+                <circle cx="28" cy="28" r="12" fill="none" stroke="#1a3a5c" stroke-width="2"/>
+                <circle cx="28" cy="28" r="5" fill="#7ec8e3" opacity=".8">
+                    <animate attributeName="r" values="4;6;4" dur="2s" repeatCount="indefinite"/>
+                    <animate attributeName="opacity" values=".6;1;.6" dur="2s" repeatCount="indefinite"/>
+                </circle>
+                <!-- Link line -->
+                <line x1="40" y1="28" x2="160" y2="28" stroke="#1a3a5c" stroke-width="1.5" stroke-dasharray="4,4"/>
+                <!-- Traveling packet dot -->
+                <circle r="3" fill="#7ec8e3" opacity="0">
+                    <animateMotion dur="2s" repeatCount="indefinite" path="M40,28 L160,28"/>
+                    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.08;0.92;1" dur="2s" repeatCount="indefinite"/>
+                </circle>
+                <!-- Protocol names cycling in the middle -->
+                <text x="100" y="24" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" font-weight="600" fill="#7ec8e3" opacity="0">
+                    BGP<animate attributeName="opacity" values="0;0;1;1;0;0;0;0;0;0;0;0" dur="12s" repeatCount="indefinite"/>
+                </text>
+                <text x="100" y="24" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" font-weight="600" fill="#2ecc71" opacity="0">
+                    LLDP<animate attributeName="opacity" values="0;0;0;0;1;1;0;0;0;0;0;0" dur="12s" repeatCount="indefinite"/>
+                </text>
+                <text x="100" y="24" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" font-weight="600" fill="#FF7A33" opacity="0">
+                    ISIS<animate attributeName="opacity" values="0;0;0;0;0;0;1;1;0;0;0;0" dur="12s" repeatCount="indefinite"/>
+                </text>
+                <text x="100" y="24" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" font-weight="600" fill="#e74c3c" opacity="0">
+                    ICMP<animate attributeName="opacity" values="0;0;0;0;0;0;0;0;1;1;0;0" dur="12s" repeatCount="indefinite"/>
+                </text>
+                <text x="100" y="24" text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="9" font-weight="600" fill="#9b59b6" opacity="0">
+                    MPLS<animate attributeName="opacity" values="0;0;0;0;0;0;0;0;0;0;1;1" dur="12s" repeatCount="indefinite"/>
+                </text>
+                <!-- Right device node -->
+                <circle cx="172" cy="28" r="12" fill="none" stroke="#1a3a5c" stroke-width="2"/>
+                <circle cx="172" cy="28" r="5" fill="#FF7A33" opacity=".8">
+                    <animate attributeName="r" values="4;6;4" dur="2s" repeatCount="indefinite" begin="1s"/>
+                    <animate attributeName="opacity" values=".6;1;.6" dur="2s" repeatCount="indefinite" begin="1s"/>
+                </circle>
+            </svg>
+            <div style="margin-top:10px;font:500 12px/1 system-ui,sans-serif;color:#7ec8e3;letter-spacing:.5px;opacity:.8">Loading Topology Studio</div>
+        </div>
+    </div>
+    <script>setTimeout(function(){var s=document.getElementById('app-splash');if(s){s.style.opacity='0';setTimeout(function(){s.remove()},500)}},8000)</script>
     <!-- Bug Alert - Bottom Center (Enhanced with AI Analysis) -->
     <div id="bottom-bug-alert" style="display: none; position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, rgba(231, 76, 60, 0.98), rgba(192, 57, 43, 0.98)); color: white; padding: 12px 18px; border-radius: 10px; font-size: 12px; font-weight: bold; box-shadow: 0 6px 24px rgba(231, 76, 60, 0.7); z-index: 100001; max-width: 700px; border: 2px solid rgba(255, 255, 255, 0.2);">
         <div style="display: flex; align-items: flex-start; gap: 14px;">
@@ -1361,7 +1454,7 @@
                 100% { filter: drop-shadow(0 2px 6px rgba(100, 116, 139, 0.4)); }
             }
         </style>
-        <button class="cloud-btn" id="btn-scaler-config" data-tooltip="Generate SCALER device configuration">
+        <button class="cloud-btn" id="btn-scaler-config" data-tooltip="Manage and configure devices in the current topology [C]">
             <div class="cloud-shape">
                 <!-- Compact fluffy bumps -->
                 <div class="cloud-puff puff-1"></div>
@@ -2244,7 +2337,7 @@
     </div>
     
     <div class="canvas-container">
-        <canvas id="topology-canvas"></canvas>
+        <canvas id="topology-canvas" tabindex="0"></canvas>
         <!-- Vertical Scrollbar -->
         <div class="vertical-scrollbar" id="vertical-scrollbar">
             <div class="scrollbar-thumb" id="vertical-thumb"></div>
@@ -3652,102 +3745,117 @@
         </div>
     </div>
     
-    <!-- Combined bundle for better loading -->
-    <!-- Load source files directly for debugging -->
+    <!-- All scripts use defer: downloads in parallel, executes in order after HTML parsed -->
     
     <!-- Layer 0: Foundation modules (no dependencies) -->
-    <script src="topology-errors.js?v=20260203"></script>
-    <script src="topology-clipboard-utils.js?v=20260311"></script>
-    <script src="topology-registry.js?v=20260203"></script>
-    <script src="topology-events.js?v=20260203"></script>
-    <script src="topology-geometry.js?v=20260203"></script>
-    <script src="topology-platform-data.js?v=20260203"></script>
+    <script defer src="topology-errors.js?v=20260203"></script>
+    <script defer src="topology-clipboard-utils.js?v=20260311"></script>
+    <script defer src="topology-registry.js?v=20260203"></script>
+    <script defer src="topology-events.js?v=20260203"></script>
+    <script defer src="topology-geometry.js?v=20260203"></script>
+    <script defer src="topology-platform-data.js?v=20260203"></script>
     
     <!-- Layer 1: Core services -->
-    <script src="topology-input.js?v=20260203"></script>
-    <script src="topology-files.js?v=20260203"></script>
-    <script src="topology-drawing.js?v=20260203"></script>
-    <script src="topology-history.js?v=20260203"></script>
-    <script src="topology-text.js?v=20260203"></script>
-    <script src="topology-shapes.js?v=20260203"></script>
-    <script src="topology-devices.js?v=20260311a"></script>
-    <script src="topology-links.js?v=20260203"></script>
-    <script src="topology-ui.js?v=20260203"></script>
-    <script src="topology-menus.js?v=20260203"></script>
-    <script src="topology-minimap.js?v=20260203"></script>
-    <script src="topology-link-editor.js?v=20260203"></script>
-    <script src="topology-groups.js?v=20260204"></script>
-    <script src="topology-toolbar.js?v=20260204"></script>
-    <script src="topology-dnaas.js?v=20260204"></script>
-    <script src="topology-network-mapper.js?v=20260310y"></script>
-    <script src="topology-multiselect-menu.js?v=20260204"></script>
-    <script src="topology-device-toolbar.js?v=20260204"></script>
-    <script src="topology-link-toolbar.js?v=20260310"></script>
-    <script src="topology-text-toolbar.js?v=20260204"></script>
-    <script src="topology-shape-toolbar.js?v=20260204"></script>
-    <script src="topology-ssh-dialog.js?v=20260204"></script>
-    <script src="topology-rename-popup.js?v=20260204"></script>
-    <script src="topology-text-popups.js?v=20260204"></script>
-    <script src="topology-device-styles.js?v=20260204"></script>
-    <script src="topology-device-editor.js?v=20260204"></script>
-    <script src="topology-keyboard.js?v=20260310"></script>
-    <script src="topology-mouse-down.js?v=20260212"></script>
-    <script src="topology-mouse-move.js?v=20260212"></script>
-    <script src="topology-mouse-up.js?v=20260212"></script>
-    <script src="topology-mouse.js?v=20260212"></script>
-    <script src="topology-link-drawing.js?v=20260310a"></script>
-    <script src="topology-xray-popup.js?v=20260310y"></script>
-    <script src="topology-toolbar-setup.js?v=20260311d"></script>
-    <script src="topology-draw.js?v=20260204"></script>
-    <script src="topology-lldp-dialog.js?v=20260204"></script>
-    <script src="topology-stack-dialog.js?v=20260311"></script>
-    <script src="topology-dnaas-helpers.js?v=20260311"></script>
-    <script src="topology-canvas-drawing.js?v=20260204"></script>
-    <script src="topology-minimap-render.js?v=20260204"></script>
-    <script src="topology-shape-drawing.js?v=20260204"></script>
-    <script src="topology-object-detection.js?v=20260310b"></script>
-    <script src="topology-modal-utils.js?v=20260204"></script>
-    <script src="topology-link-table.js?v=20260204"></script>
-    <script src="topology-device-placement.js?v=20260204"></script>
-    <script src="topology-curve-mode.js?v=20260204"></script>
-    <script src="topology-notifications.js?v=20260311g"></script>
-    <script src="topology-dialogs.js?v=20260310a"></script>
-    <script src="topology-sample-data.js?v=20260204"></script>
-    <script src="topology-bul-utils.js?v=20260204"></script>
-    <script src="topology-interfaces.js?v=20260204"></script>
-    <script src="topology-math-utils.js?v=20260204"></script>
-    <script src="topology-link-popups.js?v=20260204"></script>
-    <script src="topology-color-popups.js?v=20260204"></script>
-    <script src="topology-scrollbars.js?v=20260204"></script>
-    <script src="topology-dnaas-operations.js?v=20260310x"></script>
-    <script src="topology-bd-legend.js?v=20260310x"></script>
-    <script src="topology-touch.js?v=20260204"></script>
-    <script src="topology-context-menus.js?v=20260204"></script>
-    <script src="topology-text-editor.js?v=20260204"></script>
-    <script src="topology-device-rename.js?v=20260204"></script>
+    <script defer src="topology-input.js?v=20260203"></script>
+    <script defer src="topology-files.js?v=20260203"></script>
+    <script defer src="topology-drawing.js?v=20260203"></script>
+    <script defer src="topology-history.js?v=20260203"></script>
+    <script defer src="topology-text.js?v=20260203"></script>
+    <script defer src="topology-shapes.js?v=20260203"></script>
+    <script defer src="topology-devices.js?v=20260311a"></script>
+    <script defer src="topology-links.js?v=20260317d"></script>
+    <script defer src="topology-ui.js?v=20260203"></script>
+    <script defer src="topology-menus.js?v=20260203"></script>
+    <script defer src="topology-minimap.js?v=20260203"></script>
+    <script defer src="topology-link-editor.js?v=20260203"></script>
+    <script defer src="topology-groups.js?v=20260204"></script>
+    <script defer src="topology-toolbar.js?v=20260204"></script>
+    <script defer src="topology-dnaas.js?v=20260204"></script>
+    <script defer src="topology-network-mapper.js?v=20260310y"></script>
+    <script defer src="topology-multiselect-menu.js?v=20260204"></script>
+    <script defer src="topology-device-toolbar.js?v=20260322c"></script>
+    <script defer src="topology-link-toolbar.js?v=20260322a"></script>
+    <script defer src="topology-text-toolbar.js?v=20260317k"></script>
+    <script defer src="topology-shape-toolbar.js?v=20260317k"></script>
+    <script defer src="topology-ssh-dialog.js?v=20260323j"></script>
+    <script defer src="topology-rename-popup.js?v=20260204"></script>
+    <script defer src="topology-text-popups.js?v=20260204"></script>
+    <script defer src="topology-device-styles.js?v=20260204"></script>
+    <script defer src="topology-device-editor.js?v=20260204"></script>
+    <script defer src="topology-keyboard.js?v=20260322h"></script>
+    <script defer src="topology-mouse-down.js?v=20260212"></script>
+    <script defer src="topology-mouse-move.js?v=20260212"></script>
+    <script defer src="topology-mouse-up.js?v=20260212"></script>
+    <script defer src="topology-mouse.js?v=20260212"></script>
+    <script defer src="topology-link-drawing.js?v=20260310a"></script>
+    <script defer src="topology-xray-popup.js?v=20260322j"></script>
+    <script defer src="topology-toolbar-setup.js?v=20260311d"></script>
+    <script defer src="topology-draw.js?v=20260315a"></script>
+    <script defer src="topology-lldp-dialog.js?v=20260204"></script>
+    <script defer src="topology-stack-dialog.js?v=20260323g"></script>
+    <script defer src="topology-device-monitor.js?v=20260322m"></script>
+    <script defer src="topology-terminal.js?v=20260320h"></script>
+    <script defer src="topology-dnaas-helpers.js?v=20260322m"></script>
+    <script defer src="topology-canvas-drawing.js?v=20260322k"></script>
+    <script defer src="topology-minimap-render.js?v=20260204"></script>
+    <script defer src="topology-shape-drawing.js?v=20260204"></script>
+    <script defer src="topology-object-detection.js?v=20260322n"></script>
+    <script defer src="topology-modal-utils.js?v=20260204"></script>
+    <script defer src="topology-link-table.js?v=20260204"></script>
+    <script defer src="topology-device-placement.js?v=20260204"></script>
+    <script defer src="topology-curve-mode.js?v=20260204"></script>
+    <script defer src="topology-notifications.js?v=20260311g"></script>
+    <script defer src="topology-dialogs.js?v=20260317e"></script>
+    <script defer src="topology-sample-data.js?v=20260204"></script>
+    <script defer src="topology-bul-utils.js?v=20260204"></script>
+    <script defer src="topology-interfaces.js?v=20260204"></script>
+    <script defer src="topology-math-utils.js?v=20260204"></script>
+    <script defer src="topology-link-popups.js?v=20260204"></script>
+    <script defer src="topology-color-popups.js?v=20260204"></script>
+    <script defer src="topology-scrollbars.js?v=20260321"></script>
+    <script defer src="topology-dnaas-operations.js?v=20260310x"></script>
+    <script defer src="topology-bd-legend.js?v=20260310x"></script>
+    <script defer src="topology-touch.js?v=20260315a"></script>
+    <script defer src="topology-context-menus.js?v=20260204"></script>
+    <script defer src="topology-text-editor.js?v=20260204"></script>
+    <script defer src="topology-device-rename.js?v=20260204"></script>
     
     <!-- Phase 1 extracted modules (Feb 2026) -->
-    <script src="topology-context-menu-handlers.js?v=20260212"></script>
-    <script src="topology-link-details.js?v=20260212"></script>
-    <script src="topology-shape-methods.js?v=20260212"></script>
-    <script src="topology-selection-popups.js?v=20260212"></script>
-    <script src="topology-link-geometry.js?v=20260212"></script>
-    <script src="topology-text-attachment.js?v=20260212"></script>
+    <script defer src="topology-context-menu-handlers.js?v=20260212"></script>
+    <script defer src="topology-link-details.js?v=20260212"></script>
+    <script defer src="topology-shape-methods.js?v=20260212"></script>
+    <script defer src="topology-selection-popups.js?v=20260323h"></script>
+    <script defer src="topology-link-geometry.js?v=20260212"></script>
+    <script defer src="topology-text-attachment.js?v=20260212"></script>
     
-    <!-- Debugger (needs to load before topology.js) -->
-    <script src="debugger.js?v=20260310y"></script>
-    <script src="topology-momentum.js"></script>
-    <script src="topology-file-ops.js?v=20260310x"></script>
+    <!-- Debugger (loads before topology.js due to defer order) -->
+    <script defer src="debugger.js?v=20260310y"></script>
+    <script defer src="topology-momentum.js"></script>
+    <script defer src="topology-file-ops.js?v=20260310x"></script>
     
     <!-- Core orchestrator (loads last, uses all modules) -->
-    <script src="topology.js?v=20260310y"></script>
+    <script defer src="topology.js?v=20260319b"></script>
     
     <!-- Test suite (optional, for development) -->
-    <script src="topology-tests.js?v=20260203"></script>
+    <script defer src="topology-tests.js?v=20260203"></script>
     
-    <!-- SCALER Integration -->
-    <script src="scaler-api.js?v=20260311h"></script>
-    <script src="scaler-gui.js?v=20260311r"></script>
+    <!-- xterm.js for in-browser terminal (all self-hosted, no CDN dependency) -->
+    <link rel="stylesheet" href="xterm.min.css">
+    <script defer src="xterm.min.js"></script>
+    <script defer src="xterm-addon-fit.min.js"></script>
+    <script defer src="xterm-addon-web-links.min.js"></script>
+    <script defer src="xterm-addon-search.min.js"></script>
+    <!-- SCALER Integration (modular: core + domain bundles + init last) -->
+    <script defer src="scaler-api.js?v=20260323c"></script>
+    <script defer src="scaler-gui.js?v=20260323c"></script>
+    <script defer src="scaler-gui-history.js?v=20260323b"></script>
+    <script defer src="scaler-gui-devices.js?v=20260323b"></script>
+    <script defer src="scaler-gui-wizards-network.js?v=20260323b"></script>
+    <script defer src="scaler-gui-wizards-routing.js?v=20260323b"></script>
+    <script defer src="scaler-gui-wizards-security.js?v=20260323b"></script>
+    <script defer src="scaler-gui-progress.js?v=20260323b"></script>
+    <script defer src="scaler-gui-upgrade.js?v=20260323b"></script>
+    <script defer src="scaler-gui-init.js?v=20260323b"></script>
     <!-- Quick Load & Modal panel position fix - ensures panels stay within viewport -->
     <script>
     document.addEventListener('DOMContentLoaded', () => {

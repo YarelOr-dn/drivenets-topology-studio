@@ -763,7 +763,12 @@ def get_ssh_hostname(device, fallback_to_device_ip: bool = True) -> str:
                 mgmt_ip = ops_data.get("mgmt_ip") or ops_data.get("ssh_host")
                 if mgmt_ip and mgmt_ip != "N/A" and mgmt_ip.strip():
                     # Strip subnet mask if present (e.g., "100.64.1.35/20" -> "100.64.1.35")
-                    mgmt_ip = mgmt_ip.split('/')[0].strip()
+                    mgmt_ip = mgmt_ip.split("/")[0].strip()
+                    dev_ip = (device.ip or "").split("/")[0].strip()
+                    # If scaler_bridge passed an explicit IPv4 that differs from cached ops
+                    # (e.g. same serial under PE-1 vs YOR_PE-1 dirs), honor the requested IP.
+                    if dev_ip and re.match(r"^\d+\.\d+\.\d+\.\d+$", dev_ip) and dev_ip != mgmt_ip:
+                        return dev_ip
                     return mgmt_ip
     except Exception:
         pass  # Fall back to device.ip on any error

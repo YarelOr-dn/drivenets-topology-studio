@@ -658,6 +658,7 @@ window.NotificationManager = {
     const API_PATTERN = /^\/api\//;
     const _SILENT_404_EXACT = ['/api/dnaas/interface-details'];
     const _SILENT_404_PREFIX = ['/api/config/', '/api/operations/', '/api/health', '/api/dnaas/enable-lldp/status', '/api/dnaas/device-stack-live'];
+    const _FRIENDLY_502_EXACT = ['/api/dnaas/device-gitcommit'];
     const _SILENT_BRIDGE_PREFIX = ['/api/config/', '/api/operations/', '/api/devices/'];
     const _BRIDGE_UNAVAIL_CODES = new Set([404, 501, 502, 503]);
 
@@ -686,6 +687,7 @@ window.NotificationManager = {
                     _SILENT_404_EXACT.some(p => cleanUrl === p) ||
                     _SILENT_404_PREFIX.some(p => cleanUrl.startsWith(p))
                 )) ||
+                (resp.status === 502 && _FRIENDLY_502_EXACT.some(p => cleanUrl === p)) ||
                 (_BRIDGE_UNAVAIL_CODES.has(resp.status) &&
                     _SILENT_BRIDGE_PREFIX.some(p => cleanUrl.startsWith(p)))
             );

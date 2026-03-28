@@ -477,7 +477,31 @@ window.FileOps = {
             meta.bridge_domains = editor._multiBDMetadata.bridge_domains;
             meta.isDnaas = true;
         }
-        return { version: '1.0', objects: editor.objects.map(obj => ({ ...obj })), metadata: meta };
+        const cleanObjects = editor.objects.map(obj => {
+            const copy = { ...obj };
+            if ((copy.type === 'link' || copy.type === 'unbound') && copy._hidden) {
+                delete copy._hidden;
+            }
+            delete copy._badgeWorlds;
+            delete copy._hostnameMismatch;
+            delete copy._mismatchDismissed;
+            delete copy._identity;
+            delete copy._configHostname;
+            delete copy._stackData;
+            delete copy._stackCachedAt;
+            delete copy._lldpData;
+            delete copy._lldpCompletedAt;
+            delete copy._gitCommit;
+            delete copy._gitCommitFetchedAt;
+            delete copy._renaming;
+            delete copy._activeConfigJob;
+            delete copy._activeUpgradeJob;
+            delete copy._upgradeFailedJob;
+            delete copy._mismatchRefreshPending;
+            delete copy._createdAt;
+            return copy;
+        });
+        return { version: '1.0', objects: cleanObjects, metadata: meta };
     },
 
     quickSaveTopology(editor) {

@@ -66,10 +66,12 @@ class JenkinsBuild:
     def is_sanitizer(self) -> bool:
         """Check if this build was compiled with AddressSanitizer (ASAN).
         
-        Jenkins parameter TEST_NAMES=ENABLE_SANITIZER indicates a sanitizer build.
+        Jenkins uses TESTS_TO_RUN (trigger_build sets this) or TEST_NAMES
+        depending on pipeline version. Check both for compatibility.
         """
-        test_names = self.build_params.get('TEST_NAMES', '')
-        return 'ENABLE_SANITIZER' in str(test_names).upper()
+        test_names = str(self.build_params.get('TEST_NAMES', '')).upper()
+        tests_to_run = str(self.build_params.get('TESTS_TO_RUN', '')).upper()
+        return 'ENABLE_SANITIZER' in test_names or 'ENABLE_SANITIZER' in tests_to_run
     
     @property
     def has_image_artifacts(self) -> bool:
@@ -90,7 +92,7 @@ class JenkinsBuild:
         
         status = "[BUILDING]" if self.building else ("[OK]" if self.result == "SUCCESS" else "[FAIL]")
         expired = " [EXPIRED]" if self.is_expired else ""
-        sanitizer = " [ASAN]" if self.is_sanitizer else ""
+        sanitizer = " [Sanitizer]" if self.is_sanitizer else ""
         
         return f"#{self.build_number} {status} {age_str}{expired}{sanitizer}"
 
@@ -204,15 +206,15 @@ class ParsedJenkinsUrl:
     @property
     def jenkins_job_path(self) -> str:
         """Convert to Jenkins API job path format."""
-        # Convert slashes to /job/ for Jenkins API
+        from urllib.parse import quote
         path_parts = self.job_path.split('/')
         job_path = '/job/' + '/job/'.join(path_parts)
         
         if self.is_pr:
-            # PRs are under view/change-requests/job/PR-XXXX
             return f"{job_path}/view/change-requests/job/{self.branch_or_pr}"
         else:
-            return f"{job_path}/job/{self.branch_or_pr}"
+            encoded_branch = quote(self.branch_or_pr, safe='')
+            return f"{job_path}/job/{encoded_branch}"
 
 
 class JenkinsClient:
@@ -233,6 +235,21 @@ class JenkinsClient:
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     
+    @staticmethod
+    def _encode_branch(name: str) -> str:
+        """Normalize and double-encode a branch name for Jenkins URL segments.
+
+        Accepts raw names (feature/dev_v26_2/branch), single-encoded
+        (feature%2Fdev_v26_2%2Fbranch), or even double-encoded input.
+        Always returns a correctly double-encoded string for /job/{branch}/ paths.
+        """
+        raw = name
+        prev = None
+        while prev != raw:
+            prev = raw
+            raw = unquote(raw)
+        return quote(quote(raw, safe=''), safe='')
+
     def _api_get(self, endpoint: str, params: Dict = None) -> Optional[Dict]:
         """Make GET request to Jenkins API."""
         url = f"{self.config.url}{endpoint}"
@@ -328,10 +345,15 @@ class JenkinsClient:
     def list_release_branches(self) -> List[CheetahBranch]:
         """List release branches (rel_v*), sorted newest first."""
         return self.list_cheetah_branches(pattern=r'^rel_v\d+', sort_newest_first=True)
+
+    def list_feature_branches(self) -> List[CheetahBranch]:
+        """List feature branches (feature/*, fix/*, hotfix/*), sorted newest first."""
+        return self.list_cheetah_branches(pattern=r'^(feature|fix|hotfix)(%2F|[/_])', sort_newest_first=True)
     
     def get_branch_builds(self, branch_name: str, limit: int = 10) -> List[JenkinsBuild]:
         """Get recent builds for a branch."""
-        endpoint = f"{self.CHEETAH_BASE}/job/{branch_name}"
+        encoded_branch = self._encode_branch(branch_name)
+        endpoint = f"{self.CHEETAH_BASE}/job/{encoded_branch}"
         data = self._api_get(endpoint)
         
         if not data or 'builds' not in data:
@@ -360,9 +382,7 @@ class JenkinsClient:
             latest: If True and build_number is None, fetch lastBuild (includes in-progress).
                     If False, fetch lastSuccessfulBuild (only completed successful builds).
         """
-        # URL-encode the branch name - slashes become %2F
-        # Double-encode for Jenkins API: feature/dev_v26_1/flowspec_vpn -> feature%252Fdev_v26_1%252Fflowspec_vpn
-        encoded_branch = quote(quote(branch_name, safe=''), safe='')
+        encoded_branch = self._encode_branch(branch_name)
         
         if build_number:
             endpoint = f"{self.CHEETAH_BASE}/job/{encoded_branch}/{build_number}"
@@ -446,7 +466,7 @@ class JenkinsClient:
                 'is_sanitizer': bool - whether build uses AddressSanitizer
             Or None if no pure build found.
         """
-        encoded_branch = quote(quote(branch_name, safe=''), safe='')
+        encoded_branch = self._encode_branch(branch_name)
         endpoint = f"{self.CHEETAH_BASE}/job/{encoded_branch}"
         data = self._api_get(endpoint)
         
@@ -541,32 +561,26 @@ class JenkinsClient:
                 'has_dnos': bool, 'has_gi': bool, 'has_baseos': bool,
                 'is_sanitizer': bool, 'artifacts': list
         """
-        encoded_branch = quote(quote(branch_name, safe=''), safe='')
+        encoded_branch = self._encode_branch(branch_name)
         endpoint = f"{self.CHEETAH_BASE}/job/{encoded_branch}"
-        data = self._api_get(endpoint)
+        tree = 'builds[number,result,timestamp,url,building,duration,displayName,artifacts[fileName],actions[parameters[name,value]]]{0,%d}' % limit
+        data = self._api_get(endpoint, params={'tree': tree})
         
         if not data or 'builds' not in data:
             return []
         
         results = []
-        for build_ref in data['builds'][:limit]:
+        for build_data in data['builds']:
             if len(results) >= max_results:
                 break
-                
-            build_num = build_ref.get('number')
-            if not build_num:
-                continue
             
-            build_endpoint = f"{self.CHEETAH_BASE}/job/{encoded_branch}/{build_num}"
-            build_data = self._api_get(build_endpoint)
-            
-            if not build_data:
+            if not build_data or not build_data.get('number'):
                 continue
             
             if build_data.get('building', False):
                 continue
             
-            display_name = build_data.get('displayName', '') or f"#{build_num}"
+            display_name = build_data.get('displayName', '') or f"#{build_data['number']}"
             
             is_excluded = False
             for pattern in self.EXCLUDED_BUILD_PATTERNS:
@@ -625,9 +639,8 @@ class JenkinsClient:
         Returns:
             Tuple of (success, log_content or error_message)
         """
-        encoded_branch = quote(quote(branch_name, safe=''), safe='')
+        encoded_branch = self._encode_branch(branch_name)
         
-        # Try to get the console text
         url = f"{self.config.url}{self.CHEETAH_BASE}/job/{encoded_branch}/{build_number}/consoleText"
         
         try:
@@ -697,8 +710,7 @@ class JenkinsClient:
     def get_artifact_content(self, branch_name: str, artifact_name: str, 
                              build_number: int = None) -> Optional[str]:
         """Download artifact content as text."""
-        # URL-encode the branch name - slashes become %2F, then %252F for Jenkins
-        encoded_branch = quote(quote(branch_name, safe=''), safe='')
+        encoded_branch = self._encode_branch(branch_name)
         
         if build_number:
             url = f"{self.config.url}{self.CHEETAH_BASE}/job/{encoded_branch}/{build_number}/artifact/{artifact_name}"
@@ -845,34 +857,36 @@ class JenkinsClient:
     def trigger_build(self, branch_name: str, 
                       with_baseos: bool = True,
                       qa_version: bool = False,
+                      with_sanitizer: bool = False,
                       parameters: Dict = None) -> Tuple[bool, str]:
         """Trigger a new build on a branch.
         
         Args:
-            branch_name: The branch to build (e.g., 'dev_v25_1')
+            branch_name: The branch to build -- accepts raw (feature/branch)
+                         or pre-encoded (feature%2Fbranch) names.
             with_baseos: Whether to build BaseOS containers
             qa_version: Whether this is a QA version (60-day retention)
+            with_sanitizer: Whether to enable AddressSanitizer (ASAN) compilation
             parameters: Additional build parameters
             
         Returns:
             Tuple of (success, message/queue_url)
         """
-        # URL-encode the branch name for Jenkins API
-        encoded_branch = quote(quote(branch_name, safe=''), safe='')
+        encoded_branch = self._encode_branch(branch_name)
         endpoint = f"{self.CHEETAH_BASE}/job/{encoded_branch}/buildWithParameters"
         
-        # All required Jenkins build parameters (matching manual build defaults)
         params = {
-            # Build stages - all required for proper artifact creation
             'SHOULD_LINT': 'Yes',
-            'SHOULD_BUILD_DNOS_CONTAINERS': 'Yes',  # CRITICAL: builds DNOS
-            'SHOULD_BUILD_TARBALLS': 'Yes',          # CRITICAL: creates tar artifacts
+            'SHOULD_BUILD_DNOS_CONTAINERS': 'Yes',
+            'SHOULD_BUILD_TARBALLS': 'Yes',
             'SHOULD_BUILD_BASEOS_CONTAINERS': 'Yes' if with_baseos else 'No',
             'SHOULD_RUN_SMOKE_TESTS': 'Yes',
             'SHOULD_ALLOW_DELTA_BUILD': 'No',
-            # Test configuration
             'TESTS_TO_RUN': 'No Tests',
         }
+        
+        if with_sanitizer:
+            params['TEST_NAMES'] = 'ENABLE_SANITIZER'
         
         if qa_version:
             params['QA_VERSION'] = 'true'
@@ -1109,7 +1123,7 @@ class JenkinsClient:
             branch = match.group(3)
             build_number = int(match.group(4))
             
-            branch = unquote(branch)
+            branch = unquote(unquote(branch))
             
             return ParsedJenkinsUrl(
                 job_path=f"{org}/{repo}",
@@ -1148,7 +1162,7 @@ class JenkinsClient:
             org = match.group(1)
             repo = match.group(2)
             branch = match.group(3)
-            branch = unquote(branch)
+            branch = unquote(unquote(branch))
             
             return ParsedJenkinsUrl(
                 job_path=f"{org}/{repo}",
@@ -1313,10 +1327,11 @@ class JenkinsClient:
     def download_artifact(self, branch_name: str, artifact_path: str, 
                           build_number: int = None, dest_path: str = None) -> Optional[Path]:
         """Download an artifact from Jenkins."""
+        encoded_branch = self._encode_branch(branch_name)
         if build_number:
-            url = f"{self.config.url}{self.CHEETAH_BASE}/job/{branch_name}/{build_number}/artifact/{artifact_path}"
+            url = f"{self.config.url}{self.CHEETAH_BASE}/job/{encoded_branch}/{build_number}/artifact/{artifact_path}"
         else:
-            url = f"{self.config.url}{self.CHEETAH_BASE}/job/{branch_name}/lastSuccessfulBuild/artifact/{artifact_path}"
+            url = f"{self.config.url}{self.CHEETAH_BASE}/job/{encoded_branch}/lastSuccessfulBuild/artifact/{artifact_path}"
         
         try:
             resp = self.session.get(url, stream=True, timeout=300)

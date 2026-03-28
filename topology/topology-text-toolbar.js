@@ -182,6 +182,82 @@ function showTextSelectionToolbar(editor, textObj) {
         sep.style.cssText = `width: 1px; height: 20px; background: ${isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)'}; margin: 0 2px;`;
         return sep;
     };
+
+    // Layer widget: badge + dropdown (submenu style, like LLDP/System Stack)
+    const createLayerWidget = (obj, refreshToolbar) => {
+        const widget = document.createElement('div');
+        widget.className = 'layer-widget';
+        widget.style.cssText = 'display: inline-flex; align-items: center; gap: 1px;';
+        const badgeColor = isDarkMode ? 'rgba(255,255,255,0.85)' : 'rgba(30,30,50,0.85)';
+        const badgeBg = isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)';
+        const badgeBorder = isDarkMode ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)';
+        const updateBadge = () => {
+            badge.textContent = editor.getObjectLayer ? editor.getObjectLayer(obj) : 30;
+        };
+        const applyLayerAction = (fn) => {
+            if (!editor[fn] || !obj) return;
+            editor.saveState && editor.saveState();
+            editor[fn](obj);
+            editor.draw && editor.draw();
+            updateBadge();
+            if (refreshToolbar) setTimeout(refreshToolbar, 50);
+        };
+        const badge = document.createElement('button');
+        badge.className = 'layer-badge';
+        badge.style.cssText = `min-width: 28px; height: 24px; padding: 0 6px; border: 1px solid ${badgeBorder}; background: ${badgeBg}; color: ${badgeColor}; font-size: 11px; font-family: monospace; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; justify-content: center;`;
+        updateBadge();
+        badge.onmousedown = (e) => { e.stopPropagation(); e.preventDefault(); };
+        let dropdown = null;
+        const glassBgDrop = isDarkMode ? 'rgba(15, 15, 25, 0.85)' : 'rgba(255, 255, 255, 0.92)';
+        const glassBorderDrop = isDarkMode ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.08)';
+        const glassShadowDrop = isDarkMode
+            ? '0 4px 30px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08)'
+            : '0 4px 30px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.5)';
+        const items = [
+            { label: 'Bring to Front', fn: 'moveObjectToFront' },
+            { label: 'Move Forward', fn: 'moveObjectForward' },
+            { label: 'Move Backward', fn: 'moveObjectBackward' },
+            { label: 'Send to Back', fn: 'moveObjectToBack' },
+            null,
+            { label: 'Reset to Default', fn: 'resetObjectLayer' }
+        ];
+        const closeDropdown = () => {
+            if (dropdown) { dropdown.remove(); dropdown = null; }
+            document.removeEventListener('mousedown', outsideClick);
+        };
+        const outsideClick = (e) => {
+            if (dropdown && !dropdown.contains(e.target) && e.target !== badge) closeDropdown();
+        };
+        badge.onclick = (e) => {
+            e.stopPropagation(); e.preventDefault();
+            if (dropdown) { closeDropdown(); return; }
+            dropdown = document.createElement('div');
+            dropdown.style.cssText = `position: fixed; z-index: 100002; min-width: 160px; background: ${glassBgDrop}; border: 1px solid ${glassBorderDrop}; border-radius: 10px; padding: 4px 0; box-shadow: ${glassShadowDrop}; backdrop-filter: blur(24px) saturate(200%); -webkit-backdrop-filter: blur(24px) saturate(200%);`;
+            items.forEach((item) => {
+                if (!item) { const sep = document.createElement('div'); sep.style.cssText = `height: 1px; background: ${isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)'}; margin: 4px 6px;`; dropdown.appendChild(sep); return; }
+                const div = document.createElement('div');
+                div.style.cssText = `padding: 6px 12px; cursor: pointer; font-size: 12px; border-radius: 6px; margin: 0 4px; color: ${badgeColor};`;
+                div.textContent = item.label;
+                div.onmouseenter = () => { div.style.background = isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)'; };
+                div.onmouseleave = () => { div.style.background = 'transparent'; };
+                div.onmousedown = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+                div.onclick = (ev) => { ev.stopPropagation(); ev.preventDefault(); applyLayerAction(item.fn); closeDropdown(); };
+                dropdown.appendChild(div);
+            });
+            document.body.appendChild(dropdown);
+            const r = badge.getBoundingClientRect();
+            dropdown.style.left = `${r.left + r.width / 2 - 80}px`;
+            dropdown.style.top = `${r.bottom + 6}px`;
+            setTimeout(() => document.addEventListener('mousedown', outsideClick), 10);
+        };
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position: relative; display: inline-flex; align-items: center;';
+        wrap.appendChild(badge);
+        widget.appendChild(wrap);
+        badge.onmouseenter = () => { badge.style.background = isDarkMode ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.1)'; if (editor._showToolbarTooltip) editor._showToolbarTooltip(badge, 'Layer (click for menu)'); };
+        badge.onmouseleave = () => { badge.style.background = badgeBg; if (editor._hideToolbarTooltip) editor._hideToolbarTooltip(); };
+        return widget;
+    };
     
     // === TOOLBAR BUTTONS ===
     const isLinked = !!textObj.linkId;
@@ -282,6 +358,8 @@ function showTextSelectionToolbar(editor, textObj) {
         setTimeout(() => showTextSelectionToolbar(editor, textObj), 50);
     }));
     
+    toolbar.appendChild(createLayerWidget(textObj));
+    
     // Detach from link (only if attached)
     if (isLinked) {
         toolbar.appendChild(createButton('unlink', 'Detach from Link', () => {
@@ -299,12 +377,7 @@ function showTextSelectionToolbar(editor, textObj) {
     
     toolbar.appendChild(createSeparator());
     
-    // Group 4: More + Delete
-    
-    toolbar.appendChild(createButton('more', 'More Options', () => {
-        hideTextSelectionToolbar(editor);
-        editor.showTextEditor(textObj);
-    }));
+    // Group 4: Delete
     
     toolbar.appendChild(createButton('trash', 'Delete', () => {
         hideTextSelectionToolbar(editor);

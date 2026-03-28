@@ -154,7 +154,7 @@ window.DialogManager = {
     /**
      * Show confirmation dialog (replacement for confirm())
      */
-    showConfirmDialog(editor, title, message, onConfirm, onCancel = null) {
+    showConfirmDialog(editor, title, message, onConfirm, onCancel = null, options = {}) {
         this._ensureAnim();
         const g = this._glassVars();
         const overlay = this._makeOverlay(g);
@@ -162,12 +162,16 @@ window.DialogManager = {
         dialog.style.maxHeight = '90vh';
         dialog.style.overflowY = 'auto';
 
+        const confirmLabel = options.confirmLabel || 'Yes, Replace';
+        const confirmBg = options.confirmBg || '#e74c3c';
+        const htmlMessage = message.replace(/\n/g, '<br>');
+
         dialog.innerHTML = `
             <div style="color:#FF5E1F;font-size:17px;font-weight:600;margin-bottom:14px;letter-spacing:-0.2px;">${title}</div>
-            <div style="color:${g.textColor};font-size:14px;margin-bottom:20px;line-height:1.5;">${message}</div>
+            <div style="color:${g.textColor};font-size:14px;margin-bottom:20px;line-height:1.5;">${htmlMessage}</div>
             <div style="display:flex;gap:8px;justify-content:flex-end;">
                 <button data-role="cancel" style="padding:8px 18px;border:1px solid ${g.glassBorder};border-radius:8px;background:${g.cancelBg};color:${g.cancelColor};cursor:pointer;font-size:13px;">Cancel</button>
-                <button data-role="confirm" style="padding:8px 18px;border:none;border-radius:8px;background:#e74c3c;color:white;cursor:pointer;font-weight:600;font-size:13px;">Yes, Replace</button>
+                <button data-role="confirm" style="padding:8px 18px;border:none;border-radius:8px;background:${confirmBg};color:white;cursor:pointer;font-weight:600;font-size:13px;">${confirmLabel}</button>
             </div>
         `;
         

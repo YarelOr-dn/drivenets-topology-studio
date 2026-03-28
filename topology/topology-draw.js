@@ -76,9 +76,12 @@ window.DrawModule = {
         editor.ctx.lineJoin = 'round';
         editor.ctx.lineCap = 'round';
         
-        // Update TP positions when devices move (for device-attached unbound links)
-        // ENHANCED: Apply offset for multiple links between same devices
-        // CRITICAL: Skip position updates for link being actively dragged
+        // Skip expensive O(n^2) position recalc during pure viewport changes (zoom/pan).
+        // World positions don't move -- only the view transform changes.
+        const skipPositionUpdate = !!editor._viewportOnly;
+        editor._viewportOnly = false;
+
+        if (!skipPositionUpdate)
         editor.objects.forEach(obj => {
             // Skip if this is the link currently being stretched (let handleMouseMove control it)
             if (editor.stretchingLink && obj.id === editor.stretchingLink.id) {
@@ -422,7 +425,7 @@ window.DrawModule = {
             }
         });
         
-        // Update adjacent text positions to stay glued to links
+        if (!skipPositionUpdate)
         editor.objects.forEach(obj => {
             if (obj.type === 'text' && obj.linkId && obj.position) {
                 editor.updateAdjacentTextPosition(obj);
@@ -505,6 +508,11 @@ window.DrawModule = {
             }
         });
         
+        // MISMATCH BADGES PASS: Draw ABOVE everything else so alerts stand out
+        if (window.CanvasDrawing && window.CanvasDrawing.drawDeviceBadges) {
+            window.CanvasDrawing.drawDeviceBadges(editor);
+        }
+        
         // ALIGNMENT GUIDES: thin lines when a device aligns with others
         if (editor._alignGuides && editor.dragging && editor.selectedObject) {
             const ag = editor._alignGuides;
@@ -515,9 +523,9 @@ window.DrawModule = {
             
             // Determine visible canvas bounds in world coords
             const vl = -editor.panOffset.x / editor.zoom;
-            const vr = vl + editor.canvas.width / editor.zoom;
+            const vr = vl + editor.canvasW / editor.zoom;
             const vt = -editor.panOffset.y / editor.zoom;
-            const vb = vt + editor.canvas.height / editor.zoom;
+            const vb = vt + editor.canvasH / editor.zoom;
             
             if (ag.x !== null) {
                 editor.ctx.beginPath();

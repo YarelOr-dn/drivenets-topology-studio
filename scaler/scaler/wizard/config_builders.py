@@ -7,6 +7,280 @@ import re
 from typing import Any, Dict, List, Optional
 
 
+def scan_used_ips(config_text: str) -> Dict[str, Any]:
+    """Parse device config, extract all used IPv4 and IPv6 addresses.
+    Returns:
+      {
+        "ipv4": [{"address": "10.0.0.1", "prefix": 31, "interface": "ge400-0/0/4.100"}, ...],
+        "ipv6": [{"address": "2001:db8::1", "prefix": 127, "interface": "ge400-0/0/4.100"}, ...],
+        "ipv4_subnets": ["10.0.0.0/31", "10.0.0.2/31", ...],
+        "ipv6_subnets": ["2001:db8::/127", ...],
+      }
+    """
+    import ipaddress
+    ipv4_list: List[Dict[str, Any]] = []
+    ipv6_list: List[Dict[str, Any]] = []
+    ipv4_subnets: List[str] = []
+    ipv6_subnets: List[str] = []
+    current_iface: Optional[str] = None
+    for line in config_text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped == "!":
+            current_iface = None
+            continue
+        if line.startswith("  ") and not line.startswith("    "):
+            iface_match = re.match(r"^  (\S+)\s*$", line)
+            if iface_match and not stripped.startswith("#"):
+                current_iface = iface_match.group(1)
+        if stripped.startswith("ipv4-address "):
+            parts = stripped.split()
+            if len(parts) >= 2:
+                addr_spec = parts[1]
+                if "/" in addr_spec:
+                    addr, prefix_str = addr_spec.split("/", 1)
+                    try:
+                        prefix = int(prefix_str)
+                        ipv4_list.append({
+                            "address": addr,
+                            "prefix": prefix,
+                            "interface": current_iface or "unknown",
+                        })
+                        try:
+                            net = ipaddress.IPv4Network(f"{addr}/{prefix}", strict=False)
+                            ipv4_subnets.append(str(net))
+                        except Exception:
+                            pass
+                    except ValueError:
+                        pass
+        elif stripped.startswith("ipv6-address "):
+            parts = stripped.split()
+            if len(parts) >= 2:
+                addr_spec = parts[1]
+                if "/" in addr_spec:
+                    addr, prefix_str = addr_spec.split("/", 1)
+                    try:
+                        prefix = int(prefix_str)
+                        ipv6_list.append({
+                            "address": addr,
+                            "prefix": prefix,
+                            "interface": current_iface or "unknown",
+                        })
+                        try:
+                            net = ipaddress.IPv6Network(f"{addr}/{prefix}", strict=False)
+                            ipv6_subnets.append(str(net))
+                        except Exception:
+                            pass
+                    except ValueError:
+                        pass
+    return {
+        "ipv4": ipv4_list,
+        "ipv6": ipv6_list,
+        "ipv4_subnets": list(dict.fromkeys(ipv4_subnets)),
+        "ipv6_subnets": list(dict.fromkeys(ipv6_subnets)),
+    }
+
+
+def suggest_next_ip_range(
+    used_ips: Dict[str, Any],
+    count: int = 1,
+    ipv4_prefix: int = 31,
+    ipv6_prefix: int = 127,
+    preferred_ipv4_base: Optional[str] = None,
+    preferred_ipv6_base: Optional[str] = None,
+    ipv4_count: int = 1,
+    ipv4_step_dotted: Optional[str] = None,
+    ipv6_count: int = 1,
+) -> Dict[str, Any]:
+    """Suggest next available IP range that doesn't overlap with used_ips.
+
+    Validates the FULL range (start + count * step) against used IPs,
+    not just the first address.
+
+    Returns:
+      {
+        "ipv4_start": "10.0.0.50",
+        "ipv6_start": "2001:db8::32",
+        "conflicts": [],
+        "safe": True,
+      }
+    """
+    import ipaddress
+    conflicts: List[str] = []
+    ipv4_start: Optional[str] = None
+    ipv6_start: Optional[str] = None
+    used_v4 = used_ips.get("ipv4_subnets", [])
+    used_v6 = used_ips.get("ipv6_subnets", [])
+
+    v4_step_int = _dotted_step_to_int(ipv4_step_dotted or "0.0.0.1")
+    v4_range_count = max(1, ipv4_count)
+    v6_range_count = max(1, ipv6_count)
+
+    def _v4_range_overlaps(start_int: int, prefix: int) -> bool:
+        """Check if the full IPv4 range (start + count * step) overlaps any used subnet."""
+        try:
+            for i in range(v4_range_count):
+                addr = str(ipaddress.IPv4Address(start_int + i * v4_step_int))
+                cand = ipaddress.IPv4Network(f"{addr}/{prefix}", strict=False)
+                for u in used_v4:
+                    try:
+                        existing = ipaddress.IPv4Network(u, strict=False)
+                        if cand.overlaps(existing):
+                            return True
+                    except Exception:
+                        pass
+            return False
+        except Exception:
+            return True
+
+    def _v6_range_overlaps(start_int: int, prefix: int) -> bool:
+        """Check if the full IPv6 range overlaps any used subnet."""
+        v6_step = max(1, 2 ** (128 - min(prefix, 127)))
+        try:
+            for i in range(v6_range_count):
+                addr = str(ipaddress.IPv6Address(start_int + i * v6_step))
+                cand = ipaddress.IPv6Network(f"{addr}/{prefix}", strict=False)
+                for u in used_v6:
+                    try:
+                        existing = ipaddress.IPv6Network(u, strict=False)
+                        if cand.overlaps(existing):
+                            return True
+                    except Exception:
+                        pass
+            return False
+        except Exception:
+            return True
+
+    if preferred_ipv4_base or count > 0:
+        base_v4 = preferred_ipv4_base or "10.0.0.0"
+        if "/" in base_v4:
+            base_v4 = base_v4.split("/")[0]
+        step = max(v4_step_int, 2 ** (32 - ipv4_prefix))
+        try:
+            ip_int = int(ipaddress.IPv4Address(base_v4))
+            for _ in range(1000):
+                if not _v4_range_overlaps(ip_int, ipv4_prefix):
+                    ipv4_start = str(ipaddress.IPv4Address(ip_int))
+                    break
+                ip_int += step
+        except Exception:
+            ipv4_start = base_v4
+
+    if preferred_ipv6_base or count > 0:
+        base_v6 = preferred_ipv6_base or "2001:db8::"
+        if "/" in base_v6:
+            base_v6 = base_v6.split("/")[0]
+        step = 2 ** (128 - ipv6_prefix)
+        try:
+            ip_int = int(ipaddress.IPv6Address(base_v6))
+            for _ in range(1000):
+                if not _v6_range_overlaps(ip_int, ipv6_prefix):
+                    ipv6_start = str(ipaddress.IPv6Address(ip_int))
+                    break
+                ip_int += step
+        except Exception:
+            ipv6_start = base_v6
+
+    return {
+        "ipv4_start": ipv4_start,
+        "ipv6_start": ipv6_start,
+        "conflicts": conflicts,
+        "safe": len(conflicts) == 0,
+    }
+
+
+def check_ip_overlap(
+    used_ips: Dict[str, Any],
+    ipv4_start: Optional[str] = None,
+    ipv4_prefix: int = 31,
+    ipv4_count: int = 1,
+    ipv4_step_dotted: Optional[str] = None,
+    ipv6_start: Optional[str] = None,
+    ipv6_prefix: int = 127,
+    ipv6_count: int = 1,
+) -> Dict[str, Any]:
+    """Check if given IP range (start + count + step) overlaps with used_ips. Returns overlaps and safe flag."""
+    import ipaddress
+    overlaps: List[str] = []
+    used_v4 = used_ips.get("ipv4_subnets", [])
+    used_v6 = used_ips.get("ipv6_subnets", [])
+
+    def _v4_addrs_to_check(start: str, count: int, step_dotted: str) -> List[str]:
+        """Generate list of IPv4 addresses to check (start, start+step, start+2*step, ...)."""
+        addrs: List[str] = []
+        try:
+            base = start.split("/")[0].strip()
+            if "." not in base or count < 1:
+                return [start] if start else []
+            step_int = _dotted_step_to_int(step_dotted or "0.0.0.1")
+            ip_int = int(ipaddress.IPv4Address(base))
+            for i in range(count):
+                a = str(ipaddress.IPv4Address(ip_int + i * step_int))
+                addrs.append(a)
+            return addrs
+        except Exception:
+            return [start] if start else []
+
+    def _v6_addrs_to_check(start: str, count: int, prefix: int) -> List[str]:
+        """Generate list of IPv6 addresses to check (step = 2^(128-prefix) for /127 etc)."""
+        addrs: List[str] = []
+        try:
+            base = start.split("/")[0].strip()
+            if ":" not in base or count < 1:
+                return [start] if start else []
+            step_int = max(1, 2 ** (128 - min(prefix, 127)))
+            ip_int = int(ipaddress.IPv6Address(base))
+            for i in range(count):
+                a = str(ipaddress.IPv6Address(ip_int + i * step_int))
+                addrs.append(a)
+            return addrs
+        except Exception:
+            return [start] if start else []
+
+    if ipv4_start:
+        try:
+            addrs = _v4_addrs_to_check(ipv4_start, max(1, ipv4_count), ipv4_step_dotted or "0.0.0.1")
+            for addr in addrs:
+                cand = ipaddress.IPv4Network(f"{addr}/{ipv4_prefix}", strict=False)
+                for u in used_v4:
+                    try:
+                        existing = ipaddress.IPv4Network(u, strict=False)
+                        if cand.overlaps(existing):
+                            overlaps.append(f"IPv4 {addr}/{ipv4_prefix} overlaps with {u}")
+                            break
+                    except Exception:
+                        pass
+                if overlaps:
+                    break
+        except Exception:
+            overlaps.append(f"Invalid IPv4: {ipv4_start}")
+
+    if ipv6_start and not overlaps:
+        try:
+            addrs = _v6_addrs_to_check(ipv6_start, max(1, ipv6_count), ipv6_prefix)
+            for addr in addrs:
+                cand = ipaddress.IPv6Network(f"{addr}/{ipv6_prefix}", strict=False)
+                for u in used_v6:
+                    try:
+                        existing = ipaddress.IPv6Network(u, strict=False)
+                        if cand.overlaps(existing):
+                            overlaps.append(f"IPv6 {addr}/{ipv6_prefix} overlaps with {u}")
+                            break
+                    except Exception:
+                        pass
+                if overlaps:
+                    break
+        except Exception:
+            overlaps.append(f"Invalid IPv6: {ipv6_start}")
+
+    return {
+        "overlaps": overlaps,
+        "safe": len(overlaps) == 0,
+        "suggestion": suggest_next_ip_range(used_ips, 1, ipv4_prefix, ipv6_prefix, ipv4_start, ipv6_start),
+    }
+
+
 def _is_unusable_ip(ip_int: int, prefix_len: int, is_v6: bool) -> bool:
     """Return True if ip_int is the network or broadcast address for its subnet.
     /31 and /32 (point-to-point, loopback) are exempt per RFC 3021."""
@@ -207,13 +481,11 @@ def build_from_expansion(
 def build_interface_config(params: Dict[str, Any]) -> str:
     """Build DNOS interface config from params. Pure function.
 
-    Two modes matching the terminal wizard:
-      - Basic (bundle/ph/irb/loopback): parent=admin-state only,
-        sub-if=admin-state+vlan+IP.  No l2-service/mpls/flowspec/bfd/mtu.
-      - Physical (ge100/ge400/ge10): full E/7 flow with L2 or L3 mode,
-        MPLS, flowspec, BFD, MTU on sub-ifs.
+    Primary mode: sub-interface creation on existing physical/bundle parents.
+    Legacy types (bundle/ph/irb/loopback) retained for backward compat but
+    not exposed in CLI or GUI menus.
     """
-    itype = (params.get("interface_type") or "bundle").lower()
+    itype = (params.get("interface_type") or "subif").lower()
     parent_interfaces = params.get("parent_interfaces") or []
     start = int(params.get("start_number", 1))
     count = int(params.get("count", 1))
@@ -238,6 +510,13 @@ def build_interface_config(params: Dict[str, Any]) -> str:
     for x in skip_vlans_raw:
         try:
             skip_vlans.add(int(x))
+        except (TypeError, ValueError):
+            pass
+    skip_subif_ids_raw = params.get("skip_subif_ids") or []
+    skip_subif_ids = set()
+    for x in skip_subif_ids_raw:
+        try:
+            skip_subif_ids.add(int(x))
         except (TypeError, ValueError):
             pass
 
@@ -348,9 +627,10 @@ def build_interface_config(params: Dict[str, Any]) -> str:
                 lines.append("    !")
         lines.append("  !")
 
-        # Sub-interfaces (with skip_vlans: terminal-style vlan_offset to skip conflicting IDs)
+        # Sub-interfaces: skip existing sub-IF IDs and conflicting VLANs
         if create_sub:
             vlan_offset = 0
+            inner_offset = 0
             for j in range(subif_count):
                 sub_idx = i * subif_count + j
                 # Find next free vlan (not in skip_vlans)
@@ -372,15 +652,32 @@ def build_interface_config(params: Dict[str, Any]) -> str:
                     outer = outer_vlan_start + (sub_idx + vlan_offset) * outer_vlan_step
                 outer = min(max(outer, 1), 4094)
 
-                # Inner stays sequential for eth-tag matching (terminal behavior)
                 if inner_vlan_step == -2:
                     inner = inner_vlan_start + i
                 elif inner_vlan_step == 0:
                     inner = inner_vlan_start
                 else:
-                    inner = inner_vlan_start + j * inner_vlan_step
+                    inner = inner_vlan_start + (j + inner_offset) * inner_vlan_step
                 inner = min(max(inner, 1), 4094)
-                lines.append(f"  {name}.{vlan}")
+
+                suffix = inner if vlan_mode == "qinq" else vlan
+
+                # Skip sub-interface numbers that already exist on the device
+                if skip_subif_ids:
+                    for _ in range(4095):
+                        if suffix not in skip_subif_ids:
+                            break
+                        if vlan_mode == "qinq":
+                            inner_offset += 1
+                            inner = inner_vlan_start + (j + inner_offset) * (inner_vlan_step if inner_vlan_step > 0 else 1)
+                            inner = min(max(inner, 1), 4094)
+                            suffix = inner
+                        else:
+                            vlan_offset += 1
+                            vlan = min(max(vlan_start + (sub_idx + vlan_offset) * vlan_step, 1), 4094)
+                            suffix = vlan
+
+                lines.append(f"  {name}.{suffix}")
                 lines.append("    admin-state enabled")
                 if vlan_mode == "qinq":
                     lines.append(
@@ -878,3 +1175,96 @@ def build_routing_policy_config(params: Dict[str, Any]) -> str:
         lines = ["routing-policy", f'  route-policy {name} "{body}"', "!", "!"]
         return "\n".join(lines)
     return ""
+
+
+def build_undo_config(original_config: str) -> str:
+    """Generate DNOS delete commands to undo a pushed config.
+
+    Parses the config and produces 'delete' commands for each created object.
+    Caller should wrap with 'configure' and 'commit' as needed.
+
+    Returns:
+        Multi-line string of delete commands (one per line).
+    """
+    deletes: List[str] = []
+    lines = original_config.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            i += 1
+            continue
+        # Top-level: interfaces
+        if stripped == "interfaces":
+            i += 1
+            while i < len(lines):
+                ln = lines[i]
+                if ln.strip() == "!":
+                    i += 1
+                    break
+                if ln.startswith("  ") and not ln.startswith("    "):
+                    m = re.match(r"^  (\S+)\s*$", ln)
+                    if m:
+                        name = m.group(1)
+                        if not name.startswith("#"):
+                            deletes.append(f"delete interfaces {name}")
+                i += 1
+            continue
+        # Top-level: protocols
+        if stripped == "protocols":
+            i += 1
+            bgp_asn = None
+            while i < len(lines):
+                ln = lines[i]
+                s = ln.strip()
+                if s == "!":
+                    i += 1
+                    break
+                m_bgp = re.match(r"^  bgp\s+(\d+)\s*$", ln) if ln.startswith("  ") else None
+                if m_bgp:
+                    bgp_asn = m_bgp.group(1)
+                    i += 1
+                    continue
+                m_neighbor = re.match(r"^    neighbor\s+(\S+)\s*$", ln) if ln.startswith("    ") and bgp_asn else None
+                if m_neighbor:
+                    neighbor = m_neighbor.group(1)
+                    deletes.append(f"delete protocols bgp {bgp_asn} neighbor {neighbor}")
+                    i += 1
+                    continue
+                if ln.startswith("  ") and not ln.startswith("    "):
+                    bgp_asn = None
+                i += 1
+            continue
+        # Top-level: network-services (vrf, evpn-vpws-fxc, evpn-vpls, etc.)
+        if stripped == "network-services":
+            i += 1
+            while i < len(lines):
+                ln = lines[i]
+                if ln.strip() == "!":
+                    i += 1
+                    break
+                if ln.startswith("  vrf ") or ln.startswith("  evpn-vpws-fxc ") or ln.startswith("  evpn-vpls "):
+                    m = re.match(r"^  (vrf|evpn-vpws-fxc|evpn-vpls)\s+instance\s+(\S+)\s*$", ln)
+                    if m:
+                        deletes.append(f"delete network-services {m.group(1)} instance {m.group(2)}")
+                i += 1
+            continue
+        # Top-level: routing-policy
+        if stripped == "routing-policy":
+            i += 1
+            while i < len(lines):
+                ln = lines[i]
+                if ln.strip() == "!":
+                    i += 1
+                    break
+                m_pl = re.match(r"^  prefix-list\s+(?:ipv4|ipv6)\s+(\S+)\s*$", ln)
+                m_rp = re.match(r'^  route-policy\s+(\S+)\s+', ln)
+                if m_pl:
+                    deletes.append(f"delete routing-policy prefix-list {m_pl.group(1)}")
+                elif m_rp:
+                    deletes.append(f"delete routing-policy route-policy {m_rp.group(1)}")
+                i += 1
+            continue
+        i += 1
+    return "\n".join(deletes) if deletes else ""

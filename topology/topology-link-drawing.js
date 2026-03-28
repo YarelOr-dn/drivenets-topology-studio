@@ -891,20 +891,18 @@ window.LinkDrawing = {
         if (isArrowStyle && !curveWillBeEnabled) {
             const lineAngle = Math.atan2(endY - startY, endX - startX);
             
-            // For single arrow: determine where the arrow actually goes
-            // Arrow goes at the FREE endpoint (TP), not at MPs
             const isDoubleArrow = linkStyleEarly === 'double-arrow' || linkStyleEarly === 'dashed-double-arrow';
             
-            // Shorten end if arrow will be shown there
-            if (showArrowAtEnd && (isDoubleArrow || isEndFreeTP)) {
+            // Shorten end if arrow will be drawn there (non-MP endpoints)
+            // Single arrow: always at end if not MP. Double arrow: both non-MP ends.
+            if (!isEndMP) {
                 endX = origEndX - Math.cos(lineAngle) * arrowInset;
                 endY = origEndY - Math.sin(lineAngle) * arrowInset;
             }
             
-            // Shorten start if arrow will be shown there
-            // For double-arrow: always shorten both ends at TPs
-            // For single-arrow: shorten start if start is the TP (arrow points outward from start)
-            if (showArrowAtStart && (isDoubleArrow || (isStartFreeTP && !isEndFreeTP))) {
+            // Shorten start if arrow will be drawn there
+            // Double arrow: shorten if not MP. Single arrow: only if end IS MP (fallback).
+            if (isDoubleArrow ? !isStartMP : (isEndMP && !isStartMP)) {
                 startX = origStartX + Math.cos(lineAngle) * arrowInset;
                 startY = origStartY + Math.sin(lineAngle) * arrowInset;
             }
@@ -1406,9 +1404,8 @@ window.LinkDrawing = {
             const arrowLength = 10 + (linkWidth * 3);
             const arrowAngleSpread = Math.PI / 5; // 36°
             
-            // For double-arrow and dashed-double-arrow, draw at FREE endpoints only (TPs)
-            // This ensures merged BULs only show arrow tips at TPs, not at MPs
-            // CRITICAL: Arrow tips must be EXACTLY at link.start/end for free TPs
+            // Arrow tips at any non-merge-point endpoint: device-attached OR free TP
+            // MPs (internal BUL chain joints) never get arrows
             // For device-attached: use device edge position (origEndX/Y)
             // For free TPs: use link.end directly to ensure tip is at exact TP position
             const isEndDeviceAttached = !!link.device2;
@@ -1433,16 +1430,33 @@ window.LinkDrawing = {
             link._arrowStrokeColor = isSelected ? linkColor : '#333';
             link._arrowStrokeWidth = 1.5;
             
+            // Arrows at any non-merge-point endpoint (device-attached OR free TP)
+            // MPs are internal chain joints where two links merge -- no arrows there
+            let endIsMergePoint = false;
+            let startIsMergePoint = false;
+            if (link.mergedInto && link.mergedWith) {
+                startIsMergePoint = true;
+                endIsMergePoint = true;
+            } else if (link.mergedWith) {
+                if (link.mergedWith.parentFreeEnd !== 'end') endIsMergePoint = true;
+                if (link.mergedWith.parentFreeEnd !== 'start') startIsMergePoint = true;
+            } else if (link.mergedInto) {
+                const pLink = editor.objects.find(o => o.id === link.mergedInto.parentId);
+                if (pLink && pLink.mergedWith) {
+                    if (pLink.mergedWith.childFreeEnd !== 'end') endIsMergePoint = true;
+                    if (pLink.mergedWith.childFreeEnd !== 'start') startIsMergePoint = true;
+                }
+            }
+
             if (linkStyle === 'double-arrow' || linkStyle === 'dashed-double-arrow') {
-                if (isEndFree) arrowAtEnd = true;
-                if (isStartFree) arrowAtStart = true;
+                if (!endIsMergePoint) arrowAtEnd = true;
+                if (!startIsMergePoint) arrowAtStart = true;
             } else {
-                if (isEndFree && !isStartFree) {
+                // Single arrow: prefer end, fall back to start
+                if (!endIsMergePoint) {
                     arrowAtEnd = true;
-                } else if (isStartFree && !isEndFree) {
+                } else if (!startIsMergePoint) {
                     arrowAtStart = true;
-                } else if (isStartFree && isEndFree) {
-                    arrowAtEnd = true;
                 }
             }
         }

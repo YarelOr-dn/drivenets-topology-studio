@@ -1,0 +1,146 @@
+[
+  {
+    "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-03-23T08:45:01.097+00:00",
+    "duration_ms": 200,
+    "phase": "verify",
+    "output_length": 286,
+    "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 2.2.2.2\n          MAC label: 258\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 23-Mar-2026-10:35:37",
+    "output_full": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 2.2.2.2\n          MAC label: 258\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 23-Mar-2026-10:35:37"
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-03-23T08:45:01.299+00:00",
+    "duration_ms": 102,
+    "phase": "verify",
+    "output_length": 875,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 18\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress  ",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 18\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress              | Interface              | Egress-Encapsulation           | Timestamp              | Flags            |\n+-------------------------+------------------------+--------------------------------+------------------------+------------------+\n| (*)00:de:ad:00:01:01    | ge100-18/0/0.24        | M{258}                         | 23-Mar-2026-10:32:35   | R                |"
+  },
+  {
+    "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+    "timestamp": "2026-03-23T08:45:01.403+00:00",
+    "duration_ms": 50,
+    "phase": "verify",
+    "output_length": 26,
+    "output_preview": "ERROR: Incomplete command.",
+    "output_full": "ERROR: Incomplete command."
+  },
+  {
+    "command": "show bgp l2vpn evpn summary | no-more",
+    "timestamp": "2026-03-23T08:45:01.453+00:00",
+    "duration_ms": 200,
+    "phase": "verify",
+    "output_length": 383,
+    "output_preview": "BGP router identifier 4.4.4.4, local AS number 1234567\nBGP table node count 1\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567         26         26    0     0       0 00:09:39                   2\n\nTotal number of established neighbors with L2vpn EVPN 1/1\n\nTotal number of NSR capable BGP sessions 0",
+    "output_full": "BGP router identifier 4.4.4.4, local AS number 1234567\nBGP table node count 1\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567         26         26    0     0       0 00:09:39                   2\n\nTotal number of established neighbors with L2vpn EVPN 1/1\n\nTotal number of NSR capable BGP sessions 0"
+  },
+  {
+    "command": "show bgp l2vpn evpn summary | no-more",
+    "timestamp": "2026-03-23T08:45:01.654+00:00",
+    "duration_ms": 200,
+    "phase": "verify",
+    "output_length": 383,
+    "output_preview": "BGP router identifier 4.4.4.4, local AS number 1234567\nBGP table node count 1\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567         26         26    0     0       0 00:09:40                   2\n\nTotal number of established neighbors with L2vpn EVPN 1/1\n\nTotal number of NSR capable BGP sessions 0",
+    "output_full": "BGP router identifier 4.4.4.4, local AS number 1234567\nBGP table node count 1\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567         26         26    0     0       0 00:09:40                   2\n\nTotal number of established neighbors with L2vpn EVPN 1/1\n\nTotal number of NSR capable BGP sessions 0"
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 08:44 | include ERROR | no-more",
+    "timestamp": "2026-03-23T08:45:01.855+00:00",
+    "duration_ms": 5807,
+    "phase": "verify",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/fibmgrd_traces | include 08:44 | include ERROR | no-more",
+    "timestamp": "2026-03-23T08:45:07.663+00:00",
+    "duration_ms": 4507,
+    "phase": "verify",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:00:01:01 | no-more",
+    "timestamp": "2026-03-23T08:45:12.171+00:00",
+    "duration_ms": 200,
+    "phase": "verify",
+    "output_length": 286,
+    "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 2.2.2.2\n          MAC label: 258\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 23-Mar-2026-10:35:37",
+    "output_full": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 2.2.2.2\n          MAC label: 258\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 23-Mar-2026-10:35:37"
+  },
+  {
+    "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-03-23T08:45:12.371+00:00",
+    "duration_ms": 205,
+    "phase": "verify",
+    "output_length": 286,
+    "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 2.2.2.2\n          MAC label: 258\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 23-Mar-2026-10:35:37",
+    "output_full": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 2.2.2.2\n          MAC label: 258\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 23-Mar-2026-10:35:37"
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-03-23T08:45:12.577+00:00",
+    "duration_ms": 100,
+    "phase": "verify",
+    "output_length": 875,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 18\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress  ",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 18\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress              | Interface              | Egress-Encapsulation           | Timestamp              | Flags            |\n+-------------------------+------------------------+--------------------------------+------------------------+------------------+\n| (*)00:de:ad:00:01:01    | ge100-18/0/0.24        | M{258}                         | 23-Mar-2026-10:32:35   | R                |"
+  },
+  {
+    "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-03-23T08:45:12.678+00:00",
+    "duration_ms": 200,
+    "phase": "verify",
+    "output_length": 18,
+    "output_preview": "EvpnMacs [size: 0]",
+    "output_full": "EvpnMacs [size: 0]"
+  },
+  {
+    "command": "show evpn arp-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-03-23T08:45:12.878+00:00",
+    "duration_ms": 200,
+    "phase": "verify",
+    "output_length": 35,
+    "output_preview": "  ETH TAG: 0\n    ARP table is empty",
+    "output_full": "  ETH TAG: 0\n    ARP table is empty"
+  },
+  {
+    "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+    "timestamp": "2026-03-23T08:45:13.079+00:00",
+    "duration_ms": 50,
+    "phase": "verify",
+    "output_length": 26,
+    "output_preview": "ERROR: Incomplete command.",
+    "output_full": "ERROR: Incomplete command."
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 08:44 | include neighbor | no-more",
+    "timestamp": "2026-03-23T08:45:16.916+00:00",
+    "duration_ms": 5357,
+    "phase": "verify",
+    "output_length": 3042,
+    "output_preview": "2026-03-23T08:44:00.642286 +02:00 [WARNING   ] [bgp_debug.c:449:bgp_notify_print] [bgpd:1382:1382] 65955:180172: %NOTIFICATION: vrf default received from neighbor 2.2.2.2 6/4 (Cease/Administratively Reset) 0 bytes\n2026-03-23T08:44:00.642322 +02:00 [WARNING   ] [bgp_fsm.c:849:bgp_stop] [bgpd:1382:1382] 65957:180173: %ADJCHANGE: vrf default neighbor 2.2.2.2 Down BGP Notification received : Cease\n2026-03-23T08:44:03.010004 +02:00 [WARNING   ] [bgp_fsm.c:1691:bgp_establish] [bgpd:1382:1382] 66094:18",
+    "output_full": "2026-03-23T08:44:00.642286 +02:00 [WARNING   ] [bgp_debug.c:449:bgp_notify_print] [bgpd:1382:1382] 65955:180172: %NOTIFICATION: vrf default received from neighbor 2.2.2.2 6/4 (Cease/Administratively Reset) 0 bytes\n2026-03-23T08:44:00.642322 +02:00 [WARNING   ] [bgp_fsm.c:849:bgp_stop] [bgpd:1382:1382] 65957:180173: %ADJCHANGE: vrf default neighbor 2.2.2.2 Down BGP Notification received : Cease\n2026-03-23T08:44:03.010004 +02:00 [WARNING   ] [bgp_fsm.c:1691:bgp_establish] [bgpd:1382:1382] 66094:180195: %ADJCHANGE: neighbor 2.2.2.2 on vrf default Up\n2026-03-23T08:44:06.887692 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 66175:180241: On vrf 1, bgpid 2(ALPHA): neighbor 49.49.49.9 0x7febcf99c040 [FSM] Timer (connect timer expire)\n2026-03-23T08:44:06.887842 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 66178:180242: On vrf 2, bgpid 3(ZULU): neighbor 50.50.50.2 0x7febcfa00040 [FSM] Timer (connect timer expire)\n2026-03-23T08:44:16.887842 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 66246:180319: On vrf 1, bgpid 2(ALPHA): neighbor 49.49.49.9 0x7febcf99c040 [FSM] Timer (connect timer expire)\n2026-03-23T08:44:16.887999 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 66249:180320: On vrf 2, bgpid 3(ZULU): neighbor 50.50.50.2 0x7febcfa00040 [FSM] Timer (connect timer expire)\n2026-03-23T08:44:26.888003 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 66256:180364: On vrf 1, bgpid 2(ALPHA): neighbor 49.49.49.9 0x7febcf99c040 [FSM] Timer (connect timer expire)\n2026-03-23T08:44:26.888153 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 66259:180365: On vrf 2, bgpid 3(ZULU): neighbor 50.50.50.2 0x7febcfa00040 [FSM] Timer (connect timer expire)\n2026-03-23T08:44:36.888155 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 66266:180409: On vrf 1, bgpid 2(ALPHA): neighbor 49.49.49.9 0x7febcf99c040 [FSM] Timer (connect timer expire)\n2026-03-23T08:44:36.888318 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 66269:180410: On vrf 2, bgpid 3(ZULU): neighbor 50.50.50.2 0x7febcfa00040 [FSM] Timer (connect timer expire)\n2026-03-23T08:44:46.888380 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 66300:180466: On vrf 1, bgpid 2(ALPHA): neighbor 49.49.49.9 0x7febcf99c040 [FSM] Timer (connect timer expire)\n2026-03-23T08:44:46.888529 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 66303:180467: On vrf 2, bgpid 3(ZULU): neighbor 50.50.50.2 0x7febcfa00040 [FSM] Timer (connect timer expire)\n2026-03-23T08:44:56.888532 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 66310:180511: On vrf 1, bgpid 2(ALPHA): neighbor 49.49.49.9 0x7febcf99c040 [FSM] Timer (connect timer expire)\n2026-03-23T08:44:56.888694 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 66313:180512: On vrf 2, bgpid 3(ZULU): neighbor 50.50.50.2 0x7febcfa00040 [FSM] Timer (connect timer expire)"
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 08:44 | include established | no-more",
+    "timestamp": "2026-03-23T08:45:22.273+00:00",
+    "duration_ms": 5307,
+    "phase": "verify",
+    "output_length": 403,
+    "output_preview": "2026-03-23T08:44:00.642313 +02:00 [DEBUG     ] [bgp_fsm.c:2142:bgp_event] [bgpd:1382:1382] 65956:180173: 2.2.2.2 0x7febd6a68040 on vrf default [FSM] Receive_NOTIFICATION_message (Established->Clearing)\n2026-03-23T08:44:03.009824 +02:00 [DEBUG     ] [bgp_fsm.c:2142:bgp_event] [bgpd:1382:1382] 66061:180195: 2.2.2.2 0x7febd6a68040 on vrf default [FSM] Receive_KEEPALIVE_message (OpenConfirm->Established)",
+    "output_full": "2026-03-23T08:44:00.642313 +02:00 [DEBUG     ] [bgp_fsm.c:2142:bgp_event] [bgpd:1382:1382] 65956:180173: 2.2.2.2 0x7febd6a68040 on vrf default [FSM] Receive_NOTIFICATION_message (Established->Clearing)\n2026-03-23T08:44:03.009824 +02:00 [DEBUG     ] [bgp_fsm.c:2142:bgp_event] [bgpd:1382:1382] 66061:180195: 2.2.2.2 0x7febd6a68040 on vrf default [FSM] Receive_KEEPALIVE_message (OpenConfirm->Established)"
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 08:44 | include l2vpn | no-more",
+    "timestamp": "2026-03-23T08:45:27.581+00:00",
+    "duration_ms": 4606,
+    "phase": "verify",
+    "output_length": 7532,
+    "output_preview": "2026-03-23T08:44:00.642517 +02:00 [INFO      ] [bgp_chain.c:4961:bgp_chain_adj_out_and_advertise_marker_deinit] [bgpd:1382:1382] 65976:180173: On vrf 0, bgpid 1(default) L2VPN EVPN: remove peer 2.2.2.2 from advertise update group marker\n2026-03-23T08:44:00.642519 +02:00 [INFO      ] [bgp_chain.c:4974:bgp_chain_adj_out_and_advertise_marker_deinit] [bgpd:1382:1382] 65977:180173: On vrf 0, bgpid 1(default) L2VPN EVPN: remove peer 2.2.2.2 from adjout update group marker\n2026-03-23T08:44:00.642523 +0",
+    "output_full": "2026-03-23T08:44:00.642517 +02:00 [INFO      ] [bgp_chain.c:4961:bgp_chain_adj_out_and_advertise_marker_deinit] [bgpd:1382:1382] 65976:180173: On vrf 0, bgpid 1(default) L2VPN EVPN: remove peer 2.2.2.2 from advertise update group marker\n2026-03-23T08:44:00.642519 +02:00 [INFO      ] [bgp_chain.c:4974:bgp_chain_adj_out_and_advertise_marker_deinit] [bgpd:1382:1382] 65977:180173: On vrf 0, bgpid 1(default) L2VPN EVPN: remove peer 2.2.2.2 from adjout update group marker\n2026-03-23T08:44:00.642523 +02:00 [INFO      ] [bgp_chain.c:6277:bgp_chain_delay_mpls_advertise_marker_deinit] [bgpd:1382:1382] 65978:180173: On vrf 0, bgpid 1(default) L2VPN EVPN: Finished deinit for delay-mpls-advertise marker\n2026-03-23T08:44:00.642565 +02:00 [INFO      ] [bgp_chain.c:5672:bgp_chain_clear_route_table_bound_marker_init] [bgpd:1382:1382] 65992:180173: On vrf 0, bgpid 1(default) L2VPN VPLS: Finished init for peer 2.2.2.2\n2026-03-23T08:44:00.642567 +02:00 [INFO      ] [bgp_chain.c:5672:bgp_chain_clear_route_table_bound_marker_init] [bgpd:1382:1382] 65993:180173: On vrf 0, bgpid 1(default) L2VPN EVPN: Finished init for peer 2.2.2.2\n2026-03-23T08:44:00.643342 +02:00 [INFO      ] [bgp_chain.c:1430:bgp_chain_global_clear_route_table_bound_marker_step_finish_cb] [bgpd:1382:1382] 66029:180174: On vrf 0, bgpid 1(default) L2vpn VPLS: finished clear route table_marker(anchor) for peer 2.2.2.2\n2026-03-23T08:44:00.643343 +02:00 [NOTICE    ] [bgp_chain.c:3838:bgp_chain_done] [bgpd:1382:1382] 66030:180174: On vrf 0, bgpid 1(default) L2vpn VPLS: Chain is done!\n2026-03-23T08:44:00.643365 +02:00 [INFO      ] [bgp_chain.c:1430:bgp_chain_global_clear_route_table_bound_marker_step_finish_cb] [bgpd:1382:1382] 66031:180174: On vrf 0, bgpid 1(default) L2vpn EVPN: finished clear route table_marker(anchor) for peer 2.2.2.2\n2026-03-23T08:44:00.643487 +02:00 [INFO      ] [bgp_chain.c:410:bgp_chain_bestpath_marker_finished_cb] [bgpd:1382:1382] 66033:180174: On vrf 0, bgpid 1(default): Finished bestpath marker L2vpn EVPN after 3 steps\n2026-03-23T08:44:00.643513 +02:00 [NOTICE    ] [bgp_chain.c:3838:bgp_chain_done] [bgpd:1382:1382] 66034:180174: On vrf 0, bgpid 1(default) L2vpn EVPN: Chain is done!\n2026-03-23T08:44:03.009969 +02:00 [INFO      ] [bgp_route.c:11448:bgp_peer_trigger_reeval_out_routes] [bgpd:1382:1382] 66091:180195: delay adjout marker for peer 2.2.2.2 L2VPN vpls\n2026-03-23T08:44:03.009974 +02:00 [INFO      ] [bgp_route.c:11448:bgp_peer_trigger_reeval_out_routes] [bgpd:1382:1382] 66092:180195: delay adjout marker for peer 2.2.2.2 L2VPN evpn\n2026-03-23T08:44:03.056599 +02:00 [INFO      ] [bgp_upd_group.c:1523:bgp_update_group_add_peer_to_adjout_marker] [bgpd:1382:1382] 66127:180208: On vrf 0, bgpid 1(default) L2VPN EVPN: add peer 2.2.2.2 to update group adj-out marker update_id 1\n2026-03-23T08:44:03.056602 +02:00 [INFO      ] [bgp_chain.c:5043:bgp_chain_update_group_adj_out_marker_init] [bgpd:1382:1382] 66128:180208: On vrf 0, bgpid 1(default) L2VPN EVPN: Finished init for update-group 1 adj-out marker chain with quota 3000\n2026-03-23T08:44:03.056604 +02:00 [INFO      ] [bgp_upd_group.c:1542:bgp_update_group_add_peer_to_advertise_marker] [bgpd:1382:1382] 66129:180208: On vrf 0, bgpid 1(default) L2VPN EVPN: add peer 2.2.2.2 to update group advertise marker update_id 1\n2026-03-23T08:44:03.056605 +02:00 [INFO      ] [bgp_chain.c:5109:bgp_chain_update_group_advertise_marker_init] [bgpd:1382:1382] 66130:180208: On vrf 0, bgpid 1(default) L2VPN EVPN: Finished init for update-group 1 advertise marker chain with quota 3000\n2026-03-23T08:44:03.056608 +02:00 [INFO      ] [bgp_chain.c:6246:bgp_chain_delay_mpls_advertise_marker_init] [bgpd:1382:1382] 66131:180208: On vrf 0, bgpid 1(default) L2VPN EVPN: Finished init for delay-mpls-advertise marker\n2026-03-23T08:44:03.056610 +02:00 [INFO      ] [bgp_chain.c:4923:bgp_chain_adj_out_and_advertise_marker_init] [bgpd:1382:1382] 66132:180208: On vrf 0, bgpid 1(default) L2VPN EVPN: Finished add mpls peer 2.2.2.2 to update group adj-out and advertise marker\n2026-03-23T08:44:03.056836 +02:00 [INFO      ] [bgp_upd_group.c:1523:bgp_update_group_add_peer_to_adjout_marker] [bgpd:1382:1382] 66144:180209: On vrf 0, bgpid 1(default) L2VPN EVPN: add peer 2.2.2.2 to update group adj-out marker update_id 1\n2026-03-23T08:44:03.056837 +02:00 [INFO      ] [bgp_upd_group.c:1542:bgp_update_group_add_peer_to_advertise_marker] [bgpd:1382:1382] 66145:180209: On vrf 0, bgpid 1(default) L2VPN EVPN: add peer 2.2.2.2 to update group advertise marker update_id 1\n2026-03-23T08:44:03.056838 +02:00 [INFO      ] [bgp_chain.c:6219:bgp_chain_delay_mpls_advertise_marker_init] [bgpd:1382:1382] 66146:180209: On vrf 0, bgpid 1(default) L2VPN EVPN: do nothing\n2026-03-23T08:44:03.056842 +02:00 [INFO      ] [bgp_chain.c:4923:bgp_chain_adj_out_and_advertise_marker_init] [bgpd:1382:1382] 66147:180209: On vrf 0, bgpid 1(default) L2VPN EVPN: Finished readd mpls peer 2.2.2.2 to update group adj-out and advertise marker\n2026-03-23T08:44:03.057053 +02:00 [NOTICE    ] [bgp_chain.c:3848:bgp_chain_mpls_version_done] [bgpd:1382:1382] 66154:180209: On vrf 0, bgpid 1(default) L2vpn EVPN: Chain mpls version is done!\n2026-03-23T08:44:03.057067 +02:00 [NOTICE    ] [bgp_chain.c:3838:bgp_chain_done] [bgpd:1382:1382] 66155:180209: On vrf 0, bgpid 1(default) L2vpn EVPN: Chain is done!\n2026-03-23T08:44:03.057142 +02:00 [INFO      ] [bgp_packet.c:992:bgp_update_packet_eor] [bgpd:1382:85566] 66157:0: send EoR for L2vpn EVPN to 2.2.2.2, vrf default\n2026-03-23T08:44:03.146142 +02:00 [INFO      ] [bgp_packet.c:3191:bgp_update_receive] [bgpd:1382:1382] 66166:180218: [EVENTS] L2VPN/evpn: EoR received from 2.2.2.2 on vrf default\n2026-03-23T08:44:03.146236 +02:00 [INFO      ] [bgp_chain.c:410:bgp_chain_bestpath_marker_finished_cb] [bgpd:1382:1382] 66167:180219: On vrf 0, bgpid 1(default): Finished bestpath marker L2vpn EVPN after 2 steps\n2026-03-23T08:44:03.146326 +02:00 [NOTICE    ] [bgp_chain.c:3838:bgp_chain_done] [bgpd:1382:1382] 66168:180219: On vrf 0, bgpid 1(default) L2vpn EVPN: Chain is done!\n2026-03-23T08:44:08.146610 +02:00 [INFO      ] [bgp_chain.c:410:bgp_chain_bestpath_marker_finished_cb] [bgpd:1382:1382] 66185:180252: On vrf 0, bgpid 1(default): Finished bestpath marker L2vpn EVPN after 2 steps\n2026-03-23T08:44:08.146675 +02:00 [NOTICE    ] [bgp_chain.c:3838:bgp_chain_done] [bgpd:1382:1382] 66186:180252: On vrf 0, bgpid 1(default) L2vpn EVPN: Chain is done!\n2026-03-23T08:44:09.014334 +02:00 [INFO      ] [bgp_chain.c:6219:bgp_chain_delay_mpls_advertise_marker_init] [bgpd:1382:1382] 66201:180265: On vrf 0, bgpid 1(default) L2VPN EVPN: do nothing\n2026-03-23T08:44:09.014335 +02:00 [INFO      ] [bgp_chain.c:4930:bgp_chain_adj_out_and_advertise_marker_init] [bgpd:1382:1382] 66202:180265: On vrf 0, bgpid 1(default) L2VPN EVPN: Finished reinit for mpls peer 2.2.2.2 adj-out and advertise marker chain with quota 3000\n2026-03-23T08:44:09.014770 +02:00 [INFO      ] [bgp_upd_group.c:1523:bgp_update_group_add_peer_to_adjout_marker] [bgpd:1382:1382] 66209:180265: On vrf 0, bgpid 1(default) L2VPN EVPN: add peer 2.2.2.2 to update group adj-out marker update_id 1\n2026-03-23T08:44:09.014792 +02:00 [INFO      ] [bgp_upd_group.c:1542:bgp_update_group_add_peer_to_advertise_marker] [bgpd:1382:1382] 66210:180265: On vrf 0, bgpid 1(default) L2VPN EVPN: add peer 2.2.2.2 to update group advertise marker update_id 1\n2026-03-23T08:44:09.014795 +02:00 [NOTICE    ] [bgp_chain.c:3838:bgp_chain_done] [bgpd:1382:1382] 66211:180265: On vrf 0, bgpid 1(default) L2vpn EVPN: Chain is done!"
+  }
+]

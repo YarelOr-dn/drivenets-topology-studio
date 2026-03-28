@@ -1,0 +1,10 @@
+{
+  "phase_name": "trigger",
+  "started_at": "2026-03-23T06:36:09.654+00:00",
+  "completed_at": "2026-03-23T06:36:13.436+00:00",
+  "duration_sec": 3.782,
+  "command_count": 0,
+  "commands": [],
+  "parsed_values": {},
+  "anomalies": []
+}

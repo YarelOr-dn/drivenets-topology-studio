@@ -1,0 +1,102 @@
+{
+  "id": "TEST_mac_mob_flush_SW205163",
+  "name": "MAC Mobility | MAC withdraw / flush | Sticky/Non-sticky",
+  "type": "functional",
+  "feature": "evpn-mac-mobility",
+  "source": "jira:SW-204115 / SW-205163",
+  "jira_key": "SW-205163",
+  "parent_category": "SW-204115",
+  "created": "2026-03-20",
+  "notes": "usync flush may be slow/chunked (chip); allow polling window",
+  "device_requirements": {"type": "any", "features": ["evpn"], "min_ncp_count": 1},
+  "prerequisites": [
+    {"id": "macs_present", "check": "mac_table_non_empty", "fix_via": "Learn MACs first"}
+  ],
+  "clear_commands_validated": {
+    "clear evpn mac-table": "Clear all MACs across all instances",
+    "clear evpn mac-table instance {evpn_name}": "Clear all MACs in specific instance",
+    "clear evpn mac-table instance {evpn_name} mac {test_mac}": "Clear single MAC",
+    "clear evpn mac-table instance {evpn_name} source {interface}": "Clear MACs learned from interface",
+    "clear evpn mac-suppression": "Clear all MAC suppression entries",
+    "clear evpn mac-suppression mac {mac}": "Clear suppression for specific MAC",
+    "clear evpn mac-history": "Clear MAC move history",
+    "clear evpn restore-cycles": "Clear restore cycle counters",
+    "clear bridge-domain mac-table instance {bd_name}": "Clear bridge-domain MAC table",
+    "clear bridge-domain mac-table instance {bd_name} mac {mac}": "Clear single MAC from BD"
+  },
+  "show_commands_validated": {
+    "show evpn mac-table instance {evpn_name} | no-more": "SHOW_COMMANDS line 10089 -- MAC entries for specific instance",
+    "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more": "SHOW_COMMANDS line 10091 -- Single MAC lookup",
+    "show evpn mac-table instance {evpn_name} suppress | no-more": "Suppressed MACs after clear",
+    "show evpn instance {evpn_name} loop-prevention mac-table | no-more": "Loop prevention MAC entries",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding state and flags",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more": "Ghost MAC detection",
+    "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
+  },
+  "invalid_commands": {
+    "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use: show evpn mac-table instance {name}",
+    "show interfaces brief": "DOES NOT EXIST. Use: show interfaces description"
+  },
+  "scenarios": [
+    {
+      "id": "SC01_clear_mac_table",
+      "name": "Clear full MAC table; verify flush + usync behavior",
+      "phases": {
+        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
+        "trigger": {"action": "clear_mac_table", "command": "clear evpn mac-table instance {evpn_name}"},
+        "poll_recovery": {"timeout_sec": 300, "poll_interval_sec": 10},
+        "verify": {"expect": {"table_empty_or_flushing": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true}}
+      }
+    },
+    {
+      "id": "SC02_clear_specific_mac",
+      "name": "Clear single MAC; others remain",
+      "phases": {
+        "trigger": {"action": "clear_mac", "command": "clear evpn mac-table instance {evpn_name} mac {test_mac}"},
+        "verify": {"show_commands": ["show evpn mac-table instance {evpn_name} mac {test_mac} | no-more"], "expect": {"mac_absent": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true}}
+      }
+    },
+    {
+      "id": "SC03_sticky_clear",
+      "name": "Sticky MAC clear behavior",
+      "phases": {
+        "verify": {"expect": {"sticky_rules": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true}}
+      }
+    },
+    {
+      "id": "SC04_usync_timing",
+      "name": "Observe chunked usync flush delay tolerance",
+      "phases": {
+        "verify": {"expect": {"max_wait_sec": 120, "chunked_ok": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true}}
+      }
+    }
+  ],
+  "runtime_parameters": {
+    "evpn_name": {"resolve": "runtime"},
+    "test_mac": {"resolve": "runtime"}
+  },
+  "verdict": {"layers": 6, "stop_on_fail": false},
+  "counter_commands": [
+    {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+  ],
+  "counter_expectations": [
+    {"label": "mac_count", "rule": "no_increase", "description": "MAC count must not increase unexpectedly after flush"},
+    {"label": "ghost_mac_count", "rule": "zero", "description": "No ghost MACs after scenario"}
+  ],
+  "event_expectations": [
+    {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "No BGP notifications"},
+    {"event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED", "expect": "absent", "description": "No suppression on normal operations"}
+  ],
+  "health_checks": {
+    "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager", "neighbour_manager"],
+    "check_crashes": true,
+    "check_alarms": true
+  },
+  "cleanup_commands": ["no debug evpn mac-mobility", "no set logging terminal"],
+  "config_baseline": {
+    "sections": ["network-services evpn", "protocols bgp"],
+    "full_config": false,
+    "ignore_patterns": ["last-modified", "commit-id"]
+  }
+}

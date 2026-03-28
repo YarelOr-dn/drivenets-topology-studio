@@ -1216,9 +1216,13 @@ def _show_flowspec_menu_single_device(device: 'DNDevice', running_config: str, s
         console.print("\n[bold magenta]━━━ FlowSpec Configuration Menu ━━━[/bold magenta]")
         
         # Quick dependency check for inline status
+        try:
+            _tmp_plat = Platform(device.platform)
+        except (ValueError, KeyError):
+            _tmp_plat = Platform.NCP
         temp_state = WizardState(
             device=device,
-            platform=device.platform,
+            platform=_tmp_plat,
             current_config=running_config
         )
         issues = check_flowspec_dependencies(temp_state)
@@ -2059,6 +2063,8 @@ def _check_single_device_status(device) -> dict:
         ssh = conn['ssh']
         channel = conn['channel']
         
+        conn_state = (conn.get('device_state') or '').upper()
+        
         # Use single shell for all commands - much faster
         channel.settimeout(8)
         channel.send("\r\n")
@@ -2067,16 +2073,16 @@ def _check_single_device_status(device) -> dict:
         if not initial_output and conn.get('prompt_output'):
             initial_output = conn['prompt_output']
         
-        # Check for RECOVERY mode first (critical failure)
-        is_recovery_mode = 'RECOVERY' in initial_output or 'dnRouter(RECOVERY)' in initial_output
-        if is_recovery_mode:
+        from .connection_strategy import detect_device_mode, classify_device_state
+        mode = classify_device_state(conn_state) or detect_device_mode(initial_output)
+        
+        if mode == "RECOVERY":
             result['mode'] = "[bold red]RECOVERY[/bold red]"
-            result['install_status'] = "[bold red]❌ BOOT FAILURE - Device in recovery mode[/bold red]"
+            result['install_status'] = "[bold red]BOOT FAILURE - Device in recovery mode[/bold red]"
             ssh.close()
             return result
         
-        # Check GI mode from prompt
-        is_gi_mode = 'GI(' in initial_output or 'GI#' in initial_output or 'GI>' in initial_output
+        is_gi_mode = (mode == "GI")
         result['mode'] = "[yellow]GI[/yellow]" if is_gi_mode else "[green]DNOS[/green]"
         
         if is_gi_mode:
@@ -6411,7 +6417,7 @@ def run_image_upgrade_wizard(multi_ctx: 'MultiDeviceContext') -> bool:
                 
                 # Final fallback: use a common type or device.platform
                 if not system_type:
-                    system_type = device.platform.value if hasattr(device, 'platform') else 'SA-36CD-S'
+                    system_type = (device.system_type or device.platform or 'SA-36CD-S') if hasattr(device, 'platform') else 'SA-36CD-S'
                 
                 # Override with user-confirmed GI deploy params if available
                 deploy_hostname = hostname
@@ -15848,7 +15854,7 @@ def _show_topology_device_selection(
                 ip=connection_target,
                 username=username,
                 password=password,  # add_device handles encoding
-                platform=Platform.DNOS
+                platform="NCP"
             )
             imported_devices.append(new_device)
             existing_devices[hostname] = new_device  # Update cache
@@ -17334,7 +17340,7 @@ def add_device_interactive(dm: DeviceManager) -> Optional[List[Device]]:
                     device_id=device_id,
                     hostname=system_name,
                     ip=target,
-                    platform=Platform.NCP,
+                    platform="NCP",
                     username=username,
                     password=password
                 )
@@ -17466,18 +17472,15 @@ def add_device_interactive(dm: DeviceManager) -> Optional[List[Device]]:
             else:
                 continue
         else:
-            # Use NCP as default platform (system type is stored in operational.json)
-            # Platform enum is for NCP component types, not system chassis types
-            platform = Platform.NCP
+            platform = "NCP"
             
-            # Create new device using DeviceManager
             new_device = dm.add_device(
                 device_id=device_id,
                 hostname=use_hostname,
                 ip=target,
                 platform=platform,
                 username=username,
-                password=password  # add_device handles encoding
+                password=password
             )
         
         # Save running config to database
@@ -21174,25 +21177,16 @@ def configure_interfaces(
         if getattr(state, 'kept_interfaces', None):
             n = len(state.kept_interfaces)
             console.print(f"\n[dim]You kept {n} interface(s) above. Options below [bold]add new[/bold] interfaces or run utilities (not keep/drop).[/dim]")
-        console.print("\n[bold cyan]Interface Types:[/bold cyan]")
+        console.print("\n[bold cyan]Interface Configuration:[/bold cyan]")
         
-        # L2 Service interfaces (for service attachment)
-        console.print("[dim]── L2 Service Interfaces (FXC/VPWS/VPLS attachment) ──[/dim]")
-        console.print("  [E] Sub-interfaces from physical [dim](creates ge/bundle.Y with l2-service enabled)[/dim]")
-        console.print("  [2] PWHE interfaces [dim](creates phX parents + optionally phX.Y sub-interfaces)[/dim]")
-        
-        # L3 Routing interfaces
-        console.print("[dim]── L3 Routing Interfaces ──[/dim]")
-        console.print("  [1] Bundle (LAG) [dim](creates bundle-X with LACP/static)[/dim]")
-        console.print("  [3] IRB [dim](creates irb.X for bridge routing)[/dim]")
-        console.print("  [4] Loopback [dim](creates lo0/lo1 for router-id, BGP)[/dim]")
-        console.print("  [5] Physical parent [dim](add ge/xe/et if missing from config)[/dim]")
-        console.print("  [7] L3 sub-interface [dim](creates ge/bundle.Y with IP address)[/dim]")
+        # Sub-interface creation (the only supported interface creation mode)
+        console.print("[dim]── Sub-interface Creation ──[/dim]")
+        console.print("  [E] L2 Sub-interfaces [dim](creates ge/bundle.Y with l2-service enabled)[/dim]")
+        console.print("  [7] L3 Sub-interfaces [dim](creates ge/bundle.Y with IP address)[/dim]")
         
         # Utilities
         console.print("[dim]── Utilities ──[/dim]")
         console.print("  [6] Delete non-WAN [dim](removes interfaces without MPLS enabled)[/dim]")
-        console.print("  [L] LAG members [dim](assigns physical interfaces to bundle)[/dim]")
         console.print("  [M] Manual config [dim](paste raw interface config text)[/dim]")
         
         # Flowspec (DDoS Protection)
@@ -21207,14 +21201,14 @@ def configure_interfaces(
         console.print("  [V] View current config")
         console.print("  [B] Back | [T] Top")
         
-        valid_choices = ["1", "2", "3", "4", "5", "6", "7", "e", "l", "m", "s", "v", "b", "t", "f"]
+        valid_choices = ["6", "7", "e", "m", "s", "v", "b", "t", "f"]
         if all_config_lines:
             valid_choices.append("d")
         
         iface_choice = Prompt.ask(
-            "Select interface type",
+            "Select option",
             choices=valid_choices,
-            default="3",
+            default="e",
             case_sensitive=False
         ).lower()
         
@@ -23408,53 +23402,8 @@ Flowspec can be enabled on: Physical, Bundle, Physical VLAN, Bundle VLAN, IRB in
                 keep_configuring = False
                 continue
         
-        type_map = {
-            "1": ("bundle", "bundle-ether"),
-            "2": ("pwhe", "ph"),
-            "3": ("irb", "irb"),
-            "4": ("loopback", "lo"),
-            "5": ("physical", "ge400"),  # Physical last - usually you use existing
-        }
-        
-        if iface_choice not in type_map:
-            continue
-        
-        # Process the interface type selection
-        iface_type, prefix = type_map[iface_choice]
-        config_result = _configure_single_interface_type(
-            state, limits, iface_type, prefix, all_created_interfaces, kept_interfaces
-        )
-        
-        if config_result:
-            # Append the config lines (removing the outer "interfaces" wrapper)
-            lines = config_result.split('\n')
-            for line in lines:
-                stripped = line.strip()
-                # Skip only the 'interfaces' header and the final '!' (no indentation)
-                # Keep indented '!' terminators (e.g., '  !' that close interface blocks)
-                if stripped == 'interfaces':
-                    continue  # Skip the outer wrapper
-                if line == '!' or (stripped == '!' and not line.startswith(' ')):
-                    continue  # Skip only the final unindented '!'
-                all_config_lines.append(line)
-            
-            # Ask to continue
-            console.print("\n[bold]Configure more interface types?[/bold]")
-            console.print("  [Y] Yes - add another interface type")
-            console.print("  [N] No - done with interfaces")
-            console.print("  [B] Back - undo last interface type")
-            
-            more_choice = Prompt.ask("Select", choices=["y", "n", "b"], default="n", case_sensitive=False).lower()
-            
-            if more_choice == "b":
-                # Remove the last added interfaces
-                console.print("[yellow]Undoing last interface configuration[/yellow]")
-                # For simplicity, just restart this iteration
-                all_config_lines = []
-                all_created_interfaces = []
-                continue
-            elif more_choice == "n":
-                keep_configuring = False
+        # All other choices handled above; loop back to menu
+        continue
     
     if not all_config_lines:
         return None
@@ -39731,7 +39680,8 @@ def run_wizard(batch_config: Optional[BatchScaleConfig] = None):
                 return run_wizard(batch_config)
             # Continue showing menu until user chooses to configure or exit
     else:
-        console.print(f"\n[green]✓ Selected: {device.hostname} ({device.platform.value})[/green]")
+        _plat_display = device.system_type or device.platform or "NCP"
+        console.print(f"\n[green]✓ Selected: {device.hostname} ({_plat_display})[/green]")
         
         # Single device menu with feature parity
         single_ctx = MultiDeviceContext([device])
@@ -40444,10 +40394,14 @@ def run_wizard(batch_config: Optional[BatchScaleConfig] = None):
             return
     
     # Initialize state
+    try:
+        _ws_platform = Platform(device.platform)
+    except (ValueError, KeyError):
+        _ws_platform = Platform.NCP
     state = WizardState(
         device_id=device.id,
         hostname=device.hostname,
-        platform=device.platform
+        platform=_ws_platform
     )
     
     # Set global state for breadcrumb access

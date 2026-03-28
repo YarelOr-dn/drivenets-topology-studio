@@ -1,0 +1,37 @@
+{
+  "phase_name": "after_snapshot",
+  "started_at": "2026-03-23T08:49:31.101+00:00",
+  "completed_at": "2026-03-23T08:49:31.654+00:00",
+  "duration_sec": 0.553,
+  "command_count": 3,
+  "commands": [
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:00:01:01 | no-more",
+      "timestamp": "2026-03-23T08:49:31.101+00:00",
+      "duration_ms": 200,
+      "phase": "after_snapshot",
+      "output_length": 286,
+      "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 2.2.2.2\n          MAC label: 258\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 23-Mar-2026-10:47:44"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-03-23T08:49:31.302+00:00",
+      "duration_ms": 200,
+      "phase": "after_snapshot",
+      "output_length": 383,
+      "output_preview": "BGP router identifier 4.4.4.4, local AS number 1234567\nBGP table node count 1\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567         19         19    0     0       0 00:02:04                   2\n\nTotal number of established neighbors with L2vpn EVPN 1/1\n\nTotal number of NSR capable BGP sessions 0"
+    },
+    {
+      "command": "show system | no-more",
+      "timestamp": "2026-03-23T08:49:31.503+00:00",
+      "duration_ms": 150,
+      "phase": "after_snapshot",
+      "output_length": 3007,
+      "output_preview": "System Name: YOR_CL_PE-4, System-Id: 1095cfe0-7fc5-4701-ad03-28a8385f5820\nSystem Type: CL-86, Family: NCR\nEnterprise-Id: 49739\nDescription: DRIVENETS Network Cloud Router\nSystem status: running \nSystem Start Time: 22-Mar-2026 22:03:52 UTC+02:00 (Israel)\nSystem Uptime: 0 days, 12:45:39\nSystem Boot Uptime: 0 days, 12:46:51\nVersion: DNOS [26.2.0] build [23_priv], Copyright 2026 DRIVENETS LTD.\nPatch: N/A\nEnvironment:\n\tLocation: N/A\n\tFloor: N/A\n\tRack: N/A\nContact: support@drivenets.com\nFabric Minimum"
+    }
+  ],
+  "parsed_values": {
+    "after_mac_count": 1
+  },
+  "anomalies": []
+}

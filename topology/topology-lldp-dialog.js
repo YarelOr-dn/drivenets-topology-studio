@@ -80,7 +80,7 @@ window.LldpDialog = {
                 </span>
             </div>
             <div style="display: flex; align-items: center; gap: 8px;">
-                <button id="lldp-table-refresh" data-tooltip="Refresh LLDP data (live SSH query)" style="
+                <button id="lldp-table-refresh" title="Refresh via live SSH" style="
                     background: rgba(0, 180, 216, 0.15);
                     border: 1px solid rgba(0, 180, 216, 0.3);
                     border-radius: 6px;
@@ -175,7 +175,19 @@ window.LldpDialog = {
         const closeBtn = header.querySelector('#lldp-table-close');
         closeBtn.addEventListener('mouseenter', () => closeBtn.style.background = 'rgba(231, 76, 60, 0.3)');
         closeBtn.addEventListener('mouseleave', () => closeBtn.style.background = 'rgba(255, 255, 255, 0.1)');
-        closeBtn.addEventListener('click', () => dialog.remove());
+        const onContextUpdated = (e) => {
+            const { deviceId } = e.detail || {};
+            if (!deviceId || !device) return;
+            const match = (device.label && device.label === deviceId) || (String(serial) === String(deviceId));
+            if (match && device._lldpData && document.body.contains(dialog)) {
+                updateLldpContent(device._lldpData, true);
+            }
+        };
+        window.addEventListener('device:context-updated', onContextUpdated);
+        closeBtn.addEventListener('click', () => {
+            window.removeEventListener('device:context-updated', onContextUpdated);
+            dialog.remove();
+        });
         
         // Refresh button - triggers live SSH query
         const refreshBtn = header.querySelector('#lldp-table-refresh');
@@ -190,7 +202,12 @@ window.LldpDialog = {
         });
         
         // Unified content renderer for both initial load and refresh
-        const updateLldpContent = (data) => {
+        const updateLldpContent = (data, fromCache = false) => {
+            if (device && !fromCache && (data.neighbors?.length || data.raw_output)) {
+                device._lldpData = data;
+                device._lldpCompletedAt = Date.now();
+                if (editor.draw) editor.draw();
+            }
             if (data.neighbors && data.neighbors.length > 0) {
                 const snakeGroups = self._detectSnakePatterns(data.neighbors, deviceLabel, device);
                 let tableHtml = self._buildLldpTableHtml(snakeGroups, data, device, deviceLabel);
@@ -233,30 +250,50 @@ window.LldpDialog = {
             }
         };
         
+        const lldpAbort = new AbortController();
+        if (LldpDialog._lastLldpAbort) LldpDialog._lastLldpAbort.abort();
+        LldpDialog._lastLldpAbort = lldpAbort;
+
         refreshBtn.addEventListener('click', async () => {
-            // Show loading state
+            if (LldpDialog._lastLldpAbort) LldpDialog._lastLldpAbort.abort();
+            const refreshAbort = new AbortController();
+            LldpDialog._lastLldpAbort = refreshAbort;
             refreshIcon.style.animation = 'spin 1s linear infinite';
             refreshBtn.disabled = true;
             refreshBtn.style.opacity = '0.6';
             content.innerHTML = `
                 <div style="display: flex; align-items: center; justify-content: center; padding: 40px; color: rgba(255,255,255,0.6);">
                     <div style="width: 20px; height: 20px; border: 2px solid rgba(0, 180, 216, 0.5); border-top-color: #00B4D8; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 12px;"></div>
-                    Fetching live LLDP data via SSH...
+                    Fetching live LLDP via SSH...
                 </div>
             `;
             
             try {
-                const data = await self._fetchLldpNeighborsLive(serial, device);
-                updateLldpContent(data);
-                editor.showToast('LLDP data refreshed (live SSH)', 'success');
+                const did = device?.label || serial;
+                if (window.DeviceMonitor?.refreshDevice) {
+                    await window.DeviceMonitor.refreshDevice(did, true);
+                    if (refreshAbort.signal.aborted) return;
+                    if (device?._lldpData) {
+                        updateLldpContent(device._lldpData, true);
+                        editor.showToast('LLDP refreshed (live SSH)', 'success');
+                    } else {
+                        throw new Error('No LLDP data returned from device');
+                    }
+                } else {
+                    const data = await self._fetchLldpNeighborsLive(serial, device, refreshAbort.signal);
+                    if (refreshAbort.signal.aborted) return;
+                    updateLldpContent(data);
+                    editor.showToast('LLDP refreshed (live SSH)', 'success');
+                }
             } catch (err) {
+                if (refreshAbort.signal.aborted) return;
                 content.innerHTML = `
                     <div style="padding: 40px; text-align: center; color: rgba(255,255,255,0.5);">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#e74c3c" stroke-width="1.5" style="margin-bottom: 12px;">
                             <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                         </svg>
                         <div style="color: #e74c3c;">Failed to refresh LLDP data</div>
-                        <div style="margin-top: 8px; font-size: 11px;">${err.message || 'SSH connection failed'}</div>
+                        <div style="margin-top: 8px; font-size: 11px;">${(err.message || 'SSH connection failed').replace(/</g, '&lt;')}</div>
                     </div>
                 `;
                 editor.showToast('LLDP refresh failed', 'error');
@@ -267,27 +304,32 @@ window.LldpDialog = {
             }
         });
         
-        // Fetch LLDP data from API (cached) -- uses same updateLldpContent as refresh
-        // Pass ssh_host from device so API can SSH when serial does not resolve (e.g. P-SA-2 -> 100.64.4.205)
-        self._fetchLldpNeighbors(serial, device).then(data => {
-            updateLldpContent(data);
-            const src = data.source || (data.live ? 'live-ssh' : 'cached');
-            editor.showToast(`LLDP loaded (${src})`, 'info');
-        }).catch(err => {
-            content.innerHTML = `
-                <div style="text-align: center; padding: 40px; color: rgba(231, 76, 60, 0.9);">
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 12px;">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="15" y1="9" x2="9" y2="15"/>
-                        <line x1="9" y1="9" x2="15" y2="15"/>
-                    </svg>
-                    <div>Failed to load LLDP data</div>
-                    <div style="font-size: 11px; margin-top: 8px; color: rgba(255,255,255,0.4);">
-                        ${err.message || 'Unknown error'}
+        // Cache-first: if device has _lldpData, render immediately
+        const hasLldpCache = device?._lldpData && (device._lldpData.neighbors?.length || device._lldpData.raw_output);
+        if (hasLldpCache) {
+            updateLldpContent(device._lldpData, true);
+        } else {
+            self._fetchLldpNeighbors(serial, device, lldpAbort.signal).then(data => {
+                if (lldpAbort.signal.aborted) return;
+                updateLldpContent(data);
+            }).catch(err => {
+                if (lldpAbort.signal.aborted) return;
+                content.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: rgba(231, 76, 60, 0.9);">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 12px;">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="15" y1="9" x2="9" y2="15"/>
+                            <line x1="9" y1="9" x2="15" y2="15"/>
+                        </svg>
+                        <div>Failed to load LLDP data</div>
+                        <div style="font-size: 11px; margin-top: 8px; color: rgba(255,255,255,0.4);">
+                            ${err.message || 'Unknown error'}
+                        </div>
                     </div>
-                </div>
-            `;
-        });
+                `;
+                editor.showToast('LLDP load failed', 'error');
+            });
+        }
     },
     
     /**
@@ -493,41 +535,52 @@ window.LldpDialog = {
     },
     
     /**
-     * Fetch LLDP neighbors from scaler-monitor cache via API.
-     * When device has sshConfig.host, pass it as ssh_host so API can SSH when serial does not resolve.
+     * Fetch LLDP neighbors -- cache-first via ScalerAPI.getDeviceContext (reads
+     * operational.json instantly), then discovery_api as fallback.
      */
-    async _fetchLldpNeighbors(serial, device = null) {
+    async _fetchLldpNeighbors(serial, device = null, signal) {
+        const deviceLabel = device?.label || serial;
         const sshHost = device?.sshConfig?.host || device?.sshConfig?.hostBackup || '';
+
+        // 1. Cache-first: ScalerAPI.getDeviceContext reads operational.json
+        if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDeviceContext) {
+            try {
+                const ctx = await ScalerAPI.getDeviceContext(deviceLabel, false, sshHost);
+                if (ctx?.lldp && Array.isArray(ctx.lldp) && ctx.lldp.length > 0) {
+                    return {
+                        neighbors: ctx.lldp.map(n => ({
+                            interface: n.local || n.interface || n.local_interface || '',
+                            neighbor: n.neighbor || n.neighbor_device || n.neighbor_name || '',
+                            remote_port: n.remote || n.remote_port || n.neighbor_port || ''
+                        })),
+                        source: 'scaler-db',
+                        cached: true,
+                        last_updated: ctx.last_updated || null
+                    };
+                }
+            } catch (_) {}
+        }
+
+        // 2. Fallback: discovery_api (NetworkMapper -> SCALER DB -> inventory -> SSH)
         const url = new URL(`/api/dnaas/device/${encodeURIComponent(serial)}/lldp`, window.location.origin);
         if (sshHost && /^\d+\.\d+\.\d+\.\d+$/.test(sshHost)) {
             url.searchParams.set('ssh_host', sshHost);
         }
         try {
-            const response = await fetch(url.toString());
+            const _ctrl = new AbortController();
+            if (signal) signal.addEventListener('abort', () => _ctrl.abort(), { once: true });
+            const _timer = setTimeout(() => _ctrl.abort(), 10000);
+            const response = await fetch(url.toString(), { signal: _ctrl.signal }).finally(() => clearTimeout(_timer));
             if (response.ok) {
                 return await response.json();
             }
             const errData = await response.json().catch(() => ({}));
             const msg = errData.error || errData.detail || `HTTP ${response.status}`;
             const source = errData.source ? ` (tried: ${errData.source})` : '';
-            if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDeviceLldp) {
-                try {
-                return await ScalerAPI.getDeviceLldp(serial);
-                } catch (e) {
-                    throw new Error(msg + source);
-            }
-            }
             throw new Error(msg + source);
         } catch (err) {
             const m = err.message || '';
             if (m.includes('Failed to fetch') || m.includes('NetworkError')) {
-                if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDeviceLldp) {
-                    try {
-                        return await ScalerAPI.getDeviceLldp(serial);
-                    } catch (e) {
-                        throw new Error('API unreachable - check discovery_api.py. Tried: NetworkMapper, ScalerDB, inventory, SSH');
-                    }
-                }
                 throw new Error('API unreachable - check discovery_api.py and proxy');
             }
             throw err;
@@ -539,18 +592,22 @@ window.LldpDialog = {
      * Used by refresh button to get fresh data.
      * When device has sshConfig.host, pass ssh_host so API can connect when serial does not resolve.
      */
-    async _fetchLldpNeighborsLive(serial, device = null) {
+    async _fetchLldpNeighborsLive(serial, device = null, signal) {
         const sshHost = device?.sshConfig?.host || device?.sshConfig?.hostBackup || '';
         const body = { serial };
         if (sshHost && /^\d+\.\d+\.\d+\.\d+$/.test(sshHost)) {
             body.ssh_host = sshHost;
         }
         try {
+            const _ctrl = new AbortController();
+            if (signal) signal.addEventListener('abort', () => _ctrl.abort(), { once: true });
+            const _timer = setTimeout(() => _ctrl.abort(), 20000);
             const response = await fetch('/api/dnaas/lldp-neighbors-live', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
+                body: JSON.stringify(body),
+                signal: _ctrl.signal
+            }).finally(() => clearTimeout(_timer));
             if (response.ok) {
                 const data = await response.json();
                 if (data.lldp_neighbors && !data.neighbors) {

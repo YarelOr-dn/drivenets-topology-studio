@@ -607,6 +607,9 @@ window.TextEditorModule = {
             input.addEventListener('input', () => {
                 if (editor._renamingDevice) {
                     editor._renamingDevice.label = input.value;
+                    if (window.checkDeviceMismatchLive) {
+                        window.checkDeviceMismatchLive(editor._renamingDevice);
+                    }
                     autoResize();
                     editor.draw();
                 }
@@ -661,10 +664,16 @@ window.TextEditorModule = {
         
         if (device) {
             delete device._renaming;
+            if (window.checkDeviceMismatchLive) {
+                window.checkDeviceMismatchLive(device);
+            }
             editor.selectedObject = device;
             editor.selectedObjects = [device];
             editor.saveState();
-            editor.showDeviceSelectionToolbar(device);
+            const mismatchPopup = document.getElementById('mismatch-badge-popup');
+            if (!mismatchPopup) {
+                editor.showDeviceSelectionToolbar(device);
+            }
         }
         
         editor.draw();

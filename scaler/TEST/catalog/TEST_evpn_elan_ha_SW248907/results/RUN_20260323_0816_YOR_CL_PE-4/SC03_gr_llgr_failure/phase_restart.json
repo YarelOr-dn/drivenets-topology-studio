@@ -1,0 +1,10 @@
+{
+  "phase_name": "restart",
+  "started_at": "2026-03-23T08:31:59.549+00:00",
+  "completed_at": "2026-03-23T08:32:39.785+00:00",
+  "duration_sec": 40.236,
+  "command_count": 0,
+  "commands": [],
+  "parsed_values": {},
+  "anomalies": []
+}

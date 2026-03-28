@@ -121,45 +121,57 @@ class DrawingManager {
      */
     drawGrid() {
         if (!this.ctx || !this.canvas) return;
-        
-        const gridSize = this.gridSize;
-        const margin = this.gridMargin;
-        
-        // Calculate extended visible area (draw beyond viewport for smooth panning)
-        const startX = (-this.panOffset.x / this.zoom) - margin;
-        const startY = (-this.panOffset.y / this.zoom) - margin;
+
+        const ctx = this.ctx;
+        const zoom = this.zoom;
+        const panX = this.panOffset.x;
+        const panY = this.panOffset.y;
         const cw = this.editor ? this.editor.canvasW : this.canvas.width;
         const ch = this.editor ? this.editor.canvasH : this.canvas.height;
-        const endX = startX + (cw / this.zoom) + margin * 2;
-        const endY = startY + (ch / this.zoom) + margin * 2;
-        
-        this.ctx.save();
-        this.ctx.translate(this.panOffset.x, this.panOffset.y);
-        this.ctx.scale(this.zoom, this.zoom);
-        
-        // Adjust grid color for dark mode
-        this.ctx.strokeStyle = this.darkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)';
-        this.ctx.lineWidth = 1 / this.zoom;
-        
-        // Draw vertical lines
-        const gridStartX = Math.floor(startX / gridSize) * gridSize;
-        for (let x = gridStartX; x <= endX; x += gridSize) {
-            this.ctx.beginPath();
-            this.ctx.moveTo(x, startY);
-            this.ctx.lineTo(x, endY);
-            this.ctx.stroke();
+
+        // Constant grid size in world coordinates -- never changes with zoom.
+        const gridSize = this.gridSize;
+        const screenSpacing = gridSize * zoom;
+
+        // Skip when lines would be sub-pixel
+        if (screenSpacing < 4) return;
+
+        // Grid origin in screen space
+        const originX = ((panX % screenSpacing) + screenSpacing) % screenSpacing;
+        const originY = ((panY % screenSpacing) + screenSpacing) % screenSpacing;
+
+        // Smooth opacity: full at comfortable density, fade toward extremes
+        const baseAlpha = this.darkMode ? 0.10 : 0.08;
+        let alpha = baseAlpha;
+        if (screenSpacing < 15) {
+            alpha = baseAlpha * (screenSpacing - 4) / 11;
         }
-        
-        // Draw horizontal lines
-        const gridStartY = Math.floor(startY / gridSize) * gridSize;
-        for (let y = gridStartY; y <= endY; y += gridSize) {
-            this.ctx.beginPath();
-            this.ctx.moveTo(startX, y);
-            this.ctx.lineTo(endX, y);
-            this.ctx.stroke();
+        if (alpha < 0.005) return;
+
+        // Safety cap on line count
+        const hLines = Math.ceil(cw / screenSpacing);
+        const vLines = Math.ceil(ch / screenSpacing);
+        if (hLines + vLines > 400) return;
+
+        ctx.save();
+        ctx.strokeStyle = this.darkMode
+            ? `rgba(255, 255, 255, ${alpha})`
+            : `rgba(0, 0, 0, ${alpha})`;
+        ctx.lineWidth = 1;
+
+        ctx.beginPath();
+        for (let sx = originX; sx <= cw; sx += screenSpacing) {
+            const px = Math.round(sx) + 0.5;
+            ctx.moveTo(px, 0);
+            ctx.lineTo(px, ch);
         }
-        
-        this.ctx.restore();
+        for (let sy = originY; sy <= ch; sy += screenSpacing) {
+            const py = Math.round(sy) + 0.5;
+            ctx.moveTo(0, py);
+            ctx.lineTo(cw, py);
+        }
+        ctx.stroke();
+        ctx.restore();
     }
 
     // ========================================================================

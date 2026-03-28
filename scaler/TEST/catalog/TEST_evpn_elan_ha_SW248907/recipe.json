@@ -1,0 +1,855 @@
+{
+  "id": "TEST_evpn_elan_ha_SW248907",
+  "name": "EVPN (ELAN) SI -- EVPN High-Availability",
+  "type": "ha",
+  "feature": "evpn",
+  "source": "jira:SW-248907",
+  "jira_key": "SW-248907",
+  "jira_title": "EVPN (ELAN) SI | EVPN Regression | EVPN High-Availability",
+  "created": "2026-03-19",
+  "version": 1,
+
+  "device_requirements": {
+    "type": "cluster",
+    "features": ["evpn", "bgp-l2vpn-evpn"],
+    "min_ncp_count": 1,
+    "requires_standby_ncc": true,
+    "requires_evpn_instance": true,
+    "requires_bridge_domain": true
+  },
+
+  "prerequisites": [
+    {
+      "id": "bgp_l2vpn_evpn_session",
+      "check": "bgp_session",
+      "target": "L2VPN EVPN peer(s)",
+      "show_command": "show bgp l2vpn evpn summary | no-more",
+      "pass_criteria": "At least 1 neighbor in Established state with PfxAccepted > 0",
+      "fix_via": "Manual -- ensure BGP L2VPN EVPN neighbors are configured and peering"
+    },
+    {
+      "id": "evpn_instances_exist",
+      "check": "evpn_instance",
+      "show_command": "show evpn summary | no-more",
+      "pass_criteria": "At least 1 EVPN instance listed",
+      "fix_via": "Manual -- configure EVPN instances under network-services"
+    },
+    {
+      "id": "evpn_mac_table_populated",
+      "check": "evpn_mac_table",
+      "show_command": "show evpn mac-table | no-more",
+      "pass_criteria": "At least 1 MAC entry (Local or BGP learned)",
+      "fix_via": "Start traffic to populate MAC table"
+    },
+    {
+      "id": "standby_ncc_ready",
+      "check": "standby_ncc",
+      "show_command": "show system | no-more",
+      "pass_criteria": "Standby NCC in standby-up state",
+      "fix_via": "/HA -- verify standby NCC health"
+    },
+    {
+      "id": "traffic_path",
+      "check": "traffic_flowing",
+      "show_command": "show interfaces description | no-more",
+      "pass_criteria": "Traffic-bearing interfaces oper Up",
+      "fix_via": "/SPIRENT -- set up traffic through bridge-domain"
+    }
+  ],
+
+  "dnos_process_mapping": {
+    "_note": "Maps Jira test step names to validated DNOS process names (container-prefixed)",
+    "bgp": "routing:bgpd",
+    "fib-manager": "routing:fibmgrd",
+    "zebra": "routing:rib_manager",
+    "neighbor-manager": "neighbour_manager"
+  },
+
+  "ha_trigger_commands": {
+    "_note": "All validated on RR-SA-2 2026-03-23. Process names MUST be container-prefixed (routing:bgpd NOT bgpd). NCC ID resolved at runtime from 'show system'.",
+    "bgp_restart": "request system process restart ncc {active_ncc_id} routing-engine routing:bgpd",
+    "bgp_stop": "request system process stop ncc {active_ncc_id} routing-engine routing:bgpd",
+    "fibmgrd_restart": "request system process restart ncc {active_ncc_id} routing-engine routing:fibmgrd",
+    "rib_manager_restart": "request system process restart ncc {active_ncc_id} routing-engine routing:rib_manager",
+    "neighbour_manager_restart": "request system process restart ncc {active_ncc_id} routing-engine neighbour_manager",
+    "ncc_switchover": "request system ncc switchover"
+  },
+
+  "show_commands_validated": {
+    "_note": "All validated via search_cli_docs against DNOS CLI documentation",
+    "show bgp l2vpn evpn summary": "SHOW_COMMANDS line 6398 -- BGP L2VPN EVPN neighbor table",
+    "show evpn summary": "SHOW_COMMANDS line 10564 -- Global EVPN parameters + instance list",
+    "show evpn mac-table": "SHOW_COMMANDS line 10080 -- All MAC entries across EVPN instances",
+    "show evpn mac-table instance {name}": "SHOW_COMMANDS line 10089 -- MAC entries for specific instance",
+    "show evpn mac-table instance {name} mac {mac}": "SHOW_COMMANDS line 10091 -- Single MAC lookup",
+    "show evpn arp-table": "SHOW_COMMANDS line 9116 -- ARP entries in EVPN instances",
+    "show evpn-vpws detail": "SHOW_COMMANDS line 10689 -- EVPN-VPWS instance details",
+    "show network-services evpn {name}": "SHOW_COMMANDS line 27200 -- EVPN service config view",
+    "show system": "System node table with NCC/NCP/NCF status"
+  },
+
+  "show_commands_corrections": {
+    "_note": "Jira ticket uses syntax that does not exist in DNOS -- corrected here",
+    "show evpn detail instance {name}": "IS VALID (corrected 2026-03-20 via cmd search evpn on RR-SA-2 DNOS 26.2.0). Both 'show evpn instance' and 'show evpn detail instance' exist.",
+    "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use: show evpn mac-table instance {name}",
+    "show bgp l2vpn evpn route-type 2 mac {mac} detail": "TBD -- validate on device via ? completion"
+  },
+
+  "scenarios": [
+    {
+      "id": "SC01_bgp_graceful_restart",
+      "name": "BGP Graceful Restart",
+      "scenario_number": 1,
+      "ha_type": "process_restart",
+      "description": "Restart BGP process, verify GR behavior (routes stale, forwarding continues, routes refreshed after recovery)",
+      "phases": {
+        "setup": {
+          "sub_commands": [],
+          "description": "Ensure EVPN service with traffic flowing. Record PW/route state."
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show bgp l2vpn evpn summary | no-more",
+            "show evpn summary | no-more",
+            "show evpn instance {evpn_name} | no-more",
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show system | no-more"
+          ],
+          "parsers": ["parse_bgp_summary", "parse_evpn_summary", "parse_system_nodes"]
+        },
+        "trigger": {
+          "ha_command": "request system process restart ncc {active_ncc_id} routing-engine routing:bgpd",
+          "ha_type": "process_restart",
+          "process": "routing:bgpd",
+          "confirmation": "Yes"
+        },
+        "poll_recovery": {
+          "timeout_sec": 120,
+          "poll_interval_sec": 10,
+          "convergence_criteria": [
+            {"command": "show bgp l2vpn evpn summary | no-more", "check": "all_neighbors_established"},
+            {"command": "show evpn mac-table instance {evpn_name} | no-more", "check": "mac_count_ge_before"}
+          ]
+        },
+        "after_snapshot": {
+          "show_commands": [
+            "show bgp l2vpn evpn summary | no-more",
+            "show evpn summary | no-more",
+            "show evpn instance {evpn_name} | no-more",
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show system | no-more"
+          ]
+        },
+        "verify": {
+          "sub_commands": [],
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["GR", "STALE", "NOTIFICATION", "l2vpn"]},
+            {"file": "routing_engine/rib_manager_traces", "keywords": ["evpn", "stale"]}
+          ],
+          "expect": {
+            "history_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_rt2_recovery": true,
+            "check_ha_traffic": true,
+            "cross_layer_check": true,
+            "xray_on_mismatch": true
+          }
+        }
+      },
+      "pass_criteria": [
+        "Routes marked stale during GR window, no PW teardown",
+        "Forwarding continues during GR window",
+        "Routes refreshed after recovery, stale cleared",
+        "Labels identical pre/post"
+      ],
+      "verdict_layers": {
+        "control_plane_bgp": "All L2VPN EVPN neighbors re-establish with same PfxAccepted",
+        "control_plane_evpn": "EVPN instance state matches before snapshot",
+        "datapath_mac": "MAC table re-populated to pre-restart count",
+        "traffic": "Forwarding continued during GR window (if /SPIRENT active)",
+        "traces": "GR stale/refresh cycle logged, zero NOTIFICATION sent"
+      }
+    },
+
+    {
+      "id": "SC02_llgr",
+      "name": "LLGR (Long-Lived Graceful Restart)",
+      "scenario_number": 2,
+      "ha_type": "process_restart_extended",
+      "description": "Restart BGP, let GR timer expire to trigger LLGR. Verify routes transition to LLGR_STALE, forwarding continues, stale cleared after full recovery.",
+      "phases": {
+        "setup": {
+          "sub_commands": [],
+          "description": "Establish EVPN service. Note: LLGR timers must be configured on BGP neighbors."
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show bgp l2vpn evpn summary | no-more",
+            "show evpn summary | no-more",
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show system | no-more"
+          ],
+          "parsers": ["parse_bgp_summary", "parse_evpn_summary"]
+        },
+        "trigger": {
+          "ha_command": "request system process stop ncc {active_ncc_id} routing-engine routing:bgpd",
+          "ha_type": "process_stop",
+          "process": "routing:bgpd",
+          "hold_down_sec": 180,
+          "hold_down_note": "Device GR Restart=120s + Stalepath=30s + margin=30s. LLGR l2vpn-evpn enabled (stalepath=300s). Wait past GR into LLGR phase.",
+          "restart_command": "request system process restart ncc {active_ncc_id} routing-engine routing:bgpd",
+          "confirmation": "Yes"
+        },
+        "poll_recovery": {
+          "timeout_sec": 300,
+          "poll_interval_sec": 15,
+          "llgr_phase": true,
+          "convergence_criteria": [
+            {"command": "show bgp l2vpn evpn summary | no-more", "check": "all_neighbors_established"},
+            {"command": "show evpn mac-table instance {evpn_name} | no-more", "check": "no_stale_entries"}
+          ]
+        },
+        "after_snapshot": {
+          "show_commands": [
+            "show bgp l2vpn evpn summary | no-more",
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show system | no-more"
+          ]
+        },
+        "verify": {
+          "sub_commands": [],
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["LLGR", "STALE", "long-lived"]}
+          ],
+          "expect": {
+            "history_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_ha_traffic": true,
+            "cross_layer_check": true,
+            "xray_on_mismatch": true
+          }
+        }
+      },
+      "pass_criteria": [
+        "Routes transition to LLGR_STALE state (not deleted)",
+        "Forwarding continues with stale routes",
+        "After full recovery, stale cleared"
+      ],
+      "verdict_layers": {
+        "control_plane_bgp": "LLGR_STALE routes present during hold-down, cleared after recovery",
+        "datapath_mac": "MAC table preserved during LLGR window",
+        "traffic": "Forwarding continues (if /SPIRENT active)",
+        "traces": "LLGR stale/recovery cycle logged"
+      }
+    },
+
+    {
+      "id": "SC03_gr_llgr_failure",
+      "name": "GR/LLGR Failure (Timer Expiry)",
+      "scenario_number": 3,
+      "ha_type": "process_stop_extended",
+      "description": "Restart BGP, prevent recovery past GR+LLGR timers. Verify routes removed, PWs torn down, MACs flushed. Then bring BGP back for full reconvergence.",
+      "phases": {
+        "setup": {
+          "sub_commands": [],
+          "description": "Establish EVPN service."
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show bgp l2vpn evpn summary | no-more",
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show system | no-more"
+          ],
+          "parsers": ["parse_bgp_summary", "parse_evpn_mac_table"]
+        },
+        "trigger": {
+          "ha_command": "request system process stop ncc {active_ncc_id} routing-engine routing:bgpd",
+          "ha_type": "process_stop",
+          "process": "routing:bgpd",
+          "hold_down_sec": 480,
+          "hold_down_note": "Device GR Restart=120s + Stalepath=30s + LLGR=300s + margin=30s = 480s. Wait past ALL GR+LLGR timers.",
+          "confirmation": "Yes"
+        },
+        "mid_check": {
+          "description": "After timer expiry, verify cleanup BEFORE restarting bgpd",
+          "show_commands": [
+            "show bgp l2vpn evpn summary | no-more",
+            "show evpn mac-table instance {evpn_name} | no-more"
+          ],
+          "expected": "Routes removed, MACs flushed"
+        },
+        "restart": {
+          "command": "request system process restart ncc {active_ncc_id} routing-engine routing:bgpd",
+          "confirmation": "Yes"
+        },
+        "poll_recovery": {
+          "timeout_sec": 300,
+          "poll_interval_sec": 15,
+          "convergence_criteria": [
+            {"command": "show bgp l2vpn evpn summary | no-more", "check": "all_neighbors_established"},
+            {"command": "show evpn mac-table instance {evpn_name} | no-more", "check": "mac_count_ge_before"}
+          ]
+        },
+        "after_snapshot": {
+          "show_commands": [
+            "show bgp l2vpn evpn summary | no-more",
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show system | no-more"
+          ]
+        },
+        "verify": {
+          "sub_commands": [],
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["timer", "expired", "cleanup", "NOTIFICATION"]}
+          ],
+          "expect": {
+            "history_consistent": true,
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_rt2_recovery": true,
+            "check_ha_traffic": true,
+            "cross_layer_check": true,
+            "xray_on_mismatch": true
+          }
+        }
+      },
+      "pass_criteria": [
+        "After timer expiry: routes removed, PWs torn down, MACs flushed",
+        "BUM flooding still works (fallback to flood for unknown destinations)",
+        "When BGP comes back: full reconvergence from scratch"
+      ],
+      "verdict_layers": {
+        "control_plane_bgp": "Routes removed after timer expiry, full reconvergence after restart",
+        "datapath_mac": "MACs flushed after timer expiry, repopulated after reconvergence",
+        "traffic": "BUM flooding during cleanup, unicast restored after reconvergence",
+        "traces": "Timer expiry and cleanup logged"
+      }
+    },
+
+    {
+      "id": "SC04_fibmgrd_restart",
+      "name": "Process Restart -- fib-manager (fibmgrd)",
+      "scenario_number": 4,
+      "ha_type": "process_restart",
+      "description": "Restart fib-manager, verify FIB reprogrammed, PW state recovered, labels correct, traffic resumes.",
+      "phases": {
+        "setup": {
+          "sub_commands": [],
+          "description": "Record labels and forwarding state."
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} | no-more",
+            "show evpn-vpws detail | no-more",
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show system | no-more"
+          ],
+          "parsers": ["parse_evpn_instance", "parse_system_nodes"]
+        },
+        "trigger": {
+          "ha_command": "request system process restart ncc {active_ncc_id} routing-engine routing:fibmgrd",
+          "ha_type": "process_restart",
+          "process": "routing:fibmgrd",
+          "confirmation": "Yes"
+        },
+        "poll_recovery": {
+          "timeout_sec": 120,
+          "poll_interval_sec": 10,
+          "convergence_criteria": [
+            {"command": "show system process routing:fibmgrd | no-more", "check": "process_running"},
+            {"command": "show evpn instance {evpn_name} | no-more", "check": "pw_state_up"}
+          ]
+        },
+        "after_snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} | no-more",
+            "show evpn-vpws detail | no-more",
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show system | no-more"
+          ]
+        },
+        "verify": {
+          "sub_commands": [],
+          "trace_greps": [
+            {"file": "routing_engine/fibmgrd_traces", "keywords": ["evpn", "label", "reprogram"]}
+          ],
+          "expect": {
+            "history_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": false,
+            "check_ha_traffic": true,
+            "cross_layer_check": true,
+            "xray_on_mismatch": true
+          }
+        }
+      },
+      "pass_criteria": [
+        "PW state recovered, labels correct in forwarding plane",
+        "Traffic resumes"
+      ],
+      "verdict_layers": {
+        "control_plane_fib": "fibmgrd running, FIB entries match pre-restart",
+        "datapath_labels": "Labels correct in forwarding plane",
+        "datapath_mac": "MAC table intact or repopulated",
+        "traffic": "Traffic resumes after restart"
+      }
+    },
+
+    {
+      "id": "SC05_zebra_restart",
+      "name": "Process Restart -- zebra (rib_manager)",
+      "scenario_number": 5,
+      "ha_type": "process_restart",
+      "description": "Restart rib_manager (zebra). Verify MAC/ARP tables cleared, relearned correctly from traffic, no stale entries.",
+      "phases": {
+        "setup": {
+          "sub_commands": [],
+          "description": "Establish service with learned MACs."
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show evpn arp-table instance {evpn_name} | no-more",
+            "show system | no-more"
+          ],
+          "parsers": ["parse_evpn_mac_table", "parse_evpn_arp_table"]
+        },
+        "trigger": {
+          "ha_command": "request system process restart ncc {active_ncc_id} routing-engine routing:rib_manager",
+          "ha_type": "process_restart",
+          "process": "routing:rib_manager",
+          "confirmation": "Yes"
+        },
+        "poll_recovery": {
+          "timeout_sec": 120,
+          "poll_interval_sec": 10,
+          "convergence_criteria": [
+            {"command": "show system process routing:rib_manager | no-more", "check": "process_running"},
+            {"command": "show evpn mac-table instance {evpn_name} | no-more", "check": "mac_count_ge_before"}
+          ]
+        },
+        "after_snapshot": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show evpn arp-table instance {evpn_name} | no-more",
+            "show system | no-more"
+          ]
+        },
+        "verify": {
+          "sub_commands": [],
+          "trace_greps": [
+            {"file": "routing_engine/rib_manager_traces", "keywords": ["evpn", "mac", "arp", "relearn"]}
+          ],
+          "expect": {
+            "history_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_ha_traffic": true,
+            "cross_layer_check": true,
+            "xray_on_mismatch": true
+          }
+        }
+      },
+      "pass_criteria": [
+        "MAC and ARP tables cleared after restart",
+        "Relearned correctly from traffic/dataplane",
+        "No stale entries"
+      ],
+      "verdict_layers": {
+        "control_plane_rib": "rib_manager running, RIB entries restored",
+        "datapath_mac": "MACs cleared then relearned from traffic",
+        "datapath_arp": "ARP entries cleared then relearned",
+        "traces": "Relearning logged in rib_manager traces"
+      }
+    },
+
+    {
+      "id": "SC06_neighbour_manager_restart",
+      "name": "Process Restart -- neighbor-manager",
+      "scenario_number": 6,
+      "ha_type": "process_restart",
+      "description": "Restart neighbour_manager. Verify neighbors rediscovered, BGP sessions re-established, EVPN state restored.",
+      "phases": {
+        "setup": {
+          "sub_commands": [],
+          "description": "Establish service with active BGP neighbors."
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show evpn summary | no-more",
+            "show system | no-more"
+          ],
+          "parsers": ["parse_bgp_summary", "parse_evpn_summary"]
+        },
+        "trigger": {
+          "ha_command": "request system process restart ncc {active_ncc_id} routing-engine neighbour_manager",
+          "ha_type": "process_restart",
+          "process": "neighbour_manager",
+          "confirmation": "Yes"
+        },
+        "poll_recovery": {
+          "timeout_sec": 180,
+          "poll_interval_sec": 15,
+          "convergence_criteria": [
+            {"command": "show bgp l2vpn evpn summary | no-more", "check": "all_neighbors_established"}
+          ]
+        },
+        "after_snapshot": {
+          "show_commands": [
+            "show bgp l2vpn evpn summary | no-more",
+            "show evpn summary | no-more",
+            "show system | no-more"
+          ]
+        },
+        "verify": {
+          "sub_commands": [],
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["neighbor", "established", "l2vpn"]}
+          ],
+          "expect": {
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_rt2_recovery": true,
+            "cross_layer_check": true,
+            "xray_on_mismatch": true
+          }
+        }
+      },
+      "pass_criteria": [
+        "Neighbors rediscovered, BGP sessions re-established",
+        "EVPN state restored"
+      ],
+      "verdict_layers": {
+        "control_plane_bgp": "All L2VPN EVPN neighbors re-establish",
+        "control_plane_evpn": "EVPN instance state matches before snapshot",
+        "traces": "Neighbor rediscovery logged"
+      }
+    },
+
+    {
+      "id": "SC07_mac_recovery",
+      "name": "MAC Recovery Post-Restart",
+      "scenario_number": 7,
+      "ha_type": "process_restart",
+      "description": "Learn MACs from AC and remote RT-2, restart BGP (or zebra), verify MAC table empty after restart, resume traffic, verify MACs relearned.",
+      "phases": {
+        "setup": {
+          "sub_commands": [],
+          "description": "Learn MACs from AC and remote (RT-2)."
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show system | no-more"
+          ],
+          "parsers": ["parse_evpn_mac_table"]
+        },
+        "trigger": {
+          "ha_command": "request system process restart ncc {active_ncc_id} routing-engine routing:bgpd",
+          "ha_type": "process_restart",
+          "process": "routing:bgpd",
+          "confirmation": "Yes"
+        },
+        "immediate_check": {
+          "description": "Verify MAC table empty immediately after restart",
+          "delay_sec": 5,
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} | no-more"
+          ],
+          "expected": "MAC table empty or significantly reduced"
+        },
+        "poll_recovery": {
+          "timeout_sec": 120,
+          "poll_interval_sec": 10,
+          "convergence_criteria": [
+            {"command": "show bgp l2vpn evpn summary | no-more", "check": "all_neighbors_established"},
+            {"command": "show evpn mac-table instance {evpn_name} | no-more", "check": "mac_count_ge_before"}
+          ]
+        },
+        "after_snapshot": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show system | no-more"
+          ]
+        },
+        "verify": {
+          "sub_commands": [],
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["mac", "type-2", "relearn"]}
+          ],
+          "expect": {
+            "history_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": false,
+            "check_rt2_recovery": true,
+            "check_ha_traffic": true,
+            "cross_layer_check": true,
+            "xray_on_mismatch": true
+          }
+        }
+      },
+      "pass_criteria": [
+        "Table empty immediately after restart",
+        "MACs relearned from traffic (not preloaded from CP)",
+        "Unknown unicast flooded until MAC relearned"
+      ],
+      "verdict_layers": {
+        "control_plane_bgp": "BGP re-establishes, RT-2 routes re-received",
+        "datapath_mac": "MAC table empty after restart, fully repopulated after recovery",
+        "traffic": "Unknown unicast flooded during relearn window, then normal forwarding"
+      }
+    },
+
+    {
+      "id": "SC08_ncc_switchover",
+      "name": "NCC / RE Switchover",
+      "scenario_number": 8,
+      "ha_type": "ncc_switchover",
+      "description": "Trigger NCC switchover, verify service continues on new active NCC with matching labels and relearned MACs.",
+      "phases": {
+        "setup": {
+          "sub_commands": [],
+          "description": "Record full service state (labels, MACs, PW status)."
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show evpn summary | no-more",
+            "show evpn instance {evpn_name} | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show system | no-more"
+          ],
+          "parsers": ["parse_bgp_summary", "parse_evpn_summary", "parse_evpn_mac_table", "parse_system_nodes"]
+        },
+        "trigger": {
+          "ha_command": "request system ncc switchover",
+          "ha_type": "ncc_switchover",
+          "confirmation": "Yes",
+          "reconnect_note": "SSH sessions terminated. Reconnect after switchover (30-60s)."
+        },
+        "poll_recovery": {
+          "timeout_sec": 180,
+          "poll_interval_sec": 15,
+          "reconnect_delay_sec": 45,
+          "convergence_criteria": [
+            {"command": "show system | no-more", "check": "new_active_ncc_up"},
+            {"command": "show bgp l2vpn evpn summary | no-more", "check": "all_neighbors_established"},
+            {"command": "show evpn mac-table instance {evpn_name} | no-more", "check": "mac_count_ge_before"}
+          ]
+        },
+        "after_snapshot": {
+          "show_commands": [
+            "show evpn summary | no-more",
+            "show evpn instance {evpn_name} | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show system | no-more"
+          ]
+        },
+        "verify": {
+          "sub_commands": [],
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["switchover", "GR", "l2vpn"]},
+            {"file": "routing_engine/fibmgrd_traces", "keywords": ["switchover", "evpn"]}
+          ],
+          "expect": {
+            "history_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": false,
+            "check_rt2_recovery": true,
+            "check_ha_traffic": true,
+            "cross_layer_check": true,
+            "xray_on_mismatch": true
+          }
+        }
+      },
+      "pass_criteria": [
+        "Service continues on new active NCC",
+        "Labels match pre-switchover",
+        "MACs relearned from traffic"
+      ],
+      "verdict_layers": {
+        "system": "Switchover completed, new active NCC operational",
+        "control_plane_bgp": "All L2VPN EVPN sessions re-established on new active",
+        "control_plane_evpn": "EVPN instance state matches before snapshot",
+        "datapath_mac": "MAC table repopulated",
+        "datapath_labels": "Labels identical pre/post switchover",
+        "traffic": "Service continuity (if /SPIRENT active)"
+      }
+    },
+
+    {
+      "id": "SC09_mac_move_during_gr",
+      "name": "MAC Move During Restart Window",
+      "scenario_number": 9,
+      "ha_type": "process_restart_with_mac_move",
+      "description": "Restart BGP (GR active), during GR window move MAC from AC-1 to AC-2 via Spirent traffic shift. Verify mobility counter increments, no permanent blackhole, MAC reflects new location after recovery.",
+      "mac_move_config": {
+        "_design_ref": "Confluence: EVPN ELAN SI MAC Handling Design, Section A.9 (HA Design for MAC) + B.12 (HA Behavior for IP/L2Neighbor). MAC mobility state (suppression, counters, is_move_to_pw) must survive HA events.",
+        "parent_interface": "ge100-18/0/0",
+        "outer_vlan": 219,
+        "ac1_subid": 102,
+        "ac1_inner_vlan": 102,
+        "ac2_subid": 103,
+        "ac2_inner_vlan": 103,
+        "move_mac": "00:DE:AD:00:09:01",
+        "spirent_rate_mbps": 1,
+        "spirent_frame_size": 128,
+        "mac_learn_wait_sec": 20,
+        "move_delay_after_trigger_sec": 8
+      },
+      "phases": {
+        "setup": {
+          "sub_commands": [],
+          "description": "Create dual ACs on DUT (same EVPN instance, different inner VLANs). Create Spirent L2 devices on each AC with same MAC. Start traffic on AC-1, verify MAC learned."
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show system | no-more"
+          ],
+          "parsers": ["parse_evpn_mac_table"]
+        },
+        "trigger": {
+          "ha_command": "request system process restart ncc {active_ncc_id} routing-engine routing:bgpd",
+          "ha_type": "process_restart",
+          "process": "routing:bgpd",
+          "confirmation": "Yes"
+        },
+        "during_gr": {
+          "description": "During GR window, shift Spirent traffic from AC-1 VLAN to AC-2 VLAN (same MAC). This triggers a local-to-local MAC move in the datapath while the BGP control plane is restarting.",
+          "delay_after_trigger_sec": 8,
+          "mac_move_action": "spirent_vlan_shift",
+          "note": "Spirent stops stream on inner VLAN 102 (AC-1), starts stream on inner VLAN 103 (AC-2) with same source MAC. DUT datapath detects MAC move and updates forwarding entry."
+        },
+        "poll_recovery": {
+          "timeout_sec": 120,
+          "poll_interval_sec": 10,
+          "convergence_criteria": [
+            {"command": "show bgp l2vpn evpn summary | no-more", "check": "all_neighbors_established"},
+            {"command": "show evpn mac-table instance {evpn_name} | no-more", "check": "mac_count_ge_before"}
+          ]
+        },
+        "after_snapshot": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show system | no-more"
+          ]
+        },
+        "verify": {
+          "sub_commands": [],
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["mac", "move", "type-2", "GR"]},
+            {"file": "routing_engine/fibmgrd_traces", "keywords": ["evpn", "mac", "move"]}
+          ],
+          "expect": {
+            "history_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": true,
+            "check_mac_on_ac2": true,
+            "check_ha_traffic": true,
+            "cross_layer_check": true,
+            "xray_on_mismatch": true
+          }
+        }
+      },
+      "pass_criteria": [
+        "MAC learned on AC-1 before trigger, moved to AC-2 during GR window",
+        "Mobility counter incremented by at least 1",
+        "No permanent blackhole after recovery",
+        "MAC table reflects correct (new) location on AC-2 after GR completes",
+        "No stale entry pointing to old AC-1 location",
+        "No forbidden flags (F=frozen, D=dropped) on the moved MAC"
+      ],
+      "verdict_layers": {
+        "control_plane_bgp": "BGP re-establishes, RT-2 routes reflect new MAC location on AC-2",
+        "datapath_mac": "MAC on AC-2 (ge100-18/0/0.103), not on AC-1 (ge100-18/0/0.102)",
+        "datapath_mobility": "Mobility counter incremented (AC-1 -> AC-2 counted per design A.5)",
+        "traffic": "No permanent blackhole (traffic reaches new MAC location on AC-2)"
+      }
+    }
+  ],
+
+  "device_timers_RR_SA_2": {
+    "_note": "Discovered from 'show bgp l2vpn evpn neighbors 1.1.1.1 | no-more' and 'show config protocols bgp 123 graceful-restart | no-more'",
+    "gr_restart_timer_sec": 120,
+    "gr_stalepath_timer_sec": 30,
+    "gr_purge_timer_sec": 90,
+    "llgr_enabled": true,
+    "llgr_afis": "l2vpn-evpn",
+    "llgr_stalepath_sec": 300,
+    "hold_time_negotiated_sec": 30,
+    "hold_time_configured_sec": 180,
+    "keepalive_sec": 10,
+    "bgp_local_as": 123,
+    "bgp_remote_as": 1234567,
+    "bgp_peers_l2vpn_evpn": ["1.1.1.1", "4.4.4.4"]
+  },
+
+  "runtime_parameters": {
+    "evpn_name": {
+      "description": "EVPN instance name to test. Discovered from device via 'show evpn summary'.",
+      "default": null,
+      "resolve": "runtime"
+    },
+    "active_ncc_id": {
+      "description": "Active NCC ID. Discovered from 'show system' at runtime.",
+      "default": null,
+      "resolve": "runtime"
+    },
+    "test_mac": {
+      "description": "MAC address for SC09 MAC move test. Discovered from 'show evpn mac-table' at runtime.",
+      "default": null,
+      "resolve": "runtime"
+    }
+  },
+
+  "verdict": {
+    "layers": 14,
+    "thresholds": {
+      "bgp_convergence_sec": 120,
+      "mac_relearn_sec": 60,
+      "traffic_loss_max_sec": 5,
+      "ncc_switchover_max_sec": 90
+    },
+    "stop_on_fail": true,
+    "run_all_scenarios": false
+  },
+
+  "estimated_duration": {
+    "per_scenario_min_sec": 120,
+    "per_scenario_max_sec": 360,
+    "total_min_min": 30,
+    "total_max_min": 60,
+    "llgr_scenario_extra_min": 10,
+    "gr_failure_scenario_extra_min": 15
+  }
+}

@@ -14,7 +14,7 @@
     {
       "id": "rr_sa_2",
       "hostname": "RR-SA-2",
-      "ip": "100.64.7.242",
+      "ip": "100.64.4.205",
       "username": "dnroot",
       "password": "ZG5yb290",
       "platform": "NCP",
@@ -25,13 +25,20 @@
     {
       "id": "yor_cl_pe_4",
       "hostname": "YOR_CL_PE-4",
-      "ip": "100.64.7.197",
+      "ip": "100.64.4.36",
       "username": "dnroot",
       "password": "ZG5yb290",
-      "platform": "NCP",
-      "last_sync": "2026-03-11T10:58:17.824072+02:00",
+      "platform": "CL-86",
+      "system_type": "CL-86",
+      "last_sync": "2026-03-23T09:50:00.000000+02:00",
       "description": "PE-4 Cluster",
-      "connection_method": "SSH\u2192MGMT"
+      "connection_method": "SSH\u2192MGMT",
+      "ncc_ips": {
+        "ncc0": "100.64.11.96",
+        "ncc1": "100.64.4.122"
+      },
+      "kvm_host": "kvm108-cl408d-ncc0",
+      "mgmt_note": "DHCP assigned - use 'show interfaces management' to get current IP"
     }
   ],
   "settings": {

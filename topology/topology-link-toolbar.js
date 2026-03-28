@@ -172,6 +172,81 @@ function showLinkSelectionToolbar(editor, link, clickPos = null) {
         sep.style.cssText = `width: 1px; height: 18px; background: ${sepColor}; margin: 0 4px;`;
         return sep;
     };
+
+    // Layer widget: badge + dropdown (submenu style, like LLDP/System Stack)
+    const createLayerWidget = (obj) => {
+        const widget = document.createElement('div');
+        widget.className = 'layer-widget';
+        widget.style.cssText = 'display: inline-flex; align-items: center; gap: 1px;';
+        const badgeColor = isDarkMode ? 'rgba(255,255,255,0.85)' : 'rgba(30,30,50,0.85)';
+        const badgeBg = isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)';
+        const badgeBorder = isDarkMode ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)';
+        const updateBadge = () => {
+            badge.textContent = editor.getObjectLayer ? editor.getObjectLayer(obj) : 10;
+        };
+        const applyLayerAction = (fn) => {
+            if (!editor[fn] || !obj) return;
+            editor.saveState && editor.saveState();
+            editor[fn](obj);
+            editor.draw && editor.draw();
+            updateBadge();
+        };
+        const badge = document.createElement('button');
+        badge.className = 'layer-badge';
+        badge.style.cssText = `min-width: 28px; height: 24px; padding: 0 6px; border: 1px solid ${badgeBorder}; background: ${badgeBg}; color: ${badgeColor}; font-size: 11px; font-family: monospace; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; justify-content: center;`;
+        updateBadge();
+        badge.onmousedown = (e) => { e.stopPropagation(); e.preventDefault(); };
+        let dropdown = null;
+        const glassBgDrop = isDarkMode ? 'rgba(15, 15, 25, 0.85)' : 'rgba(255, 255, 255, 0.92)';
+        const glassBorderDrop = isDarkMode ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.08)';
+        const glassShadowDrop = isDarkMode
+            ? '0 4px 30px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08)'
+            : '0 4px 30px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.5)';
+        const items = [
+            { label: 'Bring to Front', fn: 'moveObjectToFront' },
+            { label: 'Move Forward', fn: 'moveObjectForward' },
+            { label: 'Move Backward', fn: 'moveObjectBackward' },
+            { label: 'Send to Back', fn: 'moveObjectToBack' },
+            null,
+            { label: 'Reset to Default', fn: 'resetObjectLayer' }
+        ];
+        const closeDropdown = () => {
+            if (dropdown) { dropdown.remove(); dropdown = null; }
+            document.removeEventListener('mousedown', outsideClick);
+        };
+        const outsideClick = (e) => {
+            if (dropdown && !dropdown.contains(e.target) && e.target !== badge) closeDropdown();
+        };
+        badge.onclick = (e) => {
+            e.stopPropagation(); e.preventDefault();
+            if (dropdown) { closeDropdown(); return; }
+            dropdown = document.createElement('div');
+            dropdown.style.cssText = `position: fixed; z-index: 100002; min-width: 160px; background: ${glassBgDrop}; border: 1px solid ${glassBorderDrop}; border-radius: 10px; padding: 4px 0; box-shadow: ${glassShadowDrop}; backdrop-filter: blur(24px) saturate(200%); -webkit-backdrop-filter: blur(24px) saturate(200%);`;
+            items.forEach((item) => {
+                if (!item) { const sep = document.createElement('div'); sep.style.cssText = `height: 1px; background: ${isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)'}; margin: 4px 6px;`; dropdown.appendChild(sep); return; }
+                const div = document.createElement('div');
+                div.style.cssText = `padding: 6px 12px; cursor: pointer; font-size: 12px; border-radius: 6px; margin: 0 4px; color: ${badgeColor};`;
+                div.textContent = item.label;
+                div.onmouseenter = () => { div.style.background = isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)'; };
+                div.onmouseleave = () => { div.style.background = 'transparent'; };
+                div.onmousedown = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+                div.onclick = (ev) => { ev.stopPropagation(); ev.preventDefault(); applyLayerAction(item.fn); closeDropdown(); };
+                dropdown.appendChild(div);
+            });
+            document.body.appendChild(dropdown);
+            const r = badge.getBoundingClientRect();
+            dropdown.style.left = `${r.left + r.width / 2 - 80}px`;
+            dropdown.style.top = `${r.bottom + 6}px`;
+            setTimeout(() => document.addEventListener('mousedown', outsideClick), 10);
+        };
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position: relative; display: inline-flex; align-items: center;';
+        wrap.appendChild(badge);
+        widget.appendChild(wrap);
+        badge.onmouseenter = () => { badge.style.background = isDarkMode ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.1)'; if (editor._showToolbarTooltip) editor._showToolbarTooltip(badge, 'Layer (click for menu)'); };
+        badge.onmouseleave = () => { badge.style.background = badgeBg; if (editor._hideToolbarTooltip) editor._hideToolbarTooltip(); };
+        return widget;
+    };
     
     // === LINK TOOLBAR BUTTONS ===
     
@@ -179,8 +254,15 @@ function showLinkSelectionToolbar(editor, link, clickPos = null) {
     if (link.device1 && link.device2 && window.XrayPopup) {
         const xrayBtn = document.createElement('button');
         xrayBtn.className = 'link-tb-btn';
-        xrayBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>`;
-        const xrayColor = editor._xrayCapturing === link.id ? '#FF5E1F' : '#0066FA';
+        const isCapturing = editor._xrayCapturing === link.id;
+        const captureOverlay = isCapturing
+            ? `<circle class="xray-spin-ring" cx="11" cy="11" r="5" fill="none" stroke="rgba(255,255,255,0.45)" stroke-width="1.5" stroke-dasharray="7 24" stroke-linecap="round"/>` +
+              `<g transform="translate(4.5,3.7) scale(0.203)" fill="white" stroke="none">` +
+              `<path d="M45.6 11.2c-13.4.2-21 8.1-25 15.7-3.5 6.7-4.2 12.4-4.4 14L0 41.1v2.6l17.3-.2c.7 0 1.2-.5 1.3-1.2 0 0 .7-7.1 4.4-14.2 3.4-6.6 9.5-13.1 20.3-14.1-6.7 13.3.7 28.8.7 28.8.2.4.6.7 1.2.8L64 43.7v-2.6l-18-.2c-.9-2-6.6-16.3.7-27.7.4-.7 0-1.6-.7-1.9-.1-.1-.3-.1-.4-.1z"/>` +
+              `</g>`
+            : '';
+        xrayBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/>${captureOverlay}<path d="M21 21l-4.35-4.35"/></svg>`;
+        const xrayColor = isCapturing ? '#FF5E1F' : '#0066FA';
         xrayBtn.style.cssText = `
             width: 30px; height: 30px; border: none;
             background: ${xrayColor}; color: #fff;
@@ -415,6 +497,8 @@ function showLinkSelectionToolbar(editor, link, clickPos = null) {
         if (editor.copyObjectStyle) editor.copyObjectStyle(link);
         if (editor.showToast) editor.showToast('Style copied! Click another link to paste.', 'success');
     }));
+    
+    toolbar.appendChild(createLayerWidget(link));
     
     toolbar.appendChild(createSeparator());
     

@@ -1,0 +1,47 @@
+[
+  {
+    "command": "show bgp l2vpn evpn summary | no-more",
+    "timestamp": "2026-03-23T06:37:34.243+00:00",
+    "duration_ms": 3098,
+    "phase": "before_snapshot",
+    "output_length": 480,
+    "output_preview": "BGP router identifier 2.2.2.2, local AS number 123\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  1.1.1.1         4    1234567       3036       3039    0     0       2 08:23:48                   1\n  4.4.4.4         4    1234567        521        522    0     0       2 08:23:50                   0\n\nTotal number of established neighbors with L2vpn EVPN 2/2\n\nTotal number of NSR capable BGP sessions 0",
+    "output_full": "BGP router identifier 2.2.2.2, local AS number 123\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  1.1.1.1         4    1234567       3036       3039    0     0       2 08:23:48                   1\n  4.4.4.4         4    1234567        521        522    0     0       2 08:23:50                   0\n\nTotal number of established neighbors with L2vpn EVPN 2/2\n\nTotal number of NSR capable BGP sessions 0"
+  },
+  {
+    "command": "show evpn summary | no-more",
+    "timestamp": "2026-03-23T06:37:37.342+00:00",
+    "duration_ms": 2072,
+    "phase": "before_snapshot",
+    "output_length": 716,
+    "output_preview": "Global EVPN parameters\nMAC table limit per EVI : 64000\nMAC table aging time    : 320s\nControl Word            : enabled\nFAT Label               : disabled\nE-Tree Leaf Label       : 1032383\n\nNumber of EVPN instances       : 1\nTotal local MAC addresses      : 1\nTotal local MAC-IPs            : 0\nTotal remote MAC addresses     : 0\nTotal remote MAC-IPs           : 0\nTotal VPLS MAC addresses       : 0\nTotal MAC addresses            : 1\nTotal MAC-IPs                  : 0\nTotal suppressed MAC addresses",
+    "output_full": "Global EVPN parameters\nMAC table limit per EVI : 64000\nMAC table aging time    : 320s\nControl Word            : enabled\nFAT Label               : disabled\nE-Tree Leaf Label       : 1032383\n\nNumber of EVPN instances       : 1\nTotal local MAC addresses      : 1\nTotal local MAC-IPs            : 0\nTotal remote MAC addresses     : 0\nTotal remote MAC-IPs           : 0\nTotal VPLS MAC addresses       : 0\nTotal MAC addresses            : 1\nTotal MAC-IPs                  : 0\nTotal suppressed MAC addresses : 0\nTotal number of interfaces/up  : 2/2\nTotal number of EVPN neighbors : 1\nTotal number of VPLS neighbors : 0\nTotal Local MH ESIs            : 0\nTotal Local MH ACs             : 0\nTotal Local MH VPLS ACs        : 0"
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-03-23T06:37:39.414+00:00",
+    "duration_ms": 2072,
+    "phase": "before_snapshot",
+    "output_length": 716,
+    "output_preview": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ------------------",
+    "output_full": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ----------------------------------------------------------------------------------------------------------------------------\n    L>        | 00:de:ad:00:01:01    |                               | bundle-100.2150        |             |"
+  },
+  {
+    "command": "show system | no-more",
+    "timestamp": "2026-03-23T06:37:41.486+00:00",
+    "duration_ms": 10009,
+    "phase": "before_snapshot",
+    "output_length": 48,
+    "output_preview": "[ERROR] SSH to RR-SA-2 (100.64.11.75): timed out",
+    "output_full": "[ERROR] SSH to RR-SA-2 (100.64.11.75): timed out"
+  },
+  {
+    "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+    "timestamp": "2026-03-23T06:37:51.496+00:00",
+    "duration_ms": 2225,
+    "phase": "before_snapshot",
+    "output_length": 42,
+    "output_preview": "Number of MAC-Mobility entries in redis: 0",
+    "output_full": "Number of MAC-Mobility entries in redis: 0"
+  }
+]

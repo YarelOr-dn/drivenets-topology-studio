@@ -159,10 +159,14 @@ window.ObjectDetection = {
                 // For links, collect distance - we'll find the CLOSEST link later
                 const hitDistance = editor._checkLinkHit(x, y, obj);
                 if (hitDistance >= 0) {
-                    // Store this link as a candidate with its distance
-                    if (!closestLink || hitDistance < closestLinkDistance) {
+                    // When an unbound link and a Quick Link hit at similar distances,
+                    // prefer the unbound link since QLs follow their devices automatically
+                    // and the user likely wants to interact with the UL.
+                    const ulBonus = obj.type === 'unbound' ? 2 / editor.zoom : 0;
+                    const adjustedDist = hitDistance - ulBonus;
+                    if (!closestLink || adjustedDist < closestLinkDistance) {
                         closestLink = obj;
-                        closestLinkDistance = hitDistance;
+                        closestLinkDistance = adjustedDist;
                     }
                 }
                 
@@ -196,6 +200,54 @@ window.ObjectDetection = {
             // Use the TP-clicked link, but still check device bounds
             closestLink = closestTPLink;
             closestLinkDistance = closestTPDistance;
+        }
+        
+        // SELECTION STICKINESS: When the selected object is a link and the click is
+        // in its general vicinity, prefer it over other overlapping links. This prevents
+        // accidental selection changes when a newly created UL overlaps with an
+        // existing link at the same position (e.g., both pass through viewport center).
+        // Uses a 12px bounding-box margin for both link types (symmetric behavior).
+        if (closestLink && editor.selectedObject &&
+            (editor.selectedObject.type === 'link' || editor.selectedObject.type === 'unbound') &&
+            editor.selectedObject !== closestLink) {
+            const sel = editor.selectedObject;
+            let nearSelected = false;
+            // Newly created links (within 2s) get stronger stickiness to prevent accidental switch
+            const createdTs = sel._createdAt ?? sel.createdAt;
+            const isRecentlyCreated = createdTs && (Date.now() - createdTs) < 2000;
+            const margin = (isRecentlyCreated ? 20 : 12) / editor.zoom;
+            let sx, sy, ex, ey;
+            if (sel.type === 'unbound' && sel.start && sel.end) {
+                sx = sel.start.x; sy = sel.start.y; ex = sel.end.x; ey = sel.end.y;
+                const minX = Math.min(sx, ex) - margin;
+                const maxX = Math.max(sx, ex) + margin;
+                const minY = Math.min(sy, ey) - margin;
+                const maxY = Math.max(sy, ey) + margin;
+                nearSelected = (x >= minX && x <= maxX && y >= minY && y <= maxY);
+            } else if (sel._renderedEndpoints) {
+                sx = sel._renderedEndpoints.startX; sy = sel._renderedEndpoints.startY;
+                ex = sel._renderedEndpoints.endX; ey = sel._renderedEndpoints.endY;
+                const minX = Math.min(sx, ex) - margin;
+                const maxX = Math.max(sx, ex) + margin;
+                const minY = Math.min(sy, ey) - margin;
+                const maxY = Math.max(sy, ey) + margin;
+                nearSelected = (x >= minX && x <= maxX && y >= minY && y <= maxY);
+            } else if (editor.getLinkRenderedEndpoints && editor.getLinkRenderedEndpoints(sel)) {
+                const ep = editor.getLinkRenderedEndpoints(sel);
+                sx = ep.startX; sy = ep.startY; ex = ep.endX; ey = ep.endY;
+                const minX = Math.min(sx, ex) - margin;
+                const maxX = Math.max(sx, ex) + margin;
+                const minY = Math.min(sy, ey) - margin;
+                const maxY = Math.max(sy, ey) + margin;
+                nearSelected = (x >= minX && x <= maxX && y >= minY && y <= maxY);
+            } else {
+                nearSelected = editor._checkLinkHit(x, y, sel) >= 0;
+            }
+            
+            if (nearSelected) {
+                closestLink = sel;
+                closestLinkDistance = 0;
+            }
         }
         
         // PRIORITY FIX: Before returning a link, check if click is INSIDE a device's visual bounds
@@ -611,7 +663,7 @@ window.ObjectDetection = {
     findTerminalButton(editor, device, x, y) {
         if (!device || device.type !== 'device') return false;
         // Check for either sshConfig.host or legacy deviceAddress
-        const hasSSHConfig = device.sshConfig?.host || (device.deviceAddress && device.deviceAddress.trim() !== '');
+        const hasSSHConfig = device.sshConfig?.host || device.sshConfig?.hostBackup || device.deviceSerial || (device.deviceAddress && device.deviceAddress.trim() !== '');
         if (!hasSSHConfig) return false;
         if (!device._terminalBtnPos) return false;
         
@@ -624,147 +676,472 @@ window.ObjectDetection = {
         return dist <= hitboxRadius;
     },
     
-    // Open terminal (SSH) to device
+    /**
+     * Show a recovery modal when device IP can't be resolved.
+     * Offers: manual IP entry, console discovery, open SSH config dialog.
+     * Returns resolved IP string, or null to abort.
+     */
+    async _showTerminalRecoveryModal(editor, device, failedHost) {
+        return new Promise((resolve) => {
+            const deviceId = device.label || device.id || failedHost;
+            const serial = device.deviceSerial || device.serial || '';
+            const mode = device._deviceMode || '';
+            const cachedIp = device.sshConfig?.managedDeviceIp || device.sshConfig?.hostBackup || '';
+            const cachedIsIP = cachedIp && /^\d+\.\d+\.\d+\.\d+$/.test(cachedIp);
+
+            const isDark = document.body.classList.contains('dark-mode') ||
+                window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+            const bg = isDark ? 'rgba(30,35,50,0.97)' : 'rgba(255,255,255,0.97)';
+            const text = isDark ? '#e0e0e0' : '#1a1a2e';
+            const border = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)';
+            const accent = '#e67e22';
+            const inputBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
+
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);';
+
+            const modeBadge = mode && mode !== 'unknown'
+                ? `<span style="background:${mode === 'DNOS' ? '#27ae60' : mode === 'GI' ? '#f39c12' : '#e74c3c'};color:#fff;padding:2px 8px;border-radius:4px;font-size:10px;margin-left:6px;">${mode}</span>`
+                : '';
+
+            overlay.innerHTML = `
+                <div style="background:${bg};border:1px solid ${border};border-radius:12px;padding:20px 24px;max-width:440px;width:90%;color:${text};font-family:system-ui;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+                    <div style="font-size:14px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${accent}" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        Cannot Resolve Device IP${modeBadge}
+                    </div>
+                    <div style="font-size:12px;margin-bottom:14px;color:${isDark ? '#aaa' : '#666'};">
+                        <strong>${deviceId}</strong> could not be resolved to an IP address.
+                        ${serial ? 'Serial: ' + serial : ''}
+                        ${mode === 'GI' || mode === 'RECOVERY' ? '<br>Device may be in ' + mode + ' mode -- SSH may be unavailable.' : ''}
+                    </div>
+                    <div style="margin-bottom:10px;">
+                        <label style="font-size:11px;color:${isDark ? '#999' : '#777'};display:block;margin-bottom:4px;">Management IP address:</label>
+                        <input id="_trm_ip_input" type="text" placeholder="e.g. 100.64.4.98"
+                            value="${cachedIsIP ? cachedIp : ''}"
+                            style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid ${border};background:${inputBg};color:${text};font-size:13px;outline:none;" />
+                    </div>
+                    <div id="_trm_status" style="font-size:11px;min-height:18px;margin-bottom:10px;color:${isDark ? '#888' : '#999'};"></div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
+                        <button id="_trm_discover" style="padding:5px 10px;font-size:11px;border-radius:5px;border:1px solid ${border};background:${inputBg};color:${text};cursor:pointer;">Discover Console</button>
+                        <button id="_trm_ssh_dialog" style="padding:5px 10px;font-size:11px;border-radius:5px;border:1px solid ${border};background:${inputBg};color:${text};cursor:pointer;">SSH Config</button>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button id="_trm_cancel" style="padding:6px 14px;border-radius:6px;border:1px solid ${border};background:${inputBg};color:${text};font-size:12px;cursor:pointer;">Cancel</button>
+                        <button id="_trm_connect" style="padding:6px 16px;border-radius:6px;border:none;background:linear-gradient(135deg,${accent},#d35400);color:#fff;font-size:12px;cursor:pointer;font-weight:500;">Connect</button>
+                    </div>
+                </div>`;
+
+            document.body.appendChild(overlay);
+
+            const ipInput = overlay.querySelector('#_trm_ip_input');
+            const statusEl = overlay.querySelector('#_trm_status');
+            const connectBtn = overlay.querySelector('#_trm_connect');
+            const cancelBtn = overlay.querySelector('#_trm_cancel');
+            const discoverBtn = overlay.querySelector('#_trm_discover');
+            const sshDialogBtn = overlay.querySelector('#_trm_ssh_dialog');
+
+            const cleanup = () => { if (overlay.parentNode) overlay.remove(); };
+
+            cancelBtn.addEventListener('click', () => { cleanup(); resolve(null); });
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) { cleanup(); resolve(null); } });
+
+            connectBtn.addEventListener('click', () => {
+                const ip = (ipInput.value || '').trim();
+                if (!ip) {
+                    statusEl.textContent = 'Enter a valid IP address or hostname.';
+                    statusEl.style.color = '#e74c3c';
+                    return;
+                }
+                cleanup();
+                resolve(ip);
+            });
+
+            ipInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') connectBtn.click();
+                if (e.key === 'Escape') { cleanup(); resolve(null); }
+            });
+            const _escHandler = (e) => { if (e.key === 'Escape') { cleanup(); resolve(null); } };
+            document.addEventListener('keydown', _escHandler);
+            const _origCleanup = cleanup;
+            cleanup = () => { document.removeEventListener('keydown', _escHandler); _origCleanup(); };
+
+            discoverBtn.addEventListener('click', async () => {
+                if (typeof ScalerAPI === 'undefined' || !ScalerAPI.discoverConsole) {
+                    statusEl.textContent = 'Console discovery not available.';
+                    statusEl.style.color = '#e74c3c';
+                    return;
+                }
+                discoverBtn.textContent = 'Discovering...';
+                discoverBtn.disabled = true;
+                try {
+                    const r = await ScalerAPI.discoverConsole(deviceId, serial, ipInput.value?.trim());
+                    let msg = '';
+                    if (r.console_server) msg += `Console: ${r.console_server} port ${r.port || '?'} (${r.source || '?'})`;
+                    if (r.pdu_entries?.length) msg += ` | PDU: ${r.pdu_entries[0].pdu} outlet ${r.pdu_entries[0].outlet}`;
+                    if (!msg) msg = 'No console mapping found.';
+                    statusEl.textContent = msg;
+                    statusEl.style.color = r.console_server ? '#27ae60' : '#e67e22';
+                } catch (e) {
+                    statusEl.textContent = `Discovery failed: ${e.message}`;
+                    statusEl.style.color = '#e74c3c';
+                } finally {
+                    discoverBtn.textContent = 'Discover Console';
+                    discoverBtn.disabled = false;
+                }
+            });
+
+            sshDialogBtn.addEventListener('click', () => {
+                cleanup();
+                resolve(null);
+                if (typeof window.showSSHAddressDialog === 'function') {
+                    window.showSSHAddressDialog(editor, device);
+                } else if (editor.showSSHAddressDialog) {
+                    editor.showSSHAddressDialog(device);
+                } else {
+                    editor.showNotification('[INFO] Right-click device > Set SSH Address', 'info');
+                }
+            });
+
+            setTimeout(() => ipInput.focus(), 100);
+        });
+    },
+
+    // Open terminal (SSH) to device -- iTerm preferred, web terminal as fallback
     async openTerminalToDevice(editor, device) {
         try {
-            // Get SSH config - support both new sshConfig and legacy deviceAddress
+            if (editor.hideDeviceSelectionToolbar) editor.hideDeviceSelectionToolbar();
+
             const sshConfig = device.sshConfig || {};
-            let host = sshConfig.host || '';
-            let user = sshConfig.user || 'dnroot';
-            let password = sshConfig.password || 'dnroot';
-        
-        // Fallback chain for host:
-        // 1. sshConfig.host (primary - mgmt IP)
-        // 2. sshConfig.hostBackup (backup - serial number)
-        // 3. device.deviceSerial (from DNAAS discovery)
-        // 4. device.deviceAddress (legacy format)
-        if (!host && sshConfig.hostBackup) {
-            host = sshConfig.hostBackup;
-            if (editor.debugger) {
-                editor.debugger.logInfo(`Using backup host (SN): ${host}`);
+            let host = sshConfig._userSavedHost || sshConfig.host || '';
+            let user = sshConfig._userSavedUser || sshConfig.user || 'dnroot';
+            let password = sshConfig._userSavedPass || sshConfig.password || 'dnroot';
+            let isCluster = sshConfig._isCluster || false;
+            let virshCmd = sshConfig._virshCmd || '';
+
+            if (!host) host = sshConfig.hostBackup || '';
+            if (!host) host = device.deviceSerial || '';
+            if (!host && device.deviceAddress) {
+                const addr = device.deviceAddress.trim();
+                if (addr.includes('@')) { user = addr.split('@')[0]; host = addr.split('@')[1]; }
+                else host = addr;
             }
-        }
-        
-        if (!host && device.deviceSerial) {
-            host = device.deviceSerial;
-            if (editor.debugger) {
-                editor.debugger.logInfo(`Using deviceSerial as host: ${host}`);
+            if (!host) {
+                const recovered = await this._showTerminalRecoveryModal(editor, device, device.label || 'unknown');
+                if (!recovered) return;
+                host = recovered;
+                device.sshConfig = device.sshConfig || {};
+                device.sshConfig.host = host;
             }
-        }
-        
-        // Fallback to legacy deviceAddress
-        if (!host && device.deviceAddress) {
-            const address = device.deviceAddress.trim();
-            if (address.includes('@')) {
-                const parts = address.split('@');
-                user = parts[0];
-                host = parts[1];
-            } else {
-                host = address;
+
+            const _devMode = (device._deviceMode || '').toUpperCase();
+            console.log(`[SSH] Start: label=${device.label}, host=${host}, cluster=${isCluster}, mode=${_devMode}`);
+
+            // ===== ALWAYS: if host is set, open iTerm directly (any mode) =====
+            if (host) {
+                console.log(`[SSH] iTerm direct: ssh://${user}@${host} (mode=${_devMode})`);
+                this._pendingPassword = password;
+                editor._openSshUrl(`ssh://${user}@${host}`);
+                return;
             }
-        }
-        
-        if (!host) {
-            if (editor.debugger) {
-                editor.debugger.logWarning('Cannot open terminal: No device address set');
-            }
-            editor.showNotification('No SSH address configured. Right-click device → Set SSH Address', 'warning');
-            return;
-        }
-        
-        // CRITICAL: Check if host is a valid SSH target (IP or simple hostname without special chars)
-        const isIPAddress = /^\d+\.\d+\.\d+\.\d+$/.test(host);
-        const isValidSshHost = /^[a-zA-Z0-9._-]+$/.test(host) || isIPAddress;
-        
-        if (!isIPAddress && isValidSshHost) {
-            try {
-                const lookupName = device.label || host;
-                if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDevice) {
-                    const resolved = await ScalerAPI.getDevice(lookupName);
-                    if (resolved && resolved.ip) {
-                        console.log(`[Terminal] Resolved "${host}" -> "${resolved.ip}" via Network Mapper`);
-                        const oldHost = host;
-                        host = resolved.ip;
-                        device.sshConfig = device.sshConfig || {};
-                        device.sshConfig.host = resolved.ip;
-                        device.sshConfig.hostBackup = oldHost;
-                        if (resolved.serial) device.deviceSerial = resolved.serial;
-                    }
-                }
-            } catch (e) {
-                console.warn('[Terminal] Could not resolve device IP:', e.message);
-            }
-        }
-        
-        if (!isValidSshHost) {
-            console.warn(`[Terminal] Invalid SSH host: "${host}" - contains special characters`);
-            
-            // First, try to find an IP address in the sshConfig or device properties
-            // These are more reliable than hostnames
-            const altHosts = [
-                sshConfig.hostBackup,
-                device.deviceSerial,
-                device.sshConfig?.managedDeviceIp,
-            ].filter(h => h && /^\d+\.\d+\.\d+\.\d+$/.test(h) || /^[a-z0-9]+$/i.test(h));
-            
-            if (altHosts.length > 0) {
-                host = altHosts[0];
-                console.log(`[Terminal] Using alternative host: "${host}"`);
-            } else {
-                // Fallback: Try to extract just the hostname part before any parentheses/date suffix
-                const cleanHost = host.split('(')[0].trim();
-                if (cleanHost && cleanHost !== host && /^[a-zA-Z0-9._-]+$/.test(cleanHost)) {
-                    console.log(`[Terminal] Cleaned host: "${cleanHost}"`);
-                    host = cleanHost;
-                } else {
-                    editor.showNotification(`Invalid SSH host: "${host}". Right-click → Set SSH Address with a valid IP.`, 'error');
+
+            // ===== NO HOST: fallback paths =====
+            const _isRecoveryMode = _devMode === 'GI' || _devMode === 'RECOVERY';
+
+            // Try enriched/cached IPs before probing
+            if (!_isRecoveryMode) {
+                let iTermHost = sshConfig._enrichedMgmtIp || sshConfig._nccMgmtIp || null;
+                if (iTermHost) {
+                    console.log(`[SSH] iTerm (cached): ssh://${user}@${iTermHost}`);
+                    this._pendingPassword = password;
+                    editor._openSshUrl(`ssh://${user}@${iTermHost}`);
                     return;
                 }
             }
-        }
-        
-        // Build SSH command
-        const sshCommand = `ssh ${user}@${host}`;
-        
-        if (editor.debugger) {
-            editor.debugger.logInfo(`🖥️ Opening terminal to ${device.label || 'Device'}: ${sshCommand}`);
-        }
-        
-        // Detect operating system
-        const ua = navigator.userAgent;
-        const isMac = /Mac|iPhone|iPod|iPad/.test(ua);
-        const isLinux = /Linux/.test(ua) && !(/Android/.test(ua));
-        
-        // Linux: Just copy the SSH command - _openSshUrl handles the rest
-        if (isLinux) {
-            const sshUrl = `ssh://${user}@${host}`;
-            editor._openSshUrl(sshUrl);
-            
-            // CRITICAL FIX (Jan 2026): Do NOT delay password copy - it interferes with
-            // subsequent SSH operations. Instead, show password in notification immediately.
-            if (password) {
-                // Show password visibly in notification so user can see it
-                // No clipboard copy - that would overwrite the SSH command we just copied!
-                editor.showNotification(`🔑 Password: ${password}`, 'info', 10000); // Show for 10 seconds
+
+            // ===== CLUSTER INSTANT (GI/RECOVERY, no host): try NCC mgmt, then virsh console =====
+            if (isCluster && virshCmd) {
+                const vi = sshConfig._virshInfo || {};
+                const kvmHost = vi.kvmHost || (/^\d+\.\d+\.\d+\.\d+$/.test(host) ? host : '');
+                const hasNccInfo = (vi.nccVms && vi.nccVms.length > 0) || vi.activeNcc;
+                const openedIterm = await this._tryOpenClusterNccMgmtIterm(editor, device, sshConfig);
+                if (openedIterm) return;
+                if (kvmHost && hasNccInfo && typeof window.TerminalPanel !== 'undefined' && window.TerminalPanel.open) {
+                    console.log(`[SSH] CLUSTER INSTANT -> web terminal virsh: kvm=${kvmHost}, activeNcc=${vi.activeNcc}`);
+                    window.TerminalPanel.open({
+                        deviceId: device.label || device.id || '', host: kvmHost,
+                        method: 'virsh_console',
+                        deviceLabel: `${device.label || 'Cluster'} (NCC ${vi.activeNcc || 'console'})`,
+                        password: vi.kvmPass || 'drive1234!', user: vi.kvmUser || 'dn',
+                        virshInfo: {
+                            kvmHost, kvmUser: vi.kvmUser || 'dn', kvmPass: vi.kvmPass || 'drive1234!',
+                            nccVms: vi.nccVms || [], activeNcc: vi.activeNcc || '',
+                        },
+                    });
+                    this._fireBackgroundNccDiscovery(editor, device, {
+                        kvmHost,
+                        kvmUser: vi.kvmUser || 'dn',
+                        kvmPass: vi.kvmPass || 'drive1234!',
+                        nccVms: vi.nccVms || [],
+                        activeNcc: vi.activeNcc || '',
+                    });
+                    editor.showNotification(`[OK] Connecting to ${device.label} NCC via virsh console...`, 'success', 5000);
+                    return;
+                }
+                console.log('[SSH] Cluster but missing KVM IP or NCC info, falling to probe');
             }
-            return;
-        }
-        
-        // macOS: Use iTerm integration with ssh:// URL scheme
-        // SIMPLIFIED (Jan 2026): Always open new window - no complex session tracking
-        const sshUrl = `ssh://${user}@${host}`;
-        editor._openSshUrl(sshUrl);
-        
-        if (password) {
-            editor._safeClipboardWrite(password).catch(() => {});
-            editor.showNotification(`🖥️ Terminal opened to ${device.label || host}! Password copied (⌘V)`, 'success');
-        } else {
-            editor.showNotification(`🖥️ Terminal opened: ${sshCommand}`, 'success');
-        }
+
+            // ===== STANDALONE INSTANT: host is an IP and NOT a cluster → iTerm =====
+            if (/^\d+\.\d+\.\d+\.\d+$/.test(host) && !isCluster) {
+                console.log(`[SSH] INSTANT iTerm: ssh://${user}@${host}`);
+                this._pendingPassword = password;
+                editor._openSshUrl(`ssh://${user}@${host}`);
+                if (typeof ScalerAPI !== 'undefined' && ScalerAPI.probeConnection) {
+                    ScalerAPI.probeConnection(device.label || host, host).then(r => {
+                        if (r.device_state) device._deviceMode = r.device_state;
+                        this._updateClusterInfo(device, r);
+                    }).catch(() => {});
+                }
+                return;
+            }
+
+            // ===== PROBE PATH =====
+            let bestIP = null;
+            let nccHost = null;
+            let clusterInfo = null;
+
+            if (typeof ScalerAPI !== 'undefined' && ScalerAPI.probeConnection) {
+                try {
+                    const probeHost = /^\d+\.\d+\.\d+\.\d+$/.test(host) ? host : '';
+                    const result = await ScalerAPI.probeConnection(device.label || host, probeHost);
+                    const reachable = (result.methods || []).filter(m => m.reachable);
+                    console.log(`[SSH] Probe: ${reachable.length} reachable, state=${result.device_state}`);
+
+                    if (reachable.length === 0) {
+                        editor.showNotification(`[WARN] ${device.label || host}: No method reachable.`, 'warning', 6000);
+                        return;
+                    }
+
+                    if (result.device_state) device._deviceMode = result.device_state;
+                    const probeMode = (result.device_state || _devMode || '').toUpperCase();
+
+                    // For clusters: find the NCC SSH entry (ssh_ncc)
+                    const nccEntry = reachable.find(m => m.method === 'ssh_ncc');
+                    if (nccEntry) nccHost = nccEntry.host;
+
+                    // Best reachable IP from non-virsh SSH methods
+                    const ipEntry = reachable.find(m =>
+                        m.method !== 'virsh_console' && m.method !== 'console' &&
+                        /^\d+\.\d+\.\d+\.\d+$/.test(m.host)
+                    );
+                    if (ipEntry) bestIP = ipEntry.host;
+
+                    // Detect cluster
+                    const virshEntry = reachable.find(m => m.method === 'virsh_console');
+                    if (result.cluster?.is_cluster || (virshEntry && (virshEntry.ncc_vms?.length > 0 || virshEntry.vms_running?.length > 0))) {
+                        if (virshEntry) {
+                            const kvmCreds = virshEntry.kvm_credentials || {};
+                            const activeNcc = (virshEntry.vms_running?.[0]) || (virshEntry.ncc_vms || [])[0] || '';
+                            clusterInfo = {
+                                kvmHost: virshEntry.host,
+                                kvmUser: kvmCreds.username || 'dn',
+                                kvmPass: kvmCreds.password || '',
+                                activeNcc,
+                                nccVms: virshEntry.ncc_vms || [],
+                                virshCmd: activeNcc ? `sudo virsh console --force ${activeNcc}` : '',
+                            };
+                        }
+                    }
+
+                    if (result.ncc_mgmt_ip && /^\d+\.\d+\.\d+\.\d+$/.test(String(result.ncc_mgmt_ip).trim())) {
+                        device.sshConfig = device.sshConfig || {};
+                        device.sshConfig._nccMgmtIp = String(result.ncc_mgmt_ip).trim();
+                    }
+                    this._updateClusterInfo(device, result);
+                } catch (e) {
+                    console.warn('[SSH] Probe failed:', e.message);
+                }
+            }
+
+            const probeMode = (device._deviceMode || _devMode || '').toUpperCase();
+            console.log(`[SSH] After probe: host=${host}, bestIP=${bestIP}, nccHost=${nccHost}, cluster=${!!clusterInfo}, mode=${probeMode}`);
+
+            // ===== NON-GI/RECOVERY (from probe): direct SSH via iTerm =====
+            const _probeRecovery = probeMode === 'GI' || probeMode === 'RECOVERY';
+            if (!_probeRecovery) {
+                const dnosIP = bestIP || (/^\d+\.\d+\.\d+\.\d+$/.test(host) ? host : null);
+                if (dnosIP) {
+                    console.log(`[SSH] PROBE -> iTerm (mode=${probeMode||'default'}): ssh://${user}@${dnosIP}`);
+                    this._pendingPassword = password;
+                    editor._openSshUrl(`ssh://${user}@${dnosIP}`);
+                    device.sshConfig = device.sshConfig || {};
+                    device.sshConfig._nccMgmtIp = dnosIP;
+                    return;
+                }
+            }
+
+            // ===== CLUSTER (from probe, non-DNOS): try iTerm to NCC mgmt first, then virsh =====
+            if (clusterInfo && clusterInfo.kvmHost && typeof window.TerminalPanel !== 'undefined' && window.TerminalPanel.open) {
+                const openedProbe = await this._tryOpenClusterNccMgmtIterm(editor, device, device.sshConfig || sshConfig);
+                if (openedProbe) return;
+                if (bestIP && bestIP !== clusterInfo.kvmHost) {
+                    console.log(`[SSH] PROBE CLUSTER -> iTerm via NCC IP: ${bestIP}`);
+                    this._pendingPassword = 'dnroot';
+                    editor._openSshUrl(`ssh://dnroot@${bestIP}`);
+                    device.sshConfig = device.sshConfig || {};
+                    device.sshConfig._nccMgmtIp = bestIP;
+                    editor.showNotification(`[OK] iTerm to NCC ${bestIP}`, 'success', 4000);
+                    return;
+                }
+                console.log(`[SSH] PROBE CLUSTER -> web terminal virsh: kvm=${clusterInfo.kvmHost}, activeNcc=${clusterInfo.activeNcc}`);
+                device.sshConfig = device.sshConfig || {};
+                device.sshConfig._isCluster = true;
+                device.sshConfig._virshCmd = clusterInfo.virshCmd;
+                device.sshConfig._virshInfo = {
+                    kvmHost: clusterInfo.kvmHost, kvmUser: clusterInfo.kvmUser, kvmPass: clusterInfo.kvmPass,
+                    nccVms: clusterInfo.nccVms, activeNcc: clusterInfo.activeNcc,
+                };
+                window.TerminalPanel.open({
+                    deviceId: device.label || device.id || '', host: clusterInfo.kvmHost,
+                    method: 'virsh_console',
+                    deviceLabel: `${device.label || 'Cluster'} (NCC ${clusterInfo.activeNcc || 'console'})`,
+                    password: clusterInfo.kvmPass || 'drive1234!', user: clusterInfo.kvmUser || 'dn',
+                    virshInfo: clusterInfo,
+                });
+                this._fireBackgroundNccDiscovery(editor, device, {
+                    kvmHost: clusterInfo.kvmHost,
+                    kvmUser: clusterInfo.kvmUser || 'dn',
+                    kvmPass: clusterInfo.kvmPass || 'drive1234!',
+                    nccVms: clusterInfo.nccVms || [],
+                    activeNcc: clusterInfo.activeNcc || '',
+                });
+                editor.showNotification(`[OK] Connecting to ${device.label} NCC via virsh console...`, 'success', 5000);
+                return;
+            }
+
+            // ===== STANDALONE: iTerm (got IP from probe) =====
+            if (bestIP) {
+                host = bestIP;
+                device.sshConfig = device.sshConfig || {};
+                device.sshConfig._nccMgmtIp = host;
+            }
+            if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+                console.log(`[SSH] PROBE -> iTerm: ssh://${user}@${host}`);
+                this._pendingPassword = password;
+                editor._openSshUrl(`ssh://${user}@${host}`);
+                return;
+            }
+
+            // ===== WEB TERMINAL (non-IP host, backend resolves) =====
+            if (typeof window.TerminalPanel !== 'undefined' && window.TerminalPanel.open) {
+                console.log(`[SSH] -> Web terminal: ${host}`);
+                window.TerminalPanel.open({
+                    deviceId: device.label || device.id || '', host,
+                    user: user || 'dnroot', password: password || 'dnroot',
+                    method: 'ssh_mgmt', deviceLabel: device.label || host || 'Device',
+                });
+                editor.showNotification(`[OK] Web terminal to ${device.label || host}`, 'success', 4000);
+                return;
+            }
+
+            this._pendingPassword = password;
+            editor._openSshUrl(`ssh://${user}@${host}`);
         } catch (error) {
-            console.error('[Terminal] Error opening terminal:', error);
+            console.error('[SSH] Error:', error);
             editor.showNotification(`Terminal error: ${error.message}`, 'error');
         }
+    },
+
+    /**
+     * If NCC mgmt IP answers on port 22, open iTerm (dnroot). Checks _nccMgmtIp first,
+     * then falls back to sshConfig.host if it differs from the KVM host.
+     */
+    async _tryOpenClusterNccMgmtIterm(editor, device, sshConfig) {
+        const cfg = sshConfig || device.sshConfig || {};
+        const vi = cfg._virshInfo || {};
+        const kvmHost = vi.kvmHost || '';
+        const candidates = [];
+        const nccIp = (cfg._nccMgmtIp || '').trim();
+        if (nccIp && /^\d+\.\d+\.\d+\.\d+$/.test(nccIp)) candidates.push(nccIp);
+        const hostIp = (cfg.host || '').trim();
+        if (hostIp && /^\d+\.\d+\.\d+\.\d+$/.test(hostIp) && hostIp !== kvmHost && !candidates.includes(hostIp)) {
+            candidates.push(hostIp);
+        }
+        if (candidates.length === 0) return false;
+        if (typeof ScalerAPI === 'undefined' || !ScalerAPI.checkPort) return false;
+        for (const ip of candidates) {
+            try {
+                const chk = await ScalerAPI.checkPort(ip, 22);
+                if (chk && chk.reachable) {
+                    this._pendingPassword = 'dnroot';
+                    if (editor._openSshUrl) editor._openSshUrl(`ssh://dnroot@${ip}`);
+                    device.sshConfig = device.sshConfig || {};
+                    device.sshConfig._nccMgmtIp = ip;
+                    if (editor.showNotification) {
+                        editor.showNotification(`[OK] iTerm to NCC management ${ip}`, 'success', 4000);
+                    }
+                    return true;
+                }
+            } catch (e) {
+                console.warn(`[SSH] checkPort NCC mgmt ${ip}:`, e && e.message);
+            }
+        }
+        if (device.sshConfig) delete device.sshConfig._nccMgmtIp;
+        return false;
+    },
+
+    /**
+     * Fire-and-forget: discover NCC mgmt IP via virsh + show interfaces management (backend).
+     */
+    _fireBackgroundNccDiscovery(editor, device, virshInfo) {
+        if (typeof ScalerAPI === 'undefined' || !ScalerAPI.discoverNccMgmtIp) return;
+        const deviceId = device.label || device.id || '';
+        const kvmHost = virshInfo.kvmHost || '';
+        const kvmUser = virshInfo.kvmUser || 'dn';
+        const kvmPass = virshInfo.kvmPass || '';
+        const nccVms = virshInfo.nccVms || [];
+        const activeNcc = virshInfo.activeNcc || '';
+        if (!deviceId || !kvmHost || !kvmPass) return;
+        ScalerAPI.discoverNccMgmtIp({
+            deviceId, kvmHost, kvmUser, kvmPass, nccVms, activeNcc
+        }).then((r) => {
+            if (r.ssh_auth_ok && r.ncc_mgmt_ip) {
+                device.sshConfig = device.sshConfig || {};
+                device.sshConfig._nccMgmtIp = r.ncc_mgmt_ip;
+                if (editor.showNotification) {
+                    editor.showNotification(
+                        `[OK] NCC management IP discovered: ${r.ncc_mgmt_ip} -- next SSH can use iTerm`,
+                        'success',
+                        7000
+                    );
+                }
+            }
+        }).catch((e) => console.warn('[SSH] background NCC mgmt discovery:', e && e.message));
+    },
+
+    _updateClusterInfo(device, probeResult) {
+        if (!probeResult?.cluster?.is_cluster) return;
+        const virshEntry = (probeResult.methods || []).find(m => m.method === 'virsh_console' && m.reachable);
+        if (!virshEntry) return;
+        const kvmCreds = virshEntry.kvm_credentials || {};
+        const nccVms = virshEntry.ncc_vms || [];
+        const activeNcc = (virshEntry.vms_running?.[0]) || nccVms[0] || '';
+        const kvmHost = virshEntry.host || device.sshConfig?.host || '';
+        device.sshConfig = device.sshConfig || {};
+        device.sshConfig._isCluster = true;
+        device.sshConfig._virshCmd = activeNcc ? `sudo virsh console --force ${activeNcc}` : '';
+        const isDnos = (device._deviceMode || probeResult.device_state || '').toUpperCase() === 'DNOS';
+        if (!isDnos && !device.sshConfig.user) {
+            if (kvmCreds.username) device.sshConfig.user = kvmCreds.username;
+            if (kvmCreds.password) device.sshConfig.password = kvmCreds.password;
+        }
+        device.sshConfig._virshInfo = {
+            kvmHost,
+            kvmUser: kvmCreds.username || 'dn',
+            kvmPass: kvmCreds.password || '',
+            nccVms,
+            activeNcc,
+        };
     },
     
     // Safe clipboard write that works on HTTP (non-HTTPS) contexts
@@ -804,89 +1181,34 @@ window.ObjectDetection = {
     },
     
     _openSshUrl(editor, url) {
+        console.log(`[SSH] _openSshUrl: ${url}`);
         try {
-            // Detect operating system
-            const ua = navigator.userAgent;
-            const isMac = /Mac|iPhone|iPod|iPad/.test(ua);
-            const isLinux = /Linux/.test(ua) && !(/Android/.test(ua));
-            
-            console.log(`[Terminal] _openSshUrl called, isLinux: ${isLinux}, isMac: ${isMac}, url: ${url}`);
-            
-            if (isLinux) {
-                // Linux: Try multiple approaches to open a new terminal window
-                const sshMatch = url.match(/ssh:\/\/(.+)/) || url.match(/iterm-ssh:\/\/(.+)/);
-                if (sshMatch) {
-                    const sshCommand = `ssh ${sshMatch[1]}`;
-                    console.log(`[Terminal] Linux detected, SSH command: ${sshCommand}`);
-                    
-                    // ENHANCED (Jan 2026): Try to actually open a terminal window
-                    // Method 1: Try x-terminal-emulator (Debian/Ubuntu default)
-                    // Method 2: Try gnome-terminal
-                    // Method 3: Copy to clipboard as fallback
-                    
-                    // Try opening via custom URL scheme first (if xdg-open is configured)
-                    // Some Linux distros support ssh:// URLs
-                    const testLink = document.createElement('a');
-                    testLink.href = url;
-                    testLink.target = '_blank';
-                    testLink.style.display = 'none';
-                    document.body.appendChild(testLink);
-                    
-                    // Use window.open with a unique window name to force new window
-                    const windowName = `ssh_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                    const newWindow = window.open(url, windowName, 'noopener,noreferrer');
-                    
-                    document.body.removeChild(testLink);
-                    
-                    // Also copy command to clipboard as backup
-                    editor._safeClipboardWrite(sshCommand).then(() => {
-                        if (newWindow) {
-                            editor.showNotification(`🖥️ Terminal opening... Command also copied to clipboard`, 'success');
-                        } else {
-                            editor.showNotification(`📋 SSH command copied! Paste in terminal: ${sshCommand}`, 'success');
-                        }
-                    }).catch((err) => {
-                        console.warn('[Terminal] Clipboard write failed:', err);
-                        editor.showNotification(`🖥️ Run in terminal: ${sshCommand}`, 'info');
-                    });
-                } else {
-                    console.warn('[Terminal] Could not parse SSH URL:', url);
-                    editor.showNotification(`Could not parse SSH URL`, 'error');
-                }
-                return;
-            }
-            
-            // macOS: Trigger ssh:// URL scheme to open iTerm/Terminal
-            console.log(`[Terminal] Opening SSH URL for macOS: ${url}`);
-            
             const sshMatch = url.match(/ssh:\/\/([^@]+)@(.+)/);
-            const sshCommand = sshMatch ? `ssh ${sshMatch[1]}@${sshMatch[2]}` : url;
-            
-            // Use an anchor element with click() -- avoids Chrome's iframe credential block
-            // and reliably triggers the OS URL scheme handler (iTerm, Terminal.app)
-            try {
-                const link = document.createElement('a');
-                link.href = url;
-                link.style.display = 'none';
-                document.body.appendChild(link);
-                link.click();
-                setTimeout(() => {
-                    if (document.body.contains(link)) document.body.removeChild(link);
-                }, 200);
-                console.log(`[Terminal] Triggered URL scheme via anchor click: ${url}`);
-            } catch (e) {
-                console.warn('[Terminal] Anchor click failed, trying window.open:', e);
-                window.open(url, '_blank', 'noopener,noreferrer');
+            const cmd = sshMatch ? `ssh ${sshMatch[1]}@${sshMatch[2]}` : url;
+
+            // Anchor click is the correct way to trigger protocol handlers (ssh://)
+            // window.open creates a blank tab instead of triggering the handler
+            const link = document.createElement('a');
+            link.href = url;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(() => { try { link.remove(); } catch(_){} }, 300);
+            console.log(`[SSH] Anchor click dispatched for: ${url}`);
+
+            const password = this._pendingPassword || '';
+            if (password) {
+                this._safeClipboardWrite(password).then(() => {
+                    editor.showNotification(`[OK] iTerm: ${cmd}. Password copied -- paste with Cmd+V.`, 'success', 5000);
+                }).catch(() => {
+                    editor.showNotification(`[OK] iTerm: ${cmd}. Password: ${password}`, 'info', 8000);
+                });
+            } else {
+                editor.showNotification(`[OK] iTerm: ${cmd}`, 'success', 5000);
             }
-            
-            // Copy SSH command to clipboard as reliable fallback
-            editor._safeClipboardWrite(sshCommand).then(() => {
-                editor.showNotification(`Terminal opening to ${sshMatch ? sshMatch[2] : url}. Command also copied.`, 'success', 5000);
-            }).catch(() => {
-                editor.showNotification(`Run: ${sshCommand}`, 'info', 8000);
-            });
+            this._pendingPassword = null;
         } catch (error) {
-            console.error('[Terminal] Error in _openSshUrl:', error);
+            console.error('[SSH] _openSshUrl error:', error);
             editor.showNotification(`SSH error: ${error.message}`, 'error');
         }
     },

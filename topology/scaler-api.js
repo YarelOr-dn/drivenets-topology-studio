@@ -7,6 +7,11 @@
  * 
  * @version 1.0.0
  * @requires FastAPI backend running on same origin
+ *
+ * Domain sections in this file (search for "// ====="):
+ *   Core helpers | Devices + SSH/console | Config read/write |
+ *   Config generation | Push/operations | DNAAS | Multi-BD | Progress SSE/WS |
+ *   Health | Image upgrade (Jenkins)
  */
 
 const ScalerAPI = {
@@ -19,9 +24,75 @@ const ScalerAPI = {
     // Bridge availability tracking -- prevents console 501 spam
     _bridgeUp: true,
     _bridgeRetryAfter: 0,
+
+    /**
+     * Resolve API path to full URL (prepends baseUrl for remote server access).
+     */
+    _api(path) {
+        return (this.baseUrl || '') + path;
+    },
+
+    /**
+     * WebSocket origin for scaler bridge (in-browser terminal, etc.).
+     * When baseUrl is set (e.g. http://lab:8766), uses that host and port with ws/wss.
+     * When empty (same-origin HTTP via serve.py proxy), uses page hostname and port 8766.
+     * @returns {string} e.g. ws://localhost:8766 or wss://host:8766
+     */
+    getBridgeWebSocketOrigin() {
+        const locProto = (typeof window !== 'undefined' && window.location && window.location.protocol === 'https:')
+            ? 'wss:' : 'ws:';
+        const base = (this.baseUrl || '').trim();
+        if (base) {
+            try {
+                const u = new URL(base, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+                const wsProto = u.protocol === 'https:' ? 'wss:' : 'ws:';
+                const portPart = u.port ? `:${u.port}` : '';
+                return `${wsProto}//${u.hostname}${portPart}`;
+            } catch (e) {
+                console.warn('[ScalerAPI] getBridgeWebSocketOrigin: invalid baseUrl, fallback', e);
+            }
+        }
+        if (typeof window === 'undefined' || !window.location) {
+            return 'ws://localhost:8766';
+        }
+        return `${locProto}//${window.location.hostname}:8766`;
+    },
+
+    _formatError(detail, fallback) {
+        if (!detail) return fallback || 'Request failed';
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail)) {
+            return detail.map(d => {
+                if (typeof d === 'string') return d;
+                const loc = (d.loc || []).join(' > ');
+                return loc ? `${loc}: ${d.msg || d.message || ''}` : (d.msg || d.message || JSON.stringify(d));
+            }).join('; ');
+        }
+        return String(detail);
+    },
+
+    /**
+     * Fetch with timeout using AbortController. Rejects if response takes
+     * longer than timeoutMs. Caller's signal (if any) is also respected.
+     */
+    _fetchWithTimeout(url, opts = {}, timeoutMs = 15000) {
+        const controller = new AbortController();
+        const externalSignal = opts.signal;
+        if (externalSignal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+        if (externalSignal) {
+            externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+        }
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        return fetch(url, { ...opts, signal: controller.signal })
+            .finally(() => clearTimeout(timer));
+    },
+
+    // =========================================================================
+    // CORE (_api, WebSocket origin, errors, fetch timeout)
+    // =========================================================================
     
     // =========================================================================
-    // DEVICE OPERATIONS
+    // DEVICE REGISTRY (GET/POST/PUT/DELETE /api/devices/* where applicable)
     // =========================================================================
     
     /**
@@ -29,7 +100,7 @@ const ScalerAPI = {
      * @returns {Promise<{devices: Array, count: number}>}
      */
     async getDevices() {
-        const response = await fetch('/api/devices/');
+        const response = await fetch(this._api('/api/devices/'));
         if (!response.ok) {
             throw new Error(`Failed to fetch devices: ${response.statusText}`);
         }
@@ -42,12 +113,159 @@ const ScalerAPI = {
      * @returns {Promise<Object>} Device details
      */
     async getDevice(deviceId) {
-        const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`);
+        const response = await fetch(this._api(`/api/devices/${encodeURIComponent(deviceId)}`));
         if (!response.ok) {
             throw new Error(`Device not found: ${deviceId}`);
         }
         return response.json();
     },
+    
+    // =========================================================================
+    // SSH / CONSOLE / PDU / TERMINAL (scaler_bridge /api/ssh/*, WebSocket terminal)
+    // =========================================================================
+    
+    /**
+     * Probe connection methods for a device (TCP reachability check).
+     * @param {string} deviceId - Device identifier
+     * @param {string} [sshHost] - SSH host/IP from canvas
+     * @returns {Promise<{methods: Array, recommended: string, device_state: string}>}
+     */
+    async probeConnection(deviceId, sshHost = '') {
+        const response = await fetch(this._api('/api/ssh/probe'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_id: deviceId, ssh_host: sshHost || '' })
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ detail: `Probe failed (HTTP ${response.status})` }));
+            throw new Error(err.detail || 'Probe failed');
+        }
+        return response.json();
+    },
+
+    /**
+     * Quick TCP check (e.g. port 22 on NCC management IP before iTerm).
+     * @param {string} host - IPv4
+     * @param {number} [port=22]
+     */
+    async checkPort(host, port = 22) {
+        const q = `?host=${encodeURIComponent(host)}&port=${encodeURIComponent(port)}`;
+        const response = await fetch(this._api('/api/ssh/check-port' + q));
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || 'check-port failed');
+        }
+        return response.json();
+    },
+
+    /**
+     * Background: virsh console to NCC, show interfaces management, verify SSH; updates operational.json if ok.
+     * @param {Object} p
+     * @param {string} p.deviceId
+     * @param {string} p.kvmHost
+     * @param {string} [p.kvmUser]
+     * @param {string} p.kvmPass
+     * @param {string[]} [p.nccVms]
+     * @param {string} [p.activeNcc]
+     */
+    async discoverNccMgmtIp({ deviceId, kvmHost, kvmUser, kvmPass, nccVms, activeNcc }) {
+        const response = await fetch(this._api('/api/ssh/discover-ncc-mgmt'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                device_id: deviceId,
+                kvm_host: kvmHost,
+                kvm_user: kvmUser || 'dn',
+                kvm_pass: kvmPass,
+                ncc_vms: nccVms || [],
+                active_ncc: activeNcc || ''
+            })
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || 'NCC mgmt discovery failed');
+        }
+        return response.json();
+    },
+    
+    /**
+     * Discover console path via Zohar's DB (primary) or Device42 (fallback).
+     * @param {string} deviceId - Device identifier
+     * @param {string} [serialNumber] - Serial number (optional)
+     * @param {string} [sshHost] - SSH host (optional)
+     * @returns {Promise<{console_server, port, source, pdu_entries, serial_no}>}
+     */
+    async discoverConsole(deviceId, serialNumber = '', sshHost = '') {
+        const response = await fetch(this._api('/api/ssh/discover-console'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_id: deviceId, serial_number: serialNumber, ssh_host: sshHost })
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || 'Console discovery failed');
+        }
+        return response.json();
+    },
+
+    /**
+     * PDU power action (reboot / off / on / status) via Zohar's PDU mapping.
+     * @param {Object} opts - { serial_number?, device_id?, action: reboot|off|on|status, pdu_host?, outlet? }
+     * @returns {Promise<{success, status_output, pdu_host, outlet, cli_type}>}
+     */
+    async pduPower(opts) {
+        const response = await fetch(this._api('/api/ssh/pdu-power'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(opts)
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || 'PDU action failed');
+        }
+        return response.json();
+    },
+
+    /**
+     * Scan console server ports to find a device by hostname.
+     * Probes each port on known ATEN console servers, looking for a prompt match.
+     * @param {string} deviceId
+     * @param {string} [serialNumber]
+     * @param {string} [consoleServer] - optional hint (e.g. "console-b15")
+     * @returns {Promise<{found, console_server, console_host, port, scanned, all_results}>}
+     */
+    async consoleScan(deviceId, serialNumber = '', consoleServer = '') {
+        const response = await fetch(this._api('/api/ssh/console-scan'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                device_id: deviceId,
+                serial_number: serialNumber,
+                console_server: consoleServer
+            })
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || 'Console scan failed');
+        }
+        return response.json();
+    },
+
+    /**
+     * Open in-browser WebSocket terminal to device
+     * @param {Object} opts - { deviceId, host, user, password, method, deviceLabel }
+     */
+    openTerminal(opts) {
+        if (typeof window.TerminalPanel !== 'undefined' && window.TerminalPanel.open) {
+            window.TerminalPanel.open(opts);
+        } else {
+            console.warn('[ScalerAPI] TerminalPanel not available');
+        }
+    },
+    
+    // =========================================================================
+    // DEVICE MUTATIONS (add/update/delete inventory, static JSON)
+    // =========================================================================
     
     /**
      * Add a new device
@@ -60,7 +278,7 @@ const ScalerAPI = {
      * @returns {Promise<Object>} Created device
      */
     async addDevice(device) {
-        const response = await fetch('/api/devices/', {
+        const response = await fetch(this._api('/api/devices/'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(device)
@@ -79,7 +297,7 @@ const ScalerAPI = {
      * @returns {Promise<Object>} Updated device
      */
     async updateDevice(deviceId, updates) {
-        const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, {
+        const response = await fetch(this._api(`/api/devices/${encodeURIComponent(deviceId)}`), {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(updates)
@@ -97,7 +315,7 @@ const ScalerAPI = {
      * @returns {Promise<Object>} Deletion result
      */
     async deleteDevice(deviceId) {
-        const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, {
+        const response = await fetch(this._api(`/api/devices/${encodeURIComponent(deviceId)}`), {
             method: 'DELETE'
         });
         if (!response.ok) {
@@ -145,7 +363,7 @@ const ScalerAPI = {
             }
         }
         const params = sshHost ? `?ssh_host=${encodeURIComponent(sshHost)}` : '';
-        const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/test${params}`, {
+        const response = await fetch(this._api(`/api/devices/${encodeURIComponent(deviceId)}/test${params}`), {
             method: 'POST'
         });
         if (!response.ok) {
@@ -171,7 +389,7 @@ const ScalerAPI = {
      * @returns {Promise<Object>} Sync result with config
      */
     async syncDevice(deviceId) {
-        const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/sync`, {
+        const response = await fetch(this._api(`/api/devices/${encodeURIComponent(deviceId)}/sync`), {
             method: 'POST'
         });
         if (!response.ok) {
@@ -191,7 +409,7 @@ const ScalerAPI = {
      * @returns {Promise<{config: string}>}
      */
     async getRunningConfig(deviceId) {
-        const response = await fetch(`/api/config/${encodeURIComponent(deviceId)}/running`);
+        const response = await fetch(this._api(`/api/config/${encodeURIComponent(deviceId)}/running`));
         if (!response.ok) {
             throw new Error(`Failed to get running config for ${deviceId}`);
         }
@@ -205,7 +423,7 @@ const ScalerAPI = {
      * @returns {Promise<{status: string, message: string, lines: number}>}
      */
     async syncConfig(deviceId, sshHost = '') {
-        const url = `/api/config/${encodeURIComponent(deviceId)}/sync${sshHost ? `?ssh_host=${encodeURIComponent(sshHost)}` : ''}`;
+        const url = this._api(`/api/config/${encodeURIComponent(deviceId)}/sync${sshHost ? `?ssh_host=${encodeURIComponent(sshHost)}` : ''}`);
         const response = await fetch(url, { method: 'POST' });
         if (!response.ok) {
             const err = await response.json();
@@ -220,7 +438,7 @@ const ScalerAPI = {
      * @returns {Promise<Object>} Summary with system, interfaces, services, etc.
      */
     async getConfigSummary(deviceId) {
-        const response = await fetch(`/api/config/${encodeURIComponent(deviceId)}/summary`);
+        const response = await fetch(this._api(`/api/config/${encodeURIComponent(deviceId)}/summary`));
         if (!response.ok) {
             throw new Error(`Failed to get config summary for ${deviceId}`);
         }
@@ -238,11 +456,35 @@ const ScalerAPI = {
         if (live) params.set('live', 'true');
         if (sshHost) params.set('ssh_host', sshHost);
         const qs = params.toString();
-        const url = `/api/devices/${encodeURIComponent(deviceId)}/context${qs ? '?' + qs : ''}`;
-        const response = await fetch(url);
+        const url = this._api(`/api/devices/${encodeURIComponent(deviceId)}/context${qs ? '?' + qs : ''}`);
+        const timeout = live ? 30000 : 8000;
+        const response = await this._fetchWithTimeout(url, {}, timeout);
         if (!response.ok) {
-            const error = await response.json();
+            const error = await response.json().catch(() => ({}));
             throw new Error(error.detail || `Failed to get device context for ${deviceId}`);
+        }
+        return response.json();
+    },
+
+    /**
+     * Get git_commit only (lightweight SSH). Use when context returns null git_commit.
+     * @param {string} deviceId - Device identifier
+     * @param {string} [sshHost] - SSH IP/hostname from canvas device
+     * @param {string} [sshUser] - SSH username (falls back to global default)
+     * @param {string} [sshPassword] - SSH password (falls back to global default)
+     * @returns {Promise<{git_commit: string|null}>}
+     */
+    async getDeviceGitCommit(deviceId, sshHost = '', sshUser = '', sshPassword = '') {
+        const params = new URLSearchParams();
+        if (sshHost) params.set('ssh_host', sshHost);
+        if (sshUser) params.set('ssh_user', sshUser);
+        if (sshPassword) params.set('ssh_password', sshPassword);
+        const qs = params.toString();
+        const url = this._api(`/api/devices/${encodeURIComponent(deviceId)}/git-commit${qs ? '?' + qs : ''}`);
+        const response = await this._fetchWithTimeout(url, {}, 20000);
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || `Failed to get git_commit for ${deviceId}`);
         }
         return response.json();
     },
@@ -253,7 +495,7 @@ const ScalerAPI = {
      * @returns {Promise<{suggestions: Array}>} Suggestions with wizard, reason, prefill
      */
     async wizardSuggestions(params) {
-        const response = await fetch('/api/wizard/suggestions', {
+        const response = await fetch(this._api('/api/wizard/suggestions'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params)
@@ -271,7 +513,7 @@ const ScalerAPI = {
      * @returns {Promise<Array>} List of interface configurations
      */
     async getInterfaces(deviceId) {
-        const response = await fetch(`/api/config/${encodeURIComponent(deviceId)}/interfaces`);
+        const response = await fetch(this._api(`/api/config/${encodeURIComponent(deviceId)}/interfaces`));
         if (!response.ok) {
             throw new Error(`Failed to get interfaces for ${deviceId}`);
         }
@@ -283,43 +525,6 @@ const ScalerAPI = {
      * @param {string} deviceId - Device identifier
      * @returns {Promise<Object>} Services summary
      */
-    async getServices(deviceId) {
-        const response = await fetch(`/api/config/${encodeURIComponent(deviceId)}/services`);
-        if (!response.ok) {
-            throw new Error(`Failed to get services for ${deviceId}`);
-        }
-        return response.json();
-    },
-    
-    /**
-     * Get multihoming configuration for a device
-     * @param {string} deviceId - Device identifier
-     * @returns {Promise<{count: number, interfaces: Object, esi_prefix: string}>}
-     */
-    async getMultihoming(deviceId) {
-        const response = await fetch(`/api/config/${encodeURIComponent(deviceId)}/multihoming`);
-        if (!response.ok) {
-            throw new Error(`Failed to get multihoming for ${deviceId}`);
-        }
-        return response.json();
-    },
-    
-    /**
-     * Get a specific hierarchy section from config
-     * @param {string} deviceId - Device identifier
-     * @param {string} hierarchy - Hierarchy name (system, interfaces, services, etc.)
-     * @returns {Promise<{config: string}>}
-     */
-    async getHierarchy(deviceId, hierarchy) {
-        const response = await fetch(
-            `/api/config/${encodeURIComponent(deviceId)}/hierarchy/${encodeURIComponent(hierarchy)}`
-        );
-        if (!response.ok) {
-            throw new Error(`Failed to get ${hierarchy} for ${deviceId}`);
-        }
-        return response.json();
-    },
-    
     // =========================================================================
     // PUSH/DELETE OPERATIONS
     // =========================================================================
@@ -333,7 +538,7 @@ const ScalerAPI = {
      * @returns {Promise<Object>} Validation result
      */
     async validateConfig(request) {
-        const response = await fetch('/api/operations/validate', {
+        const response = await fetch(this._api('/api/operations/validate'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(request)
@@ -355,7 +560,7 @@ const ScalerAPI = {
      * @returns {Promise<{config: string, lines: number, hierarchy: string}>}
      */
     async generateInterfaces(params) {
-        const response = await fetch('/api/config/generate/interfaces', {
+        const response = await fetch(this._api('/api/config/generate/interfaces'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -367,8 +572,34 @@ const ScalerAPI = {
         return response.json();
     },
 
+    async saveConfigForLater(deviceId, config) {
+        const response = await fetch(this._api(`/api/config/${encodeURIComponent(deviceId)}/save`), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ config })
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to save config');
+        }
+        return response.json();
+    },
+
+    async generateUndo(params) {
+        const response = await fetch(this._api('/api/config/generate/undo'), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to generate undo config');
+        }
+        return response.json();
+    },
+
     async scanExisting(params) {
-        const response = await fetch('/api/config/scan-existing', {
+        const response = await fetch(this._api('/api/config/scan-existing'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -380,8 +611,21 @@ const ScalerAPI = {
         return response.json();
     },
 
+    async scanIPs(params) {
+        const response = await fetch(this._api('/api/config/scan-ips'), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'IP scan failed');
+        }
+        return response.json();
+    },
+
     async detectPattern(params) {
-        const response = await fetch('/api/config/detect-pattern', {
+        const response = await fetch(this._api('/api/config/detect-pattern'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -394,7 +638,7 @@ const ScalerAPI = {
     },
 
     async detectL2ACParent(params) {
-        const response = await fetch('/api/config/detect/l2ac-parent', {
+        const response = await fetch(this._api('/api/config/detect/l2ac-parent'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -407,7 +651,7 @@ const ScalerAPI = {
     },
 
     async detectBGPNeighbors(params) {
-        const response = await fetch('/api/config/detect/bgp-neighbors', {
+        const response = await fetch(this._api('/api/config/detect/bgp-neighbors'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -419,8 +663,16 @@ const ScalerAPI = {
         return response.json();
     },
 
+    async getMenuSummary(deviceIds = []) {
+        const ids = Array.isArray(deviceIds) ? deviceIds : [];
+        const qs = ids.length ? '?device_ids=' + encodeURIComponent(ids.join(',')) : '';
+        const response = await fetch(this._api('/api/config/menu-summary' + qs));
+        if (!response.ok) return { devices: 0, interfaces: { phys: 0, bundle: 0, subif: 0 }, services: { fxc: 0, l2vpn: 0, evpn: 0, vpws: 0, vrf: 0 }, lldp_total: 0 };
+        return response.json();
+    },
+
     async detectScaleSuggestions(params) {
-        const response = await fetch('/api/config/detect/scale-suggestions', {
+        const response = await fetch(this._api('/api/config/detect/scale-suggestions'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -433,7 +685,7 @@ const ScalerAPI = {
     },
 
     async generateSystem(params) {
-        const response = await fetch('/api/config/generate/system', {
+        const response = await fetch(this._api('/api/config/generate/system'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -446,7 +698,7 @@ const ScalerAPI = {
     },
 
     async validatePolicy(params) {
-        const response = await fetch('/api/config/validate/policy', {
+        const response = await fetch(this._api('/api/config/validate/policy'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -459,7 +711,7 @@ const ScalerAPI = {
     },
 
     async generateRoutePolicyStructured(params) {
-        const response = await fetch('/api/config/generate/route-policy-structured', {
+        const response = await fetch(this._api('/api/config/generate/route-policy-structured'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -472,7 +724,7 @@ const ScalerAPI = {
     },
 
     async getSmartDefaults(deviceId, sshHost = '') {
-        const url = `/api/config/templates/smart-defaults/${encodeURIComponent(deviceId)}${sshHost ? `?ssh_host=${encodeURIComponent(sshHost)}` : ''}`;
+        const url = this._api(`/api/config/templates/smart-defaults/${encodeURIComponent(deviceId)}${sshHost ? `?ssh_host=${encodeURIComponent(sshHost)}` : ''}`);
         const response = await fetch(url);
         if (!response.ok) {
             const error = await response.json();
@@ -487,7 +739,7 @@ const ScalerAPI = {
      * @returns {Promise<{config: string, lines: number, hierarchy: string}>}
      */
     async generateServices(params) {
-        const response = await fetch('/api/config/generate/services', {
+        const response = await fetch(this._api('/api/config/generate/services'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -499,7 +751,7 @@ const ScalerAPI = {
         return response.json();
     },
     async generateBGP(params) {
-        const response = await fetch('/api/config/generate/bgp', {
+        const response = await fetch(this._api('/api/config/generate/bgp'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -511,7 +763,7 @@ const ScalerAPI = {
         return response.json();
     },
     async generateRoutingPolicy(params) {
-        const response = await fetch('/api/config/generate/routing-policy', {
+        const response = await fetch(this._api('/api/config/generate/routing-policy'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -523,7 +775,7 @@ const ScalerAPI = {
         return response.json();
     },
     async generateFlowSpec(params) {
-        const response = await fetch('/api/config/generate/flowspec', {
+        const response = await fetch(this._api('/api/config/generate/flowspec'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -534,8 +786,20 @@ const ScalerAPI = {
         }
         return response.json();
     },
+    async flowspecDependencyCheck(params) {
+        const response = await fetch(this._api('/api/config/flowspec-dependency-check'), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || 'FlowSpec dependency check failed');
+        }
+        return response.json();
+    },
     async generateIGP(params) {
-        const response = await fetch('/api/config/generate/igp', {
+        const response = await fetch(this._api('/api/config/generate/igp'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -547,7 +811,7 @@ const ScalerAPI = {
         return response.json();
     },
     async batchGenerate(items) {
-        const response = await fetch('/api/config/generate/batch', {
+        const response = await fetch(this._api('/api/config/generate/batch'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ items })
@@ -559,7 +823,7 @@ const ScalerAPI = {
         return response.json();
     },
     async previewConfigDiff(deviceId, config, sshHost = '') {
-        const response = await fetch('/api/config/preview-diff', {
+        const response = await fetch(this._api('/api/config/preview-diff'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ device_id: deviceId, config, ssh_host: sshHost })
@@ -571,7 +835,7 @@ const ScalerAPI = {
         return response.json();
     },
     async mirrorAnalyze(params) {
-        const response = await fetch('/api/mirror/analyze', {
+        const response = await fetch(this._api('/api/mirror/analyze'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -583,7 +847,7 @@ const ScalerAPI = {
         return response.json();
     },
     async mirrorGenerate(params) {
-        const response = await fetch('/api/mirror/generate', {
+        const response = await fetch(this._api('/api/mirror/generate'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -595,7 +859,7 @@ const ScalerAPI = {
         return response.json();
     },
     async mirrorPreviewDiff(params) {
-        const response = await fetch('/api/mirror/preview-diff', {
+        const response = await fetch(this._api('/api/mirror/preview-diff'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -607,7 +871,7 @@ const ScalerAPI = {
         return response.json();
     },
     async compareConfigs(deviceIds) {
-        const response = await fetch('/api/config/compare', {
+        const response = await fetch(this._api('/api/config/compare'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ device_ids: deviceIds })
@@ -619,28 +883,20 @@ const ScalerAPI = {
         return response.json();
     },
     async getConfigDiff(deviceId) {
-        const response = await fetch(`/api/config/${encodeURIComponent(deviceId)}/diff`);
+        const response = await fetch(this._api(`/api/config/${encodeURIComponent(deviceId)}/diff`));
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.detail || 'Diff failed');
         }
         return response.json();
     },
-    async getInterfaces(deviceId) {
-        const response = await fetch(`/api/config/${encodeURIComponent(deviceId)}/interfaces`);
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Failed to get interfaces');
-        }
-        return response.json();
-    },
     async getTemplates() {
-        const response = await fetch('/api/config/templates');
+        const response = await fetch(this._api('/api/config/templates'));
         if (!response.ok) throw new Error('Failed to get templates');
         return response.json();
     },
     async generateTemplate(templateName, values) {
-        const response = await fetch('/api/config/templates/generate', {
+        const response = await fetch(this._api('/api/config/templates/generate'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ template_name: templateName, values: values || {} })
@@ -652,7 +908,7 @@ const ScalerAPI = {
         return response.json();
     },
     async discoverDevice(ip) {
-        const response = await fetch('/api/devices/discover', {
+        const response = await fetch(this._api('/api/devices/discover'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ ip })
@@ -663,11 +919,21 @@ const ScalerAPI = {
         }
         return response.json();
     },
-    async deleteHierarchyOp(deviceId, hierarchy, dryRun = true) {
-        const response = await fetch('/api/operations/delete-hierarchy', {
+    async getDeleteHierarchyOptions() {
+        const response = await fetch(this._api('/api/config/delete-hierarchy-options'));
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to load hierarchy options');
+        }
+        return response.json();
+    },
+    async deleteHierarchyOp(deviceId, hierarchy, dryRun = true, subPath = '') {
+        const body = { device_id: deviceId, hierarchy, dry_run: dryRun };
+        if (subPath && subPath.trim()) body.sub_path = subPath.trim();
+        const response = await fetch(this._api('/api/operations/delete-hierarchy'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ device_id: deviceId, hierarchy, dry_run: dryRun })
+            body: JSON.stringify(body)
         });
         if (!response.ok) {
             const error = await response.json();
@@ -686,11 +952,97 @@ const ScalerAPI = {
      * @param {boolean} [request.dry_run=true] - If true, only validate
      * @returns {Promise<{job_id: string, status: string}>}
      */
-    async pushConfig(request) {
-        const response = await fetch('/api/operations/push', {
+    async setHostname(deviceId, hostname, sshHost) {
+        const response = await fetch(this._api(`/api/devices/${encodeURIComponent(deviceId)}/set-hostname`), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(request)
+            body: JSON.stringify({ hostname, ssh_host: sshHost || '' })
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Hostname change failed');
+        }
+        return response.json();
+    },
+
+    /**
+     * Toggle SSH connection pool on/off for faster operations.
+     * @param {boolean} enabled - true to enable pool, false to disable
+     * @returns {Promise<{enabled: boolean, count: number}>}
+     */
+    async toggleSSHPool(enabled) {
+        const response = await fetch(this._api('/api/ssh-pool/toggle'), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ enabled: !!enabled })
+        });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || 'SSH pool toggle failed');
+        }
+        return response.json();
+    },
+
+    /**
+     * Get SSH pool status: enabled, count, per-device connection state.
+     * @returns {Promise<{enabled: boolean, count: number, entries: Array}>}
+     */
+    async getSSHPoolStatus() {
+        const response = await fetch(this._api('/api/ssh-pool/status'));
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || 'SSH pool status failed');
+        }
+        return response.json();
+    },
+
+    /**
+     * Evict (force-close) pooled SSH client(s) for a device.
+     * Call when device is deleted or credentials changed.
+     * @param {string} ip - Canvas SSH host (IPv4, hostname, or serial)
+     * @param {string} [deviceId] - Device label for resolving serial/hostname to mgmt IP
+     * @returns {Promise<{status: string, evicted: string, evicted_keys?: string[]}>}
+     */
+    async evictSSHPoolConnection(ip, deviceId = '') {
+        const body = { ip: ip || '' };
+        if (deviceId) {
+            body.device_id = deviceId;
+        }
+        const response = await fetch(this._api('/api/ssh-pool/evict'), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || 'SSH pool evict failed');
+        }
+        return response.json();
+    },
+
+    async getPushEstimate(params) {
+        const response = await fetch(this._api('/api/config/push/estimate'), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Estimate failed');
+        }
+        return response.json();
+    },
+
+    async pushConfig(request) {
+        const body = {
+            ...request,
+            push_method: request.push_method || 'terminal_paste',
+            load_mode: request.load_mode || 'merge',
+        };
+        const response = await fetch(this._api('/api/operations/push'), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
         });
         if (!response.ok) {
             const error = await response.json();
@@ -705,7 +1057,7 @@ const ScalerAPI = {
      * @returns {Promise<{status: string, success: boolean, message: string}>}
      */
     async commitHeldJob(jobId) {
-        const response = await fetch(`/api/operations/push/${encodeURIComponent(jobId)}/commit`, {
+        const response = await fetch(this._api(`/api/operations/push/${encodeURIComponent(jobId)}/commit`), {
             method: 'POST'
         });
         if (!response.ok) {
@@ -721,7 +1073,7 @@ const ScalerAPI = {
      * @returns {Promise<{status: string, success: boolean, message: string}>}
      */
     async cancelHeldJob(jobId) {
-        const response = await fetch(`/api/operations/push/${encodeURIComponent(jobId)}/cancel`, {
+        const response = await fetch(this._api(`/api/operations/push/${encodeURIComponent(jobId)}/cancel`), {
             method: 'POST'
         });
         if (!response.ok) {
@@ -737,7 +1089,7 @@ const ScalerAPI = {
      * @returns {Promise<{status: string, success: boolean, message: string}>}
      */
     async cleanupHeldJob(jobId) {
-        const response = await fetch(`/api/operations/push/${encodeURIComponent(jobId)}/cleanup`, {
+        const response = await fetch(this._api(`/api/operations/push/${encodeURIComponent(jobId)}/cleanup`), {
             method: 'POST'
         });
         if (!response.ok) {
@@ -749,21 +1101,27 @@ const ScalerAPI = {
 
     async getJobs() {
         if (!this._bridgeUp && Date.now() < this._bridgeRetryAfter) return { jobs: [] };
-        const response = await fetch('/api/operations/jobs');
-        if (!response.ok) {
-            if (response.status === 501 || response.status === 502 || response.status === 503) {
-                this._bridgeUp = false;
-                this._bridgeRetryAfter = Date.now() + 15000;
-                return { jobs: [] };
+        try {
+            const response = await fetch(this._api('/api/operations/jobs'));
+            if (!response.ok) {
+                if (response.status === 501 || response.status === 502 || response.status === 503 || response.status === 500) {
+                    this._bridgeUp = false;
+                    this._bridgeRetryAfter = Date.now() + 15000;
+                    return { jobs: [] };
+                }
+                throw new Error('Failed to fetch jobs');
             }
-            throw new Error('Failed to fetch jobs');
+            this._bridgeUp = true;
+            return response.json();
+        } catch (e) {
+            this._bridgeUp = false;
+            this._bridgeRetryAfter = Date.now() + 10000;
+            return { jobs: [] };
         }
-        this._bridgeUp = true;
-        return response.json();
     },
 
     async getJob(jobId) {
-        const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}`);
+        const response = await fetch(this._api(`/api/operations/jobs/${encodeURIComponent(jobId)}`));
         if (!response.ok) {
             if (response.status === 404) return null;
             throw new Error('Failed to fetch job');
@@ -772,7 +1130,7 @@ const ScalerAPI = {
     },
 
     async retryJob(jobId) {
-        const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
+        const response = await fetch(this._api(`/api/operations/jobs/${encodeURIComponent(jobId)}/retry`), { method: 'POST' });
         if (!response.ok) {
             const err = await response.json();
             throw new Error(err.detail || 'Retry failed');
@@ -781,7 +1139,7 @@ const ScalerAPI = {
     },
 
     async deleteJob(jobId) {
-        const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+        const response = await fetch(this._api(`/api/operations/jobs/${encodeURIComponent(jobId)}`), { method: 'DELETE' });
         if (!response.ok) throw new Error('Failed to delete job');
         return response.json();
     },
@@ -793,7 +1151,7 @@ const ScalerAPI = {
      */
     async getLimits(deviceId) {
         if (!this._bridgeUp && Date.now() < this._bridgeRetryAfter) return { max_subifs: 20480 };
-        const response = await fetch(`/api/config/limits/${encodeURIComponent(deviceId)}`);
+        const response = await fetch(this._api(`/api/config/limits/${encodeURIComponent(deviceId)}`));
         if (!response.ok) {
             if (response.status === 404) {
                 return { max_subifs: 20480 };
@@ -816,19 +1174,7 @@ const ScalerAPI = {
      * @returns {Promise<{job_id: string, status: string}>}
      */
     async deleteHierarchy(deviceId, hierarchy) {
-        const response = await fetch('/api/operations/delete', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                device_id: deviceId,
-                hierarchy: hierarchy
-            })
-        });
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Delete failed');
-        }
-        return response.json();
+        return this.deleteHierarchyOp(deviceId, hierarchy, false);
     },
     
     /**
@@ -841,7 +1187,7 @@ const ScalerAPI = {
      * @returns {Promise<{job_id: string, status: string}>}
      */
     async syncMultihoming(request) {
-        const response = await fetch('/api/operations/multihoming/sync', {
+        const response = await fetch(this._api('/api/operations/multihoming/sync'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(request)
@@ -853,53 +1199,13 @@ const ScalerAPI = {
         return response.json();
     },
     
-    // =========================================================================
-    // CONFIG GENERATION - Uses SCALER's real generators
-    // =========================================================================
-    
-    /**
-     * Generate interface configuration using SCALER CLI syntax
-     * @param {Object} params - Interface generation parameters
-     * @returns {Promise<{config: string, lines: number}>}
-     */
-    async generateInterfaces(params) {
-        const response = await fetch('/api/config/generate/interfaces', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(params)
-        });
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Interface generation failed');
-        }
-        return response.json();
-    },
-    
-    /**
-     * Generate service configuration using SCALER CLI syntax
-     * @param {Object} params - Service generation parameters
-     * @returns {Promise<{config: string, lines: number}>}
-     */
-    async generateServices(params) {
-        const response = await fetch('/api/config/generate/services', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(params)
-        });
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Service generation failed');
-        }
-        return response.json();
-    },
-    
     /**
      * Compare multihoming configurations between devices
      * @param {Array<string>} deviceIds - Devices to compare
      * @returns {Promise<Object>} Comparison result
      */
     async compareMultihoming(deviceIds) {
-        const response = await fetch('/api/operations/multihoming/compare', {
+        const response = await fetch(this._api('/api/operations/multihoming/compare'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({device_ids: deviceIds})
@@ -917,63 +1223,13 @@ const ScalerAPI = {
      * @param {string} [hierarchy] - Optional hierarchy to filter (interfaces, services, etc.)
      * @returns {Promise<Object>} Diff result
      */
-    async diffConfigs(deviceIds, hierarchy = null) {
-        const response = await fetch('/api/operations/diff', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({device_ids: deviceIds, hierarchy: hierarchy})
-        });
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Diff failed');
-        }
-        return response.json();
-    },
-    
-    /**
-     * Execute batch operation on multiple devices
-     * @param {string} operation - Operation type ('test', 'sync')
-     * @param {Array<string>} deviceIds - Devices to operate on
-     * @param {Object} [params] - Optional parameters
-     * @returns {Promise<{job_id: string}>}
-     */
-    async batchOperation(operation, deviceIds, params = null) {
-        const response = await fetch('/api/operations/batch', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                operation: operation,
-                device_ids: deviceIds,
-                params: params
-            })
-        });
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Batch operation failed');
-        }
-        return response.json();
-    },
-    
-    /**
-     * Get status of a running operation
-     * @param {string} jobId - Job identifier
-     * @returns {Promise<Object>} Job status
-     */
-    async getOperationStatus(jobId) {
-        const response = await fetch(`/api/operations/${encodeURIComponent(jobId)}`);
-        if (!response.ok) {
-            throw new Error(`Job not found: ${jobId}`);
-        }
-        return response.json();
-    },
-    
     /**
      * Cancel a running operation
      * @param {string} jobId - Job identifier
      * @returns {Promise<Object>} Cancellation result
      */
     async cancelOperation(jobId) {
-        const response = await fetch(`/api/operations/${encodeURIComponent(jobId)}/cancel`, {
+        const response = await fetch(this._api(`/api/operations/${encodeURIComponent(jobId)}/cancel`), {
             method: 'POST'
         });
         if (!response.ok) {
@@ -998,7 +1254,7 @@ const ScalerAPI = {
     async startDnaasDiscovery(request) {
         let response;
         try {
-            response = await fetch('/api/dnaas/discovery/start', {
+            response = await fetch(this._api('/api/dnaas/discovery/start'), {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(request)
@@ -1023,7 +1279,7 @@ const ScalerAPI = {
      * @returns {Promise<Object>} Discovery status with progress and output
      */
     async getDnaasStatus(jobId) {
-        const response = await fetch(`/api/dnaas/discovery/status?job_id=${encodeURIComponent(jobId)}`);
+        const response = await fetch(this._api(`/api/dnaas/discovery/status?job_id=${encodeURIComponent(jobId)}`));
         if (!response.ok) {
             throw new Error(`Discovery job not found: ${jobId}`);
         }
@@ -1035,7 +1291,7 @@ const ScalerAPI = {
      * @returns {Promise<{files: Array}>}
      */
     async listDnaasFiles() {
-        const response = await fetch('/api/dnaas/discovery/list');
+        const response = await fetch(this._api('/api/dnaas/discovery/list'));
         if (!response.ok) {
             throw new Error('Failed to list discovery files');
         }
@@ -1048,7 +1304,7 @@ const ScalerAPI = {
      * @returns {Promise<Object>} Discovery result data
      */
     async getDnaasFile(filename) {
-        const response = await fetch(`/api/dnaas/discovery/file/${encodeURIComponent(filename)}`);
+        const response = await fetch(this._api(`/api/dnaas/discovery/file/${encodeURIComponent(filename)}`));
         if (!response.ok) {
             throw new Error(`Discovery file not found: ${filename}`);
         }
@@ -1060,7 +1316,7 @@ const ScalerAPI = {
      * @returns {Promise<{status: string, message: string}>}
      */
     async checkDnaasHealth() {
-        const response = await fetch('/api/dnaas/discovery/health');
+        const response = await fetch(this._api('/api/dnaas/discovery/health'));
         return response.json();
     },
     
@@ -1070,7 +1326,7 @@ const ScalerAPI = {
      * @returns {Promise<{status: string, message: string}>}
      */
     async cancelDnaasDiscovery(jobId) {
-        const response = await fetch('/api/dnaas/discovery/cancel', {
+        const response = await fetch(this._api('/api/dnaas/discovery/cancel'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ job_id: jobId })
@@ -1092,7 +1348,7 @@ const ScalerAPI = {
      * @returns {Promise<{job_id: string, message: string}>}
      */
     async startMultiBDDiscovery(request) {
-        const response = await fetch('/api/dnaas/multi-bd/start', {
+        const response = await fetch(this._api('/api/dnaas/multi-bd/start'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(request)
@@ -1110,7 +1366,7 @@ const ScalerAPI = {
      * @returns {Promise<{status: string, message?: string, bd_count?: number, result_file?: string}>}
      */
     async getMultiBDDiscoveryStatus(jobId) {
-        const response = await fetch(`/api/dnaas/multi-bd/status?job_id=${encodeURIComponent(jobId)}`);
+        const response = await fetch(this._api(`/api/dnaas/multi-bd/status?job_id=${encodeURIComponent(jobId)}`));
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.detail || `Multi-BD job not found: ${jobId}`);
@@ -1124,7 +1380,7 @@ const ScalerAPI = {
      * @returns {Promise<Object>} - Topology data with BD metadata
      */
     async getMultiBDFile(filename) {
-        const response = await fetch(`/api/dnaas/multi-bd/file/${encodeURIComponent(filename)}`);
+        const response = await fetch(this._api(`/api/dnaas/multi-bd/file/${encodeURIComponent(filename)}`));
         if (!response.ok) {
             throw new Error(`Multi-BD file not found: ${filename}`);
         }
@@ -1137,7 +1393,7 @@ const ScalerAPI = {
      * @returns {Promise<{status: string, message: string}>}
      */
     async cancelMultiBDDiscovery(jobId) {
-        const response = await fetch('/api/dnaas/multi-bd/cancel', {
+        const response = await fetch(this._api('/api/dnaas/multi-bd/cancel'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ job_id: jobId })
@@ -1171,41 +1427,102 @@ const ScalerAPI = {
      * @param {Object} callbacks - Same as connectProgress
      * @returns {EventSource} The EventSource instance
      */
-    connectPushProgress(jobId, callbacks) {
-        const url = (this.baseUrl || '') + `/api/config/push/progress/${encodeURIComponent(jobId)}`;
-        const es = new EventSource(url || `/api/config/push/progress/${encodeURIComponent(jobId)}`);
-        es.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                const terminal = data.terminal || [];
-                if (Array.isArray(terminal) && terminal.length && callbacks.onTerminal) {
-                    terminal.forEach((chunk) => callbacks.onTerminal(chunk));
-                }
-                if (data.done) {
+    connectPushProgress(jobId, callbacks, options) {
+        const url = this._api(`/api/config/push/progress/${encodeURIComponent(jobId)}`);
+        let retryCount = 0;
+        const MAX_RETRIES = 5;
+        let done = false;
+        let currentEs = null;
+        let heartbeatTimer = null;
+        const HEARTBEAT_TIMEOUT = 30000;
+        let _terminalLinesSent = (options && options.terminalOffset) || 0;
+
+        const connect = () => {
+            const es = new EventSource(url);
+            currentEs = es;
+
+            const resetHeartbeat = () => {
+                if (heartbeatTimer) clearTimeout(heartbeatTimer);
+                heartbeatTimer = setTimeout(() => {
+                    if (done) return;
+                    console.warn('[ScalerAPI] No SSE data for 30s -- reconnecting');
                     es.close();
-                    callbacks.onProgress?.(data.success ? 100 : 0, data.message);
-                    callbacks.onComplete?.(data.success, { message: data.message, terminal_full: data.terminal_full, cancelled: data.cancelled });
-                } else if (data.awaiting_decision || data.status === 'awaiting_decision') {
-                    callbacks.onAwaitingDecision?.(data);
-                } else {
-                    const pct = data.percent || 0;
-                    callbacks.onProgress?.(pct, data.message || data.phase);
+                    scheduleReconnect();
+                }, HEARTBEAT_TIMEOUT);
+            };
+
+            const scheduleReconnect = () => {
+                if (done || retryCount >= MAX_RETRIES) {
+                    if (!done) callbacks.onError?.('Connection lost after ' + MAX_RETRIES + ' retries. The operation may still be running.');
+                    return;
                 }
-            } catch (e) {
-                console.error('[ScalerAPI] Failed to parse SSE message:', e);
-            }
+                retryCount++;
+                const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 10000);
+                console.log(`[ScalerAPI] SSE reconnect attempt ${retryCount}/${MAX_RETRIES} in ${delay}ms`);
+                setTimeout(() => { if (!done) connect(); }, delay);
+            };
+
+            resetHeartbeat();
+            es.onmessage = (event) => {
+                resetHeartbeat();
+                retryCount = 0;
+                try {
+                    const data = JSON.parse(event.data);
+                    const terminal = data.terminal || [];
+                    const terminalFull = data.terminal_full || [];
+                    if (Array.isArray(terminal) && terminal.length && callbacks.onTerminal) {
+                        const fullCount = terminalFull.length || (_terminalLinesSent + terminal.length);
+                        if (_terminalLinesSent > 0 && terminal.length === fullCount) {
+                            const newOnly = terminalFull.slice(_terminalLinesSent);
+                            newOnly.forEach((chunk) => callbacks.onTerminal(chunk));
+                            _terminalLinesSent = fullCount;
+                        } else {
+                            terminal.forEach((chunk) => callbacks.onTerminal(chunk));
+                            _terminalLinesSent += terminal.length;
+                        }
+                    }
+                    if (data.done) {
+                        done = true;
+                        if (heartbeatTimer) clearTimeout(heartbeatTimer);
+                        es.close();
+                        callbacks.onProgress?.(data.success ? 100 : 0, data.message, {
+                            elapsed_seconds: data.elapsed_seconds,
+                            estimated_remaining_seconds: 0,
+                        });
+                        if (data.device_state && typeof callbacks.onDeviceState === 'function') {
+                            callbacks.onDeviceState(data.device_state);
+                        }
+                        callbacks.onComplete?.(data.success, { message: data.message, terminal_full: data.terminal_full, cancelled: data.cancelled, device_state: data.device_state });
+                    } else if (data.awaiting_decision || data.status === 'awaiting_decision') {
+                        callbacks.onAwaitingDecision?.(data);
+                    } else {
+                        const pct = data.percent || 0;
+                        callbacks.onProgress?.(pct, data.message || data.phase, {
+                            elapsed_seconds: data.elapsed_seconds,
+                            estimated_remaining_seconds: data.estimated_remaining_seconds,
+                        });
+                        if (data.device_state && typeof callbacks.onDeviceState === 'function') {
+                            callbacks.onDeviceState(data.device_state);
+                        }
+                    }
+                } catch (e) {
+                    console.error('[ScalerAPI] Failed to parse SSE message:', e);
+                }
+            };
+            es.onerror = () => {
+                if (heartbeatTimer) clearTimeout(heartbeatTimer);
+                es.close();
+                if (!done) scheduleReconnect();
+            };
         };
-        es.onerror = () => {
-            es.close();
-            callbacks.onError?.('Progress stream error');
-        };
-        return es;
+
+        connect();
+        return { close: () => { done = true; if (heartbeatTimer) clearTimeout(heartbeatTimer); currentEs?.close(); } };
     },
 
-    connectProgress(jobId, callbacks) {
-        // Prefer SSE for push jobs (scaler_bridge implements push progress via SSE)
+    connectProgress(jobId, callbacks, options) {
         if (typeof EventSource !== 'undefined') {
-            return this.connectPushProgress(jobId, callbacks);
+            return this.connectPushProgress(jobId, callbacks, options);
         }
         // Fallback: WebSocket (if serve.py ever adds WS support)
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1293,7 +1610,7 @@ const ScalerAPI = {
      * @returns {Promise<{status: string, service: string, version: string}>}
      */
     async checkHealth() {
-        const response = await fetch('/api/health');
+        const response = await fetch(this._api('/api/health'));
         if (!response.ok) {
             throw new Error('API server is not healthy');
         }
@@ -1345,12 +1662,12 @@ const ScalerAPI = {
         });
     },
 
-    // =====================================================================
-    // Image Upgrade - Jenkins Build Browsing
-    // =====================================================================
+    // =========================================================================
+    // IMAGE UPGRADE / JENKINS (/api/operations/image-upgrade/*)
+    // =========================================================================
 
     async getBuildsForBranch(branch, opts = {}) {
-        const resp = await fetch('/api/operations/image-upgrade/builds', {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/builds'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ branch, ...opts }),
@@ -1363,7 +1680,7 @@ const ScalerAPI = {
     },
 
     async resolveJenkinsUrl(url) {
-        const resp = await fetch('/api/operations/image-upgrade/resolve-url', {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/resolve-url'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url }),
@@ -1376,7 +1693,7 @@ const ScalerAPI = {
     },
 
     async getBuildStack(branch, buildNumber) {
-        const resp = await fetch('/api/operations/image-upgrade/stack', {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/stack'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ branch, build_number: buildNumber }),
@@ -1384,6 +1701,187 @@ const ScalerAPI = {
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
             throw new Error(err.detail || `Failed to get stack (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async listBranches(type = 'dev') {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/branches'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to list branches (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async getBranchSummaries(branches) {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/branch-summaries'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ branches }),
+        });
+        if (!resp.ok) return {};
+        const data = await resp.json();
+        return data.summaries || {};
+    },
+
+    async detectBranchSwitch(params) {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/branch-switch'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to detect branch switch (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async checkVersionCompat(params) {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/compat'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to check version compat (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async getUpgradePlan(params) {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/plan'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to get upgrade plan (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async triggerUpgradeBuild(branch, opts = {}) {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/trigger-build'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                branch,
+                with_baseos: opts.with_baseos !== false,
+                qa_version: opts.qa_version || false,
+                with_sanitizer: opts.with_sanitizer || false,
+                auto_push: opts.auto_push || false,
+                device_ids: opts.device_ids || [],
+                ssh_hosts: opts.ssh_hosts || {},
+                components: opts.components || ['DNOS', 'GI', 'BaseOS'],
+            }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to trigger build (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async getUpgradeBuildStatus(jobId, latest = false) {
+        const qs = latest ? '?latest=true' : '';
+        const resp = await fetch(this._api(`/api/operations/image-upgrade/build-status/${encodeURIComponent(jobId)}${qs}`));
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to get build status (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async getUpgradeBuildLog(branch, buildNumber) {
+        const qs = buildNumber ? `?build_number=${buildNumber}` : '';
+        const resp = await fetch(this._api(`/api/operations/image-upgrade/build-log/${encodeURIComponent(branch)}${qs}`));
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to get build log (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async getUpgradeDeviceStatus(deviceIds, sshHosts = {}, cachedOnly = false) {
+        const ids = Array.isArray(deviceIds) ? deviceIds.join(',') : String(deviceIds || '');
+        const hosts = Array.isArray(deviceIds) ? deviceIds.map(id => sshHosts[id] || '').join(',') : '';
+        const qs = new URLSearchParams({ device_ids: ids });
+        if (hosts) qs.set('ssh_hosts', hosts);
+        if (cachedOnly) qs.set('cached_only', 'true');
+        const timeout = cachedOnly ? 5000 : 30000;
+        const resp = await this._fetchWithTimeout(this._api(`/api/operations/image-upgrade/device-status?${qs}`), {}, timeout);
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to get device status (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async upgradeFromUrls(body) {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/from-urls'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to upgrade from URLs (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async getUpgradeRecentSources() {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/recent-sources'));
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to get recent sources (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async verifyUpgradeStacks(deviceIds, sshHosts = {}) {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/verify-stacks'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_ids: deviceIds, ssh_hosts: sshHosts }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to verify stacks (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async restoreUpgradeConfig(deviceIds, sshHosts = {}) {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/restore-config'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_ids: deviceIds, ssh_hosts: sshHosts }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to restore config (${resp.status})`);
+        }
+        return resp.json();
+    },
+
+    async waitAndUpgrade(params) {
+        const resp = await fetch(this._api('/api/operations/image-upgrade/wait-and-upgrade'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Failed to start wait-and-upgrade (${resp.status})`);
         }
         return resp.json();
     },

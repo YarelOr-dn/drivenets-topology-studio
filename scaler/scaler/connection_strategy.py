@@ -14,12 +14,23 @@ Usage:
     state, recovery_type, config = connector.connect_and_detect()
 """
 
+import os
+import re
 import time
 import socket
 import logging
 from typing import Tuple, Optional, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
+
+
+def _derive_kvm_host(host: str) -> str:
+    """If host looks like NCC VM name (e.g. kvm108-cl408d-ncc1), derive KVM host (kvm108)."""
+    if not host:
+        return host
+    if re.search(r"-ncc\d*$", host, re.I):
+        return host.split("-")[0] or host
+    return host
 
 # Suppress noisy paramiko transport-layer tracebacks (e.g. SSH banner errors)
 logging.getLogger("paramiko").setLevel(logging.WARNING)
@@ -55,6 +66,66 @@ class DeviceState(Enum):
     STANDALONE = "STANDALONE"       # One NCC down
     UNREACHABLE = "UNREACHABLE"     # Cannot connect via any method
     UNKNOWN = "UNKNOWN"             # Connected but state unclear
+
+
+# Canonical GI-like states for mode classification.
+# UPGRADING / DEPLOYING are transient job flags in operational.json during image work;
+# they must NOT be treated as "GI mode" or the wizard/canvas show GI while the CLI is DNOS.
+GI_STATES = frozenset({"GI", "BASEOS_SHELL", "ONIE"})
+RECOVERY_STATES = frozenset({"RECOVERY", "DN_RECOVERY"})
+
+
+def detect_device_mode(output: str) -> str:
+    """Canonical device mode detection from SSH/console output.
+
+    This is the SINGLE SOURCE OF TRUTH for mode detection.
+    All other detection code must call this function.
+
+    Returns: "DNOS", "GI", "RECOVERY", or "" (unknown).
+    """
+    if not output:
+        return ""
+    lower = output.lower()
+
+    if "onie:/" in lower or "onie-" in lower or "onie #" in lower:
+        return "RECOVERY"
+
+    if ("(recovery)" in lower or "dn-recovery" in lower
+            or "dnos recovery" in lower or "recovery mode" in lower
+            or "dnrouter(recovery)" in lower):
+        return "RECOVERY"
+
+    if (re.search(r'f?gi[#>]|f?gi\([^)]*\)[#>]|\[f?gi\([^)]*\)[#>]', lower)
+            or "gicli" in lower or "[fgi(" in lower):
+        return "GI"
+
+    if re.search(r'(dn|root)@[a-zA-Z0-9]+:~?\$', output):
+        return "GI"
+
+    if "#" in output and re.search(r'[a-zA-Z0-9_-]+[#>]\s*$', output.rstrip(), re.MULTILINE):
+        return "DNOS"
+
+    return ""
+
+
+def classify_device_state(state_str: str) -> str:
+    """Map any device_state string to a canonical mode: DNOS, GI, RECOVERY, or "".
+
+    Use this when reading device_state from operational.json or DeviceState enum.
+    """
+    if not state_str:
+        return ""
+    s = state_str.upper()
+    # Transient scaler/ops flags -- not a stable runtime mode (see GI_STATES comment).
+    if s in ("UPGRADING", "DEPLOYING"):
+        return ""
+    if s in GI_STATES:
+        return "GI"
+    if s in RECOVERY_STATES:
+        return "RECOVERY"
+    if s == "DNOS" or s == "STANDALONE":
+        return "DNOS"
+    return ""
 
 
 @dataclass
@@ -155,15 +226,14 @@ class DeviceConnector:
         except:
             pass
         
-        # If we know it's in GI or RECOVERY, prioritize console/virsh over SSH
-        # because SSH might be unreachable due to DHCP/DNS changes after system delete
+        # GI/RECOVERY mode priority:
+        # KVM clusters: virsh_console FIRST (SSH_NCC gives dead shell in GI mode;
+        #   only virsh->BaseOS->dncli gives a working GI CLI on KVM NCCs).
+        # Non-KVM: SSH_SN first (serial number DNS -> management VIP -> GI CLI).
         if known_state in ('GI', 'BASEOS_SHELL', 'RECOVERY', 'DN_RECOVERY', 'DEPLOYING', 'UPGRADING'):
             kvm_config = self._get_kvm_host_config()
             if kvm_config:
                 methods.append(ConnectionMethod.VIRSH_CONSOLE)
-            if self.console_config:
-                methods.append(ConnectionMethod.CONSOLE)
-                
             sn = self._get_serial_number()
             if sn:
                 methods.append(ConnectionMethod.SSH_SN)
@@ -172,6 +242,8 @@ class DeviceConnector:
             ncc_hosts = self._get_ncc_hosts()
             if ncc_hosts:
                 methods.append(ConnectionMethod.SSH_NCC)
+            if self.console_config:
+                methods.append(ConnectionMethod.CONSOLE)
             if hasattr(self.device, 'loopback_ip') and self.device.loopback_ip:
                 methods.append(ConnectionMethod.SSH_LOOPBACK)
             return methods
@@ -206,12 +278,45 @@ class DeviceConnector:
         
         return methods
     
+    def get_probe_targets(self) -> list:
+        """Return list of (method, host, port) for lightweight TCP probing.
+        Used by POST /api/ssh/probe to check reachability without full SSH."""
+        targets = []
+        for method in self._get_connection_methods():
+            host, port = None, 22
+            if method == ConnectionMethod.SSH_SN:
+                host = self._get_serial_number()
+            elif method == ConnectionMethod.SSH_MGMT:
+                host = getattr(self.device, 'ip', None)
+            elif method == ConnectionMethod.SSH_NCC:
+                hosts = self._get_ncc_hosts()
+                if hosts:
+                    host = hosts[0]
+            elif method == ConnectionMethod.VIRSH_CONSOLE:
+                cfg = self._get_kvm_host_config()
+                if cfg:
+                    raw = cfg.get('kvm_host_ip') or cfg.get('kvm_host')
+                    host = _derive_kvm_host(raw) if raw else None
+                    port = 22
+            elif method == ConnectionMethod.CONSOLE:
+                if self.console_config:
+                    host = self.console_config.get('host')
+                    port = int(self.console_config.get('port', 22))
+            elif method == ConnectionMethod.SSH_LOOPBACK:
+                host = getattr(self.device, 'loopback_ip', None)
+            if host:
+                targets.append((method, host, port))
+        return targets
+    
     def _get_ncc_hosts(self) -> list:
         """Get KVM NCC hostnames for cluster devices with VM-based NCCs.
         
         Only returns hosts when ncc_type is explicitly 'kvm' (auto-detected
         from show system: Model=X86 + hostname-pattern serial).
         Physical NCC clusters (ncc_type='physical' or unset) return empty.
+        
+        Returns active NCC first (if known) so SSH tries it before standby.
+        Falls back to ncc_vms if ncc_hosts is not populated.
         """
         try:
             from pathlib import Path
@@ -221,7 +326,11 @@ class DeviceConnector:
                 with open(op_file) as f:
                     op_data = json.load(f)
                 if op_data.get('ncc_type') == 'kvm':
-                    return op_data.get('ncc_hosts', [])
+                    hosts = op_data.get('ncc_hosts') or op_data.get('ncc_vms') or []
+                    active = op_data.get('active_ncc_vm', '')
+                    if active and active in hosts:
+                        return [active] + [h for h in hosts if h != active]
+                    return list(hosts)
         except Exception:
             pass
         
@@ -234,7 +343,8 @@ class DeviceConnector:
                     data = json.load(f)
                 ncc_info = data.get('cluster_ncc_access', {}).get(self.device.hostname)
                 if ncc_info and ncc_info.get('ncc_type') == 'kvm':
-                    return ncc_info.get('ncc_hosts', [])
+                    hosts = ncc_info.get('ncc_hosts') or ncc_info.get('ncc_vms') or []
+                    return list(hosts)
         except Exception:
             pass
         
@@ -430,7 +540,13 @@ class DeviceConnector:
     
     def _connect_ncc(self, timeout: int) -> ConnectionResult:
         """Connect to KVM NCC VM via SSH. Tries each known NCC hostname
-        (active NCC accepts SSH, standby may reject/timeout)."""
+        (active NCC accepts SSH, standby may reject/timeout).
+
+        Uses only dnroot/dnroot (NCC standard). Does NOT try the full
+        credential set to avoid SSH rate-limit lockout on the NCC.
+        """
+        import paramiko
+
         ncc_hosts = self._get_ncc_hosts()
         if not ncc_hosts:
             return ConnectionResult(
@@ -440,28 +556,85 @@ class DeviceConnector:
                 recovery_type="",
                 error="No NCC hosts configured"
             )
-        
-        ncc_creds = [{"username": "dnroot", "password": "dnroot"}]
+
+        ncc_cred = {"username": "dnroot", "password": "dnroot"}
         try:
             from pathlib import Path
-            import json
             op_file = Path(f"/home/dn/SCALER/db/configs/{self.device.hostname}/operational.json")
             if op_file.exists():
                 with open(op_file) as f:
                     op_data = json.load(f)
                 stored = op_data.get('ncc_credentials')
                 if stored and stored.get('username'):
-                    ncc_creds = [{"username": stored['username'], "password": stored['password']}]
+                    ncc_cred = {"username": stored['username'], "password": stored['password']}
         except Exception:
             pass
-        
+
         last_error = None
         for ncc_host in ncc_hosts:
-            result = self._connect_ssh_multi_creds(ncc_host, timeout, ConnectionMethod.SSH_NCC)
-            if result.success:
-                return result
-            last_error = result.error
-        
+            try:
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh.connect(
+                    ncc_host,
+                    username=ncc_cred['username'],
+                    password=ncc_cred['password'],
+                    timeout=timeout,
+                    banner_timeout=15,
+                    auth_timeout=15,
+                    allow_agent=False,
+                    look_for_keys=False,
+                )
+                channel = ssh.invoke_shell(width=200, height=50)
+                time.sleep(2)
+                output = channel.recv(8192).decode('utf-8', errors='replace')
+                channel.send("\r\n")
+                time.sleep(2)
+                output += channel.recv(8192).decode('utf-8', errors='replace')
+
+                state, recovery_type = self._detect_state_from_output(output)
+
+                if state == DeviceState.UNKNOWN:
+                    channel.send("dncli\n")
+                    time.sleep(3)
+                    dncli_out = channel.recv(8192).decode('utf-8', errors='replace')
+                    if 'assword' in dncli_out.lower():
+                        channel.send("dnroot\n")
+                        time.sleep(8)
+                        dncli_out += channel.recv(8192).decode('utf-8', errors='replace')
+                    channel.send(b"\x03")
+                    time.sleep(1)
+                    channel.send(b"\r")
+                    time.sleep(3)
+                    while channel.recv_ready():
+                        dncli_out += channel.recv(8192).decode('utf-8', errors='replace')
+                    output += dncli_out
+                    state, recovery_type = self._detect_state_from_output(output)
+
+                return ConnectionResult(
+                    success=True,
+                    method=ConnectionMethod.SSH_NCC,
+                    state=state,
+                    recovery_type=recovery_type,
+                    ssh=ssh,
+                    channel=channel,
+                    output=output,
+                    host=ncc_host,
+                    active_ncc_vm=ncc_host,
+                )
+            except paramiko.AuthenticationException:
+                last_error = f"NCC auth failed on {ncc_host}"
+                continue
+            except socket.timeout:
+                last_error = f"NCC timeout on {ncc_host}"
+                continue
+            except socket.gaierror:
+                last_error = f"NCC DNS failed for {ncc_host}"
+                continue
+            except Exception as e:
+                last_error = f"NCC {ncc_host}: {str(e)[:60]}"
+                continue
+
         return ConnectionResult(
             success=False,
             method=ConnectionMethod.SSH_NCC,
@@ -494,7 +667,7 @@ class DeviceConnector:
                 error="No KVM host config found"
             )
         
-        kvm_host = kvm_config.get('kvm_host_ip') or kvm_config.get('kvm_host')
+        kvm_host = kvm_config.get('kvm_host_ip') or _derive_kvm_host(kvm_config.get('kvm_host') or '')
         kvm_creds = kvm_config.get('kvm_host_credentials', {})
         ncc_vms = kvm_config.get('ncc_vms', [])
         console_creds = kvm_config.get('ncc_console_credentials', {})
@@ -536,10 +709,14 @@ class DeviceConnector:
             
             _drain(channel, wait=2)  # consume SSH banner
             
-            # Find active NCC VM via virsh list
-            channel.send("virsh list\n")
+            # Find active NCC VM via virsh list (sudo required on most KVM hosts)
+            channel.send("sudo virsh list --all\n")
             time.sleep(3)
             virsh_output = _drain(channel, wait=3)
+            if 'running' not in virsh_output.lower() and 'Id' not in virsh_output:
+                channel.send("virsh list --all\n")
+                time.sleep(3)
+                virsh_output = _drain(channel, wait=3)
             
             active_ncc = None
             for vm_name in ncc_vms:
@@ -571,47 +748,47 @@ class DeviceConnector:
             if ncc_id_match:
                 detected_ncc_id = int(ncc_id_match.group(1))
             
-            # Attach virsh console. Try without --force first (preserves
-            # persisted GI session), fall back to --force if busy.
-            channel.send(f"virsh console {active_ncc}\n")
+            # Attach virsh console. Try --force directly to avoid
+            # "Active console session exists" blocking.
+            channel.send(f"sudo virsh console --force {active_ncc}\n")
             time.sleep(5)
-            attach_out = _drain(channel, wait=3)
-            if 'Active console session' in attach_out:
-                channel.send(f"virsh console --force {active_ncc}\n")
-                time.sleep(5)
-                _drain(channel, wait=3)
+            attach_out = _drain(channel, wait=4)
             
-            # Wake console: send Enters patiently. The GI CLI session
-            # persists after the first dncli, so check for GI# FIRST.
-            # Priority: GI/DNOS prompt > shell prompt > login prompt.
+            # Check if GI/DNOS prompt appeared immediately in the attach output
             already_in_shell = False
             already_in_cli = False
-            all_console = ""
+            all_console = attach_out
+            attach_stripped = _strip_ansi(attach_out)
+            if re.search(r'F?GI[#>]|F?GI\([^)]*\)[#>]|\[F?GI\(', attach_stripped):
+                already_in_cli = True
+            elif re.search(r'[A-Z][A-Za-z0-9_-]+[#>]\s*$', attach_stripped, re.MULTILINE):
+                already_in_cli = True
             
-            for attempt in range(15):
-                channel.send(b"\r")
-                time.sleep(2)
-                chunk = _drain(channel, wait=2)
-                all_console += chunk
-                stripped = _strip_ansi(chunk)
-                
-                if 'GI' in stripped or re.search(r'GI\([^)]*\)[#>]', stripped):
-                    already_in_cli = True
-                    break
-                if re.search(r'[A-Z][A-Za-z0-9_-]+[#>]\s*$', stripped, re.MULTILINE):
-                    already_in_cli = True
-                    break
-                if re.search(r'(dn|root)@[a-zA-Z0-9_-]+.*\$', stripped):
-                    already_in_shell = True
-                    break
-                if 'login:' in stripped.lower():
-                    break
+            if not already_in_cli:
+                for attempt in range(8):
+                    channel.send(b"\r")
+                    time.sleep(3)
+                    chunk = _drain(channel, wait=3)
+                    all_console += chunk
+                    stripped = _strip_ansi(chunk)
+
+                    if re.search(r'F?GI[#>]|F?GI\([^)]*\)[#>]|\[F?GI\(', stripped):
+                        already_in_cli = True
+                        break
+                    if re.search(r'[A-Z][A-Za-z0-9_-]+[#>]\s*$', stripped, re.MULTILINE):
+                        already_in_cli = True
+                        break
+                    if re.search(r'(dn|root)@[a-zA-Z0-9_-]+.*\$', stripped):
+                        already_in_shell = True
+                        break
+                    if 'login:' in stripped.lower():
+                        break
             
             # Also check accumulated text for any state we might have
             # seen across multiple chunks
             if not already_in_shell and not already_in_cli:
                 all_stripped = _strip_ansi(all_console)
-                if 'GI' in all_stripped:
+                if re.search(r'F?GI[#>]|F?GI\([^)]*\)[#>]|\[F?GI\(', all_stripped):
                     already_in_cli = True
                 elif re.search(r'(dn|root)@[a-zA-Z0-9_-]+.*\$', all_stripped):
                     already_in_shell = True
@@ -648,23 +825,32 @@ class DeviceConnector:
                     dncli_pwd = dncli_creds.get('password', 'dnroot')
                     channel.send(f"{dncli_pwd}\r".encode())
                     
-                    # GI prompt is slow to appear after dncli login.
-                    # Wait generously, then send Enters to pop it.
-                    time.sleep(15)
-                    cli_out = _drain(channel, wait=5)
+                    time.sleep(10)
+                    cli_out = _drain(channel, wait=3)
                     
-                    for _ in range(5):
+                    # Ctrl+C + Enter to break out of dncli loading and pop GI prompt
+                    channel.send(b"\x03")
+                    time.sleep(1)
+                    channel.send(b"\r")
+                    time.sleep(3)
+                    cli_out += _drain(channel, wait=3)
+                    
+                    for _ in range(3):
+                        if 'GI' in cli_out or re.search(r'[A-Z][A-Za-z0-9_-]+[#>]', _strip_ansi(cli_out)):
+                            break
+                        channel.send(b"\x03")
+                        time.sleep(1)
                         channel.send(b"\r")
                         time.sleep(3)
                         extra = _drain(channel, wait=2)
                         cli_out += extra
-                        if 'GI' in extra or re.search(r'[A-Z][A-Za-z0-9_-]+[#>]', _strip_ansi(extra)):
-                            break
                     
                     dncli_out += cli_out
                 
-                already_in_cli = 'GI' in dncli_out or bool(
-                    re.search(r'[A-Z][A-Za-z0-9_-]+[#>]', _strip_ansi(dncli_out)))
+                stripped_dncli = _strip_ansi(dncli_out)
+                already_in_cli = bool(
+                    re.search(r'F?GI[#>]|F?GI\([^)]*\)[#>]|\[F?GI\(', stripped_dncli)
+                    or re.search(r'[A-Z][A-Za-z0-9_-]+[#>]', stripped_dncli))
             
             if already_in_cli:
                 channel.send(b"\r")
@@ -673,7 +859,7 @@ class DeviceConnector:
                 final_stripped = _strip_ansi(final_out)
                 
                 state = DeviceState.UNKNOWN
-                if 'GI' in final_stripped:
+                if re.search(r'F?GI[#>]|F?GI\([^)]*\)[#>]|\[F?GI\(', final_stripped):
                     state = DeviceState.GI
                 elif re.search(r'[A-Z][A-Za-z0-9_-]+[#>]', final_stripped):
                     state = DeviceState.DNOS
@@ -691,11 +877,17 @@ class DeviceConnector:
                     ncc_id=detected_ncc_id,
                 )
             
-            ssh.close()
+            # CLI not available but NCC bash shell IS accessible.
+            # Return success with BASEOS_SHELL so upgrade flows can
+            # detect stuck gi-manager and run automatic recovery.
             return ConnectionResult(
-                success=False, method=ConnectionMethod.VIRSH_CONSOLE,
-                state=DeviceState.UNREACHABLE, recovery_type="",
-                error=f"Failed to reach CLI via dncli on {active_ncc}"
+                success=True, method=ConnectionMethod.VIRSH_CONSOLE,
+                state=DeviceState.BASEOS_SHELL, recovery_type="GI",
+                ssh=ssh, channel=channel,
+                output=dncli_out,
+                host=kvm_host,
+                active_ncc_vm=active_ncc,
+                ncc_id=detected_ncc_id,
             )
         
         except Exception as e:
@@ -952,51 +1144,30 @@ class DeviceConnector:
             )
     
     def _detect_state_from_output(self, output: str) -> Tuple[DeviceState, str]:
+        """Detect device state from console/SSH output.
+
+        Delegates to the module-level detect_device_mode() for canonical detection,
+        then maps back to DeviceState enum with finer granularity.
         """
-        Detect device state from console/SSH output.
-        
-        Returns:
-            (DeviceState, recovery_type_string)
-        """
-        lower = output.lower()
-        
-        # Priority order for detection (most specific first)
-        
-        # 1. ONIE rescue mode (highest priority - most critical)
-        if "onie:/" in lower or "onie-" in lower or "onie #" in lower:
-            return DeviceState.ONIE, "ONIE"
-        
-        # 2. GI mode - look for GI prompt patterns
-        # GI# or GI(timestamp)# or gicli patterns
-        import re
-        if re.search(r'gi[#>]|gi\([^)]*\)[#>]', lower) or "gicli" in lower:
-            return DeviceState.GI, "GI"
-        
-        # 3. BaseOS shell - dn@SERIAL:~$ pattern
-        if re.search(r'(dn|root)@[a-zA-Z0-9]+:~?\$', output):
-            return DeviceState.BASEOS_SHELL, "BASEOS_SHELL"
-        
-        # 4. DN Recovery mode - check prompt pattern and keywords
-        if ("(recovery)" in lower or "dn-recovery" in lower 
-                or "dnos recovery" in lower or "recovery mode" in lower):
+        mode = detect_device_mode(output)
+
+        if mode == "RECOVERY":
+            lower = output.lower()
+            if "onie:/" in lower or "onie-" in lower or "onie #" in lower:
+                return DeviceState.ONIE, "ONIE"
             return DeviceState.DN_RECOVERY, "DN_RECOVERY"
-        
-        # 5. Standalone mode (one NCC down)
-        if "ncc: 1/2 up" in lower or "standalone" in lower:
-            return DeviceState.STANDALONE, "STANDALONE"
-        
-        # 6. Normal DNOS operation - look for DNOS CLI prompt
-        # PE-1#, router#, dnos#, or hostname# pattern
-        if re.search(r'(pe-?\d+|router|dnos|[a-zA-Z0-9_-]+)[#>]\s*$', lower, re.MULTILINE):
-            # Verify it's actually DNOS by checking for DNOS-specific output
-            if "#" in output and ("show" in lower or "config" in lower or "interface" in lower 
-                                  or "router" in lower or "pe-" in lower):
-                return DeviceState.DNOS, "DNOS"
-            # Simple prompt check - assume DNOS if we got a # prompt
-            if "#" in output:
-                return DeviceState.DNOS, "DNOS"
-        
-        # 7. Unknown state
+
+        if mode == "GI":
+            if re.search(r'(dn|root)@[a-zA-Z0-9]+:~?\$', output):
+                return DeviceState.BASEOS_SHELL, "BASEOS_SHELL"
+            return DeviceState.GI, "GI"
+
+        if mode == "DNOS":
+            lower = output.lower()
+            if "ncc: 1/2 up" in lower or "standalone" in lower:
+                return DeviceState.STANDALONE, "STANDALONE"
+            return DeviceState.DNOS, "DNOS"
+
         return DeviceState.UNKNOWN, ""
 
 
@@ -1067,12 +1238,45 @@ def _save_console_mappings(data: Dict) -> bool:
         return False
 
 
+def _lookup_zohar_csv_by_serial(serial: str) -> Optional[Dict]:
+    """Look up console server + port from Zohar's cached CSV DB by serial.
+    Returns {host, port, user, password} or None.
+    The CSV is fetched by scaler_bridge and cached at /tmp/console_devices_cache.csv."""
+    import csv as _csv
+    csv_path = "/tmp/console_devices_cache.csv"
+    if not os.path.exists(csv_path):
+        return None
+    serial_upper = serial.strip().upper()
+    if not serial_upper:
+        return None
+    try:
+        with open(csv_path, newline="") as f:
+            reader = _csv.reader(f)
+            next(reader, None)
+            for row in reader:
+                if len(row) >= 3 and row[2].strip().upper() == serial_upper:
+                    return {
+                        'host': row[0].strip(),
+                        'port': int(row[1].strip()),
+                        'user': 'dn',
+                        'password': 'drive1234',
+                        'console_server_name': row[0].strip(),
+                        'device_credentials': list(CREDENTIAL_SETS),
+                        '_source': 'zohar_db',
+                    }
+    except Exception:
+        pass
+    return None
+
+
 def get_console_config_for_device(hostname: str) -> Optional[Dict]:
     """
     Get console server configuration for a specific device.
     
-    Reads from persistent DB at db/console_mappings.json.
-    Supports multi-server format (console_servers dict) and legacy single-server format.
+    Priority:
+      1. console_mappings.json (multi-server or legacy format)
+      2. Zohar's CSV DB (/tmp/console_devices_cache.csv) -- looked up by serial from operational.json
+    
     Matches by hostname, hostname_aliases, device_to_console lookup, or serial_number.
     
     For KVM clusters: the console server reaches the NCP (data plane), NOT the NCC
@@ -1087,12 +1291,17 @@ def get_console_config_for_device(hostname: str) -> Optional[Dict]:
     """
     data = _load_console_mappings()
     if not data:
-        return None
+        data = {}
     
     # KVM clusters: console server reaches NCP, not NCC -- skip console
     ncc_access = data.get('cluster_ncc_access', {})
-    if hostname in ncc_access and ncc_access[hostname].get('ncc_type') == 'kvm':
-        return None
+    norm_h = re.sub(r'[_\-\s]', '', hostname.lower())
+    for key in ncc_access:
+        norm_k = re.sub(r'[_\-\s]', '', key.lower())
+        if norm_h in norm_k or norm_k in norm_h:
+            if ncc_access[key].get('ncc_type') == 'kvm':
+                return None
+            break
     
     hostname_lower = hostname.lower()
     
@@ -1124,21 +1333,50 @@ def get_console_config_for_device(hostname: str) -> Optional[Dict]:
                 all_names = [port_hostname] + aliases
                 if any(name.lower() == hostname_lower for name in all_names):
                     return _build_console_result(srv, srv_name, port_str, port_info)
-        
-        return None
     
     # Legacy single-server format
-    if 'ports' not in data:
-        return None
-    
-    server = data.get('console_server', {})
-    for port_str, port_info in data['ports'].items():
-        port_hostname = port_info.get('hostname', '')
-        aliases = port_info.get('hostname_aliases', [])
-        all_names = [port_hostname] + aliases
-        if any(name.lower() == hostname_lower for name in all_names):
-            return _build_console_result(server, 'default', port_str, port_info)
-    
+    if 'ports' in data:
+        server = data.get('console_server', {})
+        for port_str, port_info in data['ports'].items():
+            port_hostname = port_info.get('hostname', '')
+            aliases = port_info.get('hostname_aliases', [])
+            all_names = [port_hostname] + aliases
+            if any(name.lower() == hostname_lower for name in all_names):
+                return _build_console_result(server, 'default', port_str, port_info)
+
+    # device_to_console fallback (populated by /api/ssh/discover-console from Zohar or Device42)
+    d2c = data.get('device_to_console', {})
+    for dev_name, mapping in d2c.items():
+        if dev_name.lower() == hostname_lower:
+            cs = mapping.get('console_server')
+            pt = mapping.get('port')
+            if cs and pt:
+                return {
+                    'host': cs,
+                    'port': int(pt),
+                    'user': 'dn',
+                    'password': 'drive1234',
+                    'console_server_name': cs,
+                    'device_credentials': list(CREDENTIAL_SETS),
+                    '_source': mapping.get('source', 'cached'),
+                }
+
+    # Zohar CSV fallback: look up by serial from operational.json
+    try:
+        from pathlib import Path as _Path
+        import json as _json
+        op_file = _Path(f"db/configs/{hostname}/operational.json")
+        if op_file.exists():
+            with open(op_file) as f:
+                op_data = _json.load(f)
+            serial = op_data.get('serial_number') or op_data.get('serial') or ''
+            if serial:
+                result = _lookup_zohar_csv_by_serial(serial)
+                if result:
+                    return result
+    except Exception:
+        pass
+
     return None
 
 
@@ -1523,7 +1761,33 @@ def connect_for_upgrade(hostname: str, timeout: int = 30) -> Dict[str, Any]:
     result['device_state'] = conn_result.state.value if conn_result.state else None
     result['ncc_id'] = conn_result.ncc_id
     result['active_ncc_vm'] = conn_result.active_ncc_vm or ''
-    
+
+    if op_path.exists():
+        try:
+            with open(op_path) as f:
+                op_data = json.load(f)
+            if conn_result.state and conn_result.state not in (DeviceState.UNKNOWN, DeviceState.UNREACHABLE):
+                op_data['device_state'] = conn_result.state.value
+            op_data['last_working_method'] = method_map.get(conn_result.method, str(conn_result.method))
+            if conn_result.host and conn_result.method in (ConnectionMethod.SSH_SN, ConnectionMethod.SSH_MGMT):
+                import socket as _sock
+                try:
+                    resolved_ip = _sock.gethostbyname(conn_result.host)
+                    stored_ip = (op_data.get('mgmt_ip') or '').split('/')[0]
+                    if resolved_ip != stored_ip:
+                        op_data['mgmt_ip'] = resolved_ip
+                        op_data['ssh_host'] = resolved_ip
+                except Exception:
+                    pass
+            if conn_result.active_ncc_vm:
+                op_data['active_ncc_vm'] = conn_result.active_ncc_vm
+            if conn_result.ncc_id is not None:
+                op_data['deploy_ncc_id'] = conn_result.ncc_id
+            with open(op_path, 'w') as f:
+                json.dump(op_data, f, indent=4)
+        except Exception:
+            pass
+
     return result
 
 

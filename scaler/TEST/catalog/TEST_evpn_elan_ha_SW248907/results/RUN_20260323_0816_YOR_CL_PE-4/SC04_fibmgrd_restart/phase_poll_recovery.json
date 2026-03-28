@@ -1,0 +1,30 @@
+{
+  "phase_name": "poll_recovery",
+  "started_at": "2026-03-23T08:34:13.050+00:00",
+  "completed_at": "2026-03-23T08:34:15.624+00:00",
+  "duration_sec": 2.574,
+  "command_count": 2,
+  "commands": [
+    {
+      "command": "show system process routing:fibmgrd | no-more",
+      "timestamp": "2026-03-23T08:34:13.050+00:00",
+      "duration_ms": 2473,
+      "phase": "poll_recovery",
+      "output_length": 2539,
+      "output_preview": "System Name: YOR_CL_PE-4, System-Id: 1095cfe0-7fc5-4701-ad03-28a8385f5820\nSystem Type: CL-86, Family: NCR\nEnterprise-Id: 49739\nDescription: DRIVENETS Network Cloud Router\nSystem status: running \nSystem Start Time: 22-Mar-2026 22:03:49 UTC+02:00 (Israel)\nSystem Uptime: 0 days, 12:30:24\nSystem Boot Uptime: 0 days, 12:31:37\nSystem GRUB Timeout: 5 seconds\nVersion: DNOS [26.2.0] build [23_priv], Copyright 2026 DRIVENETS LTD.\nPatch: N/A\nEnvironment:\n\tLocation: N/A\n\tFloor: N/A\n\tRack: N/A\nContact: suppo"
+    },
+    {
+      "command": "show evpn instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-03-23T08:34:15.523+00:00",
+      "duration_ms": 100,
+      "phase": "poll_recovery",
+      "output_length": 650,
+      "output_preview": "EVPN: HA_TEST_ELAN\n  EVI ID : 1\n  Seamless-integration : disabled\n  Number of EVPN neighbors  : 1\n    Number of EVPN interfaces : 0\n    | Associated interfaces   | State   / Forwarding State                                   | Uptime              | Actual Local Homing Type    | ESI                             | Learned MACs   |\n    +-------------------------+--------------------------------------------------------------+---------------------+-----------------------------+------------------------"
+    }
+  ],
+  "parsed_values": {
+    "converged": true,
+    "convergence_sec": 2.6
+  },
+  "anomalies": []
+}

@@ -1532,7 +1532,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
 
     def _fetch_device_gitcommit(self, host: str, username: str = 'dnroot', password: str = 'dnroot') -> dict:
         """
-        SSH to device, run 'run start shell' -> password -> 'cat ./gitcommit', return hash.
+        SSH to device, run 'run start shell' -> password -> 'cat .gitcommit', return hash.
         Falls back to direct SSH on port 2222 if run start shell fails.
         """
         import paramiko
@@ -1559,24 +1559,22 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
 
                 if use_cli_shell:
                     shell.send('run start shell\n')
-                    time.sleep(2)
+                    # Wait specifically for Password: prompt (not #)
                     output = ''
-                    for _ in range(15):
+                    for _ in range(30):
                         if shell.recv_ready():
                             output += shell.recv(65535).decode('utf-8', errors='replace')
-                            time.sleep(0.2)
-                        else:
-                            time.sleep(0.3)
-                        if 'password' in output.lower() or 'Password' in output:
-                            shell.send(password + '\n')
-                            time.sleep(2)
+                        time.sleep(0.3)
+                        if 'assword' in output:
                             break
+                    shell.send(password + '\n')
+                    time.sleep(3)
+                    # Drain post-login output (shell prompt)
                     while shell.recv_ready():
-                        output += shell.recv(65535).decode('utf-8', errors='replace')
-                        time.sleep(0.2)
-                    time.sleep(0.5)
+                        shell.recv(65535)
+                        time.sleep(0.1)
 
-                shell.send('cat ./gitcommit\n')
+                shell.send('cat .gitcommit\n')
                 time.sleep(2)
                 out = ''
                 for _ in range(15):
@@ -1590,10 +1588,11 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                     line = line.strip()
                     if not line or line.startswith('cat ') or line.endswith('#'):
                         continue
-                    if re.match(r'^[a-fA-F0-9]{7,40}$', line):
-                        return line
-                    if len(line) <= 64 and not line.startswith('['):
-                        return line
+                    if 'No such file' in line or 'Permission denied' in line or 'ERROR' in line:
+                        continue
+                    m = re.match(r'^([a-fA-F0-9]{7,40}(?:-\S+)?)$', line)
+                    if m:
+                        return m.group(1)
                 return None
             finally:
                 client.close()
@@ -1728,6 +1727,17 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
         return False
     
     def do_GET(self):
+        try:
+            self._do_GET_inner()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                self._send_json({'error': f'Internal error: {e}'}, 500)
+            except Exception:
+                pass
+
+    def _do_GET_inner(self):
         parsed = urlparse(self.path)
         
         if parsed.path == '/api/health':
@@ -1903,7 +1913,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             path_parts = parsed.path.split('/')
             # path_parts = ['', 'api', 'device', 'SERIAL', 'lldp']
             if len(path_parts) >= 5:
-                from urllib.parse import unquote, parse_qs
+                from urllib.parse import unquote
                 serial = unquote(path_parts[3])
                 qs = parse_qs(parsed.query or '')
                 ssh_host = (qs.get('ssh_host', [None]) or [None])[0]
@@ -2116,6 +2126,17 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'Not found'}, 404)
     
     def do_POST(self):
+        try:
+            self._do_POST_inner()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                self._send_json({'error': f'Internal error: {e}'}, 500)
+            except Exception:
+                pass
+
+    def _do_POST_inner(self):
         global job_counter, nm_job_counter
         parsed = urlparse(self.path)
         

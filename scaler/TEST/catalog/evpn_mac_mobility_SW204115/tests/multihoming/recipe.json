@@ -1,0 +1,89 @@
+{
+  "id": "TEST_mac_mob_mh_SW205195",
+  "name": "MAC Mobility | Multihoming + Migrations",
+  "type": "functional",
+  "feature": "evpn-mac-mobility",
+  "source": "jira:SW-204115 / SW-205195",
+  "jira_key": "SW-205195",
+  "parent_category": "SW-204115",
+  "created": "2026-03-20",
+  "notes": "PW moves: suppression Drop+Shutdown only per meeting notes; multihoming learning hop behavior",
+  "device_requirements": {"type": "cluster", "features": ["evpn", "esi", "multihoming"], "min_ncp_count": 1},
+  "prerequisites": [
+    {"id": "esi", "check": "ethernet_segment_configured", "fix_via": "ESI on AC interfaces"},
+    {"id": "df_election", "check": "evpn_df_operational", "fix_via": "Lab MH topology"}
+  ],
+  "show_commands_validated": {
+    "show evpn mac-table instance {evpn_name} | no-more": "SHOW_COMMANDS line 10089 -- MAC entries for specific instance",
+    "show config network-services evpn | no-more": "Running EVPN config",
+    "show evpn summary | no-more": "SHOW_COMMANDS line 10564 -- EVPN instance list",
+    "show evpn instance {evpn_name} ethernet-segments-info | no-more": "ESI info for multihoming",
+    "show evpn instance {evpn_name} local-ethernet-segments | no-more": "Local ES membership",
+    "show evpn instance {evpn_name} detail | no-more": "Detailed instance with DF election info",
+    "show dnos-internal routing evpn instance {evpn_name} vpls-df-info | no-more": "DF election debug info",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding state and flags",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more": "Ghost MAC detection",
+    "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
+  },
+  "invalid_commands": {
+    "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use: show evpn mac-table instance {name}",
+    "show interfaces brief": "DOES NOT EXIST. Use: show interfaces description"
+  },
+  "scenarios": [
+    {
+      "id": "SC01_esi_move_between_pes",
+      "name": "ESI multi-homed AC; MAC move between PEs",
+      "phases": {
+        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more", "show config network-services evpn | no-more"]},
+        "trigger": {"action": "move_ac_across_pe", "method": "manual_lab"},
+        "verify": {"expect": {"mh_consistent": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true}}
+      }
+    },
+    {
+      "id": "SC02_df_election_learning",
+      "name": "DF election + MAC learning behavior",
+      "phases": {
+        "verify": {
+          "show_commands": ["show evpn summary | no-more", "show evpn mac-table instance {evpn_name} | no-more"],
+          "expect": {"df_role_correct": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true}
+        }
+      }
+    },
+    {
+      "id": "SC03_single_to_multi_migration",
+      "name": "Migration single-homed -> multi-homed",
+      "phases": {
+        "trigger": {"action": "attach_second_pe_esi", "method": "config_validate"},
+        "verify": {"expect": {"no_duplicate_forwarding": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true}}
+      }
+    }
+  ],
+  "runtime_parameters": {
+    "evpn_name": {"resolve": "runtime"},
+    "test_mac": {"resolve": "runtime"}
+  },
+  "verdict": {"layers": 10, "stop_on_fail": false},
+  "counter_commands": [
+    {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+  ],
+  "counter_expectations": [
+    {"label": "mac_count", "rule": "no_decrease", "description": "MAC count must not drop"},
+    {"label": "ghost_mac_count", "rule": "zero", "description": "No ghost MACs after scenario"}
+  ],
+  "event_expectations": [
+    {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "No BGP notifications"},
+    {"event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED", "expect": "absent", "description": "No suppression on normal operations"}
+  ],
+  "health_checks": {
+    "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager", "neighbour_manager"],
+    "check_crashes": true,
+    "check_alarms": true
+  },
+  "cleanup_commands": ["no debug evpn mac-mobility", "no set logging terminal"],
+  "config_baseline": {
+    "sections": ["network-services evpn", "protocols bgp"],
+    "full_config": false,
+    "ignore_patterns": ["last-modified", "commit-id"]
+  }
+}

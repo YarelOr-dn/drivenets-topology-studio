@@ -1,0 +1,147 @@
+{
+  "phase_name": "verify",
+  "started_at": "2026-03-23T08:32:42.364+00:00",
+  "completed_at": "2026-03-23T08:33:23.117+00:00",
+  "duration_sec": 40.753,
+  "command_count": 17,
+  "commands": [
+    {
+      "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-03-23T08:32:42.364+00:00",
+      "duration_ms": 200,
+      "phase": "verify",
+      "output_length": 286,
+      "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 2.2.2.2\n          MAC label: 258\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 23-Mar-2026-10:32:35"
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-03-23T08:32:42.565+00:00",
+      "duration_ms": 100,
+      "phase": "verify",
+      "output_length": 875,
+      "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 18\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress  "
+    },
+    {
+      "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+      "timestamp": "2026-03-23T08:32:42.666+00:00",
+      "duration_ms": 50,
+      "phase": "verify",
+      "output_length": 26,
+      "output_preview": "ERROR: Incomplete command."
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-03-23T08:32:42.717+00:00",
+      "duration_ms": 200,
+      "phase": "verify",
+      "output_length": 383,
+      "output_preview": "BGP router identifier 4.4.4.4, local AS number 1234567\nBGP table node count 1\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567         16         16    0     0       0 00:00:26                   2\n\nTotal number of established neighbors with L2vpn EVPN 1/1\n\nTotal number of NSR capable BGP sessions 0"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-03-23T08:32:42.918+00:00",
+      "duration_ms": 200,
+      "phase": "verify",
+      "output_length": 383,
+      "output_preview": "BGP router identifier 4.4.4.4, local AS number 1234567\nBGP table node count 1\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567         16         16    0     0       0 00:00:26                   2\n\nTotal number of established neighbors with L2vpn EVPN 1/1\n\nTotal number of NSR capable BGP sessions 0"
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 08:23 | include ERROR | no-more",
+      "timestamp": "2026-03-23T08:32:43.118+00:00",
+      "duration_ms": 5064,
+      "phase": "verify",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/fibmgrd_traces | include 08:23 | include ERROR | no-more",
+      "timestamp": "2026-03-23T08:32:48.183+00:00",
+      "duration_ms": 2904,
+      "phase": "verify",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:00:01:01 | no-more",
+      "timestamp": "2026-03-23T08:32:51.087+00:00",
+      "duration_ms": 200,
+      "phase": "verify",
+      "output_length": 286,
+      "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 2.2.2.2\n          MAC label: 258\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 23-Mar-2026-10:32:35"
+    },
+    {
+      "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-03-23T08:32:51.288+00:00",
+      "duration_ms": 200,
+      "phase": "verify",
+      "output_length": 286,
+      "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 2.2.2.2\n          MAC label: 258\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 23-Mar-2026-10:32:35"
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-03-23T08:32:51.488+00:00",
+      "duration_ms": 100,
+      "phase": "verify",
+      "output_length": 875,
+      "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 18\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress  "
+    },
+    {
+      "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-03-23T08:32:51.589+00:00",
+      "duration_ms": 200,
+      "phase": "verify",
+      "output_length": 18,
+      "output_preview": "EvpnMacs [size: 0]"
+    },
+    {
+      "command": "show evpn arp-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-03-23T08:32:51.790+00:00",
+      "duration_ms": 200,
+      "phase": "verify",
+      "output_length": 35,
+      "output_preview": "  ETH TAG: 0\n    ARP table is empty"
+    },
+    {
+      "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+      "timestamp": "2026-03-23T08:32:51.990+00:00",
+      "duration_ms": 50,
+      "phase": "verify",
+      "output_length": 26,
+      "output_preview": "ERROR: Incomplete command."
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 08:23 | include timer | no-more",
+      "timestamp": "2026-03-23T08:33:00.336+00:00",
+      "duration_ms": 6158,
+      "phase": "verify",
+      "output_length": 2489,
+      "output_preview": "2026-03-23T08:23:06.854832 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 64405:174010: On vrf 1, bgpid 2(ALPHA): neighbor 49.49.49.9 0x7febcf99c040 [FSM] Timer (connect timer expire)\n2026-03-23T08:23:06.854984 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1382:1382] 64408:174011: On vrf 2, bgpid 3(ZULU): neighbor 50.50.50.2 0x7febcfa00040 [FSM] Timer (connect timer expire)\n2026-03-23T08:23:16.854992 +02:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgp"
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 08:23 | include expired | no-more",
+      "timestamp": "2026-03-23T08:33:06.495+00:00",
+      "duration_ms": 5256,
+      "phase": "verify",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 08:23 | include cleanup | no-more",
+      "timestamp": "2026-03-23T08:33:11.752+00:00",
+      "duration_ms": 5206,
+      "phase": "verify",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 08:23 | include NOTIFICATION | no-more",
+      "timestamp": "2026-03-23T08:33:16.959+00:00",
+      "duration_ms": 6158,
+      "phase": "verify",
+      "output_length": 0,
+      "output_preview": ""
+    }
+  ],
+  "parsed_values": {},
+  "anomalies": []
+}

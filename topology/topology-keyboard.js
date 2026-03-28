@@ -9,6 +9,37 @@
  * - Input focus detection to avoid conflicts
  */
 
+const _arrowKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+const _arrowKeysDown = new Set();
+let _arrowPanRaf = null;
+let _arrowPanEditor = null;
+const _ARROW_PAN_SPEED = 6;
+
+function _arrowPanTick() {
+    const editor = _arrowPanEditor;
+    if (!editor || _arrowKeysDown.size === 0) {
+        _arrowPanRaf = null;
+        return;
+    }
+    let dx = 0, dy = 0;
+    if (_arrowKeysDown.has('ArrowLeft'))  dx += 1;
+    if (_arrowKeysDown.has('ArrowRight')) dx -= 1;
+    if (_arrowKeysDown.has('ArrowUp'))    dy += 1;
+    if (_arrowKeysDown.has('ArrowDown'))  dy -= 1;
+
+    if (dx !== 0 || dy !== 0) {
+        const mag = Math.sqrt(dx * dx + dy * dy);
+        const zoom = editor.zoom || 1;
+        const speed = _ARROW_PAN_SPEED / zoom;
+        editor.panOffset.x += (dx / mag) * speed;
+        editor.panOffset.y += (dy / mag) * speed;
+        editor.savePanOffset();
+        editor.updateScrollbars();
+        editor.draw();
+    }
+    _arrowPanRaf = requestAnimationFrame(_arrowPanTick);
+}
+
 /**
  * Handle keyboard down events
  * @param {TopologyEditor} editor - The editor instance
@@ -22,23 +53,13 @@ function handleKeyDown(editor, e) {
     
     if (!e.key) return;
     
-    // DIALOG GUARD: When ANY floating dialog/modal/popup/overlay is open,
-    // block ALL editor shortcuts except Escape. This prevents accidental
-    // Delete, Ctrl+X, 'R' (reload), etc. from modifying the canvas while
-    // the user is interacting with an overlay.
-    //
-    // Covers: Stack dialog, LLDP dialog, XRAY popup, Scaler panels,
-    // HTML modals, DNAAS dialogs, device/link/text editors, context menu,
-    // style palettes, inline submenus, save/export pickers, recovery modal,
-    // enable-LLDP overlay, and any element with role="dialog".
-    const openDialog = document.querySelector([
-        '#stack-table-dialog',
-        '#lldp-table-dialog',
-        '#xray-capture-popup',
+    // DIALOG GUARD: Block all editor shortcuts (except Escape) when an
+    // interactive dialog/modal/popup/overlay is open. Dynamic popups are
+    // created and removed on close. Permanent modals use .show qualifier.
+    // Read-only panels (stack, LLDP, git-commit, xray) are excluded so
+    // canvas shortcuts keep working while viewing reference data.
+    const _dialogSelectors = [
         '#enable-lldp-dialog-overlay',
-        '#lldp-button-menu',
-        '#lldp-inline-submenu',
-        '#stack-inline-submenu',
         '#dnaas-topology-dialog',
         '#dnaas-save-dialog',
         '#recovery-modal',
@@ -52,14 +73,25 @@ function handleKeyDown(editor, e) {
         '#link-width-slider-popup',
         '#width-slider-popup',
         '#color-palette-popup',
-        '#scaler-panel-container:not(:empty)',
         '#text-editor-modal.show',
         '#link-editor-modal.show',
         '#link-details-modal.show',
         '#device-editor-modal.show',
         '#shortcuts-modal.show',
-        '[role="dialog"]',
-    ].join(', '));
+    ];
+    let openDialog = null;
+    try {
+        const candidates = document.querySelectorAll(_dialogSelectors.join(', '));
+        for (const el of candidates) {
+            if (el.offsetParent !== null || el.style.display === 'flex' || el.style.display === 'block'
+                || el.classList.contains('show') || (el.style.opacity && el.style.opacity !== '0')) {
+                openDialog = el;
+                break;
+            }
+        }
+    } catch (err) {
+        console.warn('[KB] dialog guard selector error:', err);
+    }
     if (openDialog) {
         if (e.key === 'Escape') {
             if (openDialog.classList?.contains('show')) {
@@ -77,7 +109,7 @@ function handleKeyDown(editor, e) {
     // Non-text inputs (color, checkbox, radio, range) should not block shortcuts
     const nonTextInputTypes = new Set(['color', 'checkbox', 'radio', 'range', 'button', 'submit', 'reset']);
     const isTextInput = e.target.tagName === 'INPUT' && !nonTextInputTypes.has(e.target.type);
-    const isInputFocused = isTextInput || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable;
+    const isInputFocused = isTextInput || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT' || e.target.isContentEditable;
     
     // 'R' key for refresh (when no input is focused)
     // Note: beforeunload in index.html suppresses "Save As" dialog
@@ -164,6 +196,17 @@ function handleKeyDown(editor, e) {
         }
     }
 
+    // Arrow keys (no modifiers) - smooth canvas pan with multi-key diagonal
+    if (_arrowKeys.has(e.key) && !isInputFocused && !e.altKey && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        _arrowKeysDown.add(e.key);
+        _arrowPanEditor = editor;
+        if (!_arrowPanRaf) {
+            _arrowPanRaf = requestAnimationFrame(_arrowPanTick);
+        }
+        return;
+    }
+
     // 'L' key for Light/Dark mode toggle (when no input is focused)
     if (e.key.toLowerCase() === 'l' && !isInputFocused && !e.metaKey && !e.ctrlKey) {
         editor.toggleTheme();
@@ -188,15 +231,25 @@ function handleKeyDown(editor, e) {
         return;
     }
     
-    // 'C' key for Copy Style (when an object is selected) - CS shortcut
+    // 'C' key: Copy Style (object selected) or toggle Config panel (nothing selected)
     if (e.key.toLowerCase() === 'c' && !isInputFocused && !e.metaKey && !e.ctrlKey) {
         if (editor.selectedObject) {
-            // BUGFIX: Save object info before copyObjectStyle clears selection
             const objType = editor.selectedObject.type;
             const objLabel = editor.selectedObject.label || editor.selectedObject.text || editor.selectedObject.id;
             editor.copyObjectStyle(editor.selectedObject);
             if (editor.debugger) {
-                editor.debugger.logSuccess(`🖌️ CS: Style copied from ${objType}: ${objLabel}`);
+                editor.debugger.logSuccess(`CS: Style copied from ${objType}: ${objLabel}`);
+            }
+        } else if (typeof ScalerGUI !== 'undefined') {
+            const now = Date.now();
+            if (now - (editor._lastScalerToggle || 0) < 300) return;
+            editor._lastScalerToggle = now;
+            const hasOpenPanels = ScalerGUI.state?.activePanel
+                || Object.keys(ScalerGUI.state?.activePanels || {}).length > 0;
+            if (hasOpenPanels) {
+                ScalerGUI.closeAllPanels();
+            } else {
+                ScalerGUI.openScalerMenu();
             }
         }
         return;
@@ -439,6 +492,15 @@ function handleKeyUp(editor, e) {
         editor.spacePressed = false;
         editor.updateCursor();
     }
+
+    // Arrow key release - stop pan when all released
+    if (_arrowKeys.has(e.key)) {
+        _arrowKeysDown.delete(e.key);
+        if (_arrowKeysDown.size === 0 && _arrowPanRaf) {
+            cancelAnimationFrame(_arrowPanRaf);
+            _arrowPanRaf = null;
+        }
+    }
     
     // Track Ctrl/Cmd release
     if (e.key === 'Control' || e.key === 'Meta') {
@@ -460,10 +522,35 @@ function handleKeyUp(editor, e) {
     }
 }
 
+// Clear arrow pan on window blur to prevent stuck keys
+window.addEventListener('blur', () => {
+    _arrowKeysDown.clear();
+    if (_arrowPanRaf) {
+        cancelAnimationFrame(_arrowPanRaf);
+        _arrowPanRaf = null;
+    }
+});
+
 // Export functions to window
 window.KeyboardHandler = {
     handleKeyDown,
     handleKeyUp
 };
+
+// Raw diagnostic: confirm keydown events reach the document at all.
+// Shows a brief title flash so it's visible even without the console open.
+(function _kbDiag() {
+    let _diagTimer = null;
+    const _origTitle = document.title;
+    document.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Shift' || ev.key === 'Control' || ev.key === 'Alt' || ev.key === 'Meta') return;
+        const ae = document.activeElement;
+        const tag = ae ? ae.tagName + (ae.id ? '#' + ae.id : '') : '?';
+        console.warn(`[KB-DIAG] key="${ev.key}" target=${ev.target.tagName}#${ev.target.id || ''} activeElement=${tag}`);
+        document.title = `[KEY: ${ev.key}] ${_origTitle}`;
+        clearTimeout(_diagTimer);
+        _diagTimer = setTimeout(() => { document.title = _origTitle; }, 1200);
+    }, true);
+})();
 
 console.log('[topology-keyboard.js] Keyboard handler module loaded');

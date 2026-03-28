@@ -1,0 +1,25 @@
+{
+  "test_id": "TEST_evpn_elan_ha_SW248907",
+  "device": "YOR_CL_PE-4",
+  "overall": "ERROR",
+  "total_elapsed_sec": 67.45169401168823,
+  "scenarios": [
+    {
+      "scenario_id": "SC06_neighbour_manager_restart",
+      "scenario_name": "Process Restart -- neighbor-manager",
+      "overall": "ERROR",
+      "convergence_sec": null,
+      "trigger_timestamp": "",
+      "debug_hint": "",
+      "layers": [
+        {
+          "layer": "exception",
+          "status": "ERROR",
+          "detail": "Inter-scenario guard FAILED: 0 MACs in EVPN table at start of SC06_neighbour_manager_restart. Prior scenario may not have recovered properly.",
+          "evidence": "",
+          "elapsed_sec": 0.0
+        }
+      ]
+    }
+  ]
+}

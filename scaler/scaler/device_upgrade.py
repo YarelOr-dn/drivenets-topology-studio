@@ -670,9 +670,13 @@ class DeviceUpgrader:
         """Start deployment (from GI mode).
         
         Args:
-            system_type: System type (e.g., 'SA-40C', 'SA-36CD-S', 'CL-16')
+            system_type: System type (e.g., 'SA-40C', 'SA-36CD-S', 'CL-86')
             name: System name
-            ncc_id: NCC ID (usually 0)
+            ncc_id: NCC ID for the deploy command. For clusters (CL-*), the GI CLI
+                    validates this against the autodetected ID from NCM LLDP:
+                    NCM port 49 = NCC-0, port 50 = NCC-1.
+                    If mismatched, GI rejects with "Cannot deploy with ncc id that
+                    doesn't match the auto detected id".
             
         Returns:
             InstallTask

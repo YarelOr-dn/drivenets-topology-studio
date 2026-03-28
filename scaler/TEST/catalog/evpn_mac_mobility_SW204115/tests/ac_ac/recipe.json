@@ -1,0 +1,173 @@
+{
+  "id": "TEST_mac_mob_ac_ac_SW205161",
+  "name": "MAC Mobility | AC <-> AC | suppression / loop prevention | Sticky/Non-sticky",
+  "type": "functional",
+  "feature": "evpn-mac-mobility",
+  "source": "jira:SW-204115 / SW-205161",
+  "jira_key": "SW-205161",
+  "parent_category": "SW-204115",
+  "created": "2026-03-20",
+  "device_requirements": {"type": "any", "features": ["evpn", "two-acs"], "min_ncp_count": 1},
+  "reference_table": "Local->Local: RT-2 update; suppression YES; local loop YES; sanctions FREEZE/DROP/SHUT",
+  "show_commands_validated": {
+    "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more": "SHOW_COMMANDS line 10091 -- Single MAC lookup",
+    "show evpn mac-table instance {evpn_name} | no-more": "SHOW_COMMANDS line 10089 -- MAC entries for specific instance",
+    "show bgp l2vpn evpn summary | no-more": "BGP L2VPN EVPN session summary",
+    "show config network-services evpn | no-more": "Running EVPN config",
+    "show evpn mac-table instance {evpn_name} suppress | no-more": "Suppressed MACs (suppression test SC02)",
+    "show evpn instance {evpn_name} loop-prevention interface | no-more": "Loop prevention per interface (SC03 local loop)",
+    "show evpn instance {evpn_name} loop-prevention mac-table | no-more": "Loop prevention per MAC",
+    "show evpn instance {evpn_name} loop-prevention local | no-more": "Local loop prevention status",
+    "show evpn mac-table detail instance {evpn_name} | no-more": "Detailed MAC with sequence/flags (note: 'detail' keyword comes BEFORE 'instance')",
+    "show evpn mac summary | no-more": "Global MAC count summary",
+    "show dnos-internal routing evpn mac-mobility-redis-count | no-more": "MAC mobility move counter",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding state and flags",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more": "Ghost MAC detection",
+    "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
+  },
+  "invalid_commands": {
+    "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use: show evpn mac-table instance {name}",
+    "show interfaces brief": "DOES NOT EXIST. Use: show interfaces description"
+  },
+  "prerequisites": [
+    {"id": "two_ac", "check": "two_attachment_circuits", "fix_via": "Second AC on bridge-domain"},
+    {"id": "suppression_cfg", "check": "mac_mobility_suppression", "fix_via": "network-services evpn instance {evpn_name} mac-handling loop-prevention admin-state enabled"}
+  ],
+  "scenarios": [
+    {
+      "id": "SC01_non_sticky_move",
+      "name": "Non-sticky: AC1 -> AC2; RT-2 update; sequence increments (RFC 8560)",
+      "phases": {
+        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} mac {test_mac} | no-more"]},
+        "trigger": {"action": "move_mac_ac1_to_ac2", "method": "spirent_or_manual"},
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+            "show bgp l2vpn evpn summary | no-more"
+          ],
+          "expect": {
+            "seq_increment": true,
+            "new_ac_attachment": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC02_rapid_flap_suppression",
+      "name": "Rapid AC<->AC flap; suppression FREEZE/DROP/SHUT per config",
+      "phases": {
+        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
+        "trigger": {"action": "rapid_move_ac1_ac2", "method": "spirent"},
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+            "show evpn mac-table instance {evpn_name} suppress | no-more",
+            "show evpn instance {evpn_name} loop-prevention mac-table | no-more"
+          ],
+          "expect": {
+            "sanction_applied": true,
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_suppress_list": true,
+            "check_loop_prevention": true,
+            "expected_lp_state": "suppressed"
+          },
+          "trace_greps": [{"file": "routing_engine/bgpd_traces", "keywords": ["mac", "move", "suppress"]}]
+        }
+      }
+    },
+    {
+      "id": "SC03_local_loop_counter",
+      "name": "Local loop prevention counter increments on Local->Local only",
+      "phases": {
+        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
+        "trigger": {"action": "local_to_local_moves"},
+        "verify": {
+          "show_commands": [
+            "show evpn instance {evpn_name} loop-prevention interface | no-more",
+            "show evpn instance {evpn_name} loop-prevention local | no-more"
+          ],
+          "expect": {
+            "local_loop_count_increments": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC04_sticky_enforcement",
+      "name": "Sticky AC: moves from PW/EVPN ignored per SW-194578 matrix",
+      "phases": {
+        "snapshot": {"show_commands": ["show config network-services evpn | no-more"]},
+        "trigger": {"action": "attempt_move_to_sticky_ac"},
+        "verify": {
+          "expect": {
+            "sticky_honored": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC05_back_forth_sequence",
+      "name": "A->B->A and A->B->C sequencing per SW-204115 scale notes",
+      "phases": {
+        "trigger": {"action": "sequence_moves", "method": "spirent_or_manual"},
+        "verify": {
+          "expect": {
+            "sequence_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": true
+          }
+        }
+      }
+    }
+  ],
+  "runtime_parameters": {
+    "evpn_name": {"resolve": "runtime"},
+    "test_mac": {"resolve": "runtime"},
+    "active_ncc_id": {"resolve": "runtime"}
+  },
+  "verdict": {"layers": 10, "stop_on_fail": false},
+  "counter_commands": [
+    {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
+    {"label": "mobility_counter", "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more", "parser": "key_value", "description": "Mobility counter"},
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+  ],
+  "counter_expectations": [
+    {"label": "mac_count", "rule": "no_decrease", "description": "MAC count stable during moves"},
+    {"label": "mobility_counter", "rule": "increase", "description": "Mobility counter should increase"},
+    {"label": "ghost_mac_count", "rule": "zero", "description": "No ghost MACs"}
+  ],
+  "event_expectations": [
+    {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "No BGP notifications"},
+    {"event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED", "expect": "present", "min_count": 1, "description": "Suppression expected on rapid flap"},
+    {"event": "L2_MAC_MOBILITY_LOOP_DETECTED", "expect": "present", "min_count": 1, "description": "Loop detection on local moves"}
+  ],
+  "health_checks": {
+    "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager", "neighbour_manager"],
+    "check_crashes": true,
+    "check_alarms": true
+  },
+  "cleanup_commands": ["no debug evpn mac-mobility", "no debug evpn mac-learning", "no set logging terminal"],
+  "config_baseline": {
+    "sections": ["network-services evpn", "protocols bgp"],
+    "full_config": false,
+    "ignore_patterns": ["last-modified", "commit-id"]
+  }
+}

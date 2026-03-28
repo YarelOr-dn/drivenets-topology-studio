@@ -49,6 +49,7 @@ from .utils import get_device_config_dir, timestamp_filename, get_ssh_hostname, 
 # ============================================================================
 
 TIMING_DB_PATH = Path(__file__).parent.parent / "db" / "timing_history.json"
+UPGRADE_TIMING_DB_PATH = Path(__file__).parent.parent / "db" / "upgrade_timing_history.json"
 
 
 def _load_timing_db() -> Dict[str, Any]:
@@ -67,6 +68,178 @@ def _save_timing_db(db: Dict[str, Any]):
     TIMING_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(TIMING_DB_PATH, 'w') as f:
         json.dump(db, f, indent=2, default=str)
+
+
+# ============================================================================
+# UPGRADE TIMING LEARNING
+# ============================================================================
+
+def _load_upgrade_timing_db() -> Dict[str, Any]:
+    if UPGRADE_TIMING_DB_PATH.exists():
+        try:
+            with open(UPGRADE_TIMING_DB_PATH, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return {"entries": [], "averages": {}}
+
+
+def _save_upgrade_timing_db(db: Dict[str, Any]):
+    UPGRADE_TIMING_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(UPGRADE_TIMING_DB_PATH, 'w') as f:
+        json.dump(db, f, indent=2, default=str)
+
+
+def _upgrade_timing_key(upgrade_type: str, component_count: int, device_mode: str = "") -> str:
+    """Build a lookup key for upgrade timing averages."""
+    return f"{upgrade_type}|{component_count}comp|{device_mode or 'dnos'}"
+
+
+def save_upgrade_timing_record(
+    device_hostname: str,
+    upgrade_type: str,
+    components: list,
+    actual_time_seconds: float,
+    stage_times: Dict[str, float] = None,
+    current_version: str = "",
+    target_version: str = "",
+    device_mode: str = "",
+    success: bool = True,
+):
+    """Save a timing record after a device upgrade completes.
+
+    Args:
+        device_hostname: e.g. "RR-SA-2"
+        upgrade_type: "normal", "gi_deploy", "delete_deploy"
+        components: ["DNOS", "GI", "BaseOS"]
+        actual_time_seconds: wall-clock seconds for this device
+        stage_times: per-phase times {"connect": 3, "load_DNOS": 45, ...}
+        current_version: version before upgrade
+        target_version: version after upgrade
+        device_mode: "DNOS" / "GI" / "RECOVERY"
+        success: whether the upgrade succeeded
+    """
+    db = _load_upgrade_timing_db()
+
+    record = {
+        "timestamp": datetime.now().isoformat(),
+        "device": device_hostname,
+        "upgrade_type": upgrade_type,
+        "components": components,
+        "component_count": len(components),
+        "actual_time": actual_time_seconds,
+        "stage_times": stage_times or {},
+        "current_version": current_version,
+        "target_version": target_version,
+        "device_mode": device_mode or "DNOS",
+        "success": success,
+    }
+
+    db["entries"].append(record)
+    if len(db["entries"]) > 200:
+        db["entries"] = db["entries"][-200:]
+
+    db["averages"] = _calculate_upgrade_averages(db["entries"])
+    _save_upgrade_timing_db(db)
+
+
+def _calculate_upgrade_averages(entries: list) -> Dict[str, Any]:
+    """Build averages keyed by upgrade_type|component_count|device_mode."""
+    from collections import defaultdict
+    buckets = defaultdict(list)
+    device_buckets = defaultdict(list)
+
+    for e in entries:
+        if not e.get("success", True):
+            continue
+        t = e.get("actual_time")
+        if not t or not isinstance(t, (int, float)):
+            continue
+        key = _upgrade_timing_key(
+            e.get("upgrade_type", "normal"),
+            e.get("component_count", 3),
+            e.get("device_mode", "DNOS"),
+        )
+        buckets[key].append(t)
+        dev_key = f"{e.get('device', '')}|{key}"
+        device_buckets[dev_key].append(t)
+
+    avgs = {}
+    for key, times in buckets.items():
+        avgs[key] = {
+            "avg": sum(times) / len(times),
+            "min": min(times),
+            "max": max(times),
+            "count": len(times),
+        }
+    for dev_key, times in device_buckets.items():
+        avgs[f"dev|{dev_key}"] = {
+            "avg": sum(times) / len(times),
+            "min": min(times),
+            "max": max(times),
+            "count": len(times),
+        }
+    return avgs
+
+
+def get_upgrade_time_estimate(
+    upgrade_type: str = "normal",
+    components: list = None,
+    device_mode: str = "DNOS",
+    device_hostname: str = None,
+) -> Dict[str, Any]:
+    """Get a time estimate for a device upgrade based on history.
+
+    Returns:
+        Dict with:
+            - total: estimated seconds
+            - source: "same_device" | "type_average" | "default"
+            - confidence: "high" | "medium" | "low"
+            - count: number of historical records used
+    """
+    components = components or ["DNOS", "GI", "BaseOS"]
+    comp_count = len(components)
+    db = _load_upgrade_timing_db()
+    avgs = db.get("averages", {})
+
+    if device_hostname:
+        dev_key = f"dev|{device_hostname}|{_upgrade_timing_key(upgrade_type, comp_count, device_mode)}"
+        if dev_key in avgs and avgs[dev_key]["count"] >= 1:
+            a = avgs[dev_key]
+            return {
+                "total": a["avg"],
+                "source": "same_device",
+                "confidence": "high" if a["count"] >= 3 else "medium",
+                "count": a["count"],
+                "min": a["min"],
+                "max": a["max"],
+            }
+
+    type_key = _upgrade_timing_key(upgrade_type, comp_count, device_mode)
+    if type_key in avgs and avgs[type_key]["count"] >= 1:
+        a = avgs[type_key]
+        return {
+            "total": a["avg"],
+            "source": "type_average",
+            "confidence": "medium" if a["count"] >= 3 else "low",
+            "count": a["count"],
+            "min": a["min"],
+            "max": a["max"],
+        }
+
+    defaults = {
+        "normal": {1: 120, 2: 150, 3: 180},
+        "gi_deploy": {1: 90, 2: 120, 3: 150},
+        "delete_deploy": {1: 300, 2: 350, 3: 420},
+    }
+    base = defaults.get(upgrade_type, defaults["normal"])
+    total = base.get(comp_count, base.get(3, 180))
+    return {
+        "total": total,
+        "source": "default",
+        "confidence": "low",
+        "count": 0,
+    }
 
 
 def save_timing_record(
@@ -1054,9 +1227,24 @@ class ConfigPusher:
         channel = None
 
         try:
+            # Time-budget-based progress for file upload path
+            total_lines = len(config_text.strip().split('\n')) if config_text else 0
+            connect_budget = 5.0
+            upload_budget = max(2.0, len(config_text) / 1024 / 500.0)  # SCP
+            load_budget = max(3.0, 3.0 + total_lines / 1000.0)
+            commit_check_budget = max(60.0, 60.0 + total_lines / 1000.0 * 20.0)
+            commit_budget = max(30.0, 30.0 + total_lines / 1000.0 * 10.0)
+            total_budget = connect_budget + upload_budget + load_budget + commit_check_budget + commit_budget
+            fp_connect_end = int(100 * connect_budget / total_budget)
+            fp_upload_end = int(100 * (connect_budget + upload_budget) / total_budget)
+            fp_load_end = int(100 * (connect_budget + upload_budget + load_budget) / total_budget)
+            fp_cc_end = int(100 * (connect_budget + upload_budget + load_budget + commit_check_budget) / total_budget)
+            fp_cc_start = fp_load_end
+            fp_cc_elapsed = [0.0]  # mutable for closure
+
             # Progress: Connecting
             if progress_callback:
-                progress_callback("Connecting to device...", 10)
+                progress_callback("Connecting to device...", 5)
 
             # Connect to device using best available IP
             ssh_host = get_ssh_hostname(device)
@@ -1085,7 +1273,7 @@ class ConfigPusher:
             
             # Progress: Uploading config
             if progress_callback:
-                progress_callback("Uploading configuration file via SCP...", 20)
+                progress_callback("Uploading configuration file via SCP...", fp_connect_end)
             
             # Upload config file via native SCP (more reliable for large files)
             remote_path = f"/config/{config_name}"
@@ -1106,7 +1294,7 @@ class ConfigPusher:
 
             # Progress: Entering configure mode
             if progress_callback:
-                progress_callback("Entering configuration mode...", 30)
+                progress_callback("Entering configuration mode...", fp_upload_end)
 
             # Enter configure mode
             channel.send("configure\n")
@@ -1117,13 +1305,13 @@ class ConfigPusher:
 
             # Clear any dirty candidate config before loading
             if progress_callback:
-                progress_callback("Clearing candidate config...", 35)
+                progress_callback("Clearing candidate config...", fp_upload_end + 5)
             channel.send("rollback 0\n")
             self._read_until_prompt(channel, timeout=15, live_output_callback=live_output_callback)
 
             # Progress: Loading configuration
             if progress_callback:
-                progress_callback("Loading configuration...", 40)
+                progress_callback("Loading configuration...", fp_upload_end + 10)
 
             # Load the configuration (with real-time progress from device)
             channel.send(f"load override {config_name}\n")
@@ -1141,13 +1329,25 @@ class ConfigPusher:
                 error_msg = error_match.group(1) if error_match else output[-500:]
                 return False, f"Load failed: {error_msg}"
             
-            # Progress: Running commit check
+            # Progress: Running commit check (with time-based tick during long wait)
+            commit_check_start = time.time()
+            def _cc_tick():
+                fp_cc_elapsed[0] = time.time() - commit_check_start
+                if progress_callback:
+                    cc_width = fp_cc_end - fp_cc_start
+                    pct = fp_cc_start + int((fp_cc_elapsed[0] / max(0.1, commit_check_budget)) * cc_width)
+                    pct = min(fp_cc_end, max(fp_cc_start, pct))
+                    progress_callback("Running commit check...", pct)
             if progress_callback:
-                progress_callback("Running commit check...", 60)
-            
-            # Run commit check
+                progress_callback("Running commit check...", fp_cc_start)
             channel.send("commit check\n")
-            output = self._read_until_prompt(channel, timeout=self.commit_timeout, live_output_callback=live_output_callback)
+            output = self._read_until_prompt(
+                channel,
+                timeout=self.commit_timeout,
+                live_output_callback=live_output_callback,
+                progress_tick_callback=_cc_tick,
+                progress_tick_interval=2.0,
+            )
 
             # Check for success - includes "no changes" which means config already on device
             output_lower = output.lower()
@@ -1167,7 +1367,7 @@ class ConfigPusher:
 
             # Progress: Committing
             if progress_callback:
-                progress_callback("Committing configuration...", 80)
+                progress_callback("Committing configuration...", fp_cc_end)
 
             # Commit the configuration
             channel.send("commit\n")
@@ -1400,7 +1600,8 @@ class ConfigPusher:
         progress_callback: Callable[[str, int], None] = None,
         live_output_callback: Callable[[str], None] = None,
         show_live_terminal: bool = False,
-        phase_info: str = None
+        phase_info: str = None,
+        cancel_check: Callable[[], bool] = None,
     ) -> Tuple[bool, str]:
         """
         Push configuration by pasting directly into device terminal.
@@ -1769,12 +1970,18 @@ class ConfigPusher:
                 
                 # Use transient=False and lower refresh to prevent flickering
                 # Suppress keyboard echo to prevent duplicate lines when user presses keys
+                paste_cancelled = False
                 with suppress_keyboard_echo(), Live(render_terminal(), refresh_per_second=4, console=self._get_console(), transient=False, vertical_overflow="visible") as live:
                     # ========== STAGE 1: PASTE ==========
                     current_stage[0] = "paste"
                     last_update = 0
             
                     for i, line in enumerate(lines):
+                        if cancel_check and cancel_check():
+                            paste_cancelled = True
+                            terminal_buffer.append("[INFO] Cancel requested - aborting paste...")
+                            live.update(render_terminal())
+                            break
                         current_line[0] = i  # Update for closure
                         stripped = line.rstrip()
                         if stripped:
@@ -1815,6 +2022,15 @@ class ConfigPusher:
                     # Paste complete - show 100%
                     current_line[0] = total_lines - 1
                     live.update(render_terminal())
+                    
+                    if paste_cancelled:
+                        terminal_buffer.append("[INFO] Discarding candidate config on device...")
+                        live.update(render_terminal())
+                        channel.send("cancel\n")
+                        read_and_show(timeout=10)
+                        channel.send("exit\n")
+                        read_and_show(timeout=5)
+                        return False, "Cancelled (config discarded)"
                     
                     # Wait for device to process all pasted config
                     # Longer wait for large configs to ensure device fully processes
@@ -2204,7 +2420,13 @@ class ConfigPusher:
                 return True, "Configuration pasted and committed successfully"
             else:
                 # Non-live mode - push and call callbacks for external progress tracking
+                paste_cancelled = False
                 for i, line in enumerate(lines):
+                    if cancel_check and cancel_check():
+                        paste_cancelled = True
+                        if live_output_callback:
+                            live_output_callback("[INFO] Cancel requested - aborting paste...")
+                        break
                     stripped = line.rstrip()
                     if stripped:
                         channel.send(stripped + "\n")
@@ -2233,6 +2455,15 @@ class ConfigPusher:
                     if progress_callback and (i % progress_interval == 0 or i == total_lines - 1):
                         pct = 30 + int((i / total_lines) * 30)
                         progress_callback(f"Pasting line {i+1}/{total_lines}...", pct)
+            
+            if paste_cancelled:
+                if live_output_callback:
+                    live_output_callback("[INFO] Discarding candidate config on device...")
+                channel.send("cancel\n")
+                read_and_show(timeout=10)
+                channel.send("exit\n")
+                read_and_show(timeout=5)
+                return False, "Cancelled (config discarded)"
             
             # Wait for device to process all pasted config
             # For large configs (15k+ lines), the device needs time to process
@@ -2430,6 +2661,7 @@ class ConfigPusher:
         config_text: str,
         progress_callback: Callable[[str, int], None] = None,
         live_output_callback: Callable[[str], None] = None,
+        cancel_check: Callable[[], bool] = None,
     ) -> Tuple[bool, str, Optional[Any], Optional[Any]]:
         """
         Push config, run commit check, and hold SSH session for commit/cancel.
@@ -2442,8 +2674,24 @@ class ConfigPusher:
         keep_alive = False
 
         try:
+            # Time-budget-based progress: connect(5s), paste(lines/120), commit_check, commit
+            # Percentages are proportional to estimated time per phase
+            total_lines = len(config_text.strip().split('\n')) if config_text else 0
+            connect_budget = 5.0
+            paste_budget = max(1.0, total_lines / 120.0)
+            commit_check_budget = max(60.0, 60.0 + total_lines / 1000.0 * 20.0)
+            commit_budget = max(30.0, 30.0 + total_lines / 1000.0 * 10.0)
+            total_budget = connect_budget + paste_budget + commit_check_budget + commit_budget
+            phase_pct = {
+                'connect': (0, int(100 * connect_budget / total_budget)),
+                'paste': (int(100 * connect_budget / total_budget), int(100 * (connect_budget + paste_budget) / total_budget)),
+                'commit_check': (int(100 * (connect_budget + paste_budget) / total_budget), int(100 * (connect_budget + paste_budget + commit_check_budget) / total_budget)),
+                'commit': (int(100 * (connect_budget + paste_budget + commit_check_budget) / total_budget), 100),
+            }
+            overall_start = time.time()
+
             if progress_callback:
-                progress_callback("Connecting to device...", 10)
+                progress_callback("Connecting to device...", phase_pct['connect'][0])
 
             ssh_host = get_ssh_hostname(device)
             client = paramiko.SSHClient()
@@ -2473,7 +2721,7 @@ class ConfigPusher:
             read_and_show(timeout=5)
 
             if progress_callback:
-                progress_callback("Entering configuration mode...", 20)
+                progress_callback("Entering configuration mode...", phase_pct['paste'][0])
 
             channel.send("configure\n")
             output = read_and_show(timeout=10)
@@ -2484,14 +2732,21 @@ class ConfigPusher:
             time.sleep(0.5)
             read_and_show(timeout=10)
 
+            paste_start_time = time.time()
             if progress_callback:
-                progress_callback("Pasting configuration...", 30)
+                progress_callback("Pasting configuration...", phase_pct['paste'][0])
 
             config_text = config_text.replace('\r\n', '\n').replace('\r', '\n')
             lines = config_text.strip().split('\n')
             total_lines = len(lines)
 
+            paste_cancelled = False
             for i, line in enumerate(lines):
+                if cancel_check and cancel_check():
+                    paste_cancelled = True
+                    if live_output_callback:
+                        live_output_callback("[INFO] Cancel requested - aborting paste...")
+                    break
                 stripped = line.rstrip()
                 if stripped:
                     channel.send(stripped + "\n")
@@ -2512,11 +2767,23 @@ class ConfigPusher:
                     while channel.recv_ready():
                         channel.recv(8192)
 
-                # Progress: every 10 lines for small configs (<200), else every 100
+                # Progress: time-based (elapsed in paste phase vs paste budget)
                 progress_interval = 10 if total_lines < 200 else 100
                 if progress_callback and (i % progress_interval == 0 or i == total_lines - 1):
-                    pct = 30 + int((i / total_lines) * 30)
+                    elapsed_paste = time.time() - paste_start_time
+                    paste_width = phase_pct['paste'][1] - phase_pct['paste'][0]
+                    pct = phase_pct['paste'][0] + int((elapsed_paste / max(0.1, paste_budget)) * paste_width)
+                    pct = min(phase_pct['paste'][1], max(phase_pct['paste'][0], pct))
                     progress_callback(f"Pasting line {i+1}/{total_lines}...", pct)
+
+            if paste_cancelled:
+                if live_output_callback:
+                    live_output_callback("[INFO] Discarding candidate config on device...")
+                channel.send("cancel\n")
+                read_and_show(timeout=10)
+                channel.send("exit\n")
+                read_and_show(timeout=5)
+                return False, "Cancelled (config discarded)", None, None
 
             wait_time = max(2, min(10, total_lines // 3000))
             time.sleep(wait_time)
@@ -2531,13 +2798,43 @@ class ConfigPusher:
             time.sleep(0.5)
             read_and_show(timeout=5)
 
+            commit_check_start = time.time()
+            last_progress_tick = 0.0
             if progress_callback:
-                progress_callback("Running commit check...", 65)
+                progress_callback("Running commit check...", phase_pct['commit_check'][0])
             if live_output_callback:
                 live_output_callback("[INFO] Running commit check...")
 
             channel.send("commit check\n")
-            output = read_and_show(timeout=self.commit_timeout)
+            output = ""
+            while time.time() - commit_check_start < self.commit_timeout:
+                if channel.recv_ready():
+                    chunk = channel.recv(65535).decode('utf-8', errors='ignore')
+                    output += chunk
+                    if live_output_callback and chunk.strip():
+                        live_output_callback(chunk)
+                    # Check for completion
+                    clean = output.lower()
+                    clean = re.sub(r'local\d\.(info|warning|notice|debug|error)[^\n]*\n?', '', clean)
+                    clean = re.sub(r'if_link_state_change[^\n]*\n?', '', clean)
+                    if output.rstrip().endswith(('#', '>', 'cfg#', 'cfg>')):
+                        break
+                    if "commit check passed" in clean or "commit check failed" in clean or "transaction_commit_check_failed" in clean:
+                        time.sleep(0.5)
+                        while channel.recv_ready():
+                            output += channel.recv(65535).decode('utf-8', errors='ignore')
+                        break
+                else:
+                    # Time-based progress tick every 2 seconds during commit check
+                    now = time.time()
+                    if progress_callback and (now - last_progress_tick) >= 2.0:
+                        elapsed_cc = now - commit_check_start
+                        cc_width = phase_pct['commit_check'][1] - phase_pct['commit_check'][0]
+                        pct = phase_pct['commit_check'][0] + int((elapsed_cc / max(0.1, commit_check_budget)) * cc_width)
+                        pct = min(phase_pct['commit_check'][1], max(phase_pct['commit_check'][0], pct))
+                        progress_callback("Running commit check...", pct)
+                        last_progress_tick = now
+                time.sleep(0.1)
 
             clean_output = output.lower()
             clean_output = re.sub(r'local\d\.(info|warning|notice|debug|error)[^\n]*\n?', '', clean_output)
@@ -2589,7 +2886,7 @@ class ConfigPusher:
             if live_output_callback:
                 live_output_callback("[OK] Commit check passed")
             if progress_callback:
-                progress_callback("Commit check passed - awaiting decision", 70)
+                progress_callback("Commit check passed - awaiting decision", phase_pct['commit_check'][1])
 
             keep_alive = True
             return True, "Commit check passed", channel, client
@@ -3692,6 +3989,8 @@ class ConfigPusher:
         progress_callback: Callable[[str, int], None] = None,
         progress_prefix: str = "Loading",
         live_output_callback: Callable[[str], None] = None,
+        progress_tick_callback: Callable[[], None] = None,
+        progress_tick_interval: float = 2.0,
     ) -> str:
         """Read output until we see a prompt.
 
@@ -3701,6 +4000,8 @@ class ConfigPusher:
             progress_callback: Optional callback for progress updates
             progress_prefix: Prefix for progress messages
             live_output_callback: Optional callback for raw output (each chunk as received)
+            progress_tick_callback: Optional callback called every progress_tick_interval sec when waiting (for time-based progress)
+            progress_tick_interval: Seconds between progress_tick_callback invocations
 
         Returns:
             Full output string
@@ -3708,6 +4009,7 @@ class ConfigPusher:
         output = ""
         start_time = time.time()
         last_progress = -1
+        last_tick = 0.0
 
         # Safety: ensure timeout is not None
         if timeout is None:
@@ -3759,6 +4061,11 @@ class ConfigPusher:
                         output += channel.recv(65535).decode('utf-8', errors='ignore')
                     break
             else:
+                # Time-based progress tick when waiting for data (e.g. during long commit check)
+                now = time.time()
+                if progress_tick_callback and (now - last_tick) >= progress_tick_interval:
+                    progress_tick_callback()
+                    last_tick = now
                 time.sleep(0.1)
         
         return output

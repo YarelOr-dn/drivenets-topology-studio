@@ -1,0 +1,56 @@
+[
+  {
+    "command": "show bgp l2vpn evpn summary | no-more",
+    "timestamp": "2026-03-23T06:35:49.090+00:00",
+    "duration_ms": 2076,
+    "phase": "before_snapshot",
+    "output_length": 480,
+    "output_preview": "BGP router identifier 2.2.2.2, local AS number 123\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  1.1.1.1         4    1234567       3026       3029    0     0       2 08:22:02                   1\n  4.4.4.4         4    1234567        520        521    0     0       2 08:22:04                   0\n\nTotal number of established neighbors with L2vpn EVPN 2/2\n\nTotal number of NSR capable BGP sessions 0",
+    "output_full": "BGP router identifier 2.2.2.2, local AS number 123\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  1.1.1.1         4    1234567       3026       3029    0     0       2 08:22:02                   1\n  4.4.4.4         4    1234567        520        521    0     0       2 08:22:04                   0\n\nTotal number of established neighbors with L2vpn EVPN 2/2\n\nTotal number of NSR capable BGP sessions 0"
+  },
+  {
+    "command": "show evpn summary | no-more",
+    "timestamp": "2026-03-23T06:35:51.166+00:00",
+    "duration_ms": 2084,
+    "phase": "before_snapshot",
+    "output_length": 716,
+    "output_preview": "Global EVPN parameters\nMAC table limit per EVI : 64000\nMAC table aging time    : 320s\nControl Word            : enabled\nFAT Label               : disabled\nE-Tree Leaf Label       : 1032383\n\nNumber of EVPN instances       : 1\nTotal local MAC addresses      : 1\nTotal local MAC-IPs            : 0\nTotal remote MAC addresses     : 0\nTotal remote MAC-IPs           : 0\nTotal VPLS MAC addresses       : 0\nTotal MAC addresses            : 1\nTotal MAC-IPs                  : 0\nTotal suppressed MAC addresses",
+    "output_full": "Global EVPN parameters\nMAC table limit per EVI : 64000\nMAC table aging time    : 320s\nControl Word            : enabled\nFAT Label               : disabled\nE-Tree Leaf Label       : 1032383\n\nNumber of EVPN instances       : 1\nTotal local MAC addresses      : 1\nTotal local MAC-IPs            : 0\nTotal remote MAC addresses     : 0\nTotal remote MAC-IPs           : 0\nTotal VPLS MAC addresses       : 0\nTotal MAC addresses            : 1\nTotal MAC-IPs                  : 0\nTotal suppressed MAC addresses : 0\nTotal number of interfaces/up  : 2/2\nTotal number of EVPN neighbors : 1\nTotal number of VPLS neighbors : 0\nTotal Local MH ESIs            : 0\nTotal Local MH ACs             : 0\nTotal Local MH VPLS ACs        : 0"
+  },
+  {
+    "command": "show evpn instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-03-23T06:35:53.250+00:00",
+    "duration_ms": 2080,
+    "phase": "before_snapshot",
+    "output_length": 1046,
+    "output_preview": "EVPN: HA_TEST_ELAN\n  EVI ID : 1\n  Seamless-integration : disabled\n  Number of EVPN neighbors  : 1\n    Number of EVPN interfaces : 2\n    | Associated interfaces   | State   / Forwarding State                                   | Uptime              | Actual Local Homing Type    | ESI                             | Learned MACs   |\n    +-------------------------+--------------------------------------------------------------+---------------------+-----------------------------+------------------------",
+    "output_full": "EVPN: HA_TEST_ELAN\n  EVI ID : 1\n  Seamless-integration : disabled\n  Number of EVPN neighbors  : 1\n    Number of EVPN interfaces : 2\n    | Associated interfaces   | State   / Forwarding State                                   | Uptime              | Actual Local Homing Type    | ESI                             | Learned MACs   |\n    +-------------------------+--------------------------------------------------------------+---------------------+-----------------------------+---------------------------------+----------------+\n    | bundle-100.100          | up / forwarding-all                                          | 0 days, 9:16:11     | single-homed                |                                 | 0              |\n    | bundle-100.2150         | up / forwarding-all                                          | 0 days, 0:18:08     | single-homed                |                                 | 1              |\n  \n    (I) - DF Election Highest Preference, Invert Preference is enabled for this interface.\n  \n    (L) - Leaf Interface."
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-03-23T06:35:55.331+00:00",
+    "duration_ms": 2087,
+    "phase": "before_snapshot",
+    "output_length": 716,
+    "output_preview": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ------------------",
+    "output_full": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ----------------------------------------------------------------------------------------------------------------------------\n    L>        | 00:de:ad:00:01:01    |                               | bundle-100.2150        |             |"
+  },
+  {
+    "command": "show system | no-more",
+    "timestamp": "2026-03-23T06:35:57.419+00:00",
+    "duration_ms": 2227,
+    "phase": "before_snapshot",
+    "output_length": 1386,
+    "output_preview": "System Name: RR-SA-2, System-Id: 9ab8e9ca-b61c-456e-bbed-0ce2729c30ed\nSystem Type: SA-36CD-S, Family: NCR\nEnterprise-Id: 49739\nDescription: DRIVENETS Network Cloud Router\nSystem status: running \nSystem Start Time: 19-Mar-2026 23:31:34 UTC+02:00 (Israel)\nSystem Uptime: 3 days, 9:04:25\nSystem Boot Uptime: 3 days, 9:05:22\nVersion: DNOS [26.2.0] build [20_priv], Copyright 2026 DRIVENETS LTD.\nPatch: N/A\nEnvironment:\n\tLocation: N/A\n\tFloor: N/A\n\tRack: N/A\nContact: support@drivenets.com\nFabric Minimum L",
+    "output_full": "System Name: RR-SA-2, System-Id: 9ab8e9ca-b61c-456e-bbed-0ce2729c30ed\nSystem Type: SA-36CD-S, Family: NCR\nEnterprise-Id: 49739\nDescription: DRIVENETS Network Cloud Router\nSystem status: running \nSystem Start Time: 19-Mar-2026 23:31:34 UTC+02:00 (Israel)\nSystem Uptime: 3 days, 9:04:25\nSystem Boot Uptime: 3 days, 9:05:22\nVersion: DNOS [26.2.0] build [20_priv], Copyright 2026 DRIVENETS LTD.\nPatch: N/A\nEnvironment:\n\tLocation: N/A\n\tFloor: N/A\n\tRack: N/A\nContact: support@drivenets.com\nFabric Minimum Links: N/A\nFabric Minimum NCF: N/A\nDynamic Fabric State: N/A\nNCC switchovers: 0\nLast NCC switchover: N/A\nEscalation-stop-failovers\n  Max-failover(remaining): 2(2)\n  Failover-period(remaining): 30min(0 days, 0:30:00)\nRecovery-mode: supported\nBGP NSR: N/A\n\n\n| Type | Id     | Admin    | Operational                        | Model           | Uptime              | Description                | Serial Number        |\n+------+--------+----------+------------------------------------+-----------------+---------------------+----------------------------+----------------------+\n| NCC  | 0      |          | active-up                          | NCP-36CD-S      | 3 days, 9:04:25     | dn-ncc-0                   |                      |\n| NCP  | 0      | enabled  | up                                 | NCP-36CD-S      | 3 days, 8:59:50     | dn-ncp-0                   | WKY1BC7400002B2      |"
+  },
+  {
+    "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+    "timestamp": "2026-03-23T06:35:59.647+00:00",
+    "duration_ms": 10006,
+    "phase": "before_snapshot",
+    "output_length": 48,
+    "output_preview": "[ERROR] SSH to RR-SA-2 (100.64.11.75): timed out",
+    "output_full": "[ERROR] SSH to RR-SA-2 (100.64.11.75): timed out"
+  }
+]

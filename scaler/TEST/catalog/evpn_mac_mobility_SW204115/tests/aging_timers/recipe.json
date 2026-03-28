@@ -1,0 +1,78 @@
+{
+  "id": "TEST_mac_mob_aging_SW205164",
+  "name": "MAC Mobility | MAC aging timers",
+  "type": "functional",
+  "feature": "evpn-mac-mobility",
+  "source": "jira:SW-204115 / SW-205164",
+  "jira_key": "SW-205164",
+  "parent_category": "SW-204115",
+  "created": "2026-03-20",
+  "notes": "Aging accuracy may vary due to chip limitations (SW-204115 meeting notes)",
+  "device_requirements": {"type": "any", "features": ["evpn"], "min_ncp_count": 1},
+  "show_commands_validated": {
+    "show evpn mac-table instance {evpn_name} | no-more": "SHOW_COMMANDS line 10089 -- MAC entries for specific instance",
+    "show evpn mac-table detail instance {evpn_name} | no-more": "Detailed MAC with aging info",
+    "show evpn mac-table instance {evpn_name} local | no-more": "Local MACs only for aging check",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding state and flags",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more": "Ghost MAC detection",
+    "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
+  },
+  "invalid_commands": {
+    "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use: show evpn mac-table instance {name}",
+    "show interfaces brief": "DOES NOT EXIST. Use: show interfaces description"
+  },
+  "scenarios": [
+    {
+      "id": "SC01_default_aging",
+      "name": "Default aging: dynamic MAC ages out after idle",
+      "phases": {
+        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
+        "trigger": {"action": "stop_traffic_and_wait", "hold_sec": "2x_configured_aging"},
+        "verify": {"expect": {"mac_aged": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true}}
+      }
+    },
+    {
+      "id": "SC02_custom_aging",
+      "name": "Custom aging timer; compare to configured (tolerance band)",
+      "phases": {
+        "trigger": {"action": "set_custom_aging", "config_path": "network-services evpn instance {evpn_name} mac-handling mac-table-aging-time {custom_aging_sec}"},
+        "verify": {"expect": {"tolerance_pct": 50, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true}}
+      }
+    },
+    {
+      "id": "SC03_static_sticky_no_age",
+      "name": "Static / sticky MACs do not age out",
+      "phases": {
+        "verify": {"expect": {"sticky_persists": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true}}
+      }
+    }
+  ],
+  "runtime_parameters": {
+    "evpn_name": {"resolve": "runtime"},
+    "test_mac": {"resolve": "runtime"}
+  },
+  "verdict": {"layers": 6, "stop_on_fail": false},
+  "counter_commands": [
+    {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+  ],
+  "counter_expectations": [
+    {"label": "mac_count", "rule": "no_decrease", "description": "MAC count must not drop"},
+    {"label": "ghost_mac_count", "rule": "zero", "description": "No ghost MACs after scenario"}
+  ],
+  "event_expectations": [
+    {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "No BGP notifications"},
+    {"event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED", "expect": "absent", "description": "No suppression on normal operations"}
+  ],
+  "health_checks": {
+    "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager", "neighbour_manager"],
+    "check_crashes": true,
+    "check_alarms": true
+  },
+  "cleanup_commands": ["no debug evpn mac-mobility", "no set logging terminal"],
+  "config_baseline": {
+    "sections": ["network-services evpn", "protocols bgp"],
+    "full_config": false,
+    "ignore_patterns": ["last-modified", "commit-id"]
+  }
+}

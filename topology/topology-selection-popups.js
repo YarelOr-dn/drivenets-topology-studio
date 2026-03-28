@@ -8,6 +8,25 @@
 'use strict';
 
 window.SelectionPopups = {
+    /**
+     * Position a popup element relative to an anchor rect, clamped to viewport.
+     * @param {HTMLElement} popup - The popup element (must be in DOM)
+     * @param {{left,top,width,height,bottom,right}} anchor - Anchor bounding rect
+     * @param {Object} opts - { margin: 8, prefer: 'bottom' }
+     */
+    positionPopup(popup, anchor, opts = {}) {
+        const margin = opts.margin || 8;
+        const pr = popup.getBoundingClientRect();
+        let left = anchor.left + anchor.width / 2 - pr.width / 2;
+        let top = anchor.bottom + margin;
+        if (left < 10) left = 10;
+        if (left + pr.width > window.innerWidth - 10) left = window.innerWidth - pr.width - 10;
+        if (top + pr.height > window.innerHeight - 10) top = anchor.top - pr.height - margin;
+        if (top < 10) top = 10;
+        popup.style.left = left + 'px';
+        popup.style.top = top + 'px';
+    },
+
     _showToolbarTooltip(editor, btn, title) {
         let tooltip = document.getElementById('tb-active-tooltip');
         if (!tooltip) {
@@ -133,6 +152,7 @@ window.SelectionPopups = {
                 e.stopPropagation();
                 e.preventDefault();
                 if (!isDisabled) {
+                    editor._hideToolbarTooltip();
                     submenu.remove();
                     onClick();
                 }
@@ -174,24 +194,7 @@ window.SelectionPopups = {
         submenu.addEventListener('keydown', (e) => { e.stopPropagation(); });
         submenu.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(submenu);
-        
-        // Position below the LLDP button
-        const btnRect = lldpBtn.getBoundingClientRect();
-        const submenuRect = submenu.getBoundingClientRect();
-        let left = btnRect.left + btnRect.width / 2 - submenuRect.width / 2;
-        let top = btnRect.bottom + 6;
-        
-        // Keep within viewport
-        if (left < 10) left = 10;
-        if (left + submenuRect.width > window.innerWidth - 10) {
-            left = window.innerWidth - submenuRect.width - 10;
-        }
-        if (top + submenuRect.height > window.innerHeight - 10) {
-            top = btnRect.top - submenuRect.height - 6; // Show above
-        }
-        
-        submenu.style.left = `${left}px`;
-        submenu.style.top = `${top}px`;
+        SelectionPopups.positionPopup(submenu, lldpBtn.getBoundingClientRect(), { margin: 6 });
         
         // Close on click outside
         const closeHandler = (e) => {
@@ -235,6 +238,16 @@ window.SelectionPopups = {
             align-items: center;
             animation: lldpSubmenuFadeIn 0.15s ease forwards;
         `;
+        const _anchorRect = { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0 };
+        const _captureAnchor = () => {
+            const el = document.getElementById('stack-inline-submenu') || stackBtn;
+            if (el) {
+                const r = el.getBoundingClientRect();
+                _anchorRect.left = r.left; _anchorRect.top = r.top;
+                _anchorRect.width = r.width; _anchorRect.height = r.height;
+                _anchorRect.right = r.right; _anchorRect.bottom = r.bottom;
+            }
+        };
         const createSubBtn = (icon, tooltip, onClick, isActive = false, isDisabled = false) => {
             const btn = document.createElement('button');
             const activeColor = isActive ? '#27ae60' : iconColor;
@@ -257,93 +270,286 @@ window.SelectionPopups = {
             btn.onclick = (e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                if (!isDisabled) { submenu.remove(); onClick(); }
+                if (!isDisabled) {
+                    editor._hideToolbarTooltip();
+                    _captureAnchor();
+                    submenu.remove();
+                    const result = onClick();
+                    if (result && typeof result.catch === 'function') {
+                        result.catch(err => {
+                            console.error('[SystemStack submenu]', err);
+                            if (editor.showToast) editor.showToast(`Error: ${err.message}`, 'error');
+                        });
+                    }
+                }
             };
             return btn;
         };
+        const _isUpgrading = !!(device._upgradeInProgress || device._activeUpgradeJob);
+        const _hasStack = !!(device._stackData?.components?.length);
+        const _mode = (device._deviceMode || '').toUpperCase();
+        const _isGiEmpty = (_mode === 'GI' || _mode === 'BASEOS_SHELL') && !_hasStack;
+        const _upgradeTooltip = _isUpgrading
+            ? 'Upgrade Stack (upgrade in progress)'
+            : 'Upgrade Stack';
+        const _stackTableTooltip = _isGiEmpty
+            ? 'Stack Table (empty -- device in ' + (_mode || 'GI') + ' mode)'
+            : (_isUpgrading ? 'Stack Table (upgrade in progress)' : 'Stack Table');
+
         submenu.appendChild(createSubBtn(
-            '<rect x="4" y="4" width="16" height="4" rx="1"/><rect x="4" y="10" width="16" height="4" rx="1"/><rect x="4" y="16" width="16" height="4" rx="1"/>',
-            'Stack Table',
+            '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/>',
+            _upgradeTooltip,
             () => {
                 editor.hideDeviceSelectionToolbar();
-                if (editor.showSystemStackDialog) editor.showSystemStackDialog(device, serial);
-                else if (editor.showToast) editor.showToast('Stack dialog not available', 'error');
-            }
+                if (window.ScalerGUI && window.ScalerGUI.openUpgradeWizard) {
+                    window.ScalerGUI.openUpgradeWizard({ deviceId: device.label || serial });
+                } else if (editor.showToast) {
+                    editor.showToast('Scaler GUI not available', 'error');
+                }
+            },
+            _isUpgrading
         ));
         submenu.appendChild(createSubBtn(
-            '<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
-            'Git Commit',
-            async () => {
-                let hash = device._gitCommit;
-                if (hash !== undefined) {
-                    if (editor.showToast) editor.showToast(`Git: ${hash}`, 'info');
+            '<rect x="4" y="4" width="16" height="4" rx="1"/><rect x="4" y="10" width="16" height="4" rx="1"/><rect x="4" y="16" width="16" height="4" rx="1"/>',
+            _stackTableTooltip,
+            () => {
+                editor.hideDeviceSelectionToolbar();
+                if (_isGiEmpty) {
+                    if (editor.showToast) editor.showToast(`Device has empty stack (${_mode || 'GI'} mode) -- no stack data to show`, 'warning');
                     return;
                 }
+                if (editor.showSystemStackDialog) editor.showSystemStackDialog(device, serial);
+                else if (editor.showToast) editor.showToast('Stack dialog not available', 'error');
+            },
+            false,
+            false
+        ));
+        const _gitDisabled = _isUpgrading || _isGiEmpty;
+        const _gitTooltip = _isUpgrading
+            ? 'Git Commit (unavailable -- upgrade in progress)'
+            : (_isGiEmpty ? 'Git Commit (unavailable -- device in ' + (_mode || 'GI') + ' mode)' : 'Git Commit');
+        submenu.appendChild(createSubBtn(
+            '<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+            _gitTooltip,
+            async () => {
                 const host = sshConfig?.host || serial;
                 if (!host) {
                     if (editor.showToast) editor.showToast('No SSH address configured', 'error');
                     return;
                 }
-                if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDeviceContext) {
+                const existing = document.getElementById('git-commit-popup');
+                if (existing) existing.remove();
+
+                const popup = document.createElement('div');
+                popup.id = 'git-commit-popup';
+                popup.style.cssText = `
+                    position: fixed; z-index: 100003;
+                    min-width: 280px; max-width: 420px;
+                    background: rgba(20,25,35,0.95);
+                    border: 1px solid rgba(255,255,255,0.12);
+                    border-radius: 12px;
+                    padding: 0;
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+                    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+                `;
+                const cachedHash = (device._gitCommit !== undefined && device._gitCommit !== null && device._gitCommit !== '') ? device._gitCommit : null;
+                const cachedTs = cachedHash ? device._gitCommitFetchedAt : null;
+                const _fmtTs = (ts) => { if (!ts) return ''; const d = new Date(ts); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); };
+                const tsStr = _fmtTs(cachedTs);
+                const hashEsc = (cachedHash || '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+                popup.innerHTML = `
+                    <div id="git-commit-header" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 6px; cursor: move; user-select: none;">
+                        <span id="git-commit-title" style="color: rgba(255,255,255,0.6); font-size: 11px;">Git Commit${tsStr ? ' - ' + tsStr : ''}</span>
+                        <span style="display: flex; gap: 4px;">
+                            <button id="git-commit-refresh" type="button" style="
+                                background: rgba(0, 180, 216, 0.15);
+                                border: 1px solid rgba(0, 180, 216, 0.3);
+                                border-radius: 6px;
+                                width: 28px; height: 28px; padding: 0;
+                                cursor: pointer;
+                                display: flex; align-items: center; justify-content: center;
+                                transition: all 0.15s;
+                            " title="Refresh via live SSH">
+                                <svg id="git-commit-refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00B4D8" stroke-width="2.5" style="transition: transform 0.3s;">
+                                    <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                                </svg>
+                            </button>
+                            <button id="git-commit-close" type="button" style="
+                                background: rgba(255, 255, 255, 0.1);
+                                border: none;
+                                border-radius: 6px;
+                                width: 28px; height: 28px; padding: 0;
+                                cursor: pointer;
+                                display: flex; align-items: center; justify-content: center;
+                                transition: background 0.15s;
+                            " title="Close">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="2"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+                            </button>
+                        </span>
+                    </div>
+                    <div style="padding: 0 14px 12px;">
+                        <div id="git-commit-body" style="position: relative; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px 36px 10px 12px; font-family: Monaco, Menlo, Consolas, monospace; font-size: 12px; color: rgba(255,255,255,0.9); word-break: break-all;">
+                            ${cachedHash ? hashEsc : '<span style="color: rgba(255,255,255,0.5);">Fetching via live SSH...</span>'}
+                            <button id="git-commit-copy" type="button" style="position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0; background: transparent; border: none; cursor: pointer; color: rgba(255,255,255,0.5); display: flex; align-items: center; justify-content: center; ${cachedHash ? '' : 'display:none;'}" title="Copy">
+                                <svg width="14" height="14" viewBox="0 0 24 24"><use href="#ico-copy"/></svg>
+                            </button>
+                        </div>
+                        <div id="git-commit-error" style="color: #e74c3c; font-size: 11px; margin-top: 8px; display: none;"></div>
+                    </div>
+                `;
+                document.body.appendChild(popup);
+                SelectionPopups.positionPopup(popup, _anchorRect);
+
+                // Draggable by header
+                let _isDragging = false, _startX, _startY, _startLeft, _startTop;
+                const headerEl = popup.querySelector('#git-commit-header');
+                headerEl.addEventListener('mousedown', (e) => {
+                    if (e.target.closest('button')) return;
+                    _isDragging = true;
+                    const r = popup.getBoundingClientRect();
+                    _startX = e.clientX; _startY = e.clientY;
+                    _startLeft = r.left; _startTop = r.top;
+                    popup.style.transform = 'none';
+                    popup.style.left = _startLeft + 'px';
+                    popup.style.top = _startTop + 'px';
+                });
+                const _onMove = (e) => {
+                    if (!_isDragging) return;
+                    popup.style.left = (_startLeft + e.clientX - _startX) + 'px';
+                    popup.style.top = (_startTop + e.clientY - _startY) + 'px';
+                };
+                const _onUp = () => { _isDragging = false; };
+                document.addEventListener('mousemove', _onMove);
+                document.addEventListener('mouseup', _onUp);
+
+                // Inject spin keyframe if not present
+                if (!document.getElementById('git-commit-spin-style')) {
+                    const s = document.createElement('style');
+                    s.id = 'git-commit-spin-style';
+                    s.textContent = '@keyframes gitCommitSpin { to { transform: rotate(360deg); } }';
+                    document.head.appendChild(s);
+                }
+
+                // Refresh button hover
+                const _refreshBtn = popup.querySelector('#git-commit-refresh');
+                const _refreshIcon = popup.querySelector('#git-commit-refresh-icon');
+                _refreshBtn.addEventListener('mouseenter', () => {
+                    _refreshBtn.style.background = 'rgba(0, 180, 216, 0.3)';
+                    _refreshBtn.style.borderColor = 'rgba(0, 180, 216, 0.5)';
+                });
+                _refreshBtn.addEventListener('mouseleave', () => {
+                    _refreshBtn.style.background = 'rgba(0, 180, 216, 0.15)';
+                    _refreshBtn.style.borderColor = 'rgba(0, 180, 216, 0.3)';
+                });
+
+                // Close button hover
+                const _closeBtn = popup.querySelector('#git-commit-close');
+                _closeBtn.addEventListener('mouseenter', () => { _closeBtn.style.background = 'rgba(231, 76, 60, 0.3)'; });
+                _closeBtn.addEventListener('mouseleave', () => { _closeBtn.style.background = 'rgba(255, 255, 255, 0.1)'; });
+
+                let lastRefreshAbort = null;
+                const doClose = () => {
+                    if (lastRefreshAbort) lastRefreshAbort.abort();
+                    document.removeEventListener('mousemove', _onMove);
+                    document.removeEventListener('mouseup', _onUp);
+                    popup.remove();
+                };
+                popup.querySelector('#git-commit-close').onclick = doClose;
+
+                const _wireCopy = (hashVal) => {
+                    const copyBtn = popup.querySelector('#git-commit-copy');
+                    if (!copyBtn) return;
+                    copyBtn.style.display = hashVal ? 'flex' : 'none';
+                    copyBtn.onclick = () => {
+                        const text = hashVal || '';
+                        const svg = copyBtn.querySelector('svg use');
+                        const onCopied = () => {
+                            if (editor.showToast) editor.showToast('Copied to clipboard', 'success');
+                            if (svg) svg.setAttribute('href', '#ico-check');
+                            copyBtn.style.color = 'rgba(39,174,96,0.9)';
+                            setTimeout(() => { if (svg) svg.setAttribute('href', '#ico-copy'); copyBtn.style.color = 'rgba(255,255,255,0.5)'; }, 1500);
+                        };
+                        (typeof safeClipboardWrite === 'function' ? safeClipboardWrite(text) : navigator.clipboard.writeText(text)).then(onCopied).catch(() => {});
+                    };
+                };
+                if (cachedHash) _wireCopy(cachedHash);
+
+                const _updateBody = (hashVal, error) => {
+                    const bodyEl = popup.querySelector('#git-commit-body');
+                    const errEl = popup.querySelector('#git-commit-error');
+                    const titleEl = popup.querySelector('#git-commit-title');
+                    if (!bodyEl) return;
+                    const hEsc = (hashVal || '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+                    bodyEl.innerHTML = `${hEsc || '(empty)'}<button id="git-commit-copy" type="button" style="position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0; background: transparent; border: none; cursor: pointer; color: rgba(255,255,255,0.5); display: flex; align-items: center; justify-content: center;" title="Copy"><svg width="14" height="14" viewBox="0 0 24 24"><use href="#ico-copy"/></svg></button>`;
+                    _wireCopy(hashVal);
+                    if (error) { errEl.textContent = error; errEl.style.display = 'block'; }
+                    else { errEl.style.display = 'none'; }
+                    if (device._gitCommitFetchedAt) {
+                        titleEl.textContent = 'Git Commit - ' + _fmtTs(device._gitCommitFetchedAt);
+                    }
+                };
+
+                const _doFetch = async () => {
+                    const bodyEl = popup.querySelector('#git-commit-body');
+                    const errEl = popup.querySelector('#git-commit-error');
+                    const refreshBtn = popup.querySelector('#git-commit-refresh');
+                    const refreshIcon = popup.querySelector('#git-commit-refresh-icon');
+                    if (lastRefreshAbort) lastRefreshAbort.abort();
+                    lastRefreshAbort = new AbortController();
+                    const signal = lastRefreshAbort.signal;
+                    if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.style.opacity = '0.5'; }
+                    if (refreshIcon) refreshIcon.style.animation = 'gitCommitSpin 1s linear infinite';
+                    if (errEl) errEl.style.display = 'none';
+                    bodyEl.innerHTML = '<span style="color: rgba(255,255,255,0.5);">Fetching git commit...</span>';
+                    const deviceIdNow = device?.label || device?.deviceSerial || serial || host;
                     try {
-                        const ctx = await ScalerAPI.getDeviceContext(device.label || serial || host, false);
-                        if (ctx?.git_commit) {
-                            device._gitCommit = ctx.git_commit;
-                            submenu.remove();
-                            editor.hideDeviceSelectionToolbar();
-                            if (editor.showToast) editor.showToast(`Git: ${ctx.git_commit}`, 'info');
-                            return;
+                        let newHash = null;
+                        if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDeviceGitCommit) {
+                            if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+                            const res = await ScalerAPI.getDeviceGitCommit(deviceIdNow, host, sshConfig?.user || '', sshConfig?.password || '');
+                            newHash = res?.git_commit;
                         }
-                    } catch (_) {}
-                }
-                submenu.remove();
-                editor.hideDeviceSelectionToolbar();
-                try {
-                    const resp = await fetch('/api/dnaas/device-gitcommit', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            serial: serial || host,
-                            ssh_host: host,
-                            ssh_user: sshConfig?.user || 'dnroot',
-                            ssh_password: sshConfig?.password || 'dnroot'
-                        })
-                    });
-                    const data = await resp.json();
-                    hash = data.git_commit || data.error || 'unknown';
-                    if (data.git_commit) device._gitCommit = data.git_commit;
-                    if (editor.showToast) editor.showToast(`Git: ${hash}`, data.error ? 'error' : 'info');
-                } catch (e) {
-                    if (editor.showToast) editor.showToast(`Git commit fetch failed: ${e.message}`, 'error');
-                }
-            }
-        ));
-        submenu.appendChild(createSubBtn(
-            '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/>',
-            'Upgrade Stack',
-            () => {
-                editor.hideDeviceSelectionToolbar();
-                if (window.ScalerGUI && window.ScalerGUI.openUpgradeWizard) {
-                    window.ScalerGUI.state = window.ScalerGUI.state || {};
-                    window.ScalerGUI.state.selectedDevice = device.label || serial;
-                    window.ScalerGUI.openUpgradeWizard();
-                } else if (editor.showToast) {
-                    editor.showToast('Scaler GUI not available', 'error');
-                }
-            }
+                        if (newHash == null) {
+                            if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+                            const _timer = setTimeout(() => lastRefreshAbort?.abort(), 50000);
+                            const resp = await fetch('/api/dnaas/device-gitcommit', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ serial: serial || host, ssh_host: host, ssh_user: sshConfig?.user || 'dnroot', ssh_password: sshConfig?.password || 'dnroot' }),
+                                signal
+                            }).finally(() => clearTimeout(_timer));
+                            const data = resp.ok ? await resp.json().catch(() => ({})) : {};
+                            newHash = data?.git_commit;
+                            if (!resp.ok) throw new Error(data?.detail || `HTTP ${resp.status}`);
+                        }
+                        if (newHash != null) {
+                            device._gitCommit = newHash;
+                            device._gitCommitFetchedAt = Date.now();
+                            if (editor.requestDraw) editor.requestDraw();
+                        }
+                        _updateBody(newHash, null);
+                    } catch (e) {
+                        if (e?.name !== 'AbortError') {
+                            _updateBody(device?._gitCommit || null, e?.message || 'Failed to fetch');
+                        }
+                    } finally {
+                        if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.style.opacity = '1'; }
+                        if (refreshIcon) refreshIcon.style.animation = 'none';
+                    }
+                };
+
+                popup.querySelector('#git-commit-refresh').onclick = _doFetch;
+
+                if (!cachedHash) _doFetch();
+            },
+            false,
+            _gitDisabled
         ));
         submenu.addEventListener('keydown', (e) => { e.stopPropagation(); });
         submenu.addEventListener('keyup', (e) => { e.stopPropagation(); });
         document.body.appendChild(submenu);
-        const btnRect = stackBtn.getBoundingClientRect();
-        const submenuRect = submenu.getBoundingClientRect();
-        let left = btnRect.left + btnRect.width / 2 - submenuRect.width / 2;
-        let top = btnRect.bottom + 6;
-        if (left < 10) left = 10;
-        if (left + submenuRect.width > window.innerWidth - 10) left = window.innerWidth - submenuRect.width - 10;
-        if (top + submenuRect.height > window.innerHeight - 10) top = btnRect.top - submenuRect.height - 6;
-        submenu.style.left = `${left}px`;
-        submenu.style.top = `${top}px`;
+        SelectionPopups.positionPopup(submenu, stackBtn.getBoundingClientRect(), { margin: 6 });
         const closeHandler = (e) => {
             if (!submenu.contains(e.target) && e.target !== stackBtn) {
                 submenu.remove();

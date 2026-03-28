@@ -1,0 +1,16 @@
+{
+  "suite_id": "evpn_mac_mobility_SW204115",
+  "parent_jira": "SW-204115",
+  "tests": [
+    {"id": "TEST_mac_mob_basic_SW205160", "path": "tests/basic_learning/recipe.json"},
+    {"id": "TEST_mac_mob_ac_ac_SW205161", "path": "tests/ac_ac/recipe.json"},
+    {"id": "TEST_mac_mob_evpn_pw_SW205162", "path": "tests/evpn_pw/recipe.json"},
+    {"id": "TEST_mac_mob_flush_SW205163", "path": "tests/withdraw_flush/recipe.json"},
+    {"id": "TEST_mac_mob_aging_SW205164", "path": "tests/aging_timers/recipe.json"},
+    {"id": "TEST_mac_mob_ha_SW205165", "path": "tests/ha_mac_mobility/recipe.json"},
+    {"id": "TEST_mac_mob_mh_SW205195", "path": "tests/multihoming/recipe.json"},
+    {"id": "TEST_mac_mob_ac_evpn_SW205196", "path": "tests/ac_evpn/recipe.json"},
+    {"id": "TEST_mac_mob_ac_pw_SW205198", "path": "tests/ac_pw/recipe.json"},
+    {"id": "TEST_mac_mob_pw_pw_SW205199", "path": "tests/pw_pw/recipe.json"}
+  ]
+}

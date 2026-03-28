@@ -137,11 +137,10 @@ def add_device(dm: DeviceManager):
     password = Prompt.ask("SSH Password", password=True)
     
     platform_choice = Prompt.ask(
-        "Platform",
-        choices=["NCP", "NCM", "NCP5"],
+        "Platform/System Type (NCP, CL-86, SA-40C, etc.)",
         default="NCP"
     )
-    platform = Platform(platform_choice)
+    platform = platform_choice
     
     description = Prompt.ask("Description (optional)", default="")
     

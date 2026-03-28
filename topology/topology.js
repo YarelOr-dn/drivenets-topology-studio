@@ -423,7 +423,7 @@ class TopologyEditor {
         this.defaultFontSize = 14;
         this.magneticFieldStrength = 40; // Magnetic repulsion strength (1-80)
         this.magneticFieldUpdateTimer = null; // Throttle magnetic field updates
-        this.gridZoomEnabled = true; // Grid adjusts size with zoom for distance tracking
+        this.gridZoomEnabled = localStorage.getItem('gridZoomEnabled') !== 'false';
         this.lastTwoFingerCenter = null; // Track two-finger gesture center
         this.altPressed = false; // Track Alt/Option key for quick link start
         this.backgroundClickCount = 0; // Track background clicks in multi-select mode
@@ -1044,26 +1044,36 @@ class TopologyEditor {
             return new ToolbarManager(this);
         });
         
-        // DNAAS manager (discovery and operations)
-        this.dnaas = safeInit('DnaasManager', () => {
-            if (!window.DnaasManager) return null;
-            return new DnaasManager(this);
-        });
-
-        // Network Mapper (recursive LLDP discovery)
-        this.networkMapper = safeInit('NetworkMapperManager', () => {
-            if (!window.NetworkMapperManager) return null;
-            return new NetworkMapperManager(this);
-        });
-        if (this.networkMapper) {
-            this.networkMapper.setupPanel();
-        }
-        
         console.log('AFTER loadAutoSave, objects count:', this.objects.length);
         console.log('Current objects array:', this.objects);
 
         // Redraw after loading auto-save to show restored topology
         this.draw();
+
+        // Remove splash screen immediately after first paint
+        try {
+            const splash = document.getElementById('app-splash');
+            if (splash) {
+                splash.style.opacity = '0';
+                setTimeout(() => splash.remove(), 500);
+            }
+        } catch (_) {}
+
+        // Defer non-critical managers to after first paint
+        requestAnimationFrame(() => {
+            this.dnaas = safeInit('DnaasManager', () => {
+                if (!window.DnaasManager) return null;
+                return new DnaasManager(this);
+            });
+
+            this.networkMapper = safeInit('NetworkMapperManager', () => {
+                if (!window.NetworkMapperManager) return null;
+                return new NetworkMapperManager(this);
+            });
+            if (this.networkMapper) {
+                this.networkMapper.setupPanel();
+            }
+        });
         console.log('AFTER draw, objects count:', this.objects.length);
 
         // CRITICAL FIX: NEVER call saveState on initial load
@@ -1960,17 +1970,51 @@ class TopologyEditor {
     
     handleWheel(e) {
         e.preventDefault();
-        
-        // Close all popups when zooming/scrolling
-        this.hideAllPopups();
-        
-        // Debounced restoration of toolbar after scrolling ends
-        if (this._wheelRestoreTimer) {
-            clearTimeout(this._wheelRestoreTimer);
+
+        // Cache rect -- getBoundingClientRect triggers layout; reuse within burst
+        if (!this._wheelRect || !this._wheelRectTs || performance.now() - this._wheelRectTs > 500) {
+            this._wheelRect = this.canvas.getBoundingClientRect();
+            this._wheelRectTs = performance.now();
         }
-        this._wheelRestoreTimer = setTimeout(() => {
-            this._wheelRestoreTimer = null;
-            // Restore toolbar for selected object after scrolling ends
+        const rect = this._wheelRect;
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const isPinchZoom = e.ctrlKey || e.metaKey;
+
+        if (isPinchZoom) {
+            const worldX = (mouseX - this.panOffset.x) / this.zoom;
+            const worldY = (mouseY - this.panOffset.y) / this.zoom;
+            const scaleFactor = Math.exp(-e.deltaY * 0.004);
+            this.zoom = Math.max(0.05, Math.min(3, this.zoom * scaleFactor));
+            this.panOffset.x = mouseX - worldX * this.zoom;
+            this.panOffset.y = mouseY - worldY * this.zoom;
+        } else {
+            this.panOffset.x -= e.deltaX;
+            this.panOffset.y -= e.deltaY;
+        }
+
+        // Schedule a single rAF that draws AND updates lightweight UI.
+        // _viewportOnly tells draw() to skip O(n^2) position recalc -- nothing moved in world space.
+        this._viewportOnly = true;
+        if (!this._wheelRafId) {
+            this._wheelRafId = requestAnimationFrame(() => {
+                this._wheelRafId = null;
+                this.draw();
+                this.updateZoomIndicator();
+                this.updateScrollbars();
+            });
+        }
+
+        // Debounce expensive / infrequent work (popups, HUD, localStorage, toolbar restore)
+        if (this._wheelIdleTimer) clearTimeout(this._wheelIdleTimer);
+        this._wheelIdleTimer = setTimeout(() => {
+            this._wheelIdleTimer = null;
+            this._wheelRect = null;
+            this.hideAllPopups();
+            this.savePanOffset();
+            this.lastMousePos = this.getMousePos(e);
+            this.updateHud();
             if (this.selectedObject) {
                 if (this.selectedObject.type === 'device') {
                     this.showDeviceSelectionToolbar(this.selectedObject);
@@ -1980,94 +2024,26 @@ class TopologyEditor {
                     this.showTextSelectionToolbar(this.selectedObject);
                 }
             }
-        }, 300); // 300ms after last scroll event
-        
-        const rect = this.canvas.getBoundingClientRect();
-        // Logical (CSS) pixel coordinates
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-        this.lastMousePos = this.getMousePos(e); // keep world pos fresh for HUD
-        
-        // FIXED: Strict detection - ONLY Ctrl/Cmd key triggers zoom
-        // This prevents scroll/pan from accidentally triggering zoom
-        const isPinchZoom = e.ctrlKey || e.metaKey;
-        
-        if (isPinchZoom) {
-            // PINCH-TO-ZOOM with Ctrl/Cmd key - zooms at cursor position
-            const oldZoom = this.zoom;
-            const zoomSensitivity = 0.01; // Smooth zoom sensitivity
-            const zoomDelta = -e.deltaY * zoomSensitivity;
-
-            // Get world position at cursor BEFORE zoom
-            const worldX = (mouseX - this.panOffset.x) / this.zoom;
-            const worldY = (mouseY - this.panOffset.y) / this.zoom;
-            
-            // Calculate new zoom
-            const scaleFactor = 1 + zoomDelta;
-            const newZoom = Math.max(0.05, Math.min(3, this.zoom * scaleFactor));
-            
-            // Update zoom
-            this.zoom = newZoom;
-            
-            // Adjust pan so world position stays at cursor (zoom at cursor)
-            this.panOffset.x = mouseX - worldX * this.zoom;
-            this.panOffset.y = mouseY - worldY * this.zoom;
-            this.savePanOffset();
-        
-            // Log zoom change (only if significant change)
-            if (this.debugger && Math.abs(this.zoom - oldZoom) > 0.01) {
-                const zoomPercent = Math.round(this.zoom * 100);
-                const direction = this.zoom > oldZoom ? '🔍+' : '🔍-';
-                this.debugger.logInfo(`${direction} Ctrl+Wheel: ${zoomPercent}% at cursor position`);
-            }
-        
-            this.updateZoomIndicator();
-            this.updateScrollbars();
-            this.draw();
-            this.updateHud();
-        } else {
-            // TWO-FINGER SCROLL/PAN on trackpad - INDEPENDENT of zoom
-            const oldPanX = this.panOffset.x;
-            const oldPanY = this.panOffset.y;
-            
-            // Direct 1:1 panning for natural trackpad feel
-            const panSensitivity = 1.0;
-            
-            // Pan in both directions - zoom stays UNCHANGED
-            this.panOffset.x -= e.deltaX * panSensitivity;
-            this.panOffset.y -= e.deltaY * panSensitivity;
-            this.savePanOffset();
-            
-            // Log pan (throttled - only log significant movements)
-            if (this.debugger && (Math.abs(e.deltaX) > 20 || Math.abs(e.deltaY) > 20)) {
-                const panDx = Math.round(this.panOffset.x - oldPanX);
-                const panDy = Math.round(this.panOffset.y - oldPanY);
-                this.debugger.logInfo(`↔️ Scroll/Pan: Δx=${panDx}, Δy=${panDy}`);
-            }
-            
-            this.updateScrollbars();
-            this.draw();
-            this.updateHud();
-        }
+        }, 150);
     }
     
     updateZoomIndicator() {
         const zoomPercent = Math.round(this.zoom * 100);
         
-        // Update left toolbar zoom indicator
-        const indicator = document.getElementById('zoom-indicator');
-        if (indicator) {
-            indicator.textContent = `${zoomPercent}%`;
-        }
+        // Cache DOM references (queried once, reused across rapid zoom events)
+        if (!this._zoomIndEl) this._zoomIndEl = document.getElementById('zoom-indicator');
+        if (!this._zoomIndHudEl) this._zoomIndHudEl = document.getElementById('zoom-indicator-hud');
+
+        if (this._zoomIndEl) this._zoomIndEl.textContent = `${zoomPercent}%`;
+        if (this._zoomIndHudEl) this._zoomIndHudEl.textContent = `${zoomPercent}%`;
         
-        // Update HUD zoom indicator (bottom-right corner)
-        const hudIndicator = document.getElementById('zoom-indicator-hud');
-        if (hudIndicator) {
-            hudIndicator.textContent = `${zoomPercent}%`;
+        // Throttle localStorage write -- no need for 60 writes/sec during zoom
+        if (!this._zoomSaveTimer) {
+            this._zoomSaveTimer = setTimeout(() => {
+                this._zoomSaveTimer = null;
+                localStorage.setItem('topology_zoom', this.zoom.toString());
+            }, 300);
         }
-        
-        // Save zoom to localStorage for persistence across page refreshes
-        localStorage.setItem('topology_zoom', this.zoom.toString());
     }
     
     savePanOffset() {
@@ -2404,35 +2380,23 @@ class TopologyEditor {
     }
     
     zoomIn() {
-        console.log('zoomIn called');
-        
-        // FIXED: Zoom at cursor position - keeps point under cursor fixed
         const cursorX = this.lastMouseScreen?.x || (this.canvasW / 2);
         const cursorY = this.lastMouseScreen?.y || (this.canvasH / 2);
         
         const S_old = this.zoom;
-        const S_new = Math.max(0.05, Math.min(3, S_old + 0.05)); // Clamp to 5%-300%
+        const S_new = Math.max(0.05, Math.min(3, S_old * 1.10)); // 10% multiplicative step
         
-        // Get world position at cursor BEFORE zoom
         const worldX = (cursorX - this.panOffset.x) / S_old;
         const worldY = (cursorY - this.panOffset.y) / S_old;
         
-        // Update zoom
         this.zoom = S_new;
-        
-        // Adjust pan so world position stays at cursor (zoom at cursor)
         this.panOffset.x = cursorX - worldX * S_new;
         this.panOffset.y = cursorY - worldY * S_new;
         this.savePanOffset();
         
-        if (this.debugger) {
-            const newZoomPercent = Math.round(this.zoom * 100);
-            this.debugger.logAction(`🔍+ Zoom In: ${newZoomPercent}% (+5%) at cursor`);
-        }
-        
         this.updateZoomIndicator();
         this.updateScrollbars();
-        this.draw();
+        this.requestDraw();
         this.updateHud();
     }
     
@@ -2469,35 +2433,23 @@ class TopologyEditor {
     }
     
     zoomOut() {
-        console.log('zoomOut called');
-        
-        // FIXED: Zoom at cursor position - keeps point under cursor fixed
         const cursorX = this.lastMouseScreen?.x || (this.canvasW / 2);
         const cursorY = this.lastMouseScreen?.y || (this.canvasH / 2);
         
         const S_old = this.zoom;
-        const S_new = Math.max(0.05, Math.min(3, S_old - 0.05)); // Clamp to 5%-300%
+        const S_new = Math.max(0.05, Math.min(3, S_old / 1.10)); // 10% multiplicative step
         
-        // Get world position at cursor BEFORE zoom
         const worldX = (cursorX - this.panOffset.x) / S_old;
         const worldY = (cursorY - this.panOffset.y) / S_old;
         
-        // Update zoom
         this.zoom = S_new;
-        
-        // Adjust pan so world position stays at cursor (zoom at cursor)
         this.panOffset.x = cursorX - worldX * S_new;
         this.panOffset.y = cursorY - worldY * S_new;
         this.savePanOffset();
         
-        if (this.debugger) {
-            const newZoomPercent = Math.round(this.zoom * 100);
-            this.debugger.logAction(`🔍- Zoom Out: ${newZoomPercent}% (-5%) at cursor`);
-        }
-        
         this.updateZoomIndicator();
         this.updateScrollbars();
-        this.draw();
+        this.requestDraw();
         this.updateHud();
     }
     
@@ -2515,7 +2467,7 @@ class TopologyEditor {
         this.updateZoomIndicator();
         this.savePanOffset();
         this.updateScrollbars();
-        this.draw();
+        this.requestDraw();
         this.updateHud();
     }
     
@@ -2594,7 +2546,7 @@ class TopologyEditor {
         this.updateZoomIndicator();
         this.savePanOffset();
         this.updateScrollbars();
-        this.draw();
+        this.requestDraw();
         this.updateHud();
     }
     
@@ -4340,6 +4292,7 @@ class TopologyEditor {
                 if (statusText) statusText.textContent = 'Movable';
             }
         }
+        this.scheduleAutoSave();
     }
     
     toggleMomentum() {
@@ -9172,7 +9125,7 @@ class TopologyEditor {
         
         this.hideContextMenu();
         this.hideLayersSubmenu();
-        this.draw();
+        this.requestDraw();
     }
     
     handleContextLayerForward() {
@@ -9198,7 +9151,7 @@ class TopologyEditor {
         
         this.hideContextMenu();
         this.hideLayersSubmenu();
-        this.draw();
+        this.requestDraw();
     }
     
     handleContextLayerBackward() {
@@ -9224,7 +9177,7 @@ class TopologyEditor {
         
         this.hideContextMenu();
         this.hideLayersSubmenu();
-        this.draw();
+        this.requestDraw();
     }
     
     handleContextLayerToBack() {
@@ -9267,7 +9220,7 @@ class TopologyEditor {
         
         this.hideContextMenu();
         this.hideLayersSubmenu();
-        this.draw();
+        this.requestDraw();
     }
     
     handleContextLayerReset() {
@@ -9293,7 +9246,7 @@ class TopologyEditor {
         
         this.hideContextMenu();
         this.hideLayersSubmenu();
-        this.draw();
+        this.requestDraw();
     }
     
     // ==================== OBJECT GROUPING ====================
@@ -9432,11 +9385,11 @@ class TopologyEditor {
                     obj.locked = true;
                 }
             });
-            this.draw();
+            this.requestDraw();
         } else if (this.selectedObject && (this.selectedObject.type === 'device' || this.selectedObject.type === 'text')) {
             this.saveState();
             this.selectedObject.locked = true;
-            this.draw();
+            this.requestDraw();
         }
         this.hideContextMenu();
     }
@@ -9450,11 +9403,11 @@ class TopologyEditor {
                     obj.locked = false;
                 }
             });
-            this.draw();
+            this.requestDraw();
         } else if (this.selectedObject && (this.selectedObject.type === 'device' || this.selectedObject.type === 'text')) {
             this.saveState();
             this.selectedObject.locked = false;
-            this.draw();
+            this.requestDraw();
         }
         this.hideContextMenu();
     }
@@ -9817,14 +9770,22 @@ class TopologyEditor {
     
     // Attach text to a link at the specified position
     attachTextToLink(textObj, link, t) {
-        // Don't duplicate saveState if already saved by caller
+        // Prevent attaching to an occupied location
+        const occupied = this.objects.some(obj =>
+            obj.type === 'text' && obj.id !== textObj.id && obj.linkId === link.id
+            && Math.abs((obj.linkAttachT !== undefined ? obj.linkAttachT : 0.5) - t) < 0.08
+        );
+        if (occupied) {
+            if (this.showNotification) this.showNotification('This link location already has a text box attached', 'warning', 3000);
+            return;
+        }
+
         if (!this._attachingFromDrop) {
             this.saveState();
         }
-        
-        // Store link reference and EXACT parametric position
+
         textObj.linkId = link.id;
-        textObj.linkAttachT = t; // Store exact parametric position for flexibility
+        textObj.linkAttachT = t;
         
         // Determine position name based on t
         textObj.position = this.getAttachmentPositionFromT(t);
@@ -9979,20 +9940,46 @@ class TopologyEditor {
         const centerX = (this.canvasW / 2) / this.zoom - this.panOffset.x;
         const centerY = (this.canvasH / 2) / this.zoom - this.panOffset.y;
         
-        // Count existing unbound links to stack them vertically (avoid overlap)
-        const unboundCount = this.objects.filter(obj => obj.type === 'unbound').length;
-        const verticalOffset = unboundCount * 40; // 40px spacing between unbound links
+        // Smart placement: find a Y offset that avoids overlapping existing links.
+        // Check candidate positions and pick the first one that doesn't collide
+        // with any existing link body within a proximity threshold.
+        const halfLen = 50;
+        const spacing = 40;
+        const proximityThreshold = 15 / this.zoom;
+        let bestY = centerY;
+        
+        for (let attempt = 0; attempt < 10; attempt++) {
+            const candidateY = centerY + attempt * spacing;
+            const midX = centerX;
+            let collision = false;
+            
+            for (const obj of this.objects) {
+                if (obj.type !== 'link' && obj.type !== 'unbound') continue;
+                const dist = this._checkLinkHit(midX, candidateY, obj);
+                if (dist >= 0 && dist < proximityThreshold) {
+                    collision = true;
+                    break;
+                }
+            }
+            
+            if (!collision) {
+                bestY = candidateY;
+                break;
+            }
+            bestY = candidateY; // fallback to last tried position
+        }
         
         const link = {
             id: `link_${this.linkIdCounter++}`,
             type: 'unbound',
             originType: 'UL', // PRESERVE: Original link type (UL = Unbound Link)
             createdAt: Date.now(), // Creation timestamp for BUL order tracking
+            _createdAt: Date.now(), // Selection priority: stronger stickiness for 2s after creation
             device1: null,
             device2: null,
             color: this.defaultLinkColor || (this.darkMode ? '#ffffff' : '#666666'),
-            start: { x: centerX - 50, y: centerY + verticalOffset },
-            end: { x: centerX + 50, y: centerY + verticalOffset },
+            start: { x: centerX - halfLen, y: bestY },
+            end: { x: centerX + halfLen, y: bestY },
             connectedStart: null,  // UL ID connected to start endpoint
             connectedEnd: null,     // UL ID connected to end endpoint
             style: this.linkStyle || 'solid'  // Store the style when link is created
@@ -10772,6 +10759,18 @@ class TopologyEditor {
         
         this.saveState(); // Save state before deleting
         
+        const devicesToEvict = (this.selectedObjects && this.selectedObjects.length > 0
+            ? this.selectedObjects
+            : this.selectedObject ? [this.selectedObject] : []
+        ).filter(o => o && o.type === 'device' && (o.sshConfig?.host || o.sshConfig?.hostBackup));
+        devicesToEvict.forEach(d => {
+            const ip = d.sshConfig?.host || d.sshConfig?.hostBackup;
+            const did = d.label || d.deviceSerial || d.serial || '';
+            if (ip && typeof ScalerAPI !== 'undefined' && ScalerAPI.evictSSHPoolConnection) {
+                ScalerAPI.evictSSHPoolConnection(ip, did).catch(() => {});
+            }
+        });
+
         // Perform bulk delete whenever there are selectedObjects, regardless of multiSelectMode
         if (this.selectedObjects && this.selectedObjects.length > 0) {
             // ENHANCED: Handle UL deletion in BUL chains - reconfigure merge relationships
@@ -10855,9 +10854,37 @@ class TopologyEditor {
         
         try {
             
-            // Create deep copy of current state
+            // Create deep copy of current state, stripping transient monitor/display flags
+            const objsCopy = JSON.parse(JSON.stringify(this.objects));
+            for (const obj of objsCopy) {
+                if ((obj.type === 'link' || obj.type === 'unbound') && obj._hidden) {
+                    delete obj._hidden;
+                }
+                delete obj._badgeWorlds;
+                delete obj._hostnameMismatch;
+                delete obj._mismatchDismissed;
+                delete obj._identity;
+                delete obj._configHostname;
+                delete obj._stackData;
+                delete obj._stackCachedAt;
+                delete obj._lldpData;
+                delete obj._lldpCompletedAt;
+                delete obj._gitCommit;
+                delete obj._gitCommitFetchedAt;
+                delete obj._gitCommitFailed;
+                delete obj._renaming;
+                delete obj._activeConfigJob;
+                delete obj._activeUpgradeJob;
+                delete obj._upgradeFailedJob;
+                delete obj._upgradeInProgress;
+                delete obj._mismatchRefreshPending;
+                delete obj._sshReachable;
+                delete obj._sshReachableAt;
+                delete obj._deviceMode;
+                delete obj._createdAt;
+            }
             const state = {
-                objects: JSON.parse(JSON.stringify(this.objects)),
+                objects: objsCopy,
                 deviceIdCounter: this.deviceIdCounter,
                 linkIdCounter: this.linkIdCounter,
                 textIdCounter: this.textIdCounter,
@@ -10902,6 +10929,11 @@ class TopologyEditor {
         this.initializing = true;
         
         this.objects = JSON.parse(JSON.stringify(state.objects));
+        for (const obj of this.objects) {
+            if ((obj.type === 'link' || obj.type === 'unbound') && obj._hidden) {
+                delete obj._hidden;
+            }
+        }
         this.deviceIdCounter = state.deviceIdCounter;
         this.linkIdCounter = state.linkIdCounter;
         this.textIdCounter = state.textIdCounter;
@@ -10910,7 +10942,7 @@ class TopologyEditor {
         this.selectedObject = null;
         this.selectedObjects = [];
         this.updatePropertiesPanel();
-        this.draw();
+        this.requestDraw();
         
         // Restore initializing flag
         this.initializing = wasInitializing;
@@ -11121,8 +11153,7 @@ class TopologyEditor {
         if (linkColorInput) linkColorInput.value = this.defaultLinkColor;
         if (linkColorHex) linkColorHex.textContent = this.defaultLinkColor.toUpperCase();
         
-        // Redraw canvas with new background
-        this.draw();
+        this.requestDraw();
         this.scheduleAutoSave();
         
         this._updateBDPanelTheme();
@@ -11142,6 +11173,7 @@ class TopologyEditor {
     
     toggleGridLines() {
         this.gridZoomEnabled = !this.gridZoomEnabled;
+        localStorage.setItem('gridZoomEnabled', this.gridZoomEnabled);
         
         // Update button appearance
         const gridBtn = document.getElementById('btn-grid-lines');
@@ -11156,53 +11188,19 @@ class TopologyEditor {
             }
         }
         
-        // Log the change
         if (this.debugger) {
             this.debugger.logInfo(this.gridZoomEnabled ? 'Grid enabled' : 'Grid disabled');
         }
         
-        // Redraw canvas
-        this.draw();
+        this.requestDraw();
+        this.scheduleAutoSave();
     }
     
     drawGrid() {
-        // Draw infinite grid that zooms with canvas - Notebook style
-        const gridSize = 50; // Base grid size in world coordinates (50px squares)
-        
-        // Calculate extended visible area (draw beyond viewport for smooth panning)
-        const margin = 500; // Extra margin to draw
-        const startX = (-this.panOffset.x / this.zoom) - margin;
-        const startY = (-this.panOffset.y / this.zoom) - margin;
-        const endX = startX + (this.canvasW / this.zoom) + margin * 2;
-        const endY = startY + (this.canvasH / this.zoom) + margin * 2;
-        
-        this.ctx.save();
-        this.ctx.translate(this.panOffset.x, this.panOffset.y);
-        this.ctx.scale(this.zoom, this.zoom);
-        
-        // Adjust grid color for dark mode
-        this.ctx.strokeStyle = this.darkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)';
-        this.ctx.lineWidth = 1 / this.zoom;
-        
-        // Draw vertical lines
-        const gridStartX = Math.floor(startX / gridSize) * gridSize;
-        for (let x = gridStartX; x <= endX; x += gridSize) {
-            this.ctx.beginPath();
-            this.ctx.moveTo(x, startY);
-            this.ctx.lineTo(x, endY);
-            this.ctx.stroke();
+        if (this.drawing && typeof this.drawing.drawGrid === 'function') {
+            this.drawing.drawGrid();
+            return;
         }
-        
-        // Draw horizontal lines
-        const gridStartY = Math.floor(startY / gridSize) * gridSize;
-        for (let y = gridStartY; y <= endY; y += gridSize) {
-            this.ctx.beginPath();
-            this.ctx.moveTo(startX, y);
-            this.ctx.lineTo(endX, y);
-            this.ctx.stroke();
-        }
-        
-        this.ctx.restore();
     }
     
     draw() {
@@ -11215,6 +11213,14 @@ class TopologyEditor {
         if (window.DrawModule) {
             window.DrawModule.scheduleDraw(this);
         }
+    }
+
+    requestDraw() {
+        if (this._drawRafId) return;
+        this._drawRafId = requestAnimationFrame(() => {
+            this._drawRafId = null;
+            this.draw();
+        });
     }
     
     drawDeviceCircle(device, isSelected) {
@@ -11490,11 +11496,11 @@ class TopologyEditor {
         
         // Redraw if any changes were made
         if (stateChanged) {
-            this.draw();
+            this.requestDraw();
             this.scheduleAutoSave();
             
             if (this.debugger) {
-                this.debugger.logInfo(`📝 Applied text settings to ${selectedTexts.length} selected text object(s)`);
+                this.debugger.logInfo(`Applied text settings to ${selectedTexts.length} selected text object(s)`);
             }
         }
     }
@@ -11533,14 +11539,14 @@ class TopologyEditor {
         });
         
         if (stateChanged) {
-            this.draw();
+            this.requestDraw();
             this.scheduleAutoSave();
             
             if (this.debugger) {
                 const changes = [];
                 if (fontFamily) changes.push(`font: ${fontFamily}`);
                 if (fontSize) changes.push(`size: ${fontSize}px`);
-                this.debugger.logInfo(`📝 Applied ${changes.join(', ')} to ${selectedTexts.length} text object(s)`);
+                this.debugger.logInfo(`Applied ${changes.join(', ')} to ${selectedTexts.length} text object(s)`);
             }
         }
     }
@@ -11747,7 +11753,35 @@ class TopologyEditor {
         try {
             const data = {
                 version: '1.0',
-                objects: this.objects.map(obj => ({ ...obj })),
+                objects: this.objects.map(obj => {
+                    const copy = { ...obj };
+                    delete copy._badgeWorlds;
+                    delete copy._hostnameMismatch;
+                    delete copy._mismatchDismissed;
+                    delete copy._identity;
+                    delete copy._configHostname;
+                    delete copy._stackData;
+                    delete copy._stackCachedAt;
+                    delete copy._lldpData;
+                    delete copy._lldpCompletedAt;
+                    delete copy._gitCommit;
+                    delete copy._gitCommitFetchedAt;
+                    delete copy._gitCommitFailed;
+                    delete copy._renaming;
+                    delete copy._activeConfigJob;
+                    delete copy._activeUpgradeJob;
+                    delete copy._upgradeFailedJob;
+                    delete copy._upgradeInProgress;
+                    delete copy._mismatchRefreshPending;
+                    delete copy._sshReachable;
+                    delete copy._sshReachableAt;
+                    delete copy._deviceMode;
+                    delete copy._createdAt;
+                    if ((copy.type === 'link' || copy.type === 'unbound') && copy._hidden) {
+                        delete copy._hidden;
+                    }
+                    return copy;
+                }),
                 metadata: {
                     deviceIdCounter: this.deviceIdCounter,
                     linkIdCounter: this.linkIdCounter,
@@ -11799,6 +11833,15 @@ class TopologyEditor {
                 console.log('Parsed data metadata:', data.metadata);
 
                 if (data.objects && Array.isArray(data.objects)) {
+                    // Direct label repair: fix known corrupted names BEFORE
+                    // anything else reads this.objects.  Runs synchronously.
+                    const _labelFixes = { 'Bitch': 'RR-SA-2' };
+                    for (const obj of data.objects) {
+                        if (obj.type === 'device' && _labelFixes[obj.label]) {
+                            console.warn(`[LabelRepair] "${obj.label}" -> "${_labelFixes[obj.label]}"`);
+                            obj.label = _labelFixes[obj.label];
+                        }
+                    }
                     this.objects = data.objects;
                     this._lastSavedObjectCount = this.objects.length;
                     console.log('Successfully assigned objects array with', this.objects.length, 'items');
@@ -11832,17 +11875,48 @@ class TopologyEditor {
                         delete obj._lldpSuccessGlow;
                         delete obj._lldpFailureGlow;
                         delete obj._lldpJobId;
-                        // Keep persistent state: lldpEnabled, _lldpCompletedAt, _lldpStatus
+                        // Strip transient monitor state that should never persist.
+                        // These are re-populated by DeviceMonitor on each session.
+                        // Persisting them caused stale _configHostname to trigger
+                        // false mismatch popups and silent label overwrites.
+                        delete obj._badgeWorlds;
+                        delete obj._hostnameMismatch;
+                        delete obj._mismatchDismissed;
+                        delete obj._identity;
+                        delete obj._configHostname;
+                        delete obj._stackData;
+                        delete obj._stackCachedAt;
+                        delete obj._lldpData;
+                        delete obj._lldpCompletedAt;
+                        delete obj._gitCommit;
+                        delete obj._gitCommitFetchedAt;
+                        delete obj._gitCommitFailed;
+                        delete obj._renaming;
+                        delete obj._activeConfigJob;
+                        delete obj._activeUpgradeJob;
+                        delete obj._upgradeFailedJob;
+                        delete obj._upgradeInProgress;
+                        delete obj._mismatchRefreshPending;
+                        delete obj._sshReachable;
+                        delete obj._sshReachableAt;
+                        delete obj._deviceMode;
+                        delete obj._createdAt;
                     }
                 });
                 
+                // LABEL INTEGRITY CHECK: cross-ref SSH hosts against device inventory.
+                // If a device's SSH target resolves to a known inventory hostname that
+                // differs from the canvas label, warn and auto-fix so stale names from
+                // accidental mismatch-popup renames don't persist across sessions.
+                this._repairLabelsFromInventory();
+
                 // AUTO-CORRECT CREDENTIALS for loaded devices
                 this._correctDeviceCredentials();
                 
                 // AUTO-REPAIR corrupted links (if any)
                 const repairedCount = this.repairCorruptedLinks();
                 if (repairedCount > 0) {
-                    console.log(`🔧 Auto-repaired ${repairedCount} corrupted links on load`);
+                    console.log(`[LinkRepair] Auto-repaired ${repairedCount} corrupted links on load`);
                 }
 
                 // IMPORTANT: Link positions will be calculated dynamically by draw()
@@ -12131,6 +12205,13 @@ class TopologyEditor {
         this._clearBDState();
         this._loadDomain = opts?.domain || null;
 
+        const wasPoolEnabled = localStorage.getItem('ssh_pool_enabled') === 'true';
+        if (typeof ScalerAPI !== 'undefined' && ScalerAPI.toggleSSHPool) {
+            ScalerAPI.toggleSSHPool(false).catch(() => {}).finally(() => {
+                if (wasPoolEnabled) ScalerAPI.toggleSSHPool(true).catch(() => {});
+            });
+        }
+
         this.objects = data.objects || [];
         
         // Add missing properties for compatibility
@@ -12415,7 +12496,75 @@ class TopologyEditor {
             return window.DnaasHelpers.correctDeviceCredentials(this);
         }
     }
-    
+
+    _repairLabelsFromInventory() {
+        // Inventory is loaded async, so schedule a deferred check.
+        // Try immediately (in case already cached), then retry after 4s.
+        this._doLabelRepair();
+        setTimeout(() => this._doLabelRepairAsync(), 4000);
+    }
+
+    async _doLabelRepairAsync() {
+        let inv = window._deviceInventory || window.deviceInventory;
+        if (!inv?.devices && typeof ScalerAPI !== 'undefined' && ScalerAPI.getDeviceInventory) {
+            try { inv = await ScalerAPI.getDeviceInventory(); } catch (_) {}
+        }
+        if (!inv?.devices) return;
+        this._runLabelRepair(inv);
+    }
+
+    _doLabelRepair() {
+        const inv = window._deviceInventory || window.deviceInventory;
+        if (!inv?.devices) return;
+        this._runLabelRepair(inv);
+    }
+
+    _runLabelRepair(inv) {
+        if (this._labelRepairDone) return;
+        const ipToHostname = {};
+        for (const [key, info] of Object.entries(inv.devices)) {
+            const ip = info.mgmt_ip || key;
+            if (ip && info.hostname) ipToHostname[ip] = info.hostname;
+            if (key && info.hostname) ipToHostname[key] = info.hostname;
+        }
+        if (Object.keys(ipToHostname).length === 0) return;
+
+        const allHostnames = new Set(Object.values(ipToHostname));
+        const devices = this.objects.filter(o => o.type === 'device');
+        const repaired = [];
+        for (const dev of devices) {
+            const sshHost = dev.sshConfig?.host || dev.sshConfig?.hostBackup || '';
+            if (!sshHost) continue;
+            const inventoryName = ipToHostname[sshHost];
+            if (!inventoryName) continue;
+            const label = (dev.label || '').trim();
+            if (label === inventoryName) continue;
+            // Only auto-fix if label is clearly NOT any known device name
+            if (allHostnames.has(label)) continue;
+            const oldLabel = label;
+            dev.label = inventoryName;
+            repaired.push({ oldLabel, newLabel: inventoryName, ip: sshHost });
+        }
+        if (repaired.length > 0) {
+            this._labelRepairDone = true;
+            console.warn('[LabelRepair] Fixed corrupted device labels from inventory:', repaired);
+            for (const r of repaired) {
+                console.warn(`  "${r.oldLabel}" -> "${r.newLabel}" (SSH: ${r.ip})`);
+            }
+            this.autoSave();
+            this.draw();
+            if (typeof this.showNotification === 'function') {
+                const names = repaired.map(r => `"${r.oldLabel}" -> "${r.newLabel}"`).join(', ');
+                this.showNotification(
+                    `[INFO] Auto-repaired device labels: ${names}`,
+                    'info', 8000
+                );
+            }
+        } else {
+            this._labelRepairDone = true;
+        }
+    }
+
     applyDnaasHierarchicalLayout(objects) {
         if (window.DnaasOperations && window.DnaasOperations.applyDnaasHierarchicalLayout) {
             return window.DnaasOperations.applyDnaasHierarchicalLayout(this, objects);
@@ -12540,9 +12689,9 @@ class TopologyEditor {
     }
     
     // Show confirmation dialog (replacement for confirm())
-    showConfirmDialog(title, message, onConfirm, onCancel = null) {
+    showConfirmDialog(title, message, onConfirm, onCancel = null, options = {}) {
         if (window.DialogManager) {
-            return window.DialogManager.showConfirmDialog(this, title, message, onConfirm, onCancel);
+            return window.DialogManager.showConfirmDialog(this, title, message, onConfirm, onCancel, options);
         }
     }
     
@@ -12648,6 +12797,10 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     const editor = new TopologyEditor(canvas);
     
+    canvas.focus();
+    
+    if (window.DeviceMonitor) DeviceMonitor.init(editor);
+
     // Initialize smoke sliders after editor loads
     setTimeout(wrapSlidersWithSmoke, 200);
     
@@ -12656,10 +12809,10 @@ window.addEventListener('DOMContentLoaded', () => {
     
     // AUTO-REPAIR: Fix any corrupted links immediately after load
     setTimeout(() => {
-        console.log('🔧 Running auto-repair check...');
+        console.log('[LinkRepair] Running auto-repair check...');
         const repaired = editor.repairCorruptedLinks();
         if (repaired > 0) {
-            console.log(`🔧 Auto-repaired ${repaired} corrupted links on startup`);
+            console.log(`[LinkRepair] Auto-repaired ${repaired} corrupted links on startup`);
         }
     }, 500);
     
@@ -12746,6 +12899,44 @@ window.addEventListener('DOMContentLoaded', () => {
         return { index: editor.historyIndex, length: editor.history?.length || 0 };
     };
     
+    // Fix a corrupted device label and persist the change.
+    // Usage from browser console: fixDeviceLabel('Bitch', 'RR-SA-2')
+    window.fixDeviceLabel = (oldName, newName) => {
+        if (!oldName || !newName) {
+            console.error('Usage: fixDeviceLabel("oldLabel", "newLabel")');
+            return false;
+        }
+        const device = editor.objects.find(
+            o => o.type === 'device' && (o.label || '').trim() === oldName.trim()
+        );
+        if (!device) {
+            console.error(`No device found with label "${oldName}"`);
+            const labels = editor.objects.filter(o => o.type === 'device').map(o => o.label);
+            console.log('Current device labels:', labels);
+            return false;
+        }
+        if (editor.saveState) editor.saveState();
+        device.label = newName.trim();
+        editor.autoSave();
+        editor.draw();
+        console.log(`[fixDeviceLabel] Renamed "${oldName}" -> "${newName}" and saved.`);
+        // Also clear the backup so recovery won't bring back the bad label
+        try {
+            const backup = localStorage.getItem('topology_autosave_backup');
+            if (backup && backup.includes(oldName)) {
+                const bdata = JSON.parse(backup);
+                (bdata.objects || []).forEach(o => {
+                    if (o.type === 'device' && (o.label || '').trim() === oldName.trim()) {
+                        o.label = newName.trim();
+                    }
+                });
+                localStorage.setItem('topology_autosave_backup', JSON.stringify(bdata));
+                console.log('[fixDeviceLabel] Also fixed backup autosave.');
+            }
+        } catch (_) {}
+        return true;
+    };
+
     // Helper to manually sync all toggle buttons if they get out of sync
     window.syncToggles = () => {
         console.log('Syncing all toggle buttons...');

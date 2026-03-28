@@ -64,11 +64,10 @@ window.ScrollbarsModule = {
                 const thumbHeight = vThumb.clientHeight;
                 const maxScroll = scrollbarHeight - thumbHeight;
                 const scrollRatio = deltaY / maxScroll;
-                // Use same dynamic range as updateScrollbars
                 const baseRange = 2000;
                 const zoomFactor = Math.max(1, editor.zoom);
                 const panRange = baseRange * zoomFactor;
-                editor.panOffset.y = editor.scrollbarDragStart.panOffset + (scrollRatio * panRange * 2);
+                editor.panOffset.y = editor.scrollbarDragStart.panOffset - (scrollRatio * panRange * 2);
                 editor.savePanOffset();
                 editor.updateScrollbars();
                 editor.draw();
@@ -78,11 +77,10 @@ window.ScrollbarsModule = {
                 const thumbWidth = hThumb.clientWidth;
                 const maxScroll = scrollbarWidth - thumbWidth;
                 const scrollRatio = deltaX / maxScroll;
-                // Use same dynamic range as updateScrollbars
                 const baseRange = 2000;
                 const zoomFactor = Math.max(1, editor.zoom);
                 const panRange = baseRange * zoomFactor;
-                editor.panOffset.x = editor.scrollbarDragStart.panOffset + (scrollRatio * panRange * 2);
+                editor.panOffset.x = editor.scrollbarDragStart.panOffset - (scrollRatio * panRange * 2);
                 editor.savePanOffset();
                 editor.updateScrollbars();
                 editor.draw();
@@ -94,24 +92,19 @@ window.ScrollbarsModule = {
             document.addEventListener('pointermove', handleScrollbarMove);
         }
         
-        // Mouse alignment: Click scrollbar track to jump thumb to mouse position
         vScrollbar.addEventListener('click', (e) => {
-            if (e.target === vScrollbar) { // Clicked track, not thumb
+            if (e.target === vScrollbar) {
                 const rect = vScrollbar.getBoundingClientRect();
                 const clickY = e.clientY - rect.top;
                 const scrollbarHeight = vScrollbar.clientHeight;
                 const thumbHeight = vThumb.clientHeight;
-                
-                // Center thumb at click position
                 const newThumbTop = clickY - thumbHeight / 2;
                 const maxScroll = scrollbarHeight - thumbHeight;
-                const scrollRatio = (newThumbTop / maxScroll) * 2 - 1; // -1 to 1
-                
-                // Use same dynamic range as updateScrollbars
+                const scrollRatio = (newThumbTop / maxScroll) * 2 - 1;
                 const baseRange = 2000;
                 const zoomFactor = Math.max(1, editor.zoom);
                 const panRange = baseRange * zoomFactor;
-                editor.panOffset.y = scrollRatio * panRange;
+                editor.panOffset.y = -scrollRatio * panRange;
                 editor.savePanOffset();
                 editor.updateScrollbars();
                 editor.draw();
@@ -120,22 +113,18 @@ window.ScrollbarsModule = {
         });
         
         hScrollbar.addEventListener('click', (e) => {
-            if (e.target === hScrollbar) { // Clicked track, not thumb
+            if (e.target === hScrollbar) {
                 const rect = hScrollbar.getBoundingClientRect();
                 const clickX = e.clientX - rect.left;
                 const scrollbarWidth = hScrollbar.clientWidth;
                 const thumbWidth = hThumb.clientWidth;
-                
-                // Center thumb at click position
                 const newThumbLeft = clickX - thumbWidth / 2;
                 const maxScroll = scrollbarWidth - thumbWidth;
-                const scrollRatio = (newThumbLeft / maxScroll) * 2 - 1; // -1 to 1
-                
-                // Use same dynamic range as updateScrollbars
+                const scrollRatio = (newThumbLeft / maxScroll) * 2 - 1;
                 const baseRange = 2000;
                 const zoomFactor = Math.max(1, editor.zoom);
                 const panRange = baseRange * zoomFactor;
-                editor.panOffset.x = scrollRatio * panRange;
+                editor.panOffset.x = -scrollRatio * panRange;
                 editor.savePanOffset();
                 editor.updateScrollbars();
                 editor.draw();
@@ -159,10 +148,15 @@ window.ScrollbarsModule = {
      * @param {Object} editor - TopologyEditor instance
      */
     update(editor) {
-        const vThumb = document.getElementById('vertical-thumb');
-        const hThumb = document.getElementById('horizontal-thumb');
-        const vScrollbar = document.getElementById('vertical-scrollbar');
-        const hScrollbar = document.getElementById('horizontal-scrollbar');
+        if (!this._sbCached) {
+            this._vThumb = document.getElementById('vertical-thumb');
+            this._hThumb = document.getElementById('horizontal-thumb');
+            this._vBar  = document.getElementById('vertical-scrollbar');
+            this._hBar  = document.getElementById('horizontal-scrollbar');
+            if (this._vThumb && this._hThumb && this._vBar && this._hBar) this._sbCached = true;
+        }
+        const vThumb = this._vThumb, hThumb = this._hThumb;
+        const vScrollbar = this._vBar, hScrollbar = this._hBar;
         
         if (!vThumb || !hThumb || !vScrollbar || !hScrollbar) return;
         
@@ -171,9 +165,9 @@ window.ScrollbarsModule = {
         const zoomFactor = Math.max(1, editor.zoom);
         const panRange = baseRange * zoomFactor;
         
-        // Vertical scrollbar - smooth position calculation
+        // Vertical scrollbar - negated so thumb-down = view-down
         const vMax = vScrollbar.clientHeight - vThumb.clientHeight;
-        const vRatio = Math.max(-1, Math.min(1, editor.panOffset.y / panRange));
+        const vRatio = Math.max(-1, Math.min(1, -editor.panOffset.y / panRange));
         const vPos = (vRatio + 1) / 2 * vMax;
         const vPosClamped = Math.max(0, Math.min(vMax, vPos));
         
@@ -181,9 +175,9 @@ window.ScrollbarsModule = {
         vThumb.style.transform = `translateY(${vPosClamped}px)`;
         vThumb.style.top = '0';
         
-        // Horizontal scrollbar - smooth position calculation
+        // Horizontal scrollbar - negated so thumb-right = view-right
         const hMax = hScrollbar.clientWidth - hThumb.clientWidth;
-        const hRatio = Math.max(-1, Math.min(1, editor.panOffset.x / panRange));
+        const hRatio = Math.max(-1, Math.min(1, -editor.panOffset.x / panRange));
         const hPos = (hRatio + 1) / 2 * hMax;
         const hPosClamped = Math.max(0, Math.min(hMax, hPos));
         

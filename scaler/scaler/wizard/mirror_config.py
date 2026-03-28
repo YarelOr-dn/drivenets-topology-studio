@@ -2363,7 +2363,11 @@ class ConfigMirror:
         # Section selection (from select_sections_to_mirror)
         # If None, all sections are included. Otherwise, dict of section_name -> bool
         self.section_selection: Optional[Dict[str, bool]] = None
-        
+
+        # Custom IP mapping from smart suggestions (source_ip -> target_ip)
+        # Applied after RD/router-id/interface transforms
+        self.ip_mapping: Dict[str, str] = {}
+
         # =====================================================================
         # PRE-COMPILED REGEX PATTERNS (for speed)
         # =====================================================================
@@ -2934,12 +2938,36 @@ class ConfigMirror:
         # Interface transformation (single regex pass for all interfaces)
         if self._iface_pattern:
             result = self._iface_pattern.sub(
-                lambda m: self.interface_map.get(m.group(1), m.group(1)), 
+                lambda m: self.interface_map.get(m.group(1), m.group(1)),
                 result
             )
-        
+
+        # Custom IP mapping from smart suggestions
+        if self.ip_mapping:
+            result = self._transform_ip_mapping(result)
+
         return result
-    
+
+    def _transform_ip_mapping(self, config: str) -> str:
+        """Apply custom IP mapping (source_ip -> target_ip) from smart suggestions."""
+        if not self.ip_mapping:
+            return config
+        result = config
+        for src_ip, tgt_ip in self.ip_mapping.items():
+            src_base = src_ip.split('/')[0]
+            tgt_base = tgt_ip.split('/')[0]
+            src_esc = re.escape(src_base)
+
+            def repl(m, tgt=tgt_ip, tgt_b=tgt_base):
+                matched = m.group(0)
+                if '/' in matched and '/' in tgt:
+                    return tgt
+                return tgt_b
+
+            pattern = re.compile(rf'\b{src_esc}(?:\/\d+)?\b')
+            result = pattern.sub(repl, result)
+        return result
+
     def transform_system_section(self, system_config: str) -> str:
         """
         Transform system section from source for mirroring to target.
@@ -3662,6 +3690,154 @@ class ConfigMirror:
         )
         
         return result
+
+    def auto_detect_ip_remapping(self) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Auto-detect IP addresses that need remapping for mirroring.
+        Config-based only; no external calls.
+        Returns suggestions for BGP neighbors, WAN IPs, and service IPs.
+        """
+        suggestions: Dict[str, List[Dict[str, Any]]] = {
+            'bgp_neighbors': [],
+            'wan_ips': [],
+            'service_ips': [],
+        }
+        try:
+            import ipaddress
+        except ImportError:
+            return suggestions
+
+        # BGP neighbors from VRFs
+        vrf_list = parse_vrf_instances(self.source_config)
+        for vrf in vrf_list:
+            vrf_name = vrf.get('name', '')
+            interfaces = vrf.get('interfaces', [])
+            interface_ip = None
+            if interfaces:
+                iface = interfaces[0]
+                ip_match = re.search(
+                    rf'^\s+{re.escape(iface)}\s*\n(?:.*?\n)*?\s+ipv4-address\s+(\d+\.\d+\.\d+\.\d+(?:/\d+)?)',
+                    self.source_config, re.MULTILINE
+                )
+                if ip_match:
+                    interface_ip = ip_match.group(1)
+            for nbr in vrf.get('bgp_neighbors', []):
+                source_ip = nbr.get('ip', '')
+                if not source_ip:
+                    continue
+                remote_as = nbr.get('remote_as', 'N/A')
+                suggested_ip = source_ip
+                source = 'unchanged'
+                if interface_ip:
+                    try:
+                        net = ipaddress.ip_interface(interface_ip)
+                        hosts = list(net.network.hosts())[:5]
+                        if hosts:
+                            suggested_ip = str(hosts[1]) if len(hosts) > 1 else str(hosts[0])
+                            source = 'subnet'
+                    except Exception:
+                        pass
+                suggestions['bgp_neighbors'].append({
+                    'source_ip': source_ip,
+                    'suggested_ip': suggested_ip,
+                    'context': f"VRF {vrf_name}, AS {remote_as}",
+                    'source': source,
+                })
+
+        # WAN interface IPs
+        for wan in self.source_wan:
+            ip_match = re.search(
+                rf'^\s+{re.escape(wan)}\s*\n(?:.*?\n)*?\s+ipv4-address\s+(\d+\.\d+\.\d+\.\d+(?:/\d+)?)',
+                self.source_config, re.MULTILINE
+            )
+            if ip_match:
+                source_ip = ip_match.group(1)
+                suggested_ip = source_ip
+                source = 'unchanged'
+                try:
+                    net = ipaddress.ip_interface(source_ip)
+                    hosts = list(net.network.hosts())[:5]
+                    if hosts:
+                        my_ip = str(net.ip)
+                        for h in hosts:
+                            if str(h) != my_ip:
+                                suggested_ip = f"{h}/{net.network.prefixlen}"
+                                source = 'subnet_derive'
+                                break
+                except Exception:
+                    pass
+                suggestions['wan_ips'].append({
+                    'source_iface': wan,
+                    'source_ip': source_ip,
+                    'suggested_ip': suggested_ip,
+                    'source': source,
+                })
+
+        # Service IPs from FXC/VPLS/VRF interfaces (simplified: suggest sequential)
+        for svc in self.source_services.get('fxc', []) + self.source_services.get('vpls', []):
+            name = svc.get('name', '')
+            ifaces = svc.get('interfaces', [])
+            for iface in ifaces[:1]:
+                ip_match = re.search(
+                    rf'^\s+{re.escape(iface)}\s*\n(?:.*?\n)*?\s+ipv4-address\s+(\d+\.\d+\.\d+\.\d+(?:/\d+)?)',
+                    self.source_config, re.MULTILINE
+                )
+                if ip_match:
+                    suggestions['service_ips'].append({
+                        'source_ip': ip_match.group(1),
+                        'context': f"{name}",
+                        'suggested_ip': ip_match.group(1),
+                        'source': 'sequential',
+                    })
+                    break
+
+        return suggestions
+
+    def auto_detect_lldp_mapping(
+        self,
+        lldp_neighbors: Optional[List[Dict[str, Any]]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Map source WAN interfaces to target using LLDP neighbor data.
+        If lldp_neighbors is None or empty, returns empty list.
+        lldp_neighbors: list of dicts with keys: local_interface, neighbor_device, neighbor_port
+        """
+        if not lldp_neighbors:
+            return []
+        result = []
+        for n in lldp_neighbors:
+            iface = n.get('local_interface') or n.get('interface', '')
+            neighbor = n.get('neighbor_device') or n.get('neighbor', '')
+            remote_port = n.get('neighbor_port') or n.get('remote_port', '')
+            if not iface or '.' in iface:
+                continue
+            for src_wan in self.source_wan:
+                src_parent = src_wan.split('.')[0] if '.' in src_wan else src_wan
+                if src_parent in iface or iface in src_parent:
+                    result.append({
+                        'source_iface': src_wan,
+                        'target_iface': iface,
+                        'peer': neighbor,
+                        'source': 'lldp',
+                    })
+                    break
+        return result
+
+    def get_smart_suggestions(
+        self,
+        lldp_neighbors: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Aggregate all smart detection suggestions for the API.
+        """
+        ip_remap = self.auto_detect_ip_remapping()
+        lldp_mapping = self.auto_detect_lldp_mapping(lldp_neighbors)
+        return {
+            'bgp_neighbors': ip_remap.get('bgp_neighbors', []),
+            'wan_ips': ip_remap.get('wan_ips', []),
+            'service_ips': ip_remap.get('service_ips', []),
+            'lldp_mapping': lldp_mapping,
+        }
     
     def _services_identical(self, src_svc: Dict, tgt_svc: Dict) -> bool:
         """Check if two services have identical key properties."""

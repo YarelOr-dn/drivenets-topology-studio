@@ -591,7 +591,7 @@ window.ContextMenuHandlers = {
         
         if (isDeviceToText) {
             // Device → TB: Smart color mapping based on whether TB has background
-            const tbHasBackground = obj.showBackground || obj.bgColor || obj.backgroundColor;
+            const tbHasBackground = obj.showBackground !== false;
             
             if (tbHasBackground) {
                 // TB has background: device color → TB bg, device labelColor → TB text color
@@ -620,9 +620,7 @@ window.ContextMenuHandlers = {
         
         if (isTextToDevice) {
             // TB → Device: Smart color mapping based on whether TB has background
-            const tbHadBackground = editor.copiedStyle.showBackground || 
-                                    editor.copiedStyle.bgColor || 
-                                    editor.copiedStyle.backgroundColor;
+            const tbHadBackground = editor.copiedStyle.showBackground !== false;
             
             if (tbHadBackground) {
                 // TB had background: TB bg → device color, TB text color → device labelColor
@@ -654,9 +652,7 @@ window.ContextMenuHandlers = {
         // CROSS-TYPE: TB → Link
         const isTextToLink = sourceType === 'text' && isLinkType(objType);
         if (isTextToLink) {
-            const tbHadBackground = editor.copiedStyle.showBackground || 
-                                    editor.copiedStyle.bgColor || 
-                                    editor.copiedStyle.backgroundColor;
+            const tbHadBackground = editor.copiedStyle.showBackground !== false;
             if (tbHadBackground) {
                 // TB had background: TB bg color → link color
                 if (editor.copiedStyle.backgroundColor !== undefined) {
@@ -684,7 +680,7 @@ window.ContextMenuHandlers = {
         // CROSS-TYPE: Link → TB
         const isLinkToText = isLinkType(sourceType) && objType === 'text';
         if (isLinkToText) {
-            const tbHasBackground = obj.showBackground || obj.bgColor || obj.backgroundColor;
+            const tbHasBackground = obj.showBackground !== false;
             if (tbHasBackground) {
                 // TB has bg: link color → TB bg color
                 if (editor.copiedStyle.color !== undefined) {
@@ -707,9 +703,7 @@ window.ContextMenuHandlers = {
         // CROSS-TYPE: TB → Shape
         const isTextToShape = sourceType === 'text' && objType === 'shape';
         if (isTextToShape) {
-            const tbHadBackground = editor.copiedStyle.showBackground || 
-                                    editor.copiedStyle.bgColor || 
-                                    editor.copiedStyle.backgroundColor;
+            const tbHadBackground = editor.copiedStyle.showBackground !== false;
             if (tbHadBackground) {
                 // TB had bg: TB bg color → shape fill, TB border/text color → shape stroke
                 if (editor.copiedStyle.backgroundColor !== undefined) {
@@ -739,7 +733,7 @@ window.ContextMenuHandlers = {
         // CROSS-TYPE: Shape → TB
         const isShapeToText = sourceType === 'shape' && objType === 'text';
         if (isShapeToText) {
-            const tbHasBackground = obj.showBackground || obj.bgColor || obj.backgroundColor;
+            const tbHasBackground = obj.showBackground !== false;
             if (tbHasBackground) {
                 // TB has bg: shape fill → TB bg, shape stroke → TB border/text color
                 if (editor.copiedStyle.fillColor !== undefined) {

@@ -8,7 +8,9 @@ import base64
 
 
 class Platform(str, Enum):
-    """DNOS hardware platforms."""
+    """DNOS hardware platforms (legacy enum -- kept for backward compat).
+    New system types (CL-86, SA-40C, etc.) use the string field on Device.
+    """
     NCP = "NCP"
     NCM = "NCM"
     NCP5 = "NCP5"
@@ -78,10 +80,12 @@ class Device(BaseModel):
     ip: str = Field(..., description="IP address or DNS name for SSH")
     username: str = Field(default="dnroot", description="SSH username")
     password: str = Field(..., description="SSH password (base64 encoded)")
-    platform: Platform = Field(default=Platform.NCP, description="Hardware platform")
+    platform: str = Field(default="NCP", description="Hardware platform or system type (NCP, CL-86, SA-40C, etc.)")
+    system_type: Optional[str] = Field(default=None, description="System type for deployment (CL-86, SA-36CD-S, SA-40C, etc.)")
     last_sync: Optional[datetime] = Field(default=None, description="Last config sync time")
     description: Optional[str] = Field(default=None, description="Device description")
     management_ip: Optional[str] = Field(default=None, description="Auto-discovered management IP (fallback)")
+    connection_method: Optional[str] = Field(default=None, description="Connection method (SSH->MGMT, etc.)")
 
     @classmethod
     def encode_password(cls, plain_password: str) -> str:

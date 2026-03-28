@@ -285,7 +285,7 @@ window.LinkGeometry = {
 
     linksAlreadyShareMP(editor, link1, link2) {
         if (window.BulUtils) {
-            return window.BulUtils.linksAlreadyShareMP(this, link1, link2);
+            return window.BulUtils.linksAlreadyShareMP(editor, link1, link2);
         }
         // Fallback - check direct relationships
         if (link1.mergedWith?.linkId === link2.id || link2.mergedWith?.linkId === link1.id) return true;
