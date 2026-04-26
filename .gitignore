@@ -29,7 +29,11 @@ env/
 # IDE
 .idea/
 .vscode/
-.cursor/
+# Cursor workspace files are local by default, except curated shared commands.
+.cursor/*
+!.cursor/commands/
+.cursor/commands/*
+!.cursor/commands/debug-dnos.md
 *.swp
 *.swo
 *~
