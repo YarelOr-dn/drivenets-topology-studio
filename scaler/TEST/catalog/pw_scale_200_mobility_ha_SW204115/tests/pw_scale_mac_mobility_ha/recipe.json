@@ -1,0 +1,480 @@
+{
+  "id": "TEST_pw_scale_mac_mobility_ha_SW204115",
+  "name": "PW Scale MAC Mobility + HA -- 200 PE-4 <-> RR-SA-2 PWs",
+  "type": "ha",
+  "feature": "evpn-mac-mobility-si-vpls-scale",
+  "source": "natural-language:/TEST PW scale 200 services + SW-204115 HA",
+  "jira_key": "SW-204115",
+  "parent_category": "SW-204115",
+  "created": "2026-05-03",
+  "recipe_schema_version": 2,
+  "knowledge_revision": "2026-05-03-pe4-rrsa2-pw-scale-valid-inner3101-site-label-stepping",
+  "infra_required": "dual_dut_pw_scale",
+  "default_cleanup_scope": "service_window",
+  "device_requirements": {
+    "type": "cluster",
+    "primary_device": "YOR_CL_PE-4",
+    "peer_device": "RR-SA-2",
+    "features": [
+      "evpn",
+      "seamless-integration",
+      "l2vpn-vpls",
+      "mpls-label-pool",
+      "spirent-dnaas"
+    ],
+    "min_ncp_count": 1,
+    "requires_standby_ncc": true
+  },
+  "runtime_parameters": {
+    "scale": {
+      "default": 200,
+      "min": 1,
+      "max": 200,
+      "doc": "Number of matched PE-4/RR-SA-2 PW services. Use scale=10 for smoke."
+    },
+    "service_offset": {
+      "default": 0,
+      "doc": "Global service index starts at 1 + service_offset. Default inner VLAN window is 3101..3300; offset 200 uses 3301..3500."
+    },
+    "stream_strategy": {
+      "default": "one_per_pw_400",
+      "options": ["one_per_pw_400", "block_per_chunk_20"]
+    },
+    "ha_mode": {
+      "default": "core3",
+      "options": ["full_7_chunked", "core3", "switchover_only", "skip"],
+      "doc": "core3 = NCC switchover + routing:bgpd restart + wb_agent/NCP datapath restart."
+    },
+    "wave_activation": {
+      "default": true,
+      "wave_size": 50,
+      "wave_spacing_sec": 5
+    },
+    "chunk_commit_size": {
+      "default": 25
+    },
+    "traffic_rate_mbps_per_stream": {
+      "default": 1
+    },
+    "frame_size_bytes": {
+      "default": 128
+    },
+    "stabilization_window_sec": {
+      "default": 60
+    },
+    "dnaas_preflight_mode": {
+      "default": "full",
+      "options": ["full", "sample", "skip"],
+      "doc": "full checks every PE-4 and RR-SA-2 stream recipe before config and again after config; sample checks chunk boundaries for smoke/debug only."
+    },
+    "dnaas_parallelism": {
+      "default": 20,
+      "doc": "Parallel dnos_dnaas_spirent_preflight calls for the 2 * scale window."
+    }
+  },
+  "topology_anchor": {
+    "description": "200 matched EVPN-SI VPLS services between PE-4 and RR-SA-2. PE-4 traffic rides DNAAS fab 213 and user outer 219. RR-SA-2 traffic rides DNAAS fab 215 and B-15 rewrites user outer 215 to DUT wire outer 4 while preserving valid 802.1Q inner tags.",
+    "service_matrix_generator": "shared.pw_scale_builder.build_service_matrix(scale={scale}, offset={service_offset})",
+    "service_index_rule": {
+      "global_index": "service_offset + local_index, where local_index is 1..scale",
+      "default_global_index_range": "1..200",
+      "inner_vlan": "3100 + global_index; default run uses 3101..3300 and must stay within 1..4094",
+      "route_target": "1234567:<inner_vlan>",
+      "evi": "<inner_vlan>",
+      "service_name": "EVPN_PW_S<global_index:03d>",
+      "pe4_rd": "4.4.4.4:<inner_vlan>",
+      "rr_rd": "2.2.2.2:<inner_vlan>",
+      "pe4_evpn_bgp_as": 1234567,
+      "rr_sa2_evpn_bgp_as": 123,
+      "pe4_site_id": "10000 + global_index",
+      "rr_site_id": "20000 + global_index",
+      "label_block_size": 8,
+      "label_block_ordinal": "global_index - 1",
+      "label_block_budget_slots": "(global_index - 1) * 8 .. ((global_index - 1) * 8) + 7"
+    },
+    "non_overlap_contract": {
+      "validated_by": "shared.pw_scale_builder._validate_service_matrix",
+      "must_be_unique_per_service": [
+        "service_name",
+        "inner_vlan",
+        "evi",
+        "route_target",
+        "PE-4 AC",
+        "RR-SA-2 AC",
+        "PE-4 RD",
+        "RR-SA-2 RD",
+        "PE-4 site-id",
+        "RR-SA-2 site-id",
+        "label_block_ordinal",
+        "stream name",
+        "ownership tag",
+        "source MAC",
+        "unknown-unicast destination MAC"
+      ],
+      "must_not_overlap_between_devices": [
+        "site-id ranges",
+        "traffic source MAC ranges",
+        "unknown-unicast destination MAC ranges",
+        "stream names"
+      ],
+      "label_block_note": "label-block-size is the per-instance width, so it remains 8. The non-overlap key is the per-service site-id plus label_block_ordinal/budget metadata; DNOS owns the actual dynamic label allocation."
+    },
+    "pe4": {
+      "device": "YOR_CL_PE-4",
+      "loopback": "4.4.4.4",
+      "role": "cluster DUT and HA target",
+      "ac_parent": "ge100-18/0/0",
+      "outer_vlan": 219,
+      "fabric_vlan": 213,
+      "dnaas_leaf": "DNAAS-LEAF-B10",
+      "dnaas_leaf_port": "ge100-0/0/3",
+      "spirent_frame": "Q-in-Q outer=219 inner=<inner_vlan>",
+      "expected_origin_flag": "L>",
+      "expected_remote_flag_on_rr": "v>"
+    },
+    "rr_sa_2": {
+      "device": "RR-SA-2",
+      "loopback": "2.2.2.2",
+      "role": "PW peer with matched services",
+      "ac_parent": "bundle-100",
+      "wire_outer_vlan": 4,
+      "spirent_outer_vlan": 215,
+      "fabric_vlan": 215,
+      "dnaas_leaf": "DNAAS-LEAF-B15",
+      "dnaas_leaf_port": "ge100-0/0/6",
+      "spirent_frame": "Q-in-Q outer=215 inner=<inner_vlan>; B-15 rewrites outer to 4",
+      "expected_origin_flag": "L>",
+      "expected_remote_flag_on_pe4": "v>"
+    },
+    "spirent": {
+      "session_name": "dn_spirent_main",
+      "port": "//100.64.3.238/6/13",
+      "leaf": "DNAAS-LEAF-B14",
+      "port_facing_leaf": "ge100-0/0/15",
+      "stream_count": "2 * scale",
+      "default_stream_count": 400
+    }
+  },
+  "expected_traffic_generator": {
+    "module": "shared.pw_scale_builder",
+    "function": "build_expected_traffic",
+    "matrix_function": "build_service_matrix",
+    "entry_count": "2 * scale",
+    "default_entry_count": 400,
+    "keys": ["S001_PE4..S200_PE4 (offset=0)", "S001_RR..S200_RR (offset=0)"],
+    "feeds": "active_test_session.expected_traffic",
+    "proof_contract": [
+      "Every PE4 entry uses --vlan 219 --inner-vlan <inner_vlan> and expects L> on PE-4, v> on RR-SA-2.",
+      "Every RR entry uses --vlan 215 --inner-vlan <inner_vlan> and expects L> on RR-SA-2, v> on PE-4.",
+      "Every stream uses a deterministic unknown-unicast destination MAC (02:aa:ad:01:* for PE-4-side, 02:aa:be:01:* for RR-side), never broadcast.",
+      "No entry may include --no-qinq."
+    ]
+  },
+  "prerequisites": [
+    {
+      "id": "service_matrix_no_overlap",
+      "check": "generated_parameter_window",
+      "generator": "shared.pw_scale_builder.build_service_matrix",
+      "expect": "all service names, inner VLANs, EVIs, RTs, RDs, ACs, site IDs, label-block ordinals, stream names, ownership tags, and MACs are unique; all inner VLANs are within 1..4094",
+      "fail_action": "abort_before_config"
+    },
+    {
+      "id": "live_service_window_empty",
+      "check": "existing_config_collision_guard",
+      "devices": ["YOR_CL_PE-4", "RR-SA-2"],
+      "check_command": "show config | flatten",
+      "expect": "no generated EVPN_PW_S service name and no generated PE-4/RR-SA-2 AC name already exists before bulk creation",
+      "fail_action": "abort_before_config_or_run_cleanup_with_same_scale_and_offset"
+    },
+    {
+      "id": "identity_pe4",
+      "check": "device_identity_lock",
+      "device": "YOR_CL_PE-4",
+      "check_command": "show system version | no-more",
+      "expect_pattern": "System Name"
+    },
+    {
+      "id": "identity_rrsa2",
+      "check": "device_identity_lock",
+      "device": "RR-SA-2",
+      "check_command": "show system version | no-more",
+      "expect_pattern": "System Name"
+    },
+    {
+      "id": "spirent_session_alive",
+      "check": "spirent_session_reachable",
+      "expect": "dn_spirent_main reservable on //100.64.3.238/6/13",
+      "fix_via": "/SPIRENT status then /SPIRENT setup if missing"
+    },
+    {
+      "id": "spirent_stream_capacity",
+      "check": "soft_capacity_config",
+      "config_file": "~/.spirent_config.json",
+      "expect": "capacity.max_streams >= 400",
+      "fix": "This recipe bumps the soft warning cap to 500. It is not a Spirent hardware limit."
+    },
+    {
+      "id": "dnaas_preflight_pe4_window",
+      "check": "mcp_dnaas_spirent_preflight_window",
+      "fix_via_mcp": {
+        "tool": "dnos_dnaas_spirent_preflight",
+        "args_template": {
+          "vlan": 219,
+          "dut": "YOR_CL_PE-4",
+          "inner_vlan": "{service.inner_vlan}",
+          "caller_intent": "test_recipe"
+        }
+      },
+      "parallelism": 50,
+      "pass_when": "verdict == 'READY' or verdict == 'NEEDS_AC'",
+      "fail_when": "verdict == 'BLOCKED'",
+      "runtime_enforced_by": "orchestrator.py prerequisite_gate",
+      "feeds": "active_test_session.expected_traffic.*_PE4"
+    },
+    {
+      "id": "dnaas_preflight_rr_window",
+      "check": "mcp_dnaas_spirent_preflight_window",
+      "fix_via_mcp": {
+        "tool": "dnos_dnaas_spirent_preflight",
+        "args_template": {
+          "vlan": 215,
+          "dut": "RR-SA-2",
+          "inner_vlan": "{service.inner_vlan}",
+          "caller_intent": "test_recipe"
+        }
+      },
+      "parallelism": 50,
+      "pass_when": "verdict == 'READY' or verdict == 'NEEDS_AC'",
+      "fail_when": "verdict == 'BLOCKED'",
+      "runtime_enforced_by": "orchestrator.py prerequisite_gate",
+      "feeds": "active_test_session.expected_traffic.*_RR"
+    },
+    {
+      "id": "label_pool_not_sw253359",
+      "check": "known_bug_gate",
+      "device": "YOR_CL_PE-4",
+      "check_command": "show mpls label-allocation tables | no-more",
+      "fail_pattern": "bgp-vpls: 0 labels, N/A",
+      "known_bug": "SW-253359",
+      "runtime_enforced_by": "orchestrator.py prerequisite_gate",
+      "fail_action": "abort_before_config"
+    },
+    {
+      "id": "label_block_config_present",
+      "check": "routing_options_label_block",
+      "device": "YOR_CL_PE-4",
+      "check_command": "show config routing-options | no-more",
+      "expect_pattern": "bgp-vpls-label-block-size",
+      "per_instance_label_block_size": 8,
+      "expected_label_budget_per_device": "scale * 8 label slots (default 1600)",
+      "warn_if_missing": true
+    },
+    {
+      "id": "label_pool_config_active",
+      "check": "bgp_vpls_configured_vs_in_use",
+      "devices": ["YOR_CL_PE-4", "RR-SA-2"],
+      "check_commands": [
+        "show mpls label-allocation tables | no-more",
+        "show config routing-options | no-more"
+      ],
+      "expect": "bgp-vpls In use label total is >= scale * label-block-size and matches the configured bgp-vpls label pool after restart",
+      "fail_when": "Configured bgp-vpls pool is large enough but In use remains smaller, or DNOS prints 'Configured values differ from current in use values, restart system to apply new values.'",
+      "known_bug": "SW-253359",
+      "runtime_enforced_by": "orchestrator.py prerequisite_gate",
+      "fail_action": "abort_before_config_traffic_or_ha",
+      "remediation": "Keep routing-options bgp-vpls-label-block-size >= scale * label-block-size, perform full cold 'request system restart' on the affected cluster, then re-run show mpls label-allocation tables and require bgp-vpls In use to match the configured pool. bgpd/container/NCC restarts and switchover are not accepted fixes for this gate."
+    },
+    {
+      "id": "ha_readiness_pe4",
+      "check": "ha_readiness",
+      "device": "YOR_CL_PE-4",
+      "skip_when": "ha_mode == 'skip'",
+      "check_commands": [
+        "show system | no-more",
+        "show system alarms | no-more",
+        "show interfaces management | no-more"
+      ],
+      "pass_criteria": [
+        "standby NCC is standby-up for switchover tests",
+        "failover budget remaining > 0",
+        "no critical alarms"
+      ]
+    }
+  ],
+  "show_commands_validated": {
+    "show system version | no-more": "Device identity lock.",
+    "show system | no-more": "HA readiness, active/standby NCC, failover budget.",
+    "show config | flatten": "Documented DNOS syntax. Live collision guard before creating generated EVPN_PW_S services and ACs.",
+    "show system alarms | no-more": "Abort on critical alarms before HA. Live-validated on PE-4 and RR-SA-2, DNOS 19.2.13.x lab image, 2026-05-03.",
+    "show interfaces management | no-more": "NCE IP mapping for cluster HA.",
+    "show mpls label-allocation tables | no-more": "Label pool integrity and SW-253359 gate.",
+    "show config routing-options | no-more": "bgp-vpls-label-block-size discovery. Live-validated on PE-4 and RR-SA-2, DNOS 19.2.13.x lab image, 2026-05-03.",
+    "show network-services evpn all | no-more": "Bulk visibility check for generated EVPN service names.",
+    "show network-services evpn {service_name} | no-more": "Per-service EVI, interface, and remote PE state.",
+    "show evpn vpls-pw | no-more": "PW establishment count after bulk config. Live-validated on PE-4 and RR-SA-2, DNOS 19.2.13.x lab image, 2026-05-03.",
+    "show evpn instance {service_name} detail | no-more": "Per-service EVI, AC, BGP-VPLS neighbor, and VPLS PW state. Live-validated with EVPN_SI_VPLS_1 on PE-4 and RR-SA-2, 2026-05-03.",
+    "show evpn instance {service_name} vpls-pw | no-more": "Per-service PW status. Live-validated with EVPN_SI_VPLS_1 on PE-4 and RR-SA-2, 2026-05-03.",
+    "show evpn mac-table instance {service_name} mac {mac} | no-more": "Source-qualified local/PW MAC checks.",
+    "show evpn mac-table detail instance {service_name} | no-more": "Detailed flags when a service fails the fast MAC check.",
+    "show bgp l2vpn vpls summary | no-more": "VPLS BGP session state. Live-validated on PE-4 and RR-SA-2, DNOS 19.2.13.x lab image, 2026-05-03.",
+    "show bgp l2vpn evpn summary | no-more": "EVPN BGP session state.",
+    "show system process routing:bgpd | no-more": "BGP daemon health after HA.",
+    "show system process wb_agent | no-more": "NCP datapath agent health after HA."
+  },
+  "invalid_commands": {
+    "show evpn mac-table instance {service_name} detail": "Wrong DNOS order. Use 'show evpn mac-table detail instance {service_name}'.",
+    "show interfaces brief": "Does not exist in DNOS. Use 'show interfaces description'.",
+    "show bgp ipv4 flowspec-vpn summary": "Does not exist. Use 'show bgp ipv4 flowspec summary' for FlowSpec tests."
+  },
+  "phases": [
+    {
+      "name": "prerequisite_gate",
+      "tool": "python",
+      "runner": "orchestrator.py --phase prerequisite_gate",
+      "timeout_sec": 600
+    },
+    {
+      "name": "bulk_config_setup",
+      "tool": "python",
+      "runner": "shared.pw_scale_runner.apply_config_chunks",
+      "chunk_commit_size_param": "chunk_commit_size",
+      "timeout_sec": 2400,
+      "python_justification": "Chunked multi-device commits with conditional stop on first failure."
+    },
+    {
+      "name": "verify_pw_establishment",
+      "tool": "python",
+      "runner": "shared.pw_scale_runner.poll_pw_establishment",
+      "timeout_sec": 300,
+      "poll_interval_sec": 10
+    },
+    {
+      "name": "verify_dnaas_ready_after_config",
+      "tool": "python",
+      "runner": "orchestrator.py --phase verify_dnaas_ready_after_config",
+      "timeout_sec": 600,
+      "pass_when": "every checked PE-4/RR-SA-2 preflight verdict is READY after ACs are committed",
+      "python_justification": "Parallel post-config DNAAS preflight across 2 * scale StreamBlock recipes before creating live Spirent traffic."
+    },
+    {
+      "name": "spirent_streams_create_400",
+      "tool": "python",
+      "runner": "shared.pw_scale_runner.create_spirent_streams",
+      "timeout_sec": 900,
+      "creates": "2 * scale StreamBlocks"
+    },
+    {
+      "name": "wave_activation_50_per_5s",
+      "tool": "python",
+      "runner": "shared.pw_scale_runner.wave_activate_streams",
+      "timeout_sec": 240
+    },
+    {
+      "name": "verify_mac_learn_both_sides",
+      "tool": "python",
+      "runner": "shared.pw_scale_runner.verify_mac_learning",
+      "timeout_sec": 600,
+      "poll_interval_sec": 10
+    },
+    {
+      "name": "stabilization_window",
+      "tool": "python",
+      "action": "sleep_and_collect_spirent_stats",
+      "timeout_sec": 120
+    },
+    {
+      "name": "ha_switchover_only",
+      "tool": "python",
+      "enabled_when": "ha_mode in ['switchover_only', 'core3', 'full_7_chunked']",
+      "ha_command": "request system ncc switchover",
+      "ha_type": "ncc_switchover",
+      "timeout_sec": 900
+    },
+    {
+      "name": "ha_bgpd_restart",
+      "tool": "python",
+      "enabled_when": "ha_mode in ['core3', 'full_7_chunked']",
+      "ha_command_template": "request system process restart ncc {active_ncc_id} routing-engine routing:bgpd",
+      "ha_type": "process_restart",
+      "timeout_sec": 900
+    },
+    {
+      "name": "ha_wb_agent_restart",
+      "tool": "python",
+      "enabled_when": "ha_mode in ['core3', 'full_7_chunked']",
+      "ha_command_template": "request system container restart ncp {active_ncp_id} datapath",
+      "ha_type": "container_restart",
+      "timeout_sec": 1200
+    },
+    {
+      "name": "ha_full_7_chunked",
+      "tool": "python",
+      "enabled_when": "ha_mode == 'full_7_chunked'",
+      "source_recipe": "~/SCALER/TEST/catalog/evpn_mac_mobility_SW204115/tests/ha_mac_mobility/recipe.json",
+      "chunking": "3 chunks with budget/cooldown gates",
+      "timeout_sec": 7200
+    },
+    {
+      "name": "final_verdict",
+      "tool": "python",
+      "runner": "orchestrator.py --phase final_verdict",
+      "timeout_sec": 300
+    },
+    {
+      "name": "optional_cleanup",
+      "tool": "python",
+      "runner": "shared.pw_scale_runner.cleanup_config_chunks",
+      "enabled_when": "cleanup == true",
+      "timeout_sec": 2400
+    }
+  ],
+  "verdict": {
+    "layers": 14,
+    "thresholds": {
+      "pw_up_required": "scale",
+      "mac_learning_required": "2 * scale source MACs, each visible local on origin and v> on peer",
+      "mac_convergence_median_sec_warn": 5,
+      "mac_convergence_slow_bin_fail_count": 5,
+      "per_stream_loss_p95_warn_frames": 100,
+      "per_stream_loss_p99_fail_frames": 1000,
+      "ha_spirent_loss_delta_frames": 0,
+      "ha_per_stream_loss_delta_frames": 0,
+      "label_pool_allocated_delta": "UNCHANGED",
+      "critical_alarms": "FORBIDDEN",
+      "new_core_files": "FORBIDDEN"
+    },
+    "scale_gates": [
+      "PW count: 200/200 visible on both DUTs",
+      "MAC source isolation: no local flag on the peer for a remote PW-learned MAC",
+      "Stream loss histogram preserved per StreamBlock",
+      "During every HA event, Spirent aggregate and per-stream loss counters must not increase",
+      "SW-253359 label-pool signature absent before and after HA"
+    ]
+  },
+  "test_config": {
+    "test_id": "TEST_pw_scale_mac_mobility_ha_SW204115",
+    "test_mode": "dnos_mode",
+    "cluster_requirement": "cl_only",
+    "jira_component": "evpn-mac-mobility",
+    "owner": "dn",
+    "fsm_guards": {
+      "max_ssh_retries": 10,
+      "max_spirent_reconnects": 3,
+      "max_scenario_retries": 1,
+      "max_heavy_ops_per_session": 1,
+      "hard_timeout_sec": 7200,
+      "ssh_backoff_sec": 5,
+      "spirent_backoff_sec": 5
+    },
+    "snapshot_expected_changes": {
+      "new_core_dumps": "FORBIDDEN",
+      "alarm:any": "FORBIDDEN"
+    }
+  },
+  "cleanup_policy": {
+    "default": "ask",
+    "config_cleanup": "reverse chunked dnos_multi_device_commit",
+    "spirent_cleanup": "remove streams whose names start pw_scale_pe4_ or pw_scale_rr_",
+    "active_session_tracking": "~/SCALER/TEST/active_test_session.json"
+  }
+}

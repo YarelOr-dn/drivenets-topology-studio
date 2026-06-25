@@ -1,0 +1,15 @@
+{
+  "test_id": "TEST_mac_mob_basic_SW205160",
+  "primary_device": "PE-4",
+  "dry_run": false,
+  "started_at": "2026-05-01T13:38:53+00:00",
+  "ended_at": "2026-05-01T13:39:29+00:00",
+  "verdict": "FAIL",
+  "totals": {
+    "total_cmds": 64,
+    "rejected_cmds": 5,
+    "by_method": {
+      "dnos_config_mcp": 64
+    }
+  }
+}

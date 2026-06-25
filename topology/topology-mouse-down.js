@@ -61,6 +61,25 @@ window.MouseDownHandler = {
         // (Note: inline editor has its own click-outside handler, but this is a backup)
         
         const pos = editor.getMousePos(e);
+
+        if (editor.currentTool === 'laser') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.button !== 0) {
+                editor._laserPointerActive = false;
+                return;
+            }
+            editor._laserPointerActive = true;
+            const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+            if (window.TopologyLaser.beginTrailStroke) {
+                window.TopologyLaser.beginTrailStroke(editor, pos, now);
+            } else {
+                editor._laserTrail = [];
+                window.TopologyLaser.appendTrailPoint(editor, pos, now);
+            }
+            editor.scheduleDraw ? editor.scheduleDraw() : editor.draw();
+            return;
+        }
         
         // ═══════════════════════════════════════════════════════════════════════════
         // ABSOLUTE PRIORITY 0: SSH Terminal Button (highest click priority - above ALL)
@@ -117,31 +136,36 @@ window.MouseDownHandler = {
             let tbHasPriority = false;
             
             if (textAtPos) {
-                // Calculate full visual bounds (text + background padding)
-                editor.ctx.save();
-                const fontFamily = textAtPos.fontFamily || 'Arial';
-                const fontWeight = textAtPos.fontWeight || 'normal';
-                editor.ctx.font = `${fontWeight} ${textAtPos.fontSize}px ${fontFamily}`;
-                const metrics = editor.ctx.measureText(textAtPos.text || 'Text');
-                const textW = metrics.width;
-                const textH = parseInt(textAtPos.fontSize) || 14;
-                editor.ctx.restore();
-                
+                // Hitbox parity with stretch (2026-05-12): resolve TB bounds
+                // through `getTextEffectiveBounds` so that edge-stretched
+                // boxes (manual width with auto-grown or locked height) win
+                // their TB-vs-link-CP arbitration over the full visible
+                // rectangle, not over a stale single-line measureText of
+                // the raw `obj.text`.
+                const tbBounds = (window.ObjectDetection && window.ObjectDetection.getTextEffectiveBounds)
+                    ? window.ObjectDetection.getTextEffectiveBounds(editor, textAtPos)
+                    : { w: 0, h: 0 };
+                const textW = tbBounds.w;
+                const textH = tbBounds.h;
+
                 // Transform click point to text's local space
                 const dx = pos.x - textAtPos.x;
                 const dy = pos.y - textAtPos.y;
-                const angle = -(textAtPos.rotation || 0) * Math.PI / 180;
+                const effRotTb = editor.getEffectiveTextRotation
+                    ? editor.getEffectiveTextRotation(textAtPos)
+                    : (textAtPos.rotation || 0);
+                const angle = -effRotTb * Math.PI / 180;
                 const localX = dx * Math.cos(angle) - dy * Math.sin(angle);
                 const localY = dx * Math.sin(angle) + dy * Math.cos(angle);
-                
+
                 // FIX: Use FULL visible bounds - text + background padding
                 // If TB has a background, use its padding; otherwise use reasonable margin
                 const hasBackground = textAtPos.showBackground !== false;
                 const bgPadding = hasBackground ? (textAtPos.backgroundPadding || 8) : 6;
                 // Add extra click tolerance (6px) for better UX
                 const clickPadding = bgPadding + 6;
-                
-                const isOnTextArea = Math.abs(localX) <= (textW/2 + clickPadding) && 
+
+                const isOnTextArea = Math.abs(localX) <= (textW/2 + clickPadding) &&
                                      Math.abs(localY) <= (textH/2 + clickPadding);
                 
                 // TB WINS if click is within its visible area
@@ -275,7 +299,11 @@ window.MouseDownHandler = {
             };
             editor.canvas.style.cursor = 'move';
             // Close all menus/toolbars when panning starts
-            editor.hideAllPopups();
+            if (editor.beginCanvasPanInteraction) {
+                editor.beginCanvasPanInteraction();
+            } else {
+                editor.hideAllPopups();
+            }
             if (window.XrayPopup && window.XrayPopup.temporaryHide) {
                 window.XrayPopup.temporaryHide();
             }
@@ -391,90 +419,73 @@ window.MouseDownHandler = {
             return;
         }
         
-        // Check for handles ONLY on SELECTED text object
-        // CRITICAL: Only allow resize/rotation AFTER text is selected AND mouse is released
-        // This prevents accidental resize/rotate when trying to drag unselected text
+        // Check for handles ONLY on SELECTED text object.
+        //
+        // CRITICAL: Only allow resize/rotation AFTER text is selected AND
+        // mouse is released. This prevents accidental resize/rotate when
+        // trying to drag unselected text.
+        //
+        // Routes through the unified `findTextHandle` helper (mirrors the
+        // shape resize handle taxonomy: 8 bbox handles + 1 outboard
+        // rotation handle, all in shape-style ids 'nw'/'n'/'ne'/'e'/...).
+        // Resize math lives in topology-mouse-move.js; this block only
+        // captures the start state.
         let handleFound = false;
-        
+
         if (editor.selectedObject && editor.selectedObject.type === 'text' && e.button === 0 &&
             editor.selectedObject._mouseReleasedAfterSelection === true) {
             const textObj = editor.selectedObject;
-            // Temporarily set font to measure text - MUST match drawing font exactly
-            editor.ctx.save();
-            const fontFamily = textObj.fontFamily || 'Arial';
-            const fontWeight = textObj.fontWeight || 'normal';
-            const fontStyle = textObj.fontStyle || 'normal';
-            const fontSize = parseInt(textObj.fontSize) || 14;
-            editor.ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
-            
-            // Handle multiline text - same calculation as drawText
-            const textContent = textObj.text || 'Text';
-            const lines = textContent.split('\n');
-            const lineHeight = fontSize * 1.3;
-            
-            let maxWidth = 0;
-            for (const line of lines) {
-                const metrics = editor.ctx.measureText(line || ' ');
-                maxWidth = Math.max(maxWidth, metrics.width);
-            }
-            const textWidth = maxWidth;
-            const textHeight = lines.length * lineHeight;
-            editor.ctx.restore();
-            
-            const angle = (textObj.rotation || 0) * Math.PI / 180;
-            
-            // Define all corner handles (must match drawing offset of 8)
-            const handleOffset = 8;
-            const corners = [
-                { x: -textWidth/2 - handleOffset, y: -textHeight/2 - handleOffset, type: 'resize' },  // Top-left
-                { x: textWidth/2 + handleOffset, y: -textHeight/2 - handleOffset, type: 'rotation' },  // Top-right
-                { x: textWidth/2 + handleOffset, y: textHeight/2 + handleOffset, type: 'resize' },     // Bottom-right
-                { x: -textWidth/2 - handleOffset, y: textHeight/2 + handleOffset, type: 'resize' }     // Bottom-left
-            ];
-                
-                // Check each corner handle - PIXEL-ACCURATE to match visual
-                for (const corner of corners) {
-                    // Transform corner to world coordinates (accounting for text rotation)
-                    const rotatedX = corner.x * Math.cos(angle) - corner.y * Math.sin(angle);
-                    const rotatedY = corner.x * Math.sin(angle) + corner.y * Math.cos(angle);
-                    const handleWorldX = textObj.x + rotatedX;
-                    const handleWorldY = textObj.y + rotatedY;
-                    
-                    const dx = pos.x - handleWorldX;
-                    const dy = pos.y - handleWorldY;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-            
-                    // PIXEL-ACCURATE: Match hitbox to visual handle size
-                    const handleSize = Math.max(6, Math.min(10, 8 / editor.zoom));
-                    const hitboxSize = handleSize + 4; // Small tolerance
-                    if (dist < hitboxSize) {
-                        editor.selectedObject = textObj;
-                        editor.selectedObjects = [textObj];
-                        
-                    if (corner.type === 'rotation') {
-                // Start text rotation
-                        editor.saveState(); // Make text rotation undoable
-                editor.rotatingText = true;
-                        editor.hideMultiSelectContextMenu(); // Hide MS menu during rotation
-                        const mouseAngle = Math.atan2(pos.y - textObj.y, pos.x - textObj.x);
-                editor.textRotationStartAngle = mouseAngle;
-                        editor.textRotationStartRot = textObj.rotation;
-                    } else {
-                        // Start text resize - drag away from center = bigger, toward center = smaller
-                        editor.saveState();
-                        editor.resizingText = true;
-                        editor.hideMultiSelectContextMenu();
-                        editor.hideTextSelectionToolbar();
-                        editor.textResizeStartSize = textObj.fontSize;
-                        editor.textResizeStartDist = Math.sqrt(
-                            Math.pow(pos.x - textObj.x, 2) + 
-                            Math.pow(pos.y - textObj.y, 2)
-                        );
-                    }
-                        handleFound = true;
+            const hit = editor.findTextHandle ? editor.findTextHandle(textObj, pos.x, pos.y) : null;
+
+            if (hit) {
+                editor.selectedObject = textObj;
+                editor.selectedObjects = [textObj];
+
+                if (hit.type === 'rotation') {
+                    // Start text rotation -- unchanged semantics, just routed
+                    // through the new handle hit-test.
+                    editor.saveState();
+                    editor.rotatingText = true;
+                    editor.hideMultiSelectContextMenu();
+                    const mouseAngle = Math.atan2(pos.y - textObj.y, pos.x - textObj.x);
+                    editor.textRotationStartAngle = mouseAngle;
+                    editor.textRotationStartRot = textObj.rotation;
+                    editor.canvas.style.cursor = 'grabbing';
+                } else {
+                    // Start bbox-resize. Snapshot start width/height. If the
+                    // text box is auto-sized today (no persisted width/height),
+                    // measure the current rendered bounds and FREEZE them on
+                    // start -- the first drag converts the box from auto-size
+                    // to manual-size in a single, predictable transition.
+                    editor.saveState();
+                    editor.hideMultiSelectContextMenu();
+                    editor.hideTextSelectionToolbar();
+
+                    const bounds = (window.ObjectDetection && window.ObjectDetection.getTextEffectiveBounds)
+                        ? window.ObjectDetection.getTextEffectiveBounds(editor, textObj)
+                        : { w: 0, h: 0 };
+                    const startW = Math.max(20, Number.isFinite(textObj.width) ? textObj.width : bounds.w);
+                    const startH = Math.max(20, Number.isFinite(textObj.height) ? textObj.height : bounds.h);
+
+                    editor.resizingText = true;
+                    editor.textResizeHandle = hit.handle; // 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
+                    editor._textResizeStart = {
+                        x: pos.x,
+                        y: pos.y,
+                        width: startW,
+                        height: startH,
+                        centerX: textObj.x,
+                        centerY: textObj.y,
+                        // Whether this text box was auto-sized BEFORE this
+                        // resize (used by drawing path for back-compat) --
+                        // captured only for diagnostics; conversion to
+                        // manual happens on first move.
+                        wasAutoSized: !(Number.isFinite(textObj.width) && Number.isFinite(textObj.height))
+                    };
+                }
+                handleFound = true;
                 e.preventDefault();
                 return;
-                    }
             }
         }
         
@@ -557,6 +568,39 @@ window.MouseDownHandler = {
                     return;
                 }
             }
+
+            if (sel.type === 'packet' && window.PacketMethods &&
+                typeof window.PacketMethods.findPacketResizeHandle === 'function') {
+                const packetHandle = window.PacketMethods.findPacketResizeHandle(editor, sel, pos.x, pos.y);
+                if (packetHandle) {
+                    const bounds = window.PacketMethods.getPacketBounds
+                        ? window.PacketMethods.getPacketBounds(editor, sel)
+                        : { w: sel.width || 110 };
+                    editor.saveState();
+                    editor.resizingPacket = sel;
+                    // For a freestanding packet we pin the OPPOSITE edge so the
+                    // grabbed edge tracks the cursor 1:1 (natural resize). For a
+                    // link-attached packet the center is locked to the cable, so
+                    // it grows symmetrically about the anchor instead.
+                    const oppositeEdgeX = packetHandle === 'e'
+                        ? sel.x - bounds.w / 2
+                        : sel.x + bounds.w / 2;
+                    editor._packetResizeStart = {
+                        x: pos.x,
+                        width: bounds.w,
+                        dir: packetHandle,
+                        attached: !!sel.linkId,
+                        oppositeEdgeX
+                    };
+                    editor.dragging = false;
+                    editor.hidePacketSelectionToolbar();
+                    editor.hideMultiSelectContextMenu();
+                    editor.canvas.style.cursor = 'ew-resize';
+                    editor.draw();
+                    e.preventDefault();
+                    return;
+                }
+            }
         }
 
         // Find clicked object if we didn't click text handles
@@ -599,6 +643,45 @@ window.MouseDownHandler = {
                     }
                 }
             }
+        }
+
+        if (clickedObject && clickedObject.type === 'packet' && e.button === 0 &&
+            window.PacketMethods && typeof window.PacketMethods.findPacketSummaryHit === 'function') {
+            const packetSummaryHit = window.PacketMethods.findPacketSummaryHit(editor, clickedObject, pos.x, pos.y);
+            if (packetSummaryHit) {
+                editor.selectedObject = clickedObject;
+                editor.selectedObjects = [clickedObject];
+                clickedObject._mouseReleasedAfterSelection = true;
+                if (packetSummaryHit === 'arrow') {
+                    clickedObject.direction = clickedObject.direction === 'backward' ? 'forward' : 'backward';
+                    editor.saveState();
+                    editor.draw();
+                } else if (window.PacketPopup && typeof window.PacketPopup.showSummaryEditor === 'function') {
+                    window.PacketPopup.showSummaryEditor(editor, clickedObject);
+                    editor.draw();
+                }
+                e.preventDefault();
+                return;
+            }
+        }
+
+        // Click the header chevron of an already-selected packet to toggle
+        // collapse/expand directly on the canvas (responsive, no popup needed).
+        if (clickedObject && clickedObject.type === 'packet' && e.button === 0 &&
+            clickedObject._mouseReleasedAfterSelection === true &&
+            window.PacketMethods && typeof window.PacketMethods.findPacketChevronHit === 'function' &&
+            window.PacketMethods.findPacketChevronHit(editor, clickedObject, pos.x, pos.y)) {
+            editor.selectedObject = clickedObject;
+            editor.selectedObjects = [clickedObject];
+            clickedObject.collapsed = !clickedObject.collapsed;
+            editor.saveState();
+            editor.draw();
+            // Keep an open popup's Collapse/Expand label in sync.
+            if (document.getElementById('packet-popup') && editor.showPacketSelectionToolbar) {
+                editor.showPacketSelectionToolbar(clickedObject);
+            }
+            e.preventDefault();
+            return;
         }
         
         // Legacy device/shape handle checks kept as fallback for objects found by findObjectAt
@@ -862,113 +945,8 @@ window.MouseDownHandler = {
                             });
                         }
                         
-                        // GROUPING: If clicked object belongs to a group, auto-select all group members
-                        if (clickedObject.groupId) {
-                            const groupMembers = editor.getGroupMembers(clickedObject);
-                            console.log('[GROUP] Found', groupMembers.length, 'group members for groupId:', clickedObject.groupId);
-                            groupMembers.forEach(member => {
-                                if (!editor.selectedObjects.includes(member)) {
-                                    editor.selectedObjects.push(member);
-                                    console.log('[GROUP] Added member:', member.type, member.id || member.label);
-                                }
-                            });
-                            
-                            // If we now have multiple objects selected, set up multi-select drag
-                            console.log('[GROUP] Total selectedObjects:', editor.selectedObjects.length);
-                            if (editor.selectedObjects.length > 1) {
-                                // CRITICAL: Stop momentum before capturing - prevents TB+shape jump
-                                if (editor.momentum) {
-                                    editor.momentum.stopAll();
-                                    editor.momentum.reset();
-                                }
-                                // Check: merged (BUL) links grouped with devices/shapes/text - moving fails
-                                const hasMergedLinks = editor.selectedObjects.some(o =>
-                                    o.type === 'unbound' && (o.mergedWith || o.mergedInto)
-                                );
-                                const hasOtherObjects = editor.selectedObjects.some(o =>
-                                    o.type === 'device' || o.type === 'shape' || o.type === 'text'
-                                );
-                                if (hasMergedLinks && hasOtherObjects) {
-                                    if (editor.showToast) {
-                                        editor.showToast(
-                                            'BUL chains grouped with devices/shapes cannot be moved together. Ungroup first, or move each separately.',
-                                            'warning'
-                                        );
-                                    }
-                                    editor.draw();
-                                    return;
-                                }
-                                
-                                editor.saveState();
-                                editor.dragStart = { x: pos.x, y: pos.y };
-                                editor.dragStartTime = Date.now();
-                                editor.multiSelectInitialPositions = editor.selectedObjects.map(obj => {
-                                    const initPos = { id: obj.id, x: obj.x, y: obj.y };
-                                    if (obj.type === 'unbound') {
-                                        initPos.startX = obj.start.x;
-                                        initPos.startY = obj.start.y;
-                                        initPos.endX = obj.end.x;
-                                        initPos.endY = obj.end.y;
-                                        initPos.curvePointX = obj.manualCurvePoint?.x;
-                                        initPos.curvePointY = obj.manualCurvePoint?.y;
-                                        initPos.controlPointX = obj.manualControlPoint?.x;
-                                        initPos.controlPointY = obj.manualControlPoint?.y;
-                                    }
-                                    return initPos;
-                                });
-                                
-                                // FIX: Populate Quick Link and Attached UL CPs (prevents jump when group has devices)
-                                const deviceIds = editor.selectedObjects.filter(o => o.type === 'device').map(o => o.id);
-                                editor._initialQuickLinkCPs = editor.objects
-                                    .filter(obj => obj.type === 'link' &&
-                                        (deviceIds.includes(obj.device1) || deviceIds.includes(obj.device2)) &&
-                                        (obj.manualCurvePoint || obj.manualControlPoint))
-                                    .map(ql => ({
-                                        id: ql.id,
-                                        curvePointX: ql.manualCurvePoint?.x,
-                                        curvePointY: ql.manualCurvePoint?.y,
-                                        controlPointX: ql.manualControlPoint?.x,
-                                        controlPointY: ql.manualControlPoint?.y,
-                                        bothEndpointsMoved: deviceIds.includes(ql.device1) && deviceIds.includes(ql.device2)
-                                    }));
-                                const selectedLinkIds = editor.selectedObjects.filter(o => o.type === 'unbound').map(o => o.id);
-                                editor._initialAttachedULCPs = editor.objects
-                                    .filter(obj => obj.type === 'unbound' &&
-                                        obj.manualCurvePoint &&
-                                        !selectedLinkIds.includes(obj.id) &&
-                                        (deviceIds.includes(obj.device1) || deviceIds.includes(obj.device2)))
-                                    .map(ul => ({
-                                        id: ul.id,
-                                        curvePointX: ul.manualCurvePoint?.x,
-                                        curvePointY: ul.manualCurvePoint?.y,
-                                        bothEndpointsMoved: deviceIds.includes(ul.device1) && deviceIds.includes(ul.device2)
-                                    }));
-                                
-                                // Set up pending drag for group
-                                editor._pendingDrag = {
-                                    object: clickedObject,
-                                    isMultiSelect: true,
-                                    isGroup: true,
-                                    startX: pos.x,
-                                    startY: pos.y,
-                                    dragStart: { ...editor.dragStart },
-                                    multiSelectInitialPositions: [...editor.multiSelectInitialPositions],
-                                    _initialQuickLinkCPs: editor._initialQuickLinkCPs ? [...editor._initialQuickLinkCPs] : [],
-                                    _initialAttachedULCPs: editor._initialAttachedULCPs ? [...editor._initialAttachedULCPs] : [],
-                                    threshold: 5
-                                };
-                                
-                                if (editor.debugger) {
-                                    editor.debugger.logInfo(`Group selected: ${editor.selectedObjects.length} objects (groupId: ${clickedObject.groupId})`);
-                                }
-                                
-                                editor.multiSelectMode = false;
-                                editor.currentMode = 'select';
-                                editor.updateModeIndicator();
-                                editor.draw();
-                                return;
-                            }
-                        }
+                        // Group membership is metadata here; clicking a grouped object selects only that object.
+                        // Full-group selection remains available through the Groups panel select action.
                         
                         editor.multiSelectMode = false;
                         editor.currentMode = 'select';
@@ -1398,51 +1376,14 @@ window.MouseDownHandler = {
                             // Quick Links are simple - just select immediately
                         }
                         
-                        // GROUPING: If clicked object belongs to a group, auto-select all group members
-                        // CRITICAL FIX: Must set up multi-select drag here to prevent the fallback
-                        // in handleMouseMove which causes a jump (dragStart offset vs absolute mismatch)
-                        if (clickedObject.groupId) {
-                            const groupMembers = editor.getGroupMembers(clickedObject);
-                            groupMembers.forEach(member => {
-                                if (!editor.selectedObjects.includes(member)) {
-                                    editor.selectedObjects.push(member);
-                                }
-                            });
-                            
-                            // If group expanded to multiple objects, set up multi-select drag & return
-                            if (editor.selectedObjects.length > 1) {
-                                if (editor.momentum) {
-                                    editor.momentum.stopAll();
-                                    editor.momentum.reset();
-                                }
-                                editor.saveState();
-                                editor.dragStart = { x: pos.x, y: pos.y };
-                                editor.dragStartTime = Date.now();
-                                // Positions are captured FRESH at threshold time (line ~2873)
-                                // _pendingDrag just needs isMultiSelect flag and threshold
-                                editor._pendingDrag = {
-                                    object: clickedObject,
-                                    isMultiSelect: true,
-                                    isGroup: true,
-                                    startX: pos.x,
-                                    startY: pos.y,
-                                    dragStart: { x: pos.x, y: pos.y },
-                                    multiSelectInitialPositions: [],
-                                    _initialQuickLinkCPs: [],
-                                    _initialAttachedULCPs: [],
-                                    threshold: 5
-                                };
-                                editor.currentMode = 'select';
-                                editor.updateModeIndicator();
-                                editor.draw();
-                                editor.updatePropertiesPanel();
-                                return;
-                            }
-                        }
+                        // Do not auto-expand grouped objects into a group selection on click.
                         
                         // CRITICAL: Block handles until mouse is released after selection
-                        // This prevents accidental resize/rotate when clicking to select
-                        if (clickedObject.type === 'device' || clickedObject.type === 'text' || clickedObject.type === 'shape') {
+                        // This prevents accidental resize/rotate when clicking to select.
+                        // Packets are included so their stretch handles + collapse
+                        // chevron only arm after the selecting click is released.
+                        if (clickedObject.type === 'device' || clickedObject.type === 'text' ||
+                            clickedObject.type === 'shape' || clickedObject.type === 'packet') {
                             clickedObject._mouseReleasedAfterSelection = false; // NOT released yet - block handles until mouseup
                         }
                         
@@ -1492,6 +1433,10 @@ window.MouseDownHandler = {
                                     editor.showLinkSelectionToolbar(clickedObject, clickPosForToolbar);
                                 } else if (clickedObject.type === 'shape') {
                                     editor.showShapeSelectionToolbar(clickedObject);
+                                } else if (clickedObject.type === 'packet') {
+                                    // Open the per-packet popup (layer toggles, title rename,
+                                    // collapse/expand, delete) when a packet chip is selected.
+                                    editor.showPacketSelectionToolbar(clickedObject);
                                 }
                             }
                         }, toolbarDelay);
@@ -1581,6 +1526,25 @@ window.MouseDownHandler = {
                     
                     // Update properties panel but DON'T set dragging=true yet!
                     editor.updatePropertiesPanel();
+
+                    if (alreadySelected) {
+                        const clickPosForToolbar = { x: pos.x, y: pos.y };
+                        setTimeout(() => {
+                            if (editor.linking || editor.currentTool === 'link') return;
+                            if (editor.selectedObject !== clickedObject || editor.dragging) return;
+                            if (clickedObject.type === 'text' && !editor._inlineTextEditor) {
+                                editor.showTextSelectionToolbar(clickedObject);
+                            } else if (clickedObject.type === 'device') {
+                                editor.showDeviceSelectionToolbar(clickedObject);
+                            } else if (clickedObject.type === 'link' || clickedObject.type === 'unbound') {
+                                editor.showLinkSelectionToolbar(clickedObject, clickPosForToolbar);
+                            } else if (clickedObject.type === 'shape') {
+                                editor.showShapeSelectionToolbar(clickedObject);
+                            } else if (clickedObject.type === 'packet') {
+                                editor.showPacketSelectionToolbar(clickedObject);
+                            }
+                        }, 120);
+                    }
                     
                     // ENHANCED: For unbound links, store initial endpoint positions for body dragging
                     if (clickedObject.type === 'unbound' && !editor.stretchingLink) {
@@ -1918,6 +1882,18 @@ window.MouseDownHandler = {
                                 offsetX: editor.dragStart.x,
                                 offsetY: editor.dragStart.y
                             };
+                            // Container shapes (2026-04-26): if the shape
+                            // has `containerMode: true`, snapshot every
+                            // object whose centre is inside it so we can
+                            // drag them together as a single unit.
+                            if (clickedObject.containerMode === true && typeof editor.getContainerChildren === 'function') {
+                                editor._containerDragChildren = editor.getContainerChildren(clickedObject);
+                                if (editor.debugger && editor._containerDragChildren && editor._containerDragChildren.length > 0) {
+                                    editor.debugger.logInfo(`[CONTAINER] Captured ${editor._containerDragChildren.length} child(ren) for shape "${clickedObject.label || clickedObject.shapeType}"`);
+                                }
+                            } else {
+                                editor._containerDragChildren = null;
+                            }
                         }
                         
                         // ENHANCED: Use drag threshold to prevent accidental dragging on light taps
@@ -1928,6 +1904,7 @@ window.MouseDownHandler = {
                             dragStart: { ...editor.dragStart },
                             deviceDragInitialPos: editor.deviceDragInitialPos ? { ...editor.deviceDragInitialPos } : null,
                             shapeDragInitialPos: editor.shapeDragInitialPos ? { ...editor.shapeDragInitialPos } : null,  // CRITICAL FIX: Include shape drag position
+                            containerDragChildren: editor._containerDragChildren || null,  // 2026-04-26: container shapes drag their inner objects
                             dragStartPos: (clickedObject.x !== undefined && clickedObject.y !== undefined) 
                                 ? { x: clickedObject.x, y: clickedObject.y } 
                                 : null,
@@ -2836,39 +2813,45 @@ window.MouseDownHandler = {
         editor.lastDoubleClickTime = Date.now();
         
         const pos = editor.getMousePos(e);
+        if (editor.selectedObject && editor.selectedObject.type === 'packet' && window.PacketMethods &&
+            typeof window.PacketMethods.findPacketResizeHandle === 'function') {
+            const selectedHandle = window.PacketMethods.findPacketResizeHandle(editor, editor.selectedObject, pos.x, pos.y);
+            if (selectedHandle && Number.isFinite(editor.selectedObject.userWidth)) {
+                delete editor.selectedObject.userWidth;
+                editor.saveState();
+                editor.draw();
+                e.preventDefault();
+                return;
+            }
+        }
         let clickedObject = editor.findObjectAt(pos.x, pos.y);
+
+        if (clickedObject && clickedObject.type === 'packet' && window.PacketMethods &&
+            typeof window.PacketMethods.findPacketResizeHandle === 'function') {
+            const packetHandle = window.PacketMethods.findPacketResizeHandle(editor, clickedObject, pos.x, pos.y);
+            if (packetHandle && Number.isFinite(clickedObject.userWidth)) {
+                delete clickedObject.userWidth;
+                editor.saveState();
+                editor.draw();
+                e.preventDefault();
+                return;
+            }
+        }
         
-        // ENHANCED: Check if clicking inside rotated bounding box of ANY text object
+        // Hitbox parity with stretch (2026-05-12): if the primary
+        // `findObjectAt` did not return a text object, fall back to
+        // `findTextAt` which is the canonical text hit-test and ALWAYS
+        // resolves bounds through `getTextEffectiveBounds` (so manual
+        // width / auto-grown height / wrap-aware bbox work). The previous
+        // inline `measureText(obj.text || 'Text')` fallback ignored
+        // `text.width` / `text.height` entirely and was the root cause of
+        // the "double-click on a stretched text box spawns a phantom
+        // unbound link over it" bug -- the fallback's stale bounds let
+        // the click slip through to the background-double-click branch.
         if (!clickedObject || clickedObject.type !== 'text') {
-            // Check all text objects for hitbox
-            const textInHitbox = editor.objects.find(obj => {
-                if (obj.type !== 'text') return false;
-                
-                // Calculate rotated rectangle hitbox
-                editor.ctx.save();
-                editor.ctx.font = `${obj.fontSize}px Arial`;
-                const metrics = editor.ctx.measureText(obj.text || 'Text');
-                const w = metrics.width;
-                const h = parseInt(obj.fontSize);
-                editor.ctx.restore();
-                
-                // Rectangle bounds (with padding for handles)
-                const rectW = w + 10;
-                const rectH = h + 10;
-                
-                // Transform click point to text's local space (unrotate)
-                const angle = obj.rotation * Math.PI / 180;
-                const dx = pos.x - obj.x;
-                const dy = pos.y - obj.y;
-                
-                // Rotate point back to unrotated space
-                const localX = dx * Math.cos(-angle) - dy * Math.sin(-angle);
-                const localY = dx * Math.sin(-angle) + dy * Math.cos(-angle);
-                
-                // Check if inside rectangle
-                return Math.abs(localX) <= rectW/2 && Math.abs(localY) <= rectH/2;
-            });
-            
+            const textInHitbox = editor.findTextAt
+                ? editor.findTextAt(pos.x, pos.y)
+                : null;
             if (textInHitbox) clickedObject = textInHitbox;
         }
         
@@ -3030,16 +3013,20 @@ window.MouseDownHandler = {
                 // Double-click link body to show connection details table
                 editor.showLinkDetails(clickedObject);
             } else if (clickedObject.type === 'text') {
-                // ENHANCED: Select text first, THEN open INLINE editor (Jan 2026)
+                // Select text first, THEN open INLINE editor.
+                // Polish + QA pass 2026-05-12: pass {selectAll:false} so the
+                // caret lands at end-of-text instead of selecting all. The
+                // showInline auto-detects placeholder/empty boxes and
+                // overrides this to true so a fresh "Text" placeholder still
+                // gets replaced on first keystroke.
                 editor.selectedObject = clickedObject;
                 editor.selectedObjects = [clickedObject];
-                editor.draw(); // Show selection
-                
-                // Short delay to show selection before opening inline editor
+                editor.draw();
+
                 setTimeout(() => {
-                    editor.showInlineTextEditor(clickedObject, e);
+                    editor.showInlineTextEditor(clickedObject, e, { selectAll: false });
                 }, 50);
-                
+
                 if (editor.debugger) {
                     editor.debugger.logSuccess(`Double-click on text: Inline editing "${clickedObject.text}"`);
                 }

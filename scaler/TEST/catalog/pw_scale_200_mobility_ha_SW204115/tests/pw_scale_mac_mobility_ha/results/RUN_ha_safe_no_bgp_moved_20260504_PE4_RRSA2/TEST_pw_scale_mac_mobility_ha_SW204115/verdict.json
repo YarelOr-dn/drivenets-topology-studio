@@ -1,0 +1,406 @@
+{
+  "ok": false,
+  "phases": [
+    {
+      "data": {
+        "after_stats": {
+          "loss": {
+            "frames": 6547479,
+            "percent": 14.245
+          },
+          "port": "//100.64.3.238/6/13",
+          "rx": {
+            "dropped_frames": "0",
+            "dropped_pct": "0",
+            "rate_bps": "1830848",
+            "rate_fps": "1695",
+            "sig_frames": "38995618",
+            "total_bytes": "5445269405",
+            "total_frames": "39415841"
+          },
+          "timestamp": "2026-05-04T12:41:14.236883",
+          "tx": {
+            "rate_bps": "1729816",
+            "rate_fps": "1689",
+            "sig_frames": "45963320",
+            "total_bytes": "5883304960",
+            "total_frames": "45963320"
+          }
+        },
+        "before_stats": {
+          "loss": {
+            "frames": 6550467,
+            "percent": 14.4631
+          },
+          "port": "//100.64.3.238/6/13",
+          "rx": {
+            "dropped_frames": "0",
+            "dropped_pct": "0",
+            "rate_bps": "1880232",
+            "rate_fps": "1701",
+            "sig_frames": "38323149",
+            "total_bytes": "5356121989",
+            "total_frames": "38740555"
+          },
+          "timestamp": "2026-05-04T12:34:35.871697",
+          "tx": {
+            "rate_bps": "1729832",
+            "rate_fps": "1689",
+            "sig_frames": "45291022",
+            "total_bytes": "5797250816",
+            "total_frames": "45291022"
+          }
+        },
+        "command": "request system ncc switchover",
+        "expected_mac_state": "moved",
+        "final_loss_delta": {
+          "loss_frames": 0,
+          "per_stream_deltas": {},
+          "rx_dropped_frames": 0,
+          "stream_dropped_frames": 0
+        },
+        "mac_result": {
+          "data": {
+            "failed_services": 0,
+            "iteration": 1,
+            "moved_services": 200,
+            "sample_failures": [],
+            "total_services": 200
+          },
+          "detail": "all service MACs moved to opposite DUT",
+          "ok": true,
+          "phase": "verify_mass_mobility"
+        },
+        "pw_result": {
+          "data": {
+            "iteration": 2,
+            "missing_installed_pe4": [],
+            "missing_installed_rr": [],
+            "missing_pe4": [],
+            "missing_rr": [],
+            "pe4_installed": 200,
+            "pe4_seen": 200,
+            "rr_installed": 200,
+            "rr_seen": 200
+          },
+          "detail": "all PWs installed",
+          "ok": true,
+          "phase": "verify_pw_establishment"
+        },
+        "scenario_id": "ncc_switchover",
+        "traffic_during_ha": {
+          "max_delta": {
+            "loss_frames": 1287,
+            "per_stream_deltas": {},
+            "rx_dropped_frames": 0,
+            "stream_dropped_frames": 0
+          },
+          "ok": false,
+          "samples": [
+            {
+              "delta_from_before": {
+                "loss_frames": 0,
+                "per_stream_deltas": {},
+                "rx_dropped_frames": 0,
+                "stream_dropped_frames": 0
+              },
+              "stats": {
+                "loss": {
+                  "frames": 6550182,
+                  "percent": 14.4554
+                },
+                "port": "//100.64.3.238/6/13",
+                "rx": {
+                  "dropped_frames": "0",
+                  "dropped_pct": "0",
+                  "rate_bps": "1890128",
+                  "rate_fps": "1697",
+                  "sig_frames": "38345304",
+                  "total_bytes": "5359084082",
+                  "total_frames": "38762800"
+                },
+                "timestamp": "2026-05-04T12:34:49.153950",
+                "tx": {
+                  "rate_bps": "1729856",
+                  "rate_fps": "1689",
+                  "sig_frames": "45312982",
+                  "total_bytes": "5800061696",
+                  "total_frames": "45312982"
+                }
+              },
+              "timestamp": "2026-05-04T12:34:49.153950"
+            },
+            {
+              "delta_from_before": {
+                "loss_frames": 0,
+                "per_stream_deltas": {},
+                "rx_dropped_frames": 0,
+                "stream_dropped_frames": 0
+              },
+              "stats": {
+                "loss": {
+                  "frames": 6550247,
+                  "percent": 14.4513
+                },
+                "port": "//100.64.3.238/6/13",
+                "rx": {
+                  "dropped_frames": "0",
+                  "dropped_pct": "0",
+                  "rate_bps": "1854144",
+                  "rate_fps": "1699",
+                  "sig_frames": "38358671",
+                  "total_bytes": "5360866675",
+                  "total_frames": "38776248"
+                },
+                "timestamp": "2026-05-04T12:34:56.775823",
+                "tx": {
+                  "rate_bps": "1729832",
+                  "rate_fps": "1689",
+                  "sig_frames": "45326495",
+                  "total_bytes": "5801791360",
+                  "total_frames": "45326495"
+                }
+              },
+              "timestamp": "2026-05-04T12:34:56.775823"
+            },
+            {
+              "delta_from_before": {
+                "loss_frames": 233,
+                "per_stream_deltas": {},
+                "rx_dropped_frames": 0,
+                "stream_dropped_frames": 0
+              },
+              "stats": {
+                "loss": {
+                  "frames": 6550700,
+                  "percent": 14.4485
+                },
+                "port": "//100.64.3.238/6/13",
+                "rx": {
+                  "dropped_frames": "0",
+                  "dropped_pct": "0",
+                  "rate_bps": "1826968",
+                  "rate_fps": "1695",
+                  "sig_frames": "38370001",
+                  "total_bytes": "5362356789",
+                  "total_frames": "38787619"
+                },
+                "timestamp": "2026-05-04T12:35:04.002602",
+                "tx": {
+                  "rate_bps": "1729664",
+                  "rate_fps": "1689",
+                  "sig_frames": "45338319",
+                  "total_bytes": "5803304832",
+                  "total_frames": "45338319"
+                }
+              },
+              "timestamp": "2026-05-04T12:35:04.002602"
+            },
+            {
+              "delta_from_before": {
+                "loss_frames": 0,
+                "per_stream_deltas": {},
+                "rx_dropped_frames": 0,
+                "stream_dropped_frames": 0
+              },
+              "stats": {
+                "loss": {
+                  "frames": 6549956,
+                  "percent": 14.4431
+                },
+                "port": "//100.64.3.238/6/13",
+                "rx": {
+                  "dropped_frames": "0",
+                  "dropped_pct": "0",
+                  "rate_bps": "1733464",
+                  "rate_fps": "1695",
+                  "sig_frames": "38382514",
+                  "total_bytes": "5364008794",
+                  "total_frames": "38800188"
+                },
+                "timestamp": "2026-05-04T12:35:11.093854",
+                "tx": {
+                  "rate_bps": "1729824",
+                  "rate_fps": "1689",
+                  "sig_frames": "45350144",
+                  "total_bytes": "5804818432",
+                  "total_frames": "45350144"
+                }
+              },
+              "timestamp": "2026-05-04T12:35:11.093854"
+            },
+            {
+              "delta_from_before": {
+                "loss_frames": 1287,
+                "per_stream_deltas": {},
+                "rx_dropped_frames": 0,
+                "stream_dropped_frames": 0
+              },
+              "stats": {
+                "loss": {
+                  "frames": 6551754,
+                  "percent": 14.4427
+                },
+                "port": "//100.64.3.238/6/13",
+                "rx": {
+                  "dropped_frames": "0",
+                  "dropped_pct": "0",
+                  "rate_bps": "1734416",
+                  "rate_fps": "1697",
+                  "sig_frames": "38394184",
+                  "total_bytes": "5365551824",
+                  "total_frames": "38811903"
+                },
+                "timestamp": "2026-05-04T12:35:18.465537",
+                "tx": {
+                  "rate_bps": "1729808",
+                  "rate_fps": "1689",
+                  "sig_frames": "45363657",
+                  "total_bytes": "5806548096",
+                  "total_frames": "45363657"
+                }
+              },
+              "timestamp": "2026-05-04T12:35:18.465537"
+            },
+            {
+              "delta_from_before": {
+                "loss_frames": 1217,
+                "per_stream_deltas": {},
+                "rx_dropped_frames": 0,
+                "stream_dropped_frames": 0
+              },
+              "stats": {
+                "loss": {
+                  "frames": 6551684,
+                  "percent": 14.4388
+                },
+                "port": "//100.64.3.238/6/13",
+                "rx": {
+                  "dropped_frames": "0",
+                  "dropped_pct": "0",
+                  "rate_bps": "1805568",
+                  "rate_fps": "1696",
+                  "sig_frames": "38406030",
+                  "total_bytes": "5367136086",
+                  "total_frames": "38823798"
+                },
+                "timestamp": "2026-05-04T12:35:25.728248",
+                "tx": {
+                  "rate_bps": "1729840",
+                  "rate_fps": "1689",
+                  "sig_frames": "45375482",
+                  "total_bytes": "5808061696",
+                  "total_frames": "45375482"
+                }
+              },
+              "timestamp": "2026-05-04T12:35:25.728248"
+            },
+            {
+              "delta_from_before": {
+                "loss_frames": 1143,
+                "per_stream_deltas": {},
+                "rx_dropped_frames": 0,
+                "stream_dropped_frames": 0
+              },
+              "stats": {
+                "loss": {
+                  "frames": 6551610,
+                  "percent": 14.4344
+                },
+                "port": "//100.64.3.238/6/13",
+                "rx": {
+                  "dropped_frames": "0",
+                  "dropped_pct": "0",
+                  "rate_bps": "1850376",
+                  "rate_fps": "1696",
+                  "sig_frames": "38419562",
+                  "total_bytes": "5368936566",
+                  "total_frames": "38837385"
+                },
+                "timestamp": "2026-05-04T12:35:33.284434",
+                "tx": {
+                  "rate_bps": "1729848",
+                  "rate_fps": "1689",
+                  "sig_frames": "45388995",
+                  "total_bytes": "5809791360",
+                  "total_frames": "45388995"
+                }
+              },
+              "timestamp": "2026-05-04T12:35:33.284434"
+            },
+            {
+              "delta_from_before": {
+                "loss_frames": 1078,
+                "per_stream_deltas": {},
+                "rx_dropped_frames": 0,
+                "stream_dropped_frames": 0
+              },
+              "stats": {
+                "loss": {
+                  "frames": 6551545,
+                  "percent": 14.4305
+                },
+                "port": "//100.64.3.238/6/13",
+                "rx": {
+                  "dropped_frames": "0",
+                  "dropped_pct": "0",
+                  "rate_bps": "1832296",
+                  "rate_fps": "1696",
+                  "sig_frames": "38431400",
+                  "total_bytes": "5370492567",
+                  "total_frames": "38849274"
+                },
+                "timestamp": "2026-05-04T12:35:40.534235",
+                "tx": {
+                  "rate_bps": "1729656",
+                  "rate_fps": "1689",
+                  "sig_frames": "45400819",
+                  "total_bytes": "5811304832",
+                  "total_frames": "45400819"
+                }
+              },
+              "timestamp": "2026-05-04T12:35:40.534235"
+            },
+            {
+              "delta_from_before": {
+                "loss_frames": 1004,
+                "per_stream_deltas": {},
+                "rx_dropped_frames": 0,
+                "stream_dropped_frames": 0
+              },
+              "stats": {
+                "loss": {
+                  "frames": 6551471,
+                  "percent": 14.426
+                },
+                "port": "//100.64.3.238/6/13",
+                "rx": {
+                  "dropped_frames": "0",
+                  "dropped_pct": "0",
+                  "rate_bps": "1788624",
+                  "rate_fps": "1698",
+                  "sig_frames": "38444929",
+                  "total_bytes": "5372292957",
+                  "total_frames": "38862862"
+                },
+                "timestamp": "2026-05-04T12:35:48.324714",
+                "tx": {
+                  "rate_bps": "1729840",
+                  "rate_fps": "1689",
+                  "sig_frames": "45414333",
+                  "total_bytes": "5813034624",
+                  "total_frames": "45414333"
+                }
+              },
+              "timestamp": "2026-05-04T12:35:48.324714"
+            }
+          ]
+        },
+        "trigger_output": "request system ncc switchover\r\n\u001b[1FYOR_CL_PE-4(04-May-2026-15:34:40)# request system ncc switchover\r\nWarning: Are you sure you want to perform ncc switchover? (yes/no) [no]? Yes\r\n\r\nYOR_CL_PE-4# "
+      },
+      "detail": "HA scenario failed or Spirent loss detected",
+      "ok": false,
+      "phase": "ha_ncc_switchover"
+    }
+  ]
+}

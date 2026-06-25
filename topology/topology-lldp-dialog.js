@@ -7,6 +7,259 @@
 'use strict';
 
 window.LldpDialog = {
+    _authFetch(url, options = {}) {
+        if (window.TopologyAuth && typeof window.TopologyAuth.authFetch === 'function') {
+            return window.TopologyAuth.authFetch(url, options);
+        }
+        return fetch(url, options);
+    },
+
+    _sshHost(device) {
+        if (window.TopologyDeviceIdentity?.resolveIdentity) {
+            const resolved = window.TopologyDeviceIdentity.resolveIdentity(device);
+            if (resolved.host) return resolved.host;
+        }
+        return (
+            device?._registeredMgmtIp
+            || device?.sshConfig?.host
+            || device?.sshConfig?.hostBackup
+            || ''
+        ).trim();
+    },
+
+    _deviceAddressHost(device) {
+        const addr = String(device?.deviceAddress || '').trim();
+        return addr.includes('@') ? addr.split('@').pop().trim() : addr;
+    },
+
+    _isGeneratedCanvasLabel(value) {
+        const clean = String(value || '').trim();
+        return /^(NCP|NCP-\d+|S|S\d+)$/i.test(clean);
+    },
+
+    _hasRealLookupTarget(device, fallback = '') {
+        if (!device) return false;
+        if (device._registeredDeviceId || device._registeredHostname || device._registeredMgmtIp || device._monitoredKey) return true;
+        if (device._monitorRegistered || device._monitorContext || device._monitorCapabilities || device._metadataDiscovered) return true;
+        if (device.deviceSerial || device.serial || device.device_id || device.hostname) return true;
+        if (device.deviceAddress || device.sshConfig?._snVerifiedHost) return true;
+        if (this._sshHost(device)) return true;
+        const fb = String(fallback || '').trim();
+        return !!fb && !this._isGeneratedCanvasLabel(fb);
+    },
+
+    _identityCandidates(device, fallback = '') {
+        if (window.TopologyDeviceIdentity?.resolveIdentity) {
+            const resolved = window.TopologyDeviceIdentity.resolveIdentity(device, { deviceId: fallback, host: this._sshHost(device) });
+            if (resolved.candidates?.length) return resolved.candidates;
+        }
+        const host = this._sshHost(device);
+        const addressHost = this._deviceAddressHost(device);
+        const label = String(device?.label || '').trim();
+        const name = String(device?.name || '').trim();
+        const hostname = String(device?.hostname || '').trim();
+        const includeCanvasNames = this._hasRealLookupTarget(device, fallback)
+            && [label, name, hostname].some(v => v && !this._isGeneratedCanvasLabel(v));
+
+        return [...new Set([
+            device?._registeredDeviceId,
+            device?._registeredHostname,
+            device?._monitoredKey,
+            device?.deviceSerial,
+            device?.serial,
+            device?.device_id,
+            hostname,
+            device?._registeredMgmtIp,
+            host,
+            addressHost,
+            this._isGeneratedCanvasLabel(fallback) ? '' : fallback,
+            includeCanvasNames ? label : '',
+            includeCanvasNames ? name : ''
+        ].map(v => String(v || '').trim()).filter(Boolean))];
+    },
+
+    _primaryDeviceId(device, fallback = '') {
+        const candidates = this._identityCandidates(device, fallback);
+        return candidates[0] || '';
+    },
+
+    _escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
+
+    _cleanText(value) {
+        if (value == null) return '';
+        if (typeof value === 'string') return value.trim();
+        if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+        if (Array.isArray(value)) {
+            return value.map(v => this._cleanText(v)).filter(Boolean).join(', ');
+        }
+        if (typeof value === 'object') {
+            const known = value.name || value.label || value.hostname || value.interface || value.port || value.value;
+            return known ? this._cleanText(known) : '';
+        }
+        return String(value).trim();
+    },
+
+    _formatRawOutput(value) {
+        if (value == null) return '';
+        if (typeof value === 'string') return value;
+        if (Array.isArray(value)) return value.map(v => this._cleanText(v)).filter(Boolean).join('\n');
+        if (typeof value === 'object') {
+            try {
+                return JSON.stringify(value, null, 2);
+            } catch (_) {
+                return '';
+            }
+        }
+        return String(value);
+    },
+
+    _isPlaceholderLldpData(data) {
+        return !!data && (data.placeholder === true || data.source === 'canvas-placeholder');
+    },
+
+    _preDnosMode(device) {
+        const modes = [
+            device?._deviceMode,
+            device?._modeRawState,
+            device?._monitorContext?.device_state,
+            device?._monitorContext?.mode,
+            device?._identity?.device_state,
+            device?.sshConfig?._deviceState
+        ].map(v => String(v || '').trim().toUpperCase()).filter(Boolean);
+        for (const mode of modes) {
+            if (mode === 'DNOS' || mode === 'STANDALONE') return '';
+            if (mode === 'GI' || mode.includes('GI_MODE')) return 'GI';
+            if (mode === 'RECOVERY' || mode === 'DN_RECOVERY') return 'RECOVERY';
+            if (mode === 'BASEOS_SHELL') return 'BASEOS_SHELL';
+        }
+        return '';
+    },
+
+    _createEmptyLldpData(message = 'No LLDP neighbors discovered or configured yet.') {
+        if (window.TopologyDeviceDefaults?.createEmptyLldpData) {
+            return {
+                ...window.TopologyDeviceDefaults.createEmptyLldpData(),
+                message
+            };
+        }
+        return {
+            neighbors: [],
+            lldp_neighbors: [],
+            source: 'canvas-placeholder',
+            placeholder: true,
+            message
+        };
+    },
+
+    _hasLldpLookupTarget(device, fallback = '') {
+        return this._hasRealLookupTarget(device, fallback);
+    },
+
+    _normNeighbor(n) {
+        return {
+            interface: LldpDialog._cleanText(n.interface || n.local || n.local_interface),
+            neighbor: LldpDialog._cleanText(n.neighbor || n.neighbor_name || n.neighbor_device),
+            remote_port: LldpDialog._cleanText(n.remote_port || n.remote || n.neighbor_interface || n.neighbor_port)
+        };
+    },
+
+    _isInvalidLldpValue(value) {
+        const clean = this._cleanText(value);
+        if (!clean) return true;
+        if (clean === '-1') return true;
+        if (/^\[object\s+object\]$/i.test(clean)) return true;
+        if (/^(undefined|null|unknown)$/i.test(clean)) return true;
+        return false;
+    },
+
+    _sanitizeLldpNeighbors(neighbors = []) {
+        if (!Array.isArray(neighbors)) return [];
+        const seen = new Set();
+        return neighbors
+            .map(n => this._normNeighbor(n || {}))
+            .filter(n => {
+                if (this._isInvalidLldpValue(n.interface)) return false;
+                if (this._isInvalidLldpValue(n.neighbor)) return false;
+                if (n.remote_port && this._isInvalidLldpValue(n.remote_port)) return false;
+                const key = `${n.interface}|${n.neighbor}|${n.remote_port}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+    },
+
+    _metadataState(device, data = null) {
+        const guard = window.TopologyDeviceIdentity || null;
+        if (!guard?.metadataState) {
+            return { ready: true, loading: false, status: 'ready' };
+        }
+        return guard.metadataState(device, 'lldp', {
+            host: this._sshHost(device),
+            deviceId: this._primaryDeviceId(device),
+            data
+        });
+    },
+
+    _markLldpReady(device, data, source = '') {
+        const guard = window.TopologyDeviceIdentity || null;
+        if (guard?.markMetadataReady) {
+            guard.markMetadataReady(device, 'lldp', {
+                host: this._sshHost(device),
+                deviceId: this._primaryDeviceId(device),
+                source: source || data?.source || '',
+                data
+            });
+        }
+    },
+
+    _stopDeviceScanVisual(editor, device) {
+        if (!device) return;
+        if (window.DnaasHelpers && typeof window.DnaasHelpers._stopLldpAnimation === 'function') {
+            try {
+                window.DnaasHelpers._stopLldpAnimation(editor, device);
+                return;
+            } catch (_) {}
+        }
+        device._lldpAnimating = false;
+        device._lldpRunning = false;
+        device._lldpAnimStart = null;
+        device._lldpWavePhase = 0;
+        device._lldpHasLinks = false;
+        if (editor && editor._lldpAnimTimer) {
+            const stillAnimating = (editor.objects || []).some(o => o && o.type === 'device' && o._lldpAnimating);
+            if (!stillAnimating) {
+                clearInterval(editor._lldpAnimTimer);
+                editor._lldpAnimTimer = null;
+            }
+        }
+        try { editor?.draw?.(); } catch (_) {}
+    },
+
+    cleanupForTopologySwitch(editor) {
+        try {
+            if (LldpDialog._lastLldpAbort) {
+                LldpDialog._lastLldpAbort.abort();
+                LldpDialog._lastLldpAbort = null;
+            }
+        } catch (_) {}
+        const dialog = document.getElementById('lldp-table-dialog');
+        if (dialog) dialog.remove();
+        if (editor && Array.isArray(editor.objects)) {
+            editor.objects.forEach(obj => {
+                if (obj && obj.type === 'device' && (obj._lldpAnimating || obj._lldpRunning)) {
+                    LldpDialog._stopDeviceScanVisual(editor, obj);
+                }
+            });
+        }
+    },
+
     showLldpTableDialog(editor, device, serial, options = {}) {
         const self = this;
         const forceRefresh = options.forceRefresh || false;
@@ -76,7 +329,7 @@ window.LldpDialog = {
                     <path d="M7.76 16.24a6 6 0 0 0 8.48 0"/>
                 </svg>
                 <span style="color: rgba(255, 255, 255, 0.95); font-weight: 600; font-size: 14px;">
-                    LLDP Neighbors - ${deviceLabel}
+                    LLDP Neighbors - ${self._escapeHtml(deviceLabel)}
                 </span>
             </div>
             <div style="display: flex; align-items: center; gap: 8px;">
@@ -178,13 +431,25 @@ window.LldpDialog = {
         const onContextUpdated = (e) => {
             const { deviceId } = e.detail || {};
             if (!deviceId || !device) return;
-            const match = (device.label && device.label === deviceId) || (String(serial) === String(deviceId));
+            const resolved = window.TopologyDeviceIdentity?.resolveIdentity
+                ? window.TopologyDeviceIdentity.resolveIdentity(device, { deviceId: serial, host: self._sshHost(device) })
+                : null;
+            const candidates = [
+                device.label,
+                serial,
+                device._registeredDeviceId,
+                device._registeredHostname,
+                device._monitoredKey,
+                ...(resolved?.candidates || [])
+            ].map(v => String(v || '').trim().toLowerCase()).filter(Boolean);
+            const match = candidates.includes(String(deviceId).trim().toLowerCase());
             if (match && device._lldpData && document.body.contains(dialog)) {
                 updateLldpContent(device._lldpData, true);
             }
         };
         window.addEventListener('device:context-updated', onContextUpdated);
         closeBtn.addEventListener('click', () => {
+            try { lldpAbort.abort(); } catch (_) {}
             window.removeEventListener('device:context-updated', onContextUpdated);
             dialog.remove();
         });
@@ -201,20 +466,102 @@ window.LldpDialog = {
             refreshBtn.style.borderColor = 'rgba(0, 180, 216, 0.3)';
         });
         
+        // GI / non-DNOS mode awareness. A device in GI / RECOVERY / BASEOS_SHELL
+        // does NOT run the DNOS LLDP daemon, so the box has no live neighbor
+        // table to query. Anything we can show is necessarily a pre-delete /
+        // pre-deploy snapshot captured while the device was still in DNOS.
+        // Mark that explicitly so users don't treat the rows as live state
+        // (typical confusion: "device is in GI but says 34 neighbors -- which
+        // is right?"). We never block the dialog, because the snapshot is
+        // still useful for reasoning about the previous topology.
+        //
+        // Use the same mode evidence surfaces as the rest of the device UI so a
+        // GI transition stamped by monitor/onboarding still labels cached LLDP.
+        const _giModeStr = self._preDnosMode(device);
+        const _isPreDnosMode = !!_giModeStr;
+        const _hasLldpTarget = self._hasLldpLookupTarget(device, serial);
+        // Hide the live-SSH refresh button -- there's no DNOS CLI to query.
+        if (_isPreDnosMode) {
+            refreshBtn.title = `Device is in ${_giModeStr} mode -- no live LLDP available (DNOS not running)`;
+            refreshBtn.disabled = true;
+            refreshBtn.style.opacity = '0.35';
+            refreshBtn.style.cursor = 'not-allowed';
+        } else if (!_hasLldpTarget) {
+            refreshBtn.title = 'Add SSH or registered device details before refreshing LLDP';
+            refreshBtn.disabled = true;
+            refreshBtn.style.opacity = '0.35';
+            refreshBtn.style.cursor = 'not-allowed';
+        }
+        const _preDnosBannerHtml = _isPreDnosMode ? `
+            <div style="
+                margin-bottom: 12px;
+                padding: 10px 12px;
+                background: rgba(0, 180, 216, 0.07);
+                border: 1px solid rgba(0, 180, 216, 0.24);
+                border-radius: 8px;
+                color: rgba(214, 237, 246, 0.92);
+                font-size: 11.5px;
+                line-height: 1.45;
+                display: flex;
+                gap: 10px;
+                align-items: flex-start;
+            ">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00B4D8" stroke-width="2" style="flex-shrink:0;margin-top:1px">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 16v-4"/>
+                    <path d="M12 8h.01"/>
+                </svg>
+                <div>
+                    <div style="font-weight: 600; margin-bottom: 2px;">Device is in ${self._escapeHtml(_giModeStr)} mode; LLDP neighbors are from the previous DNOS snapshot.</div>
+                    <div style="opacity: 0.78;">The cached table remains visible as a pre-deploy reference until this device returns to DNOS and LLDP is refreshed.</div>
+                </div>
+            </div>` : '';
+
         // Unified content renderer for both initial load and refresh
         const updateLldpContent = (data, fromCache = false) => {
-            if (device && !fromCache && (data.neighbors?.length || data.raw_output)) {
-                device._lldpData = data;
+            self._stopDeviceScanVisual(editor, device);
+            if (self._isPlaceholderLldpData(data)) {
+                content.innerHTML = self._buildEmptyLldpTableHtml(deviceLabel, data, {
+                    sourceLabel: 'Canvas placeholder',
+                    helperText: 'Add SSH or registered device details, then run Enable LLDP or refresh after discovery.'
+                });
+                return;
+            }
+            const sanitizedNeighbors = self._sanitizeLldpNeighbors(data?.neighbors || data?.lldp_neighbors || []);
+            const hadRows = Array.isArray(data?.neighbors) || Array.isArray(data?.lldp_neighbors);
+            const cleanData = {
+                ...(data || {}),
+                neighbors: sanitizedNeighbors
+            };
+            if (hadRows && sanitizedNeighbors.length === 0 && !data?.raw_output) {
+                content.innerHTML = self._buildEmptyLldpTableHtml(deviceLabel, self._createEmptyLldpData('LLDP data is not ready for this device yet.'), {
+                    sourceLabel: 'Unknown',
+                    helperText: 'Ignored malformed or stale LLDP rows. Refresh after the current device identity is discovered.'
+                });
+                return;
+            }
+            if (device && !fromCache && (cleanData.neighbors?.length || cleanData.raw_output)) {
+                self._markLldpReady(device, cleanData);
+                device._lldpData = cleanData;
                 device._lldpCompletedAt = Date.now();
                 if (editor.draw) editor.draw();
             }
-            if (data.neighbors && data.neighbors.length > 0) {
-                const snakeGroups = self._detectSnakePatterns(data.neighbors, deviceLabel, device);
-                let tableHtml = self._buildLldpTableHtml(snakeGroups, data, device, deviceLabel);
-                content.innerHTML = tableHtml;
-                self._attachLldpTableEvents(content, device, snakeGroups, dialog);
-            } else if (data.raw_output) {
-                content.innerHTML = `
+            const readyState = self._metadataState(device, cleanData);
+            if (fromCache && !readyState.ready) {
+                const label = readyState.loading ? 'Loading' : 'Unknown';
+                content.innerHTML = self._buildEmptyLldpTableHtml(deviceLabel, self._createEmptyLldpData('LLDP data is still loading for this device.'), {
+                    sourceLabel: label,
+                    helperText: 'The toolbar will enable the LLDP table after fresh data matches this device identity.'
+                });
+                return;
+            }
+            if (cleanData.neighbors && cleanData.neighbors.length > 0) {
+                const snakeGroups = self._detectSnakePatterns(cleanData.neighbors, deviceLabel, device);
+                let tableHtml = self._buildLldpTableHtml(snakeGroups, cleanData, device, deviceLabel);
+                content.innerHTML = _preDnosBannerHtml + tableHtml;
+                self._attachLldpTableEvents(content, device, snakeGroups, dialog, editor);
+            } else if (cleanData.raw_output) {
+                content.innerHTML = _preDnosBannerHtml + `
                     <div style="margin-bottom: 12px; color: rgba(255, 193, 7, 0.9); font-size: 11px;">
                         Raw LLDP output (could not parse neighbors):
                     </div>
@@ -230,23 +577,29 @@ window.LldpDialog = {
                         word-break: break-all;
                         max-height: 400px;
                         overflow-y: auto;
-                    ">${data.raw_output}</pre>
+                    ">${self._escapeHtml(self._formatRawOutput(cleanData.raw_output))}</pre>
                 `;
-            } else {
+            } else if (_isPreDnosMode) {
                 content.innerHTML = `
-                    <div style="text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">
-                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 12px; opacity: 0.5;">
-                            <circle cx="12" cy="12" r="10"/>
-                            <line x1="12" y1="8" x2="12" y2="12"/>
-                            <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    <div style="text-align: center; padding: 40px; color: rgba(255,255,255,0.6);">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="rgba(255,193,7,0.85)" stroke-width="1.5" style="margin-bottom: 12px;">
+                            <path d="M12 9v4"/><path d="M12 17h.01"/>
+                            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
                         </svg>
-                        <div>No LLDP neighbors found</div>
-                        ${data.error ? `<div style="color: #e74c3c; margin-top: 8px; font-size: 11px;">${data.error}</div>` : ''}
-                        <div style="font-size: 11px; margin-top: 8px; color: rgba(255,255,255,0.4);">
-                            Run "Enable LLDP" first to discover neighbors
+                        <div style="color: rgba(255, 215, 100, 0.95); font-weight: 600;">No cached LLDP for this device</div>
+                        <div style="font-size: 11.5px; margin-top: 10px; color: rgba(255,255,255,0.55); line-height: 1.5; max-width: 360px; margin-left: auto; margin-right: auto;">
+                            ${self._escapeHtml(deviceLabel)} is currently in <strong>${_giModeStr}</strong> mode. DNOS is not running, so we can't query LLDP. There is also no pre-deploy snapshot kept for this device.
+                        </div>
+                        <div style="font-size: 11px; margin-top: 14px; color: rgba(255,255,255,0.4);">
+                            Neighbors will appear here once the device is deployed back into DNOS.
                         </div>
                     </div>
                 `;
+            } else {
+                content.innerHTML = self._buildEmptyLldpTableHtml(deviceLabel, cleanData, {
+                    sourceLabel: cleanData.cached ? 'Cache' : 'Live',
+                    helperText: 'Run "Enable LLDP" first to discover neighbors.'
+                });
             }
         };
         
@@ -257,6 +610,11 @@ window.LldpDialog = {
         refreshBtn.addEventListener('click', async () => {
             if (LldpDialog._lastLldpAbort) LldpDialog._lastLldpAbort.abort();
             const refreshAbort = new AbortController();
+            const identityGuard = window.TopologyDeviceIdentity || null;
+            const requestDeviceId = self._primaryDeviceId(device, serial);
+            const identityToken = identityGuard?.makeRequestToken
+                ? identityGuard.makeRequestToken(device, { host: self._sshHost(device), deviceId: requestDeviceId })
+                : null;
             LldpDialog._lastLldpAbort = refreshAbort;
             refreshIcon.style.animation = 'spin 1s linear infinite';
             refreshBtn.disabled = true;
@@ -269,7 +627,7 @@ window.LldpDialog = {
             `;
             
             try {
-                const did = device?.label || serial;
+                const did = self._primaryDeviceId(device, serial) || device?.label || serial;
                 if (window.DeviceMonitor?.refreshDevice) {
                     await window.DeviceMonitor.refreshDevice(did, true);
                     if (refreshAbort.signal.aborted) return;
@@ -282,18 +640,27 @@ window.LldpDialog = {
                 } else {
                     const data = await self._fetchLldpNeighborsLive(serial, device, refreshAbort.signal);
                     if (refreshAbort.signal.aborted) return;
+                    if (identityGuard?.signature && identityToken
+                        && identityGuard.signature(device, self._sshHost(device)) !== identityToken.signature) {
+                        content.innerHTML = self._buildEmptyLldpTableHtml(deviceLabel, self._createEmptyLldpData('LLDP response ignored because the device SN/host changed.'), {
+                            sourceLabel: 'Stale response',
+                            helperText: 'Run refresh again for the current device identity.'
+                        });
+                        return;
+                    }
                     updateLldpContent(data);
                     editor.showToast('LLDP refreshed (live SSH)', 'success');
                 }
             } catch (err) {
                 if (refreshAbort.signal.aborted) return;
+                self._stopDeviceScanVisual(editor, device);
                 content.innerHTML = `
                     <div style="padding: 40px; text-align: center; color: rgba(255,255,255,0.5);">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#e74c3c" stroke-width="1.5" style="margin-bottom: 12px;">
                             <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                         </svg>
                         <div style="color: #e74c3c;">Failed to refresh LLDP data</div>
-                        <div style="margin-top: 8px; font-size: 11px;">${(err.message || 'SSH connection failed').replace(/</g, '&lt;')}</div>
+                        <div style="margin-top: 8px; font-size: 11px;">${self._escapeHtml(err.message || 'SSH connection failed')}</div>
                     </div>
                 `;
                 editor.showToast('LLDP refresh failed', 'error');
@@ -305,15 +672,44 @@ window.LldpDialog = {
         });
         
         // Cache-first: if device has _lldpData, render immediately
-        const hasLldpCache = device?._lldpData && (device._lldpData.neighbors?.length || device._lldpData.raw_output);
+        const hasLldpCache = device?._lldpData && self._metadataState(device, device._lldpData).ready && (
+            self._sanitizeLldpNeighbors(device._lldpData.neighbors || device._lldpData.lldp_neighbors || []).length
+            || device._lldpData.raw_output
+            || self._isPlaceholderLldpData(device._lldpData)
+        );
+        const localLldpNeighbors = (
+            Array.isArray(device?.lldp_neighbors) ? device.lldp_neighbors
+                : (Array.isArray(device?.lldp) ? device.lldp
+                    : (Array.isArray(device?._lldp) ? device._lldp : []))
+        );
+        const localLldpData = localLldpNeighbors.length && self._metadataState(device).ready ? {
+            neighbors: localLldpNeighbors.map(n => self._normNeighbor(n)),
+            source: 'canvas',
+            cached: true
+        } : null;
         if (hasLldpCache) {
             updateLldpContent(device._lldpData, true);
+        } else if (localLldpData) {
+            updateLldpContent(localLldpData, true);
+        } else if (!_hasLldpTarget) {
+            updateLldpContent(self._createEmptyLldpData());
         } else {
+            const identityGuard = window.TopologyDeviceIdentity || null;
+            const requestDeviceId = self._primaryDeviceId(device, serial);
+            const identityToken = identityGuard?.makeRequestToken
+                ? identityGuard.makeRequestToken(device, { host: self._sshHost(device), deviceId: requestDeviceId })
+                : null;
             self._fetchLldpNeighbors(serial, device, lldpAbort.signal).then(data => {
                 if (lldpAbort.signal.aborted) return;
+                if (identityGuard?.signature && identityToken
+                    && identityGuard.signature(device, self._sshHost(device)) !== identityToken.signature) {
+                    updateLldpContent(self._createEmptyLldpData('LLDP response ignored because the device SN/host changed.'), true);
+                    return;
+                }
                 updateLldpContent(data);
             }).catch(err => {
                 if (lldpAbort.signal.aborted) return;
+                self._stopDeviceScanVisual(editor, device);
                 content.innerHTML = `
                     <div style="text-align: center; padding: 40px; color: rgba(231, 76, 60, 0.9);">
                         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 12px;">
@@ -323,7 +719,7 @@ window.LldpDialog = {
                         </svg>
                         <div>Failed to load LLDP data</div>
                         <div style="font-size: 11px; margin-top: 8px; color: rgba(255,255,255,0.4);">
-                            ${err.message || 'Unknown error'}
+                            ${self._escapeHtml(err.message || 'Unknown error')}
                         </div>
                     </div>
                 `;
@@ -332,6 +728,43 @@ window.LldpDialog = {
         }
     },
     
+    _buildEmptyLldpTableHtml(deviceLabel, data = {}, options = {}) {
+        const sourceLabel = options.sourceLabel || 'No data';
+        const message = data.message || data.error || 'No LLDP neighbors discovered or configured yet.';
+        const helperText = options.helperText || 'Neighbors will appear here after LLDP discovery completes.';
+        const escapedMessage = this._escapeHtml(message);
+        const escapedHelper = this._escapeHtml(helperText);
+        const escapedSource = this._escapeHtml(sourceLabel);
+        const escapedLabel = this._escapeHtml(deviceLabel || 'Device');
+
+        return `
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                <span style="color: rgba(255,255,255,0.6); font-size: 11px;">Found 0 neighbor(s)</span>
+                <span style="color: rgba(255,255,255,0.4); font-size: 10px; margin-left: auto;">
+                    <span style="color: rgba(255,255,255,0.65); font-weight: 600; padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,0.06); font-size: 9px;">${escapedSource}</span>
+                </span>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                <thead>
+                    <tr style="background: rgba(255, 255, 255, 0.05);">
+                        <th style="padding: 10px; text-align: left; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.1);">Local Interface</th>
+                        <th style="padding: 10px; text-align: left; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.1);">Neighbor</th>
+                        <th style="padding: 10px; text-align: left; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.1);">Remote Port</th>
+                        <th style="padding: 10px; text-align: right; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.1); width: 92px;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td colspan="4" style="padding: 28px 18px; text-align: center; color: rgba(255,255,255,0.58); border-bottom: 1px solid rgba(255,255,255,0.05); line-height: 1.5;">
+                            <div style="font-weight: 600; color: rgba(255,255,255,0.76);">${escapedMessage}</div>
+                            <div style="font-size: 11px; margin-top: 8px; color: rgba(255,255,255,0.42);">${escapedLabel}: ${escapedHelper}</div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        `;
+    },
+
     /**
      * Detect snake patterns, DNAAS fabric, port mirror, and loop connections.
      * - Snake: ALL available NCP interfaces connecting to same neighbor (full loopback)
@@ -344,12 +777,12 @@ window.LldpDialog = {
      * @returns {Array} Groups with connection type detection
      */
     _detectSnakePatterns(neighbors, deviceLabel = '', device = null) {
-        const deviceLabelUpper = (deviceLabel || '').toUpperCase().replace(/[_-]/g, '');
+        const deviceLabelUpper = this._cleanText(deviceLabel).toUpperCase().replace(/[_-]/g, '');
         
         // Count total NCP interfaces on device (all ge100-* interfaces)
         let totalNcpInterfaces = 0;
         if (device && neighbors) {
-            const allInterfaces = neighbors.map(n => n.interface || n.local_interface || '');
+            const allInterfaces = neighbors.map(n => this._cleanText(n.interface || n.local_interface));
             const ncpInterfaces = allInterfaces.filter(iface => iface.match(/ge100-\d+/));
             totalNcpInterfaces = new Set(ncpInterfaces).size;
         }
@@ -361,7 +794,7 @@ window.LldpDialog = {
         // Group by neighbor name
         const byNeighbor = {};
         workingNeighbors.forEach(n => {
-            const neighbor = n.neighbor || n.neighbor_name || 'unknown';
+            const neighbor = this._cleanText(n.neighbor || n.neighbor_name) || 'unknown';
             if (!byNeighbor[neighbor]) {
                 byNeighbor[neighbor] = [];
             }
@@ -386,7 +819,7 @@ window.LldpDialog = {
             
             // Count NCP interfaces in THIS group
             const ncpInterfacesInGroup = entries.filter(e => {
-                const iface = e.interface || e.local_interface || '';
+                const iface = this._cleanText(e.interface || e.local_interface);
                 return iface.match(/ge100-\d+/);
             }).length;
             
@@ -403,8 +836,8 @@ window.LldpDialog = {
             if (entries.length >= minCount) {
                 // Parse interface numbers to detect sequential pattern
                 const parsed = entries.map(e => {
-                    const iface = e.interface || e.local_interface || '';
-                    const remotePort = e.remote_port || e.neighbor_port || '';
+                    const iface = this._cleanText(e.interface || e.local_interface);
+                    const remotePort = this._cleanText(e.remote_port || e.neighbor_port);
                     // Extract numbers from interface name (e.g., "ge100-6/0/2" -> [100, 6, 0, 2])
                     const localMatch = iface.match(/(\d+)/g);
                     const remoteMatch = remotePort.match(/(\d+)/g);
@@ -534,34 +967,267 @@ window.LldpDialog = {
         return groups;
     },
     
+    _neighborLookupCandidates(neighbor) {
+        const clean = this._cleanText(neighbor);
+        if (!clean) return [];
+        const candidates = [clean];
+        const compact = clean.replace(/[_\s]+/g, '-');
+        if (compact !== clean) candidates.push(compact);
+
+        const suffix = clean.match(/(?:^|[-_])([A-Z]+)[-_]?(\d+)$/i);
+        if (suffix) {
+            candidates.push(`${suffix[1].toUpperCase()}-${suffix[2]}`);
+            candidates.push(`${suffix[1].toUpperCase()}${suffix[2]}`);
+        }
+
+        const dnaasShort = clean.replace(/^DNAAS[-_](LEAF|SPINE|SUPERSPINE)[-_]?/i, '');
+        if (dnaasShort && dnaasShort !== clean) candidates.push(dnaasShort);
+
+        return [...new Set(candidates.map(v => this._cleanText(v)).filter(Boolean))];
+    },
+
+    async _resolveLldpNeighborTarget(neighbor) {
+        const candidates = this._neighborLookupCandidates(neighbor);
+        if (!candidates.length || typeof ScalerAPI === 'undefined' || !ScalerAPI.getDeviceContext) {
+            return { ok: false, reason: 'Neighbor is not known to the device database yet.' };
+        }
+
+        let lastError = '';
+        for (const candidate of candidates) {
+            try {
+                const ctx = await ScalerAPI.getDeviceContext(candidate, false, '');
+                const host = this._cleanText(ctx?.resolved_ip || ctx?.mgmt_ip || ctx?.ip);
+                if (!host) {
+                    lastError = 'No management address in device context';
+                    continue;
+                }
+                const deviceId = this._cleanText(ctx?.hostname || ctx?.identity?.hostname || ctx?.device_id || candidate);
+                return {
+                    ok: true,
+                    deviceId: deviceId || candidate,
+                    host,
+                    label: this._cleanText(ctx?.hostname || candidate),
+                    source: this._cleanText(ctx?.resolved_via || ctx?.source || 'device-context'),
+                };
+            } catch (err) {
+                lastError = err?.message || String(err || 'resolution failed');
+            }
+        }
+
+        return {
+            ok: false,
+            reason: lastError || 'Onboard or discover this neighbor before connecting.',
+        };
+    },
+
+    _buildNeighborConnectButton(neighbor) {
+        const safeNeighbor = this._escapeHtml(this._cleanText(neighbor));
+        return `
+            <button class="lldp-neighbor-connect"
+                    type="button"
+                    data-neighbor="${safeNeighbor}"
+                    disabled
+                    title="Checking whether ${safeNeighbor || 'neighbor'} has a known SSH target"
+                    style="
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 5px;
+                        padding: 4px 8px;
+                        border-radius: 999px;
+                        border: 1px solid rgba(0, 180, 216, 0.22);
+                        background: rgba(0, 180, 216, 0.08);
+                        color: rgba(214, 237, 246, 0.62);
+                        font-size: 10px;
+                        font-weight: 700;
+                        letter-spacing: 0.02em;
+                        cursor: wait;
+                        transition: all 0.15s ease;
+                        white-space: nowrap;
+                    ">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" style="pointer-events:none;">
+                    <polyline points="4 17 10 11 4 5"/>
+                    <line x1="12" y1="19" x2="20" y2="19"/>
+                </svg>
+                Connect
+            </button>
+        `;
+    },
+
+    _setNeighborButtonState(button, state, target = null, reason = '') {
+        if (!button) return;
+        button.dataset.state = state;
+        if (target) {
+            button.dataset.deviceId = target.deviceId || '';
+            button.dataset.host = target.host || '';
+            button.dataset.label = target.label || target.deviceId || '';
+            button.dataset.source = target.source || '';
+        }
+        if (state === 'ready') {
+            button.disabled = false;
+            button.title = `Open native SSH to ${target?.label || target?.deviceId || button.dataset.neighbor}`;
+            button.style.cursor = 'pointer';
+            button.style.color = '#D6EDF6';
+            button.style.borderColor = 'rgba(0, 180, 216, 0.58)';
+            button.style.background = 'linear-gradient(135deg, rgba(0, 180, 216, 0.26), rgba(0, 150, 180, 0.16))';
+            button.style.boxShadow = '0 0 0 1px rgba(0, 180, 216, 0.08), 0 4px 12px rgba(0, 180, 216, 0.12)';
+        } else {
+            button.disabled = true;
+            button.title = reason || 'Onboard or discover this neighbor before connecting.';
+            button.style.cursor = 'not-allowed';
+            button.style.color = 'rgba(255,255,255,0.38)';
+            button.style.borderColor = 'rgba(255,255,255,0.10)';
+            button.style.background = 'rgba(255,255,255,0.045)';
+            button.style.boxShadow = 'none';
+        }
+    },
+
+    _nativeSshUserForNeighbor(target) {
+        const identity = `${target?.deviceId || ''} ${target?.label || ''}`.toUpperCase();
+        if (/\b(DNAAS|LEAF|SPINE|SUPERSPINE)\b/.test(identity)) return 'sisaev';
+        if (/\b(ARISTA|EOS|CEOS|DCS)\b/.test(identity)) return 'dn';
+        return 'dnroot';
+    },
+
+    _openNeighborNativeSsh(editor, button) {
+        const deviceId = this._cleanText(button?.dataset?.deviceId);
+        const host = this._cleanText(button?.dataset?.host);
+        const label = this._cleanText(button?.dataset?.label || deviceId);
+        if (!deviceId && !host) {
+            editor?.showToast?.('Neighbor SSH target is not resolved yet', 'warning');
+            return;
+        }
+        if (!editor?._openSshUrl) {
+            editor?.showToast?.('Native SSH launcher is not available', 'error');
+            return;
+        }
+        const user = this._nativeSshUserForNeighbor({ deviceId, label });
+        const device = {
+            id: deviceId || host,
+            label: label || deviceId || host,
+            sshConfig: {
+                host,
+                user,
+                _userSavedHost: host,
+                _userSavedUser: user,
+                _lastLaunchVia: 'lldp-neighbor-native-ssh',
+                _lastLaunchAt: Date.now(),
+            },
+        };
+        if (window.ObjectDetection) {
+            // Reuse the canonical native SSH path and force iTerm for this LLDP action.
+            window.ObjectDetection._pendingDevice = device;
+            window.ObjectDetection._forceItermOnce = true;
+        }
+        editor._openSshUrl(`ssh://${user}@${host}`);
+    },
+
+    _attachNeighborConnectButtons(content, editor) {
+        const buttons = Array.from(content.querySelectorAll('.lldp-neighbor-connect'));
+        if (!buttons.length) return;
+
+        const byNeighbor = new Map();
+        buttons.forEach(button => {
+            const neighbor = this._cleanText(button.dataset.neighbor);
+            if (!neighbor) {
+                this._setNeighborButtonState(button, 'unknown', null, 'Missing neighbor identity.');
+                return;
+            }
+            if (!byNeighbor.has(neighbor)) byNeighbor.set(neighbor, []);
+            byNeighbor.get(neighbor).push(button);
+
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (button.disabled || button.dataset.state !== 'ready') return;
+                this._openNeighborNativeSsh(editor, button);
+            });
+            button.addEventListener('mouseenter', () => {
+                if (!button.disabled) button.style.transform = 'translateY(-1px)';
+            });
+            button.addEventListener('mouseleave', () => {
+                button.style.transform = '';
+            });
+        });
+
+        byNeighbor.forEach((neighborButtons, neighbor) => {
+            this._resolveLldpNeighborTarget(neighbor).then(result => {
+                if (result?.ok) {
+                    neighborButtons.forEach(button => this._setNeighborButtonState(button, 'ready', result));
+                } else {
+                    const reason = result?.reason || 'Onboard or discover this neighbor before connecting.';
+                    neighborButtons.forEach(button => this._setNeighborButtonState(button, 'unknown', null, reason));
+                }
+            }).catch(err => {
+                const reason = err?.message || 'Could not resolve this neighbor.';
+                neighborButtons.forEach(button => this._setNeighborButtonState(button, 'unknown', null, reason));
+            });
+        });
+    },
+
     /**
      * Fetch LLDP neighbors -- cache-first via ScalerAPI.getDeviceContext (reads
      * operational.json instantly), then discovery_api as fallback.
      */
     async _fetchLldpNeighbors(serial, device = null, signal) {
         const deviceLabel = device?.label || serial;
-        const sshHost = device?.sshConfig?.host || device?.sshConfig?.hostBackup || '';
-
-        // 1. Cache-first: ScalerAPI.getDeviceContext reads operational.json
-        if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDeviceContext) {
-            try {
-                const ctx = await ScalerAPI.getDeviceContext(deviceLabel, false, sshHost);
-                if (ctx?.lldp && Array.isArray(ctx.lldp) && ctx.lldp.length > 0) {
-                    return {
-                        neighbors: ctx.lldp.map(n => ({
-                            interface: n.local || n.interface || n.local_interface || '',
-                            neighbor: n.neighbor || n.neighbor_device || n.neighbor_name || '',
-                            remote_port: n.remote || n.remote_port || n.neighbor_port || ''
-                        })),
-                        source: 'scaler-db',
-                        cached: true,
-                        last_updated: ctx.last_updated || null
-                    };
-                }
-            } catch (_) {}
+        const sshHost = this._sshHost(device);
+        if (!this._hasLldpLookupTarget(device, serial)) {
+            return this._createEmptyLldpData('Not discovered yet. Run probe/discover or add a verified device identity.');
         }
+        const identityCandidates = this._identityCandidates(device, serial);
 
-        // 2. Fallback: discovery_api (NetworkMapper -> SCALER DB -> inventory -> SSH)
+        const contextLookup = async (live) => {
+            if (typeof ScalerAPI === 'undefined' || !ScalerAPI.getDeviceContext) return null;
+            const guard = window.TopologyDeviceIdentity || null;
+            for (const deviceId of identityCandidates) {
+                try {
+                    const token = guard?.makeRequestToken
+                        ? guard.makeRequestToken(device, { host: sshHost, deviceId })
+                        : null;
+                    const ctx = await ScalerAPI.getDeviceContext(deviceId, live, sshHost, {
+                        bypassCache: !!live,
+                        signal,
+                    });
+                    if (guard?.signature && token && guard.signature(device, sshHost) !== token.signature) {
+                        return null;
+                    }
+                    if (guard?.validateResponseForDevice && token) {
+                        const identityCheck = guard.validateResponseForDevice(device, {}, token, {
+                            host: sshHost,
+                            ctx,
+                            deviceId
+                        });
+                        if (!identityCheck.ok) continue;
+                    }
+                    if (ctx?.lldp && Array.isArray(ctx.lldp) && ctx.lldp.length > 0) {
+                        return {
+                            neighbors: ctx.lldp.map(n => LldpDialog._normNeighbor(n)),
+                            source: ctx.resolved_via || (live ? 'scaler-bridge-live' : 'scaler-db'),
+                            cached: !live,
+                            last_updated: ctx.last_updated || ctx.timestamp || null,
+                            resolved_ip: ctx.resolved_ip || ctx.mgmt_ip || '',
+                            hostname: ctx.identity?.hostname || ctx.hostname || deviceId,
+                        };
+                    }
+                } catch (_) {}
+            }
+            return null;
+        };
+
+        // 1. Cache-first through scaler bridge. This path resolves via the
+        // current user's monitored registry, so already-onboarded devices do
+        // not depend on stale canvas-only labels or discovery_api aliases.
+        const cachedCtx = await contextLookup(false);
+        if (cachedCtx) return cachedCtx;
+
+        // 2. Live scaler bridge context. This uses backend identity +
+        // per-user credentials and refreshes LLDP without duplicate
+        // onboarding. It is the reliability path for an existing DB device
+        // whose cached operational.json has no LLDP yet.
+        const liveCtx = await contextLookup(true);
+        if (liveCtx) return { ...liveCtx, live: true, cached: false };
+
+        // 3. Compatibility fallback: discovery_api (NetworkMapper -> SCALER DB -> inventory -> SSH)
         const url = new URL(`/api/dnaas/device/${encodeURIComponent(serial)}/lldp`, window.location.origin);
         if (sshHost && /^\d+\.\d+\.\d+\.\d+$/.test(sshHost)) {
             url.searchParams.set('ssh_host', sshHost);
@@ -570,7 +1236,7 @@ window.LldpDialog = {
             const _ctrl = new AbortController();
             if (signal) signal.addEventListener('abort', () => _ctrl.abort(), { once: true });
             const _timer = setTimeout(() => _ctrl.abort(), 10000);
-            const response = await fetch(url.toString(), { signal: _ctrl.signal }).finally(() => clearTimeout(_timer));
+            const response = await this._authFetch(url.toString(), { signal: _ctrl.signal }).finally(() => clearTimeout(_timer));
             if (response.ok) {
                 return await response.json();
             }
@@ -593,7 +1259,48 @@ window.LldpDialog = {
      * When device has sshConfig.host, pass ssh_host so API can connect when serial does not resolve.
      */
     async _fetchLldpNeighborsLive(serial, device = null, signal) {
-        const sshHost = device?.sshConfig?.host || device?.sshConfig?.hostBackup || '';
+        const sshHost = this._sshHost(device);
+        if (!this._hasLldpLookupTarget(device, serial)) {
+            return this._createEmptyLldpData('Not discovered yet. Run probe/discover or add a verified device identity.');
+        }
+        if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDeviceContext) {
+            const guard = window.TopologyDeviceIdentity || null;
+            for (const deviceId of this._identityCandidates(device, serial)) {
+                try {
+                    const token = guard?.makeRequestToken
+                        ? guard.makeRequestToken(device, { host: sshHost, deviceId })
+                        : null;
+                    const ctx = await ScalerAPI.getDeviceContext(deviceId, true, sshHost, {
+                        bypassCache: true,
+                        signal,
+                    });
+                    if (guard?.signature && token && guard.signature(device, sshHost) !== token.signature) {
+                        return this._createEmptyLldpData('LLDP response ignored because the device SN/host changed.');
+                    }
+                    if (guard?.validateResponseForDevice && token) {
+                        const identityCheck = guard.validateResponseForDevice(device, {}, token, {
+                            host: sshHost,
+                            ctx,
+                            deviceId
+                        });
+                        if (!identityCheck.ok) continue;
+                    }
+                    const lldp = Array.isArray(ctx?.lldp) ? ctx.lldp : [];
+                    if (lldp.length > 0) {
+                        return {
+                            neighbors: lldp.map(n => LldpDialog._normNeighbor(n)),
+                            lldp_neighbors: lldp,
+                            source: ctx.resolved_via || 'scaler-bridge-live',
+                            hostname: ctx.identity?.hostname || ctx.hostname || deviceId,
+                            resolved_ip: ctx.resolved_ip || ctx.mgmt_ip || '',
+                            last_updated: new Date().toISOString(),
+                            cached: false,
+                            live: true,
+                        };
+                    }
+                } catch (_) {}
+            }
+        }
         const body = { serial };
         if (sshHost && /^\d+\.\d+\.\d+\.\d+$/.test(sshHost)) {
             body.ssh_host = sshHost;
@@ -602,7 +1309,7 @@ window.LldpDialog = {
             const _ctrl = new AbortController();
             if (signal) signal.addEventListener('abort', () => _ctrl.abort(), { once: true });
             const _timer = setTimeout(() => _ctrl.abort(), 20000);
-            const response = await fetch('/api/dnaas/lldp-neighbors-live', {
+            const response = await this._authFetch('/api/dnaas/lldp-neighbors-live', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
@@ -611,11 +1318,7 @@ window.LldpDialog = {
             if (response.ok) {
                 const data = await response.json();
                 if (data.lldp_neighbors && !data.neighbors) {
-                    data.neighbors = data.lldp_neighbors.map(n => ({
-                        interface: n.local_interface || n.interface || '',
-                        neighbor: n.neighbor_device || n.neighbor || '',
-                        remote_port: n.neighbor_port || n.remote_port || ''
-                    }));
+                    data.neighbors = data.lldp_neighbors.map(n => LldpDialog._normNeighbor(n));
                 }
                 data.last_updated = new Date().toISOString();
                 data.cached = false;
@@ -643,6 +1346,7 @@ window.LldpDialog = {
      * Extracted for reuse by refresh button
      */
     _buildLldpTableHtml(snakeGroups, data, device, deviceLabel) {
+        const esc = (value) => this._escapeHtml(this._cleanText(value));
         let tableHtml = `
             <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                 <thead>
@@ -651,6 +1355,7 @@ window.LldpDialog = {
                         <th style="padding: 10px; text-align: left; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.1);">Local Interface</th>
                         <th style="padding: 10px; text-align: left; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.1);">Neighbor</th>
                         <th style="padding: 10px; text-align: left; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.1);">Remote Port</th>
+                        <th style="padding: 10px; text-align: right; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.1); width: 92px;">Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -675,6 +1380,10 @@ window.LldpDialog = {
         
         // Helper to build a collapsible group row
         const buildCollapsibleGroup = (groupId, color, icon, localRange, remoteRange, neighbor, entryCount, label, entries) => {
+            const safeLocalRange = esc(localRange);
+            const safeRemoteRange = esc(remoteRange);
+            const safeNeighbor = esc(neighbor);
+            const connectButton = this._buildNeighborConnectButton(neighbor);
             let html = `
                 <tr style="background: ${color.replace(')', ', 0.08)')}; cursor: pointer;"
                         onclick="this.classList.toggle('expanded'); document.getElementById('${groupId}').style.display = this.classList.contains('expanded') ? 'table-row-group' : 'none'; this.querySelector('.group-arrow').style.transform = this.classList.contains('expanded') ? 'rotate(90deg)' : '';">
@@ -682,22 +1391,25 @@ window.LldpDialog = {
                         <span class="group-arrow" style="display: inline-block; transition: transform 0.2s; color: ${color};">&#9654;</span>
                         </td>
                     <td style="padding: 8px 10px; color: ${color}; border-bottom: 1px solid rgba(255,255,255,0.05);">
-                        ${icon}<strong>${localRange}</strong>
+                        ${icon}<strong>${safeLocalRange}</strong>
                         <span style="color: rgba(255,255,255,0.5); font-size: 10px; margin-left: 8px;">(${entryCount} ${label})</span>
                         </td>
-                    <td style="padding: 8px 10px; color: ${color}; border-bottom: 1px solid rgba(255,255,255,0.05);"><strong>${neighbor}</strong></td>
-                        <td style="padding: 8px 10px; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.05);">${remoteRange}</td>
+                    <td style="padding: 8px 10px; color: ${color}; border-bottom: 1px solid rgba(255,255,255,0.05);"><strong>${safeNeighbor}</strong></td>
+                        <td style="padding: 8px 10px; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.05);">${safeRemoteRange}</td>
+                        <td style="padding: 8px 10px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.05);">${connectButton}</td>
                     </tr>
                 `;
             html += `<tbody id="${groupId}" style="display: none;">`;
             entries.forEach((entry, i) => {
                 const entryBg = i % 2 === 0 ? color.replace(')', ', 0.03)') : color.replace(')', ', 0.06)');
+                const entryNeighbor = entry.neighbor || entry.neighbor_device || entry.neighbor_name || neighbor;
                 html += `
                     <tr style="background: ${entryBg};">
                             <td style="padding: 6px 10px 6px 20px;"></td>
-                        <td style="padding: 6px 10px; color: ${color.replace(')', ', 0.85)')}; border-bottom: 1px solid rgba(255,255,255,0.03);">${entry.interface || entry.local_interface || '-'}</td>
-                        <td style="padding: 6px 10px; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.03);">${entry.neighbor || entry.neighbor_device || entry.neighbor_name || '-'}</td>
-                            <td style="padding: 6px 10px; color: rgba(255,255,255,0.6); border-bottom: 1px solid rgba(255,255,255,0.03);">${entry.remote_port || entry.neighbor_port || '-'}</td>
+                        <td style="padding: 6px 10px; color: ${color.replace(')', ', 0.85)')}; border-bottom: 1px solid rgba(255,255,255,0.03);">${esc(entry.interface || entry.local_interface) || '-'}</td>
+                        <td style="padding: 6px 10px; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.03);">${esc(entryNeighbor) || '-'}</td>
+                            <td style="padding: 6px 10px; color: rgba(255,255,255,0.6); border-bottom: 1px solid rgba(255,255,255,0.03);">${esc(entry.remote_port || entry.neighbor_port) || '-'}</td>
+                            <td style="padding: 6px 10px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.03);">${this._buildNeighborConnectButton(entryNeighbor)}</td>
                         </tr>
                     `;
                 });
@@ -759,12 +1471,14 @@ window.LldpDialog = {
                 if (isLoop) loopLinkCount += group.entries.length;
                 if (isPortMirror) { mirrorCount++; mirrorLinkCount += group.entries.length; }
                 group.entries.forEach(entry => {
+                    const entryNeighbor = entry.neighbor || entry.neighbor_device || entry.neighbor_name || group.neighbor;
                     tableHtml += `
                         <tr style="background: transparent;">
                             <td style="padding: 8px 10px; text-align: center;">${icon}</td>
-                            <td style="padding: 8px 10px; color: ${color}; border-bottom: 1px solid rgba(255,255,255,0.05);">${entry.interface || entry.local_interface || '-'}</td>
-                            <td style="padding: 8px 10px; color: ${color}; border-bottom: 1px solid rgba(255,255,255,0.05);">${entry.neighbor || entry.neighbor_device || entry.neighbor_name || '-'}</td>
-                            <td style="padding: 8px 10px; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.05);">${entry.remote_port || entry.neighbor_port || '-'}</td>
+                            <td style="padding: 8px 10px; color: ${color}; border-bottom: 1px solid rgba(255,255,255,0.05);">${esc(entry.interface || entry.local_interface) || '-'}</td>
+                            <td style="padding: 8px 10px; color: ${color}; border-bottom: 1px solid rgba(255,255,255,0.05);">${esc(entryNeighbor) || '-'}</td>
+                            <td style="padding: 8px 10px; color: rgba(255,255,255,0.7); border-bottom: 1px solid rgba(255,255,255,0.05);">${esc(entry.remote_port || entry.neighbor_port) || '-'}</td>
+                            <td style="padding: 8px 10px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.05);">${this._buildNeighborConnectButton(entryNeighbor)}</td>
                         </tr>
                     `;
                 });
@@ -806,9 +1520,12 @@ window.LldpDialog = {
             timestampStr = `${dateStr} ${timeStr}`;
         }
         
+        const _devModeForSummary = this._preDnosMode(device);
+        const _isPreDnosForSummary = !!_devModeForSummary;
+        const _scanLabel = _isPreDnosForSummary ? 'Pre-deploy snapshot' : 'Last scan';
         summaryHtml += `<span style="color: rgba(255,255,255,0.4); font-size: 10px; margin-left: auto;">`;
-        if (timestampStr) summaryHtml += `Last scan: ${timestampStr} `;
-        summaryHtml += `<span style="color: ${srcColor}; font-weight: 600; padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,0.06); font-size: 9px;">${srcLabel}</span>`;
+        if (timestampStr) summaryHtml += `${_scanLabel}: ${timestampStr} `;
+        summaryHtml += `<span style="color: ${srcColor}; font-weight: 600; padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,0.06); font-size: 9px;">${_isPreDnosForSummary ? 'Snapshot' : srcLabel}</span>`;
         summaryHtml += `</span>`;
         
         if (dnaasLinkCount > 0) {
@@ -831,7 +1548,8 @@ window.LldpDialog = {
     /**
      * Attach event handlers to LLDP table rows for expand/collapse
      */
-    _attachLldpTableEvents(content, device, snakeGroups, dialog) {
+    _attachLldpTableEvents(content, device, snakeGroups, dialog, editor = null) {
+        this._attachNeighborConnectButtons(content, editor || window.topologyEditor || window.editor || null);
         // Add expand/collapse behavior for snake groups
         content.querySelectorAll('.snake-group-header').forEach(header => {
             header.addEventListener('click', () => {
@@ -862,8 +1580,9 @@ window.LldpDialog = {
         const existing = document.getElementById('lldp-button-menu');
         if (existing) existing.remove();
         
-        // Get serial for API calls - PREFER sshConfig.host (actual address) over label
-        const serial = device?.sshConfig?.host || device?.deviceSerial || device?.label || '';
+        // Use the backend-registered identity first. sshConfig.host can be a
+        // stale canvas-only IP; the backend registry is the source of truth.
+        const serial = this._primaryDeviceId(device);
         console.log('LLDP menu - device:', device?.label, 'serial/host for API:', serial);
         
         // Liquid Glass styling (mode-aware)

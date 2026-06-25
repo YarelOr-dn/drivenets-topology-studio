@@ -1,0 +1,53 @@
+{
+  "feature": "evpn-mac-mobility",
+  "_description": "Starter pack for EVPN MAC mobility tests (SW-204115 family). Covers AC<->AC moves, MAC suppression, freeze/restore-cycles, and local-loop-prevention behaviors.",
+  "epics": ["SW-204115"],
+  "show_commands": [
+    {
+      "command": "show evpn instance <name> mac-table",
+      "purpose": "Verify MAC source after each move (AC1, AC2, suppressed).",
+      "phase": "verify"
+    },
+    {
+      "command": "show evpn instance <name> mac-table mac <MAC>",
+      "purpose": "Drill into one MAC's full state (move count, freeze, source).",
+      "phase": "verify"
+    },
+    {
+      "command": "show evpn instance <name> loop-prevention mac-table",
+      "purpose": "Per-MAC suppression/move table (cycles + remaining suppress time). REPLACES the incorrect 'show evpn instance <name> mac-suppression' from earlier docs -- live-validated REJECTED on dev_v26_2 build 8fd38d35a10a 2026-04-30.",
+      "phase": "verify"
+    },
+    {
+      "command": "show evpn instance <name> loop-prevention mac-table local",
+      "purpose": "Local-only view of MAC suppression/move table.",
+      "phase": "verify"
+    },
+    {
+      "command": "show evpn instance <name> loop-prevention interface",
+      "purpose": "Shutdown-interface table (was previously named 'restore-cycles' incorrectly).",
+      "phase": "snapshot"
+    },
+    {
+      "command": "show config network-services evpn instance <name> mac-handling",
+      "purpose": "Read mac-handling subtree (mobility-thresholds, sticky, restore-timer).",
+      "phase": "config"
+    }
+  ],
+  "clear_commands_validated": [
+    "clear evpn mac-table instance <name>",
+    "clear evpn instance <name> mac-suppression",
+    "clear evpn instance <name> mac-history",
+    "clear evpn instance <name> restore-cycles"
+  ],
+  "syntax_traps": [
+    "WRONG: 'clear evpn mac-suppression instance X' -- the order is INVERTED",
+    "WRONG: 'show evpn mac-table instance X detail' -- 'detail' must come BEFORE 'instance'",
+    "RIGHT: 'show evpn mac-table detail instance X' OR 'show evpn detail instance X'",
+    "Loop-prevention action keywords: 'suppress' (default), 'blackhole', 'shutdown'. NOT 'freeze' or 'drop'.",
+    "LLP uses 'restore-timer' (no mac- prefix) at the local-loop-prevention level; outer loop-prevention level uses 'mac-restore-timer'.",
+    "WRONG: 'show evpn instance X mac-suppression' / 'mac-history' / 'restore-cycles' -- these are CLEAR-side verbs only. Live-validated rejected on PE-4 dev_v26_2 build 8fd38d35a10a 2026-04-30. Use 'show evpn instance X loop-prevention {interface|local|mac-table|mac-ip-table}' instead.",
+    "WRONG: 'show evpn local-loop-prevention' -- not a valid show keyword. Use 'show evpn instance X loop-prevention local' (local-loop-prevention only exists in CONFIG mode under mac-handling > loop-prevention)."
+  ],
+  "_see_also": "evpn-loop-prevention.json -- canonical, fully validated loop-prevention syntax pack from 2026-04-30 PE-4 discovery."
+}

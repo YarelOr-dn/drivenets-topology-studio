@@ -1,0 +1,181 @@
+{
+  "name": "metro-g8032-6node",
+  "protocol": "ring",
+  "scale": "small",
+  "summary": "G.8032 metro Ethernet ring with 6 access nodes. One link is the Ring Protection Link (normally blocked). Sub-50 ms protection on failure.",
+  "tags": [
+    "ring",
+    "g8032",
+    "erps",
+    "rpl",
+    "metro"
+  ],
+  "layout_hint": "ring",
+  "objects": [
+    {
+      "id": "ring",
+      "type": "shape",
+      "shapeType": "ellipse",
+      "x": 960,
+      "y": 540,
+      "width": 700,
+      "height": 700,
+      "fillColor": "#f39c12",
+      "fillEnabled": true,
+      "fillOpacity": 0.06,
+      "strokeColor": "#f39c12",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "label": "G.8032 Metro Ring"
+    },
+    {
+      "id": "rn1",
+      "type": "device",
+      "label": "RN-1",
+      "x": 960.0,
+      "y": 220.0,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "rn2",
+      "type": "device",
+      "label": "RN-2",
+      "x": 1237.1281292110205,
+      "y": 380.0,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "rn3",
+      "type": "device",
+      "label": "RN-3",
+      "x": 1237.1281292110205,
+      "y": 700.0,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "rn4",
+      "type": "device",
+      "label": "RN-4",
+      "x": 960.0,
+      "y": 860.0,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "rn5",
+      "type": "device",
+      "label": "RN-5",
+      "x": 682.8718707889795,
+      "y": 700.0,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "rn6",
+      "type": "device",
+      "label": "RN-6",
+      "x": 682.8718707889797,
+      "y": 380.0,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "l_rn1_rn2",
+      "type": "link",
+      "device1": "rn1",
+      "device2": "rn2",
+      "color": "#e74c3c",
+      "style": "dashed",
+      "width": 3,
+      "label": "RPL (blocked)"
+    },
+    {
+      "id": "l_rn2_rn3",
+      "type": "link",
+      "device1": "rn2",
+      "device2": "rn3",
+      "color": "#f39c12",
+      "style": "solid",
+      "width": 3,
+      "label": "Ring"
+    },
+    {
+      "id": "l_rn3_rn4",
+      "type": "link",
+      "device1": "rn3",
+      "device2": "rn4",
+      "color": "#f39c12",
+      "style": "solid",
+      "width": 3,
+      "label": "Ring"
+    },
+    {
+      "id": "l_rn4_rn5",
+      "type": "link",
+      "device1": "rn4",
+      "device2": "rn5",
+      "color": "#f39c12",
+      "style": "solid",
+      "width": 3,
+      "label": "Ring"
+    },
+    {
+      "id": "l_rn5_rn6",
+      "type": "link",
+      "device1": "rn5",
+      "device2": "rn6",
+      "color": "#f39c12",
+      "style": "solid",
+      "width": 3,
+      "label": "Ring"
+    },
+    {
+      "id": "l_rn6_rn1",
+      "type": "link",
+      "device1": "rn6",
+      "device2": "rn1",
+      "color": "#f39c12",
+      "style": "solid",
+      "width": 3,
+      "label": "Ring"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "Metro Ethernet Ring (G.8032 / ERPS)",
+      "x": 960,
+      "y": 120,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_rpl",
+      "type": "text",
+      "text": "RPL = Ring Protection Link (blocked during\nnormal operation). On failure the RPL is\nunblocked and traffic re-routes; < 50 ms.",
+      "x": 960,
+      "y": 980,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#e74c3c",
+      "borderWidth": 1
+    }
+  ]
+}

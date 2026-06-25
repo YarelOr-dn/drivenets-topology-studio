@@ -1,0 +1,220 @@
+{
+  "name": "l1-l2-hierarchy",
+  "protocol": "isis",
+  "scale": "medium",
+  "summary": "IS-IS hierarchical design. Area 49.0001 (L1) attaches to the L2 backbone via two L1L2 routers. Classic SP backbone topology.",
+  "tags": [
+    "isis",
+    "l1",
+    "l2",
+    "hierarchical",
+    "sp-backbone"
+  ],
+  "objects": [
+    {
+      "id": "l1",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 500,
+      "y": 700,
+      "width": 660,
+      "height": 460,
+      "fillColor": "#27ae60",
+      "fillEnabled": true,
+      "fillOpacity": 0.1,
+      "strokeColor": "#27ae60",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 16,
+      "label": "Area 49.0001 (L1)"
+    },
+    {
+      "id": "l2",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 1380,
+      "y": 380,
+      "width": 900,
+      "height": 460,
+      "fillColor": "#95a5a6",
+      "fillEnabled": true,
+      "fillOpacity": 0.1,
+      "strokeColor": "#95a5a6",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 16,
+      "label": "L2 Backbone"
+    },
+    {
+      "id": "l1r1",
+      "type": "device",
+      "label": "L1-R1",
+      "x": 280,
+      "y": 600,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "l1r2",
+      "type": "device",
+      "label": "L1-R2",
+      "x": 280,
+      "y": 820,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "l1l2a",
+      "type": "device",
+      "label": "L1L2-A",
+      "x": 700,
+      "y": 700,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#e67e22",
+      "radius": 48
+    },
+    {
+      "id": "l2r1",
+      "type": "device",
+      "label": "L2-R1",
+      "x": 1100,
+      "y": 380,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "l2r2",
+      "type": "device",
+      "label": "L2-R2",
+      "x": 1420,
+      "y": 380,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "l2r3",
+      "type": "device",
+      "label": "L2-R3",
+      "x": 1740,
+      "y": 380,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "l1l2b",
+      "type": "device",
+      "label": "L1L2-B",
+      "x": 1420,
+      "y": 620,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#e67e22",
+      "radius": 48
+    },
+    {
+      "id": "l_l1r1_l1r2",
+      "type": "link",
+      "device1": "l1r1",
+      "device2": "l1r2",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L1"
+    },
+    {
+      "id": "l_l1r1_l1l2a",
+      "type": "link",
+      "device1": "l1r1",
+      "device2": "l1l2a",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L1"
+    },
+    {
+      "id": "l_l1r2_l1l2a",
+      "type": "link",
+      "device1": "l1r2",
+      "device2": "l1l2a",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L1"
+    },
+    {
+      "id": "l_l1l2a_l2r1",
+      "type": "link",
+      "device1": "l1l2a",
+      "device2": "l2r1",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L1/L2"
+    },
+    {
+      "id": "l_l2r1_l2r2",
+      "type": "link",
+      "device1": "l2r1",
+      "device2": "l2r2",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L2"
+    },
+    {
+      "id": "l_l2r2_l2r3",
+      "type": "link",
+      "device1": "l2r2",
+      "device2": "l2r3",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L2"
+    },
+    {
+      "id": "l_l2r2_l1l2b",
+      "type": "link",
+      "device1": "l2r2",
+      "device2": "l1l2b",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L1/L2"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "IS-IS L1 + L2 Hierarchy",
+      "x": 1100,
+      "y": 140,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_note",
+      "type": "text",
+      "text": "L1 routers know only Area 49.0001\nL2 routers exchange inter-area reachability\nL1L2 routers sit on the boundary (NET = 49.0001.xxxx.xxxx.xxxx.00)",
+      "x": 1100,
+      "y": 1060,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#334155",
+      "borderWidth": 1
+    }
+  ]
+}

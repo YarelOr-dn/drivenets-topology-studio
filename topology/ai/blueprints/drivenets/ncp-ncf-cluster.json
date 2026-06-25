@@ -1,0 +1,268 @@
+{
+  "name": "ncp-ncf-cluster",
+  "protocol": "drivenets",
+  "scale": "medium",
+  "summary": "DriveNets Network Cloud disaggregated cluster: 4 NCP packet boxes, 2 NCF fabric chassis, and NCM control plane. Canonical scale-out DNOS chassis replacement.",
+  "tags": [
+    "drivenets",
+    "ncp",
+    "ncf",
+    "ncm",
+    "cluster",
+    "dnos"
+  ],
+  "layout_hint": "clos-3-stage",
+  "objects": [
+    {
+      "id": "cluster",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 960,
+      "y": 540,
+      "width": 1500,
+      "height": 640,
+      "fillColor": "#00b4d8",
+      "fillEnabled": true,
+      "fillOpacity": 0.06,
+      "strokeColor": "#00b4d8",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 18,
+      "label": "DriveNets Network Cloud Cluster"
+    },
+    {
+      "id": "ncf1",
+      "type": "device",
+      "label": "NCF-1",
+      "x": 720,
+      "y": 320,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "ncf2",
+      "type": "device",
+      "label": "NCF-2",
+      "x": 1200,
+      "y": 320,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "ncp1",
+      "type": "device",
+      "label": "NCP-1",
+      "x": 460,
+      "y": 720,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#2c3e50"
+    },
+    {
+      "id": "ncp2",
+      "type": "device",
+      "label": "NCP-2",
+      "x": 760,
+      "y": 720,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#2c3e50"
+    },
+    {
+      "id": "ncp3",
+      "type": "device",
+      "label": "NCP-3",
+      "x": 1160,
+      "y": 720,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#2c3e50"
+    },
+    {
+      "id": "ncp4",
+      "type": "device",
+      "label": "NCP-4",
+      "x": 1460,
+      "y": 720,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#2c3e50"
+    },
+    {
+      "id": "ncm",
+      "type": "device",
+      "label": "NCM",
+      "x": 960,
+      "y": 960,
+      "role": "core",
+      "visualStyle": "hex",
+      "color": "#00b4d8",
+      "radius": 48
+    },
+    {
+      "id": "l_ncp1_ncf1",
+      "type": "link",
+      "device1": "ncp1",
+      "device2": "ncf1",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "Cluster fabric"
+    },
+    {
+      "id": "l_ncp1_ncf2",
+      "type": "link",
+      "device1": "ncp1",
+      "device2": "ncf2",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "Cluster fabric"
+    },
+    {
+      "id": "l_ncp2_ncf1",
+      "type": "link",
+      "device1": "ncp2",
+      "device2": "ncf1",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "Cluster fabric"
+    },
+    {
+      "id": "l_ncp2_ncf2",
+      "type": "link",
+      "device1": "ncp2",
+      "device2": "ncf2",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "Cluster fabric"
+    },
+    {
+      "id": "l_ncp3_ncf1",
+      "type": "link",
+      "device1": "ncp3",
+      "device2": "ncf1",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "Cluster fabric"
+    },
+    {
+      "id": "l_ncp3_ncf2",
+      "type": "link",
+      "device1": "ncp3",
+      "device2": "ncf2",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "Cluster fabric"
+    },
+    {
+      "id": "l_ncp4_ncf1",
+      "type": "link",
+      "device1": "ncp4",
+      "device2": "ncf1",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "Cluster fabric"
+    },
+    {
+      "id": "l_ncp4_ncf2",
+      "type": "link",
+      "device1": "ncp4",
+      "device2": "ncf2",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "Cluster fabric"
+    },
+    {
+      "id": "mgmt_ncp1",
+      "type": "link",
+      "device1": "ncm",
+      "device2": "ncp1",
+      "color": "#95a5a6",
+      "style": "dashed",
+      "label": "mgmt"
+    },
+    {
+      "id": "mgmt_ncp2",
+      "type": "link",
+      "device1": "ncm",
+      "device2": "ncp2",
+      "color": "#95a5a6",
+      "style": "dashed",
+      "label": "mgmt"
+    },
+    {
+      "id": "mgmt_ncp3",
+      "type": "link",
+      "device1": "ncm",
+      "device2": "ncp3",
+      "color": "#95a5a6",
+      "style": "dashed",
+      "label": "mgmt"
+    },
+    {
+      "id": "mgmt_ncp4",
+      "type": "link",
+      "device1": "ncm",
+      "device2": "ncp4",
+      "color": "#95a5a6",
+      "style": "dashed",
+      "label": "mgmt"
+    },
+    {
+      "id": "mgmt_ncf1",
+      "type": "link",
+      "device1": "ncm",
+      "device2": "ncf1",
+      "color": "#95a5a6",
+      "style": "dashed",
+      "label": "mgmt"
+    },
+    {
+      "id": "mgmt_ncf2",
+      "type": "link",
+      "device1": "ncm",
+      "device2": "ncf2",
+      "color": "#95a5a6",
+      "style": "dashed",
+      "label": "mgmt"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "DriveNets Network Cloud (NCP/NCF) Cluster",
+      "x": 960,
+      "y": 140,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_roles",
+      "type": "text",
+      "text": "NCP = Network Cloud Packet (forwarding)\nNCF = Network Cloud Fabric (Clos spine)\nNCM = Network Cloud Manager (control)",
+      "x": 960,
+      "y": 1100,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#00b4d8",
+      "borderWidth": 1
+    }
+  ]
+}

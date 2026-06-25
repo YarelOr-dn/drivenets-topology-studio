@@ -1,0 +1,10 @@
+[
+  {
+    "label": "mac_count",
+    "command": "show evpn mac-table",
+    "before": 3,
+    "after": 1,
+    "delta": -2,
+    "assessment": "decreased"
+  }
+]

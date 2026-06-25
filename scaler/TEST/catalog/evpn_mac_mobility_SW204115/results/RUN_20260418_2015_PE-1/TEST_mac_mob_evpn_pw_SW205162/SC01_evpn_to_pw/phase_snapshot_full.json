@@ -1,0 +1,11 @@
+[
+  {
+    "command": "show evpn mac-table instance PW_TEST_ELAN mac 00:de:ad:ff:ff:01 | no-more",
+    "timestamp": "2026-04-18T20:16:10.173+00:00",
+    "duration_ms": 250,
+    "phase": "snapshot",
+    "output_length": 182,
+    "output_preview": "EVPN    : PW_TEST_ELAN\nEVI ID  : 6\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1010\n      Timestamp: 18-Apr-2026-23:15:18",
+    "output_full": "EVPN    : PW_TEST_ELAN\nEVI ID  : 6\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1010\n      Timestamp: 18-Apr-2026-23:15:18"
+  }
+]

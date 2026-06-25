@@ -1,0 +1,15 @@
+{
+  "commands": {
+    "show evpn instance EVPN_SI_VPLS_1 detail": {
+      "last_seen_iso": "2026-04-30T14:38:42Z",
+      "protocol": "evpn",
+      "valid": true
+    },
+    "show evpn local-loop-prevention": {
+      "last_seen_iso": "2026-04-30T14:38:42Z",
+      "protocol": "evpn",
+      "valid": false
+    }
+  },
+  "feature": "evpn"
+}

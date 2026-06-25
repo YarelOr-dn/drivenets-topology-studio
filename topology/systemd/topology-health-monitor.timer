@@ -1,0 +1,16 @@
+[Unit]
+Description=Run Topology Studio external health monitor every minute
+Documentation=file:///home/dn/drivenets-topology-studio/topology/systemd/README.md
+
+[Timer]
+# Fire 30s after login/boot so the app has a chance to bind ports first,
+# then every 60s. Persistent=true means missed runs are caught up after
+# resume from sleep, but only with the next due tick (not a flood).
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Persistent=true
+Unit=topology-health-monitor.service
+
+[Install]
+WantedBy=timers.target

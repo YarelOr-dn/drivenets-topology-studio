@@ -108,6 +108,24 @@ DNOS supports the following actions for FlowSpec VPN:
 
 *Unsupported Actions*: IETF redirect-ip (0x0c), Traffic-Action sample/terminal, DSCP marking.
 
+### 8.1 Epic / User-Story Chain for Action Support (authoritative PM spec)
+
+The support matrix in Section 8 is grounded in the following epics and user stories:
+
+| Jira | Type | Title | Release | Reporter | Status | Contribution to matrix |
+|------|------|-------|---------|----------|--------|------------------------|
+| **SW-41148** | Epic | BGP Flowspec Redirect Action (redirect-to-NH) | v13.3 (Feb 2021) | -- | Verified | Introduces redirect-to-IP (Simpson draft 0x08) |
+| **SW-48486** | Epic | BGP Flowspec redirect to VRF (RT-Redirect) | v16.2 / PI_4_2021 | Michell Shama | Verified | Introduces RT-Redirect. Explicitly states **"Multiple actions are not supported and not required"** at the time of v16.2. This is the historical baseline. |
+| **SW-61572** | Epic | BGP FlowSpec Rate-Limit | **v17 / PI_2_2022** | V. Zernopolsky | **Verified** | **Explicitly lifts the SW-48486 restriction** and adds: `"Support the following single/multiple actions... BGP FS rate-limit with redirect to VRF - BGP FS redirect to VRF is limited by rate-limit"` and `"BGP FS rate-limit with redirect to NH - BGP FS redirect to NH is limited by rate-limit"`. Quotes RFC 8955 directly: `"traffic-rate-bytes and rt-redirect can be applied to packets at the same time"`. |
+| **SW-182545** | Epic (Parent) | Flowspec VPN (SAFI 134) | v26.2 / PI_1_2026 | **Omri Nir** | Ready To SIT/E2E | Specifies: `"Support similar flowspec capabilities NLRI & extcommunity actions as for default VRF"`. Inherits action matrix from default VRF. |
+| **SW-206876** | User story | Support Flowspec VPN in default VRF | v26.2 | **Omri Nir** | Dev-Done | Lists actions: `Traffic-rate`, `RT-redirect`, `redirect-ip`. Says `"align support with flowspec"`. Redirect-IP + RT-Redirect: `"ignore redirect-to-ip and perform only redirect-to-rt"`. |
+| **SW-206877** | User story | Support Flowspec in Non-Default VRF | v26.2 | **Omri Nir** | Dev-Done | **Definitive scope statement:** `"In the context of non-default vrf, these ipv4/6-flowspec paths will be processed in similar manner as... Actions: SW-41148, SW-48486, SW-61572"`. This is the user story that **explicitly inherits SW-61572's rate-limit + RT-redirect combo into SAFI 134**. |
+| **SW-206889** | User story | Support for RT Redirect action (in VPN context) | v26.2 | **Omri Nir** | Dev-Done | `"Support will align with existing support in default VRF defined by SW-48486"`. Scopes RT-redirect behaviour for SAFI 134. |
+
+**Conclusion from the spec chain**: By SW-206877 explicitly listing **SW-61572** as one of the three action epics whose behaviour is inherited into non-default VRF FlowSpec handling, the PM specification states that **traffic-rate (>0) + RT-Redirect combined action IS supported for FlowSpec VPN (SAFI 134) in DNOS v17+ (default VRF) and v26.2 (non-default VRF via SAFI 134)**.
+
+The only exception that was never lifted is **traffic-rate = 0 (drop) + RT-Redirect**, because a drop and a redirect are semantically conflicting actions (there is nothing to redirect once dropped).
+
 ## 9. Redirect Behavior Deep Dive
 * **RT-Redirect**: If multiple VRFs import the same RT, the **first VRF alphabetically** wins the redirect.
 * **Redirect-IP to MPLS Next-Hop**: If the target IP resolves via an MPLS-recursive next-hop (label-switched path), the NCP skips the redirect action **by design**. (`Action 4 skipped, probably because it is unreachable`).

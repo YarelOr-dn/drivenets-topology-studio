@@ -1,0 +1,115 @@
+{
+  "phase_name": "trigger",
+  "started_at": "2026-04-16T16:53:37.148+00:00",
+  "completed_at": "2026-04-16T16:54:46.766+00:00",
+  "duration_sec": 69.618,
+  "command_count": 13,
+  "commands": [
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-16T16:53:37.148+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-16T16:53:50.521+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-16T16:53:55.625+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-16T16:54:00.729+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-16T16:54:05.833+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-16T16:54:10.937+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-16T16:54:16.041+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-16T16:54:21.145+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-16T16:54:26.249+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-16T16:54:31.353+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-16T16:54:36.457+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-16T16:54:41.561+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-16T16:54:46.665+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    }
+  ],
+  "parsed_values": {},
+  "anomalies": []
+}

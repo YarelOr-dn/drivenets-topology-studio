@@ -9,10 +9,153 @@
   "created": "2026-03-20",
   "reference_table": "Local->PW: Withdraw; suppression YES; Local loop NO. PW->Local: Advertise; suppression YES. Sticky AC->PW: IGNORE. PW->Sticky AC: prefer sticky + RT-2",
   "device_requirements": {"type": "any", "features": ["evpn", "vpls-pw"], "min_ncp_count": 1},
+  "infra_required": "spirent_vpls_cp",
+  "infra_reason": "Uses Spirent as VPLS BGP peer on SI-enabled EVPN instance (PW_TEST_ELAN). VPLS RTs are under seamless-integration > protocols > bgp (ONLY valid location). PW is 'Installed' because only Spirent peers via l2vpn-vpls for this EVI. Full chain: ISIS+LDP+BGP l2vpn-vpls. Spirent sends MPLS-labeled L2 frames via vpls-stream for PW MAC learning. See ~/.cursor/spirent-reference/vpls-pw-establishment.md.",
+  "reference_doc": "~/.cursor/spirent-reference/vpls-pw-establishment.md",
+  "convergence_budget_seconds": 90,
+  "prerequisites": [
+    {
+      "id": "spirent_session",
+      "check": "spirent_available",
+      "check_command": "spirent_tool.py status --json",
+      "fix_via": "spirent_tool.py connect && reserve"
+    },
+    {
+      "id": "vpls_label_pool",
+      "check": "label_pool_configured",
+      "check_command": "show mpls label-allocation tables | no-more",
+      "expect": "bgp-vpls row with non-zero label count",
+      "alt_check": "show config routing-options | flatten | include bgp-vpls-label-block-size",
+      "fix_config": "routing-options bgp-vpls-label-block-size 130",
+      "fix_via": "auto_config",
+      "known_bug": "SW-253359: on cluster devices, label pool may show 0 even after config+restart"
+    },
+    {
+      "id": "bgp_l2vpn_vpls_af",
+      "check": "bgp_address_family",
+      "check_command": "show config protocols bgp {asn} | flatten | include l2vpn-vpls",
+      "expect": "address-family l2vpn-vpls",
+      "fix_config": "protocols bgp {asn} > address-family l2vpn-vpls (enter subtree, no admin-state inside AF)",
+      "fix_via": "auto_config"
+    },
+    {
+      "id": "si_evpn_instance",
+      "check": "evpn_instance_with_si_and_vpls_rt",
+      "check_command": "show config network-services evpn instance {pw_test_evpn_name} | no-more",
+      "expect": "instance {pw_test_evpn_name} with seamless-integration and export-l2vpn-vpls route-target",
+      "fail_action": "auto_create",
+      "fix_via": "Create EVPN instance PW_TEST_ELAN WITH seamless-integration. VPLS RTs MUST be under SI > protocols > bgp subtree.",
+      "fix_config_hierarchy": [
+        "network-services evpn instance PW_TEST_ELAN",
+        "  protocols bgp {asn}",
+        "    export-l2vpn-evpn route-target 9990:9990",
+        "    import-l2vpn-evpn route-target 9990:9990",
+        "    route-distinguisher {router_id}:9990",
+        "  seamless-integration",
+        "    protocols bgp",
+        "      export-l2vpn-vpls route-target 9990:9990",
+        "      import-l2vpn-vpls route-target 9990:9990",
+        "    label-block-size 8",
+        "    source-if lo0",
+        "    site-id 2 site-interface ge400-0/0/5.1010",
+        "  interface ge400-0/0/5.1010"
+      ],
+      "critical_note": "VPLS RTs (export-l2vpn-vpls) are ONLY valid under seamless-integration > protocols > bgp. NOT at instance-level BGP. NEVER remove SI from this instance -- it deletes all VPLS RT config. Discovered 2026-04-11.",
+      "validated": true,
+      "validation_note": "VALIDATED PE-1 2026-04-11: PW Installed after SI + VPLS RT under SI subtree"
+    },
+    {
+      "id": "isis_adjacency",
+      "check": "isis_neighbor_up",
+      "check_command": "show isis neighbors | include ge400-0/0/5.3",
+      "expect": "L2 Up",
+      "fix_via": "spirent_vpls_provisioner.py provisions ISIS on DUT (P2P, area 49.0001) and Spirent (area converted to STC hex 490001)",
+      "depends_on": ["si_evpn_instance"],
+      "convergence_time_seconds": 45,
+      "stc_encoding_trap": "STC Area1 requires concatenated hex '490001' not dotted '49.0001'. SystemId uses dotted format '0000.0000.0003'. These formats are NOT interchangeable.",
+      "validated": true,
+      "validation_note": "VALIDATED PE-1 2026-04-11: ISIS L2 Up in 43s after _area_to_stc_hex() fix"
+    },
+    {
+      "id": "route_to_loopback",
+      "check": "igp_route_exists",
+      "check_command": "show route 6.6.6.6",
+      "expect": "Known via isis",
+      "depends_on": ["isis_adjacency"],
+      "convergence_time_seconds": 5,
+      "note": "Route to Spirent loopback 6.6.6.6/32 must be installed via ISIS for LDP to create a label binding"
+    },
+    {
+      "id": "ldp_session",
+      "check": "ldp_neighbor_operational",
+      "check_command": "show ldp neighbors | include 17.17.17",
+      "expect": "OPERATIONAL",
+      "depends_on": ["route_to_loopback"],
+      "convergence_time_seconds": 10,
+      "note": "LDP session provides MPLS label for FEC 6.6.6.6/32 (the VPLS nexthop)"
+    },
+    {
+      "id": "spirent_vpls_peer",
+      "check": "bgp_vpls_session",
+      "check_command": "show bgp summary | include 17.17.17",
+      "expect": "Established",
+      "fix_via": "spirent_tool.py bgp-peer --negotiate-afi l2vpn-vpls --vpls-rd {vpls_rd} --vpls-rt {vpls_rt} --vpls-ve-id {vpls_ve_id} --vpls-block-size 8 --vpls-nexthop 6.6.6.6",
+      "depends_on": ["bgp_l2vpn_vpls_af", "si_evpn_instance", "ldp_session"],
+      "convergence_time_seconds": 10,
+      "validated": true,
+      "validation_note": "VALIDATED PE-1 2026-04-11: BGP ESTABLISHED in 53s from protocol-start"
+    },
+    {
+      "id": "pw_installed",
+      "check": "vpls_pw_installed",
+      "check_command": "show evpn vpls-pw | no-more",
+      "pass_criteria": "PW exists for {pw_test_evpn_name} with Status = Installed (NOT Uninstalled/BNI)",
+      "validated": true,
+      "validation_note": "VALIDATED PE-1 2026-04-11: PW Installed after SI + correct VPLS RT under SI + BlkSize=8",
+      "fail_action": "diagnose_vpls_pw",
+      "fail_checklist": [
+        "1. RT mismatch: Spirent --vpls-rt must exactly match DUT SI import-l2vpn-vpls RT",
+        "2. Missing SI: export-l2vpn-vpls only valid under seamless-integration subtree",
+        "3. ISIS area hex: STC needs '490001' not '49.0001'",
+        "4. BlkSize too small: must cover remote site-id (BlkSize=1 silently fails)",
+        "5. No route to loopback: ISIS not converged",
+        "6. No LDP label: LDP not OPERATIONAL",
+        "7. BGP not ESTABLISHED: check neighbor IP alignment",
+        "8. PW Uninstalled: competing EVPN RT-2 routes force BNI"
+      ],
+      "depends_on": ["spirent_vpls_peer"],
+      "convergence_time_seconds": 5,
+      "reference_doc": "~/.cursor/spirent-reference/vpls-pw-establishment.md section 7"
+    },
+    {
+      "id": "pw_ingress_label",
+      "check": "ingress_label_available",
+      "check_command": "show evpn vpls-pw | no-more",
+      "pass_criteria": "Ingress-label field present and non-zero for {pw_test_evpn_name}",
+      "extract": "pw_ingress_label",
+      "depends_on": ["pw_installed"]
+    },
+    {
+      "id": "ac_on_same_instance",
+      "check": "ac_interface_configured",
+      "check_command": "show config network-services evpn instance {pw_test_evpn_name} | flatten | include interface",
+      "pass_criteria": "At least one AC interface on the non-SI instance for local MAC learning",
+      "depends_on": ["si_evpn_instance"]
+    }
+  ],
+  "spirent_vpls_setup": {
+    "description": "Spirent acts as a remote VPLS peer. PW is established via BGP l2vpn-vpls. Spirent sends MPLS-labeled frames with vpls-stream using PE-1's PW ingress label. PE-1 pops the MPLS label and learns inner source MAC as a PW-learned MAC.",
+    "mac_trigger_functions": {
+      "pw_traffic": "spirent_create_vpls_stream(name, mpls_label=pw_ingress_label, inner_src_mac=test_mac)",
+      "ac_traffic": "spirent_create_mac_block(name, ac_vlan, mac_count, base_mac) + spirent_protocol_start()",
+      "ac_to_pw_move": "Learn MAC on AC via protocol-start, then send same MAC via vpls-stream on PW",
+      "pw_to_ac_move": "Send MAC via vpls-stream on PW, then learn same MAC on AC via protocol-start"
+    }
+  },
   "show_commands_validated": {
     "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more": "SHOW_COMMANDS line 10091 -- Single MAC lookup",
     "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding state and flags",
-    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more": "Ghost MAC detection",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more": "Ghost MAC detection",
     "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
   },
   "invalid_commands": {
@@ -23,42 +166,64 @@
     {
       "id": "SC01_ac_to_pw",
       "name": "Non-sticky: Local AC -> PW; withdraw RT-2; suppression counted",
+      "spirent_method": "1) Learn MAC on AC via spirent_create_mac_block + protocol_start. 2) Stop protocol, remove device. 3) Send same MAC via spirent_create_vpls_stream(mpls_label=pw_ingress_label). DUT detects MAC moved from local AC to PW.",
       "phases": {
-        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} mac {test_mac} | no-more"]},
-        "trigger": {"action": "move_ac_to_pw"},
-        "verify": {"expect": {"withdraw_rt2": true, "suppression_increment": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true, "check_suppress_list": true}}
+        "snapshot": {"show_commands": ["show evpn mac-table instance {pw_test_evpn_name} mac {test_mac} | no-more"]},
+        "trigger": {
+          "action": "move_ac_to_pw",
+          "step1": {"method": "spirent_create_mac_block", "args": {"vlan": "{ac_vlan}", "mac": "{test_mac}"}, "then": "protocol_start, wait 8s, protocol_stop, remove_device"},
+          "step2": {"method": "spirent_create_vpls_stream", "args": {"mpls_label": "{pw_ingress_label}", "inner_src_mac": "{test_mac}"}, "then": "start, wait 5s"}
+        },
+        "verify": {"show_commands": ["show evpn mac-table instance {pw_test_evpn_name} mac {test_mac} | no-more"], "expect": {"check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true}}
       }
     },
     {
       "id": "SC02_pw_to_ac",
-      "name": "PW -> Local AC (non-sticky); advertise RT-2; suppression counted",
+      "name": "PW -> Local AC (non-sticky); advertise RT-2",
+      "spirent_method": "1) Send MAC via vpls-stream (PW path). 2) Stop, remove stream. 3) Learn same MAC on AC via spirent_create_mac_block + protocol_start. DUT detects MAC moved from PW to local AC.",
       "phases": {
-        "verify": {"expect": {"advertise_rt2": true, "suppression_increment": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true, "check_suppress_list": true}}
+        "trigger": {
+          "action": "move_pw_to_ac",
+          "step1": {"method": "spirent_create_vpls_stream", "args": {"mpls_label": "{pw_ingress_label}", "inner_src_mac": "{test_mac}"}, "then": "start, wait 5s, stop, remove_stream"},
+          "step2": {"method": "spirent_create_mac_block", "args": {"vlan": "{ac_vlan}", "mac": "{test_mac}"}, "then": "protocol_start, wait 8s"}
+        },
+        "verify": {"show_commands": ["show evpn mac-table instance {pw_test_evpn_name} mac {test_mac} | no-more"], "expect": {"new_ac_attachment": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true}}
       }
     },
     {
       "id": "SC03_sticky_ac_to_pw",
       "name": "Sticky AC -> PW: IGNORE move (SW-194578)",
+      "spirent_method": "1) Configure sticky-interface on AC. 2) Learn MAC on sticky AC via protocol_start. 3) Send same MAC via vpls-stream on PW. 4) Verify: MAC stays on sticky AC, move ignored.",
       "phases": {
-        "verify": {"expect": {"move_ignored": true, "check_mac_flags": true, "check_forwarding": true, "check_ghost_macs": true}}
+        "trigger": {"action": "move_ac_to_pw", "sticky": true},
+        "verify": {"expect": {"sticky_honored": true, "check_mac_flags": true, "check_forwarding": true, "check_ghost_macs": true}}
       }
     },
     {
       "id": "SC04_pw_to_sticky_ac",
       "name": "PW -> Sticky AC: prefer sticky AC; advertise RT-2",
+      "spirent_method": "1) Send MAC via vpls-stream on PW. 2) Configure sticky-interface on AC. 3) Learn same MAC on sticky AC via protocol_start. 4) Verify: sticky AC wins, RT-2 re-advertised.",
       "phases": {
-        "verify": {"expect": {"prefer_sticky_ac": true, "advertise_rt2": true, "check_mac_flags": true, "check_forwarding": true, "check_ghost_macs": true}}
+        "trigger": {"action": "learn_on_pw_then_configure_sticky", "sticky": true},
+        "verify": {"expect": {"sticky_honored": true, "new_ac_attachment": true, "check_mac_flags": true, "check_forwarding": true, "check_ghost_macs": true}}
       }
     }
   ],
   "runtime_parameters": {
-    "evpn_name": {"resolve": "runtime"},
-    "test_mac": {"resolve": "runtime"}
+    "evpn_name": {"resolve": "runtime", "description": "SI instance (HA_TEST_ELAN) for AC side -- or same as pw_test_evpn_name if using single non-SI instance"},
+    "pw_test_evpn_name": {"default": "PW_TEST_ELAN", "description": "Non-SI EVPN instance for PW testing"},
+    "test_mac": {"resolve": "runtime", "default": "00:DE:AD:00:01:01"},
+    "ac_vlan": {"resolve": "runtime", "description": "VLAN for local AC on the non-SI instance"},
+    "pw_ingress_label": {"resolve": "from_show_command", "source": "show evpn vpls-pw | no-more", "filter_instance": "{pw_test_evpn_name}", "description": "MPLS label PE-1 expects from Spirent VPLS peer"},
+    "vpls_rd": {"resolve": "from_router_id", "format": "{router_id}:9990"},
+    "vpls_rt": {"default": "9990:9990"},
+    "vpls_ve_id": {"default": 1},
+    "asn": {"resolve": "from_device", "description": "PE-1 BGP AS number"}
   },
   "verdict": {"layers": 8, "stop_on_fail": false},
   "counter_commands": [
     {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
-    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more", "parser": "line_count", "description": "Ghost MAC count"}
   ],
   "counter_expectations": [
     {"label": "mac_count", "rule": "no_decrease", "description": "MAC count must not drop"},
@@ -73,9 +238,9 @@
     "check_crashes": true,
     "check_alarms": true
   },
-  "cleanup_commands": ["no debug evpn mac-mobility", "no set logging terminal"],
+  "cleanup_commands": ["no debug evpn mac-mobility", "unset logging terminal"],
   "config_baseline": {
-    "sections": ["network-services evpn", "protocols bgp"],
+    "sections": ["network-services evpn", "protocols bgp {asn}"],
     "full_config": false,
     "ignore_patterns": ["last-modified", "commit-id"]
   }

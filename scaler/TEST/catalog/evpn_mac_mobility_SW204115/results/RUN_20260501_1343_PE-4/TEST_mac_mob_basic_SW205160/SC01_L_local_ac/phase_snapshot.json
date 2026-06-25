@@ -1,0 +1,37 @@
+{
+  "phase_name": "snapshot",
+  "started_at": "2026-05-01T13:45:10.933+00:00",
+  "completed_at": "2026-05-01T13:45:11.390+00:00",
+  "duration_sec": 0.457,
+  "command_count": 3,
+  "commands": [
+    {
+      "command": "show evpn instance EVPN_SI_VPLS_1 detail | no-more",
+      "timestamp": "2026-05-01T13:45:10.933+00:00",
+      "duration_ms": 103,
+      "phase": "snapshot",
+      "output_length": 4789,
+      "output_preview": "EVPN: EVPN_SI_VPLS_1\n  EVI ID : 2\n  Description : VPLS-SI-PW1 RD=4.4.4.4:1001 RT=1234567:2001 site=4001 PW-PW-mobility-3rd-site\n  Route Distinguisher            : 4.4.4.4:1001\n  Transport protocol             : mpls\n  Fat label                      : disabled\n  Control word                   : enabled\n  MAC learning                   : enabled\n  Allocated unicast label        : 265\n  Allocated IM label             : 1032385\n  E-Tree Configuration           : Root\n\n  MAC Table\n  =========\n  MAC t"
+    },
+    {
+      "command": "show evpn mac-table mac 00:de:ad:00:01:01 | no-more",
+      "timestamp": "2026-05-01T13:45:11.037+00:00",
+      "duration_ms": 201,
+      "phase": "snapshot",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show interfaces ge100-18/0/1 | no-more",
+      "timestamp": "2026-05-01T13:45:11.238+00:00",
+      "duration_ms": 152,
+      "phase": "snapshot",
+      "output_length": 2185,
+      "output_preview": "Interface ge100-18/0/1\n\tSNMP ifindex: 2, Network-Service: EVPN (EVPN_SI_VPLS_1)\n\tAdmin state: enabled, Physical link state: up, Operational state: up, Uptime: 2 days, 0:21:02\n\tState transitions: 4, Last cleared: 2 days, 0:44:51\n\tDescription: EVPN_SI_VPLS_1 PW-source AC port-mode (Spirent->B14.211->fab211->B10.4->PE4)\n\tMAC Address: e8:c5:7a:39:b6:6e (HW: e8:c5:7a:39:b6:6e)\n\tSpeed: 100Gbps, Duplex: FULL, Bundle-id: N/A\n\tPort-priority: 32768\n\tPort-number: 33446\n\tMPLS: disabled\n\tL2 MTU: 1514, MPLS M"
+    }
+  ],
+  "parsed_values": {
+    "before_mac_count": 0
+  },
+  "anomalies": []
+}

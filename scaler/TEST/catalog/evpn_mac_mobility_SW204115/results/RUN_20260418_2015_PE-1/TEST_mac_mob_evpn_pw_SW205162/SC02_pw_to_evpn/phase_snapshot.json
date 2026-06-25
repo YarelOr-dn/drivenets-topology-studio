@@ -1,0 +1,10 @@
+{
+  "phase_name": "snapshot",
+  "started_at": "2026-04-18T20:16:54.120+00:00",
+  "completed_at": "2026-04-18T20:16:54.120+00:00",
+  "duration_sec": 0.0,
+  "command_count": 0,
+  "commands": [],
+  "parsed_values": {},
+  "anomalies": []
+}

@@ -95,6 +95,31 @@ def _upgrade_timing_key(upgrade_type: str, component_count: int, device_mode: st
     return f"{upgrade_type}|{component_count}comp|{device_mode or 'dnos'}"
 
 
+def _normalize_platform(system_type: str) -> str:
+    """Normalise a DNOS system_type ("SA-36CD-S", "NCP-GF-C", etc.) into a
+    stable bucket key.
+
+    We purposely collapse hardware-revision suffixes so that e.g.
+    ``SA-36CD-S-R1`` and ``SA-36CD-S-R2`` share history; boot / install
+    time is driven by the platform family, not the PCB revision. Empty
+    inputs and the scaler's "N/A" placeholder (used in operational.json
+    before live probing has detected the hardware) both fall back to
+    the sentinel ``"unknown"`` so lookups never land on an unrelated
+    platform or on a nonsense-data bucket.
+    """
+    if not system_type:
+        return "unknown"
+    import re
+    t = str(system_type).strip().upper()
+    # Sentinel values from operational.json / scaler CLI must not leak
+    # into bucket keys; everything else keeps its alphabetic identity.
+    if t in ("N/A", "NA", "NONE", "NULL", "UNKNOWN", "-"):
+        return "unknown"
+    t = re.sub(r"[^A-Z0-9._-]", "", t)    # kill CLI-unsafe chars if any slip in
+    t = re.sub(r"-R\d+$", "", t)           # drop trailing -R1 / -R2 revisions
+    return t or "unknown"
+
+
 def save_upgrade_timing_record(
     device_hostname: str,
     upgrade_type: str,
@@ -105,6 +130,7 @@ def save_upgrade_timing_record(
     target_version: str = "",
     device_mode: str = "",
     success: bool = True,
+    system_type: str = "",
 ):
     """Save a timing record after a device upgrade completes.
 
@@ -118,6 +144,13 @@ def save_upgrade_timing_record(
         target_version: version after upgrade
         device_mode: "DNOS" / "GI" / "RECOVERY"
         success: whether the upgrade succeeded
+        system_type: DNOS platform (e.g. ``"SA-36CD-S"``, ``"NCP-GF-C"``).
+            Stored on every record and used by
+            :func:`get_upgrade_time_estimate` as the cross-device
+            similarity fallback (platform-aware estimate) so a
+            first-ever upgrade of a known hardware family inherits the
+            timing of prior upgrades of that SAME platform instead of
+            the generic pool that mixes single-box and cluster chassis.
     """
     db = _load_upgrade_timing_db()
 
@@ -133,6 +166,7 @@ def save_upgrade_timing_record(
         "target_version": target_version,
         "device_mode": device_mode or "DNOS",
         "success": success,
+        "system_type": _normalize_platform(system_type),
     }
 
     db["entries"].append(record)
@@ -144,10 +178,25 @@ def save_upgrade_timing_record(
 
 
 def _calculate_upgrade_averages(entries: list) -> Dict[str, Any]:
-    """Build averages keyed by upgrade_type|component_count|device_mode."""
+    """Build averages keyed by upgrade_type|component_count|device_mode,
+    plus per-device and per-platform buckets.
+
+    Bucket keys produced:
+
+    * ``<upgrade_type>|<Ncomp>|<mode>``           - generic (all platforms)
+    * ``dev|<hostname>|<upgrade_type>|...``       - same exact device
+    * ``platform|<system_type>|<upgrade_type>|..``- same hardware family
+
+    The platform bucket is the reason a brand-new cluster chassis's
+    first-ever upgrade no longer inherits timing from single-box
+    aggregators (which are ~3x faster).  Older entries that predate the
+    ``system_type`` field are simply not added to the platform bucket
+    (they still contribute to the device + generic buckets).
+    """
     from collections import defaultdict
     buckets = defaultdict(list)
     device_buckets = defaultdict(list)
+    platform_buckets = defaultdict(list)
 
     for e in entries:
         if not e.get("success", True):
@@ -163,6 +212,9 @@ def _calculate_upgrade_averages(entries: list) -> Dict[str, Any]:
         buckets[key].append(t)
         dev_key = f"{e.get('device', '')}|{key}"
         device_buckets[dev_key].append(t)
+        plat = _normalize_platform(e.get("system_type") or e.get("platform") or "")
+        if plat and plat != "unknown":
+            platform_buckets[f"{plat}|{key}"].append(t)
 
     avgs = {}
     for key, times in buckets.items():
@@ -179,6 +231,13 @@ def _calculate_upgrade_averages(entries: list) -> Dict[str, Any]:
             "max": max(times),
             "count": len(times),
         }
+    for plat_key, times in platform_buckets.items():
+        avgs[f"platform|{plat_key}"] = {
+            "avg": sum(times) / len(times),
+            "min": min(times),
+            "max": max(times),
+            "count": len(times),
+        }
     return avgs
 
 
@@ -187,37 +246,99 @@ def get_upgrade_time_estimate(
     components: list = None,
     device_mode: str = "DNOS",
     device_hostname: str = None,
+    system_type: str = "",
 ) -> Dict[str, Any]:
     """Get a time estimate for a device upgrade based on history.
+
+    Lookup priority (first bucket with data wins):
+
+    1. ``dev|<hostname>|<key>``           -- same exact device (best)
+    2. ``platform|<system_type>|<key>``   -- same hardware family (e.g.
+       SA-36CD-S). Used when the hostname has no history OR only 1-2
+       entries and we can find >=3 on the same platform, to give the
+       wizard a meaningful "medium/high confidence" hint for a new
+       device of a known family.
+    3. ``<key>``                          -- generic pool (all platforms)
+    4. hard-coded default.
 
     Returns:
         Dict with:
             - total: estimated seconds
-            - source: "same_device" | "type_average" | "default"
+            - source: "same_device" | "same_platform" | "type_average" | "default"
             - confidence: "high" | "medium" | "low"
             - count: number of historical records used
+            - min / max: when available
     """
     components = components or ["DNOS", "GI", "BaseOS"]
     comp_count = len(components)
     db = _load_upgrade_timing_db()
     avgs = db.get("averages", {})
+    key = _upgrade_timing_key(upgrade_type, comp_count, device_mode)
 
+    # 1. Same device, same kind of upgrade.
+    same_device = None
     if device_hostname:
-        dev_key = f"dev|{device_hostname}|{_upgrade_timing_key(upgrade_type, comp_count, device_mode)}"
+        dev_key = f"dev|{device_hostname}|{key}"
         if dev_key in avgs and avgs[dev_key]["count"] >= 1:
-            a = avgs[dev_key]
-            return {
-                "total": a["avg"],
-                "source": "same_device",
-                "confidence": "high" if a["count"] >= 3 else "medium",
-                "count": a["count"],
-                "min": a["min"],
-                "max": a["max"],
-            }
+            same_device = avgs[dev_key]
 
-    type_key = _upgrade_timing_key(upgrade_type, comp_count, device_mode)
-    if type_key in avgs and avgs[type_key]["count"] >= 1:
-        a = avgs[type_key]
+    # 2. Same hardware platform (family-level average).
+    same_platform = None
+    plat = _normalize_platform(system_type)
+    if plat and plat != "unknown":
+        plat_key = f"platform|{plat}|{key}"
+        if plat_key in avgs and avgs[plat_key]["count"] >= 1:
+            same_platform = avgs[plat_key]
+
+    # Prefer same_device when confidence is already medium/high
+    # (count >= 3). If the device has only 1-2 runs but the platform
+    # bucket has >= 3, the platform average is usually more
+    # representative (the device may have had a transient slow run).
+    if same_device and same_device["count"] >= 3:
+        a = same_device
+        return {
+            "total": a["avg"],
+            "source": "same_device",
+            "confidence": "high",
+            "count": a["count"],
+            "min": a["min"],
+            "max": a["max"],
+        }
+    if same_platform and same_platform["count"] >= 3:
+        a = same_platform
+        return {
+            "total": a["avg"],
+            "source": "same_platform",
+            "confidence": "high" if a["count"] >= 5 else "medium",
+            "count": a["count"],
+            "min": a["min"],
+            "max": a["max"],
+            "platform": plat,
+        }
+    if same_device:
+        a = same_device
+        return {
+            "total": a["avg"],
+            "source": "same_device",
+            "confidence": "medium" if a["count"] >= 2 else "low",
+            "count": a["count"],
+            "min": a["min"],
+            "max": a["max"],
+        }
+    if same_platform:
+        a = same_platform
+        return {
+            "total": a["avg"],
+            "source": "same_platform",
+            "confidence": "low",
+            "count": a["count"],
+            "min": a["min"],
+            "max": a["max"],
+            "platform": plat,
+        }
+
+    if key in avgs and avgs[key]["count"] >= 1:
+        a = avgs[key]
         return {
             "total": a["avg"],
             "source": "type_average",

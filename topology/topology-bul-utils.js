@@ -78,9 +78,19 @@ window.BulUtils = {
     },
 
     /**
-     * Recursively find ALL merged links in the chain
+     * Recursively find ALL merged links in the chain.
+     * Uses editor._frameMergedLinks (per-draw cache) when available so that
+     * many calls during a single frame don't repeatedly walk the chain, and
+     * editor._frameIdMap (id→object) to avoid O(n) `objects.find()` calls.
      */
     getAllMergedLinks(editor, link) {
+        // Per-frame cache hit (only valid during a single draw call).
+        if (editor._frameMergedLinks && link && editor._frameMergedLinks.has(link.id)) {
+            return editor._frameMergedLinks.get(link.id);
+        }
+        const idMap = editor._frameIdMap; // optional Map<id, object>
+        const findById = (id) => idMap ? idMap.get(id) : editor.objects.find(o => o.id === id);
+
         const mergedSet = new Set();
         const toProcess = [link];
         const processed = new Set();
@@ -95,7 +105,7 @@ window.BulUtils = {
             
             // Check for merged partner (parent)
             if (currentLink.mergedWith) {
-                const childLink = editor.objects.find(o => o.id === currentLink.mergedWith.linkId);
+                const childLink = findById(currentLink.mergedWith.linkId);
                 if (childLink && !processed.has(childLink.id)) {
                     toProcess.push(childLink);
                 }
@@ -103,7 +113,7 @@ window.BulUtils = {
             
             // Check for merged parent (if this is a child)
             if (currentLink.mergedInto) {
-                const parentLink = editor.objects.find(o => o.id === currentLink.mergedInto.parentId);
+                const parentLink = findById(currentLink.mergedInto.parentId);
                 if (parentLink && !processed.has(parentLink.id)) {
                     toProcess.push(parentLink);
                 }
@@ -121,7 +131,17 @@ window.BulUtils = {
             });
         }
         
-        return Array.from(mergedSet);
+        const result = Array.from(mergedSet);
+        // Populate the per-frame cache for every link in this chain so that
+        // any subsequent call within the same draw frame returns immediately.
+        if (editor._frameMergedLinks) {
+            for (const lk of result) {
+                if (lk && lk.id !== undefined) {
+                    editor._frameMergedLinks.set(lk.id, result);
+                }
+            }
+        }
+        return result;
     },
 
     /**

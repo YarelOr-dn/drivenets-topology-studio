@@ -1,0 +1,37 @@
+{
+  "devices": [
+    "PE-4",
+    "RR-SA-2"
+  ],
+  "label_pool": {
+    "PE-4": {
+      "configured": 4096,
+      "in_use": 4096,
+      "mismatch": false,
+      "reachable": true,
+      "ready": true
+    },
+    "RR-SA-2": {
+      "configured": 4096,
+      "in_use": 4096,
+      "mismatch": false,
+      "reachable": true,
+      "ready": true
+    }
+  },
+  "phase": "label_poll",
+  "restart_results": [
+    {
+      "confirmed": true,
+      "device": "PE-4",
+      "ok": true
+    },
+    {
+      "confirmed": true,
+      "device": "RR-SA-2",
+      "ok": true
+    }
+  ],
+  "run_dir": "/home/dn/drivenets-topology-studio/scaler/TEST/catalog/pw_scale_200_mobility_ha_SW204115/tests/pw_scale_mac_mobility_ha/results/RUN_20260504_082838_4096_restart_prereq",
+  "updated_at": "2026-05-04T08:35:34"
+}

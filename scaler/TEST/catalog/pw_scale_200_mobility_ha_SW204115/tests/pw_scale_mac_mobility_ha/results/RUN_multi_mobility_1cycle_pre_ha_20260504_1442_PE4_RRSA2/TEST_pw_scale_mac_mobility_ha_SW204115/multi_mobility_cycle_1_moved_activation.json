@@ -1,0 +1,13 @@
+{
+  "data": {
+    "deactivated_streams": 4,
+    "logical_flows_per_side": 200,
+    "stream_names": [
+      "pw_mob_rr_moves_pe4_i3101_3300",
+      "pw_mob_pe4_moves_rr_i3101_3300"
+    ]
+  },
+  "detail": "started 2 reverse modifier StreamBlocks",
+  "ok": true,
+  "phase": "multi_mobility_cycle_1_moved_activation"
+}

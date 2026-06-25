@@ -15,12 +15,21 @@ class HistoryManager {
             console.log('saveState called with', this.editor.objects.length, 'objects');
             
             // Create deep copy of current state
+            const objects = JSON.parse(JSON.stringify(this.editor.objects));
+            objects.forEach(obj => {
+                if (obj && obj._hiddenByGroup) {
+                    delete obj._hiddenByGroup;
+                    if (obj._hidden === true) delete obj._hidden;
+                }
+            });
             const state = {
-                objects: JSON.parse(JSON.stringify(this.editor.objects)),
+                objects,
                 deviceIdCounter: this.editor.deviceIdCounter,
                 linkIdCounter: this.editor.linkIdCounter,
                 textIdCounter: this.editor.textIdCounter,
-                deviceCounters: { ...this.editor.deviceCounters }
+                deviceCounters: { ...this.editor.deviceCounters },
+                topologyGeneration: this.editor._topologyGeneration || 0,
+                topologyKey: this.editor._activeTopologyIdentity?.key || ''
             };
             
             // Remove any future history if we're not at the end
@@ -51,12 +60,31 @@ class HistoryManager {
 
     restoreState(state) {
         if (!state) return;
+        if (state.topologyGeneration !== undefined
+                && state.topologyGeneration !== (this.editor._topologyGeneration || 0)) {
+            console.warn('[HistoryManager] Ignored stale topology history state');
+            return;
+        }
+        if (state.topologyKey && this.editor._activeTopologyIdentity?.key
+                && state.topologyKey !== this.editor._activeTopologyIdentity.key) {
+            console.warn('[HistoryManager] Ignored history state for another topology');
+            return;
+        }
         
         // Temporarily disable auto-save during restore to prevent triggering saveState
         const wasInitializing = this.editor.initializing;
         this.editor.initializing = true;
         
         this.editor.objects = JSON.parse(JSON.stringify(state.objects));
+        this.editor.objects.forEach(obj => {
+            if (obj && obj._hiddenByGroup) {
+                delete obj._hiddenByGroup;
+                if (obj._hidden === true) delete obj._hidden;
+            }
+        });
+        if (this.editor.groups && typeof this.editor.groups.applyVisibility === 'function') {
+            this.editor.groups.applyVisibility();
+        }
         this.editor.deviceIdCounter = state.deviceIdCounter;
         this.editor.linkIdCounter = state.linkIdCounter;
         this.editor.textIdCounter = state.textIdCounter;
@@ -65,6 +93,19 @@ class HistoryManager {
         this.editor.selectedObject = null;
         this.editor.selectedObjects = [];
         this.editor.ui.updatePropertiesPanel();
+
+        // Force-invalidate the minimap cache here -- see editor.restoreState
+        // in topology.js for the full rationale. Undo/redo swaps the entire
+        // objects array, and without dropping the cache hash the minimap can
+        // keep painting the pre-undo snapshot even after the main canvas has
+        // already drawn the restored state.
+        try {
+            if (window.MinimapRender && typeof window.MinimapRender.invalidateCache === 'function') {
+                window.MinimapRender.invalidateCache();
+            }
+            if (this.editor.minimap) delete this.editor.minimap._cachedBase;
+        } catch (_) { /* swallow */ }
+
         this.editor.drawing.draw();
         
         // Restore initializing flag
@@ -121,6 +162,28 @@ class HistoryManager {
     initializeHistory(initialState) {
         // Create initial history entry without triggering auto-save
         this.history.push(initialState);
+        this.historyIndex = 0;
+        this.updateUndoRedoButtons();
+        this.updateStepCounter();
+    }
+
+    resetForTopologyLoad(initialState) {
+        const state = initialState || {
+            objects: JSON.parse(JSON.stringify(this.editor.objects || [])).map(obj => {
+                if (obj && obj._hiddenByGroup) {
+                    delete obj._hiddenByGroup;
+                    if (obj._hidden === true) delete obj._hidden;
+                }
+                return obj;
+            }),
+            deviceIdCounter: this.editor.deviceIdCounter,
+            linkIdCounter: this.editor.linkIdCounter,
+            textIdCounter: this.editor.textIdCounter,
+            deviceCounters: { ...this.editor.deviceCounters },
+            topologyGeneration: this.editor._topologyGeneration || 0,
+            topologyKey: this.editor._activeTopologyIdentity?.key || ''
+        };
+        this.history = [state];
         this.historyIndex = 0;
         this.updateUndoRedoButtons();
         this.updateStepCounter();

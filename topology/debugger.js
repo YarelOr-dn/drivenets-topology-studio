@@ -3128,6 +3128,11 @@ Topology Editor - ${sectionTitle}
         if (debuggerBtn) {
             debuggerBtn.classList.add('active');
         }
+        // Global single-overlay mutex (2026-04-22): opening the
+        // debugger auto-closes AI / Scaler / terminal / etc.
+        if (window.TopoPanelMutex) {
+            try { window.TopoPanelMutex.markOpen('debugger'); } catch (_) {}
+        }
         
         console.log('Debugger shown');
     }
@@ -3142,8 +3147,15 @@ Topology Editor - ${sectionTitle}
         if (debuggerBtn) {
             debuggerBtn.classList.remove('active');
         }
+        if (window.TopoPanelMutex) {
+            try { window.TopoPanelMutex.markClosed('debugger'); } catch (_) {}
+        }
         
         console.log('Debugger hidden');
+    }
+
+    isOpen() {
+        return !!this.enabled;
     }
 
     toggle() {
@@ -3235,7 +3247,16 @@ Topology Editor - ${sectionTitle}
 
 // Make debugger available globally
 window.createDebugger = function(editor) {
-    return new TopologyDebugger(editor);
+    const instance = new TopologyDebugger(editor);
+    if (window.TopoPanelMutex) {
+        try {
+            window.TopoPanelMutex.register('debugger', {
+                close: function () { instance.hide(); },
+                isOpen: function () { return instance.isOpen(); },
+            });
+        } catch (_) {}
+    }
+    return instance;
 };
 
 // Global shortcut: Press Shift+D+D (double D) to toggle debugger from anywhere

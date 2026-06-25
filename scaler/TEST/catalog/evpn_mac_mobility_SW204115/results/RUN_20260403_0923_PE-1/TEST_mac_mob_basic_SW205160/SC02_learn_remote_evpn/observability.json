@@ -1,0 +1,892 @@
+{
+  "meta": {
+    "test_id": "TEST_mac_mob_basic_SW205160",
+    "scenario_id": "SC02_learn_remote_evpn",
+    "device": "PE-1",
+    "started_at": "2026-04-03T09:27:43.245+00:00",
+    "completed_at": "2026-04-03T09:31:30.643+00:00",
+    "total_duration_sec": 221.558,
+    "total_commands": 31,
+    "total_anomalies": 0,
+    "phase_count": 4
+  },
+  "phases": [
+    {
+      "phase_name": "snapshot",
+      "started_at": "2026-04-03T09:27:43.246+00:00",
+      "completed_at": "2026-04-03T09:27:43.497+00:00",
+      "duration_sec": 0.251,
+      "command_count": 1,
+      "commands": [
+        {
+          "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+          "timestamp": "2026-04-03T09:27:43.246+00:00",
+          "duration_ms": 250,
+          "phase": "snapshot",
+          "output_length": 735,
+          "output_preview": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ------------------"
+        }
+      ],
+      "parsed_values": {
+        "before_mac_count": 1
+      },
+      "anomalies": []
+    },
+    {
+      "phase_name": "trigger",
+      "started_at": "2026-04-03T09:27:43.648+00:00",
+      "completed_at": "2026-04-03T09:27:47.037+00:00",
+      "duration_sec": 3.389,
+      "command_count": 0,
+      "commands": [],
+      "parsed_values": {
+        "trigger_duration_sec": 3.389
+      },
+      "anomalies": []
+    },
+    {
+      "phase_name": "verify",
+      "started_at": "2026-04-03T09:27:52.041+00:00",
+      "completed_at": "2026-04-03T09:29:55.573+00:00",
+      "duration_sec": 123.532,
+      "command_count": 14,
+      "commands": [
+        {
+          "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+          "timestamp": "2026-04-03T09:27:52.041+00:00",
+          "duration_ms": 250,
+          "phase": "verify",
+          "output_length": 735,
+          "output_preview": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ------------------"
+        },
+        {
+          "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:00:01:01 | no-more",
+          "timestamp": "2026-04-03T09:27:52.292+00:00",
+          "duration_ms": 250,
+          "phase": "verify",
+          "output_length": 182,
+          "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 03-Apr-2026-12:23:10"
+        },
+        {
+          "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+          "timestamp": "2026-04-03T09:27:52.543+00:00",
+          "duration_ms": 250,
+          "phase": "verify",
+          "output_length": 182,
+          "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 03-Apr-2026-12:23:10"
+        },
+        {
+          "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+          "timestamp": "2026-04-03T09:27:52.794+00:00",
+          "duration_ms": 100,
+          "phase": "verify",
+          "output_length": 874,
+          "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress   "
+        },
+        {
+          "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+          "timestamp": "2026-04-03T09:27:52.895+00:00",
+          "duration_ms": 250,
+          "phase": "verify",
+          "output_length": 735,
+          "output_preview": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ------------------"
+        },
+        {
+          "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:00:01:01 | no-more",
+          "timestamp": "2026-04-03T09:27:53.146+00:00",
+          "duration_ms": 250,
+          "phase": "verify",
+          "output_length": 182,
+          "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 03-Apr-2026-12:23:10"
+        },
+        {
+          "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+          "timestamp": "2026-04-03T09:27:53.397+00:00",
+          "duration_ms": 250,
+          "phase": "verify",
+          "output_length": 182,
+          "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 03-Apr-2026-12:23:10"
+        },
+        {
+          "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+          "timestamp": "2026-04-03T09:27:53.648+00:00",
+          "duration_ms": 100,
+          "phase": "verify",
+          "output_length": 874,
+          "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress   "
+        },
+        {
+          "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+          "timestamp": "2026-04-03T09:27:53.748+00:00",
+          "duration_ms": 250,
+          "phase": "verify",
+          "output_length": 138,
+          "output_preview": "evi_id=1, eth_tag=0, mac=00:de:ad:00:01:01, interface=, dp_index=13624, action_type=New, Type=Add, neighbor_keys_size=0\nEvpnMacs [size: 1]"
+        },
+        {
+          "command": "show evpn arp-table instance HA_TEST_ELAN | no-more",
+          "timestamp": "2026-04-03T09:27:53.999+00:00",
+          "duration_ms": 250,
+          "phase": "verify",
+          "output_length": 35,
+          "output_preview": "  ETH TAG: 0\n    ARP table is empty"
+        },
+        {
+          "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+          "timestamp": "2026-04-03T09:27:54.250+00:00",
+          "duration_ms": 50,
+          "phase": "verify",
+          "output_length": 26,
+          "output_preview": "ERROR: Incomplete command."
+        },
+        {
+          "command": "show bgp l2vpn evpn summary | no-more",
+          "timestamp": "2026-04-03T09:27:54.302+00:00",
+          "duration_ms": 250,
+          "phase": "verify",
+          "output_length": 483,
+          "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 3\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567      86843      86808    0     0       3 01w3d00h                   1\n  5.5.5.5         4    1234567       4117       8234    0     0       0 never      Idle            \n\nTotal number of established neighbors with L2vpn EVPN 1/2\n\nTotal number of NSR capable BGP sessions 0"
+        },
+        {
+          "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include ERROR | no-more",
+          "timestamp": "2026-04-03T09:27:54.553+00:00",
+          "duration_ms": 6107,
+          "phase": "verify",
+          "output_length": 218,
+          "output_preview": "2026-04-03T09:27:42.340654 +03:00 [WARNING   ] [bgp_debug.c:449:bgp_notify_print] [bgpd:1342:1342] 2141112:5219608: %NOTIFICATION: vrf default sent to neighbor 5.5.5.5 2/2 (OPEN Message Error/Bad Peer AS) 2 bytes 1b 6a"
+        },
+        {
+          "command": "show file traces routing_engine/fibmgrd_traces | include 09:27 | include ERROR | no-more",
+          "timestamp": "2026-04-03T09:28:00.660+00:00",
+          "duration_ms": 15370,
+          "phase": "verify",
+          "output_length": 0,
+          "output_preview": ""
+        }
+      ],
+      "parsed_values": {
+        "after_mac_count": 1,
+        "cross_layer_check": {
+          "mac": "00:de:ad:00:01:01",
+          "passed": true,
+          "fail_count": 0,
+          "warn_count": 0,
+          "layers_collected": [
+            "mac_table",
+            "mac_detail",
+            "forwarding_table",
+            "fib_database",
+            "arp_table",
+            "ghost_macs"
+          ],
+          "layers_skipped": [],
+          "mismatches": [],
+          "xray_triggered": false
+        }
+      },
+      "anomalies": []
+    },
+    {
+      "phase_name": "auto_diagnose",
+      "started_at": "2026-04-03T09:29:55.575+00:00",
+      "completed_at": "2026-04-03T09:31:29.961+00:00",
+      "duration_sec": 94.386,
+      "command_count": 16,
+      "commands": [
+        {
+          "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include MAC | no-more",
+          "timestamp": "2026-04-03T09:29:55.575+00:00",
+          "duration_ms": 8161,
+          "phase": "auto_diagnose",
+          "output_length": 0,
+          "output_preview": ""
+        },
+        {
+          "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include EVPN | no-more",
+          "timestamp": "2026-04-03T09:30:03.736+00:00",
+          "duration_ms": 8862,
+          "phase": "auto_diagnose",
+          "output_length": 0,
+          "output_preview": ""
+        },
+        {
+          "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include withdraw | no-more",
+          "timestamp": "2026-04-03T09:30:12.598+00:00",
+          "duration_ms": 7612,
+          "phase": "auto_diagnose",
+          "output_length": 0,
+          "output_preview": ""
+        },
+        {
+          "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include announce | no-more",
+          "timestamp": "2026-04-03T09:30:20.211+00:00",
+          "duration_ms": 8061,
+          "phase": "auto_diagnose",
+          "output_length": 0,
+          "output_preview": ""
+        },
+        {
+          "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include seq | no-more",
+          "timestamp": "2026-04-03T09:30:28.272+00:00",
+          "duration_ms": 5808,
+          "phase": "auto_diagnose",
+          "output_length": 1244,
+          "output_preview": "2026-04-03T09:27:02.880646 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2141022:1106555:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 44991) seq:3441426954 ack:3090326841 flags:FA msgSize:0\n2026-04-03T09:27:11.915346 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2141047:1106574:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local ad"
+        },
+        {
+          "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include duplicate | no-more",
+          "timestamp": "2026-04-03T09:30:34.080+00:00",
+          "duration_ms": 8912,
+          "phase": "auto_diagnose",
+          "output_length": 0,
+          "output_preview": ""
+        },
+        {
+          "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include suppress | no-more",
+          "timestamp": "2026-04-03T09:30:42.993+00:00",
+          "duration_ms": 12516,
+          "phase": "auto_diagnose",
+          "output_length": 0,
+          "output_preview": ""
+        },
+        {
+          "command": "show file traces routing_engine/rib-manager_traces | include 09:27 | include MAC | no-more",
+          "timestamp": "2026-04-03T09:30:55.509+00:00",
+          "duration_ms": 11765,
+          "phase": "auto_diagnose",
+          "output_length": 1291,
+          "output_preview": "2026-03-23T09:27:14.134763 +02:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 121419:2119567: vty[??]@# show evpn mac-table\n2026-03-23T09:27:14.135795 +02:00 [INFO      ] [EvpnServiceVtysh.cpp:223:l2_evpn_show_mac_async_iteration] [rib-manager:1344:1344] 121420:2119567: finish\n2026-03-23T09:27:29.814887 +02:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 121427:2119696: vty[??]@# show evpn mac-table\n2026-03-23T09:27:29.815901 +02:00 [INFO      ] [Evpn"
+        },
+        {
+          "command": "show file traces routing_engine/rib-manager_traces | include 09:27 | include evpn | no-more",
+          "timestamp": "2026-04-03T09:31:07.275+00:00",
+          "duration_ms": 12868,
+          "phase": "auto_diagnose",
+          "output_length": 24408,
+          "output_preview": "2026-03-23T09:27:14.134763 +02:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 121419:2119567: vty[??]@# show evpn mac-table\n2026-03-23T09:27:14.135795 +02:00 [INFO      ] [EvpnServiceVtysh.cpp:223:l2_evpn_show_mac_async_iteration] [rib-manager:1344:1344] 121420:2119567: finish\n2026-03-23T09:27:29.814887 +02:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 121427:2119696: vty[??]@# show evpn mac-table\n2026-03-23T09:27:29.815901 +02:00 [INFO      ] [Evpn"
+        },
+        {
+          "command": "show file traces routing_engine/rib-manager_traces | include 09:27 | include FIB | no-more",
+          "timestamp": "2026-04-03T09:31:20.144+00:00",
+          "duration_ms": 8611,
+          "phase": "auto_diagnose",
+          "output_length": 398,
+          "output_preview": "2026-03-24T08:44:26.861192 +02:00 [INFO      ] [evpn_fib_callbacks.cpp:137:evpn_local_l2_neighbor] [rib-manager:1344:1344] 141509:2783137: EVPN local neighbor: evpn_id:1 mac:00:de:ad:02:00:01 ip:10.99.214.20 reachability:2\n2026-03-24T09:27:46.757631 +02:00 [INFO      ] [zserv.c:4179:zsend_fib_preserved] [rib-manager:1344:1344] 145114:2804220: Send FIB_PRESERVED message to client. fib_preserved=2"
+        },
+        {
+          "command": "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+          "timestamp": "2026-04-03T09:31:28.756+00:00",
+          "duration_ms": 250,
+          "phase": "auto_diagnose",
+          "output_length": 35,
+          "output_preview": "  ETH TAG: 0\n    MAC table is empty"
+        },
+        {
+          "command": "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+          "timestamp": "2026-04-03T09:31:29.007+00:00",
+          "duration_ms": 250,
+          "phase": "auto_diagnose",
+          "output_length": 207,
+          "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+        },
+        {
+          "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+          "timestamp": "2026-04-03T09:31:29.258+00:00",
+          "duration_ms": 250,
+          "phase": "auto_diagnose",
+          "output_length": 42,
+          "output_preview": "Number of MAC-Mobility entries in redis: 0"
+        },
+        {
+          "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+          "timestamp": "2026-04-03T09:31:29.508+00:00",
+          "duration_ms": 100,
+          "phase": "auto_diagnose",
+          "output_length": 26,
+          "output_preview": "ERROR: Incomplete command."
+        },
+        {
+          "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+          "timestamp": "2026-04-03T09:31:29.609+00:00",
+          "duration_ms": 250,
+          "phase": "auto_diagnose",
+          "output_length": 18,
+          "output_preview": "EvpnMacs [size: 0]"
+        },
+        {
+          "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+          "timestamp": "2026-04-03T09:31:29.860+00:00",
+          "duration_ms": 100,
+          "phase": "auto_diagnose",
+          "output_length": 442,
+          "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+        }
+      ],
+      "parsed_values": {},
+      "anomalies": []
+    }
+  ],
+  "diffs": [
+    {
+      "label": "mac_count",
+      "command": "show evpn mac-table",
+      "before": 1,
+      "after": 1,
+      "delta": 0,
+      "assessment": "stable"
+    }
+  ],
+  "traffic_snapshots": [],
+  "timeline": [
+    {
+      "timestamp": "2026-04-03T09:27:43.246+00:00",
+      "event_type": "phase_start",
+      "message": "Phase 'snapshot' started"
+    },
+    {
+      "timestamp": "2026-04-03T09:27:43.246+00:00",
+      "event_type": "command",
+      "message": "[snapshot] show evpn mac-table instance HA_TEST_ELAN | no-more (250ms, 735 chars)",
+      "data": {
+        "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+        "duration_ms": 250,
+        "output_length": 735
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:43.497+00:00",
+      "event_type": "phase_end",
+      "message": "Phase 'snapshot' completed (0.25s, 1 commands)",
+      "data": {
+        "duration_sec": 0.25099992752075195,
+        "command_count": 1
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:43.648+00:00",
+      "event_type": "counter_snapshot",
+      "message": "Counter snapshot 'before_trigger' recorded",
+      "data": {
+        "label": "before_trigger",
+        "counter_count": 2
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:43.648+00:00",
+      "event_type": "phase_start",
+      "message": "Phase 'trigger' started"
+    },
+    {
+      "timestamp": "2026-04-03T09:27:43.648+00:00",
+      "event_type": "trigger",
+      "message": "Action=remote_pe_traffic, mapped=spirent_remote_pe, method=spirent",
+      "data": {
+        "action": "remote_pe_traffic",
+        "mapped": "spirent_remote_pe",
+        "mac_count": 1
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:47.037+00:00",
+      "event_type": "phase_end",
+      "message": "Phase 'trigger' completed (3.39s, 0 commands)",
+      "data": {
+        "duration_sec": 3.3889999389648438,
+        "command_count": 0
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:47.038+00:00",
+      "event_type": "wait",
+      "message": "Propagation wait 5s (persistent SSH)"
+    },
+    {
+      "timestamp": "2026-04-03T09:27:52.041+00:00",
+      "event_type": "phase_start",
+      "message": "Phase 'verify' started"
+    },
+    {
+      "timestamp": "2026-04-03T09:27:52.041+00:00",
+      "event_type": "command",
+      "message": "[verify] show evpn mac-table instance HA_TEST_ELAN | no-more (250ms, 735 chars)",
+      "data": {
+        "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+        "duration_ms": 250,
+        "output_length": 735
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:52.292+00:00",
+      "event_type": "diff",
+      "message": "Diff 'mac_count': 1 -> 1 (stable)",
+      "data": {
+        "label": "mac_count",
+        "command": "show evpn mac-table",
+        "before": 1,
+        "after": 1,
+        "delta": 0,
+        "assessment": "stable"
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:52.292+00:00",
+      "event_type": "command",
+      "message": "[verify] show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:00:01:01 | no-more (250ms, 182 chars)",
+      "data": {
+        "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:00:01:01 | no-more",
+        "duration_ms": 250,
+        "output_length": 182
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:52.543+00:00",
+      "event_type": "command",
+      "message": "[verify] show evpn mac-table detail instance HA_TEST_ELAN | no-more (250ms, 182 chars)",
+      "data": {
+        "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+        "duration_ms": 250,
+        "output_length": 182
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:52.794+00:00",
+      "event_type": "command",
+      "message": "[verify] show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more (100ms, 874 chars)",
+      "data": {
+        "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+        "duration_ms": 100,
+        "output_length": 874
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:52.895+00:00",
+      "event_type": "command",
+      "message": "[verify] show evpn mac-table instance HA_TEST_ELAN | no-more (250ms, 735 chars)",
+      "data": {
+        "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+        "duration_ms": 250,
+        "output_length": 735
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:53.146+00:00",
+      "event_type": "command",
+      "message": "[verify] show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:00:01:01 | no-more (250ms, 182 chars)",
+      "data": {
+        "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:00:01:01 | no-more",
+        "duration_ms": 250,
+        "output_length": 182
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:53.397+00:00",
+      "event_type": "command",
+      "message": "[verify] show evpn mac-table detail instance HA_TEST_ELAN | no-more (250ms, 182 chars)",
+      "data": {
+        "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+        "duration_ms": 250,
+        "output_length": 182
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:53.648+00:00",
+      "event_type": "command",
+      "message": "[verify] show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more (100ms, 874 chars)",
+      "data": {
+        "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+        "duration_ms": 100,
+        "output_length": 874
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:53.748+00:00",
+      "event_type": "command",
+      "message": "[verify] show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more (250ms, 138 chars)",
+      "data": {
+        "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+        "duration_ms": 250,
+        "output_length": 138
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:53.999+00:00",
+      "event_type": "command",
+      "message": "[verify] show evpn arp-table instance HA_TEST_ELAN | no-more (250ms, 35 chars)",
+      "data": {
+        "command": "show evpn arp-table instance HA_TEST_ELAN | no-more",
+        "duration_ms": 250,
+        "output_length": 35
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:54.250+00:00",
+      "event_type": "command",
+      "message": "[verify] show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more (50ms, 26 chars)",
+      "data": {
+        "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+        "duration_ms": 50,
+        "output_length": 26
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:54.302+00:00",
+      "event_type": "command",
+      "message": "[verify] show bgp l2vpn evpn summary | no-more (250ms, 483 chars)",
+      "data": {
+        "command": "show bgp l2vpn evpn summary | no-more",
+        "duration_ms": 250,
+        "output_length": 483
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:27:54.553+00:00",
+      "event_type": "command",
+      "message": "[verify] show file traces routing_engine/bgpd_traces | include 09:27 | include ERROR | no-more (6107ms, 218 chars)",
+      "data": {
+        "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include ERROR | no-more",
+        "duration_ms": 6107,
+        "output_length": 218
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:28:00.660+00:00",
+      "event_type": "command",
+      "message": "[verify] show file traces routing_engine/fibmgrd_traces | include 09:27 | include ERROR | no-more (15370ms, 0 chars)",
+      "data": {
+        "command": "show file traces routing_engine/fibmgrd_traces | include 09:27 | include ERROR | no-more",
+        "duration_ms": 15370,
+        "output_length": 0
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:28:16.182+00:00",
+      "event_type": "counter_snapshot",
+      "message": "Counter snapshot 'after_verify' recorded",
+      "data": {
+        "label": "after_verify",
+        "counter_count": 2
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:28:16.182+00:00",
+      "event_type": "counter_diff",
+      "message": "Counter diff: PASS",
+      "data": {
+        "before_label": "before_trigger",
+        "after_label": "after_verify",
+        "passed": true,
+        "fail_count": 0,
+        "items": [
+          {
+            "label": "mac_count",
+            "before": 1,
+            "after": 1,
+            "delta": 0,
+            "rule": "no_decrease",
+            "passed": true,
+            "assessment": "delta=0, stable/increased",
+            "description": "MAC count must not drop"
+          },
+          {
+            "label": "ghost_mac_count",
+            "before": 1,
+            "after": 1,
+            "delta": 0,
+            "rule": "zero",
+            "passed": true,
+            "assessment": "delta=0, zero",
+            "description": "No ghost MACs after scenario"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:29:55.322+00:00",
+      "event_type": "event_audit",
+      "message": "Event audit: PASS",
+      "data": {
+        "passed": true,
+        "fail_count": 0
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:29:55.573+00:00",
+      "event_type": "phase_end",
+      "message": "Phase 'verify' completed (123.53s, 14 commands)",
+      "data": {
+        "duration_sec": 123.53200006484985,
+        "command_count": 14
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:29:55.575+00:00",
+      "event_type": "phase_start",
+      "message": "Phase 'auto_diagnose' started"
+    },
+    {
+      "timestamp": "2026-04-03T09:29:55.575+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show file traces routing_engine/bgpd_traces | include 09:27 | include MAC | no-more (8161ms, 0 chars)",
+      "data": {
+        "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include MAC | no-more",
+        "duration_ms": 8161,
+        "output_length": 0
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:30:03.736+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show file traces routing_engine/bgpd_traces | include 09:27 | include EVPN | no-more (8862ms, 0 chars)",
+      "data": {
+        "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include EVPN | no-more",
+        "duration_ms": 8862,
+        "output_length": 0
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:30:12.598+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show file traces routing_engine/bgpd_traces | include 09:27 | include withdraw | no-more (7612ms, 0 chars)",
+      "data": {
+        "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include withdraw | no-more",
+        "duration_ms": 7612,
+        "output_length": 0
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:30:20.211+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show file traces routing_engine/bgpd_traces | include 09:27 | include announce | no-more (8061ms, 0 chars)",
+      "data": {
+        "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include announce | no-more",
+        "duration_ms": 8061,
+        "output_length": 0
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:30:28.272+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show file traces routing_engine/bgpd_traces | include 09:27 | include seq | no-more (5808ms, 1244 chars)",
+      "data": {
+        "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include seq | no-more",
+        "duration_ms": 5808,
+        "output_length": 1244
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:30:34.080+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show file traces routing_engine/bgpd_traces | include 09:27 | include duplicate | no-more (8912ms, 0 chars)",
+      "data": {
+        "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include duplicate | no-more",
+        "duration_ms": 8912,
+        "output_length": 0
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:30:42.993+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show file traces routing_engine/bgpd_traces | include 09:27 | include suppress | no-more (12516ms, 0 chars)",
+      "data": {
+        "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include suppress | no-more",
+        "duration_ms": 12516,
+        "output_length": 0
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:30:55.509+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show file traces routing_engine/rib-manager_traces | include 09:27 | include MAC | no-more (11765ms, 1291 chars)",
+      "data": {
+        "command": "show file traces routing_engine/rib-manager_traces | include 09:27 | include MAC | no-more",
+        "duration_ms": 11765,
+        "output_length": 1291
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:31:07.275+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show file traces routing_engine/rib-manager_traces | include 09:27 | include evpn | no-more (12868ms, 24408 chars)",
+      "data": {
+        "command": "show file traces routing_engine/rib-manager_traces | include 09:27 | include evpn | no-more",
+        "duration_ms": 12868,
+        "output_length": 24408
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:31:20.144+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show file traces routing_engine/rib-manager_traces | include 09:27 | include FIB | no-more (8611ms, 398 chars)",
+      "data": {
+        "command": "show file traces routing_engine/rib-manager_traces | include 09:27 | include FIB | no-more",
+        "duration_ms": 8611,
+        "output_length": 398
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:31:28.756+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show evpn mac-table instance HA_TEST_ELAN suppress | no-more (250ms, 35 chars)",
+      "data": {
+        "command": "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+        "duration_ms": 250,
+        "output_length": 35
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:31:29.007+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more (250ms, 207 chars)",
+      "data": {
+        "command": "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+        "duration_ms": 250,
+        "output_length": 207
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:31:29.258+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show dnos-internal routing evpn mac-mobility-redis-count | no-more (250ms, 42 chars)",
+      "data": {
+        "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+        "duration_ms": 250,
+        "output_length": 42
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:31:29.508+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more (100ms, 26 chars)",
+      "data": {
+        "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+        "duration_ms": 100,
+        "output_length": 26
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:31:29.609+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more (250ms, 18 chars)",
+      "data": {
+        "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+        "duration_ms": 250,
+        "output_length": 18
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:31:29.860+00:00",
+      "event_type": "command",
+      "message": "[auto_diagnose] show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more (100ms, 442 chars)",
+      "data": {
+        "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+        "duration_ms": 100,
+        "output_length": 442
+      }
+    },
+    {
+      "timestamp": "2026-04-03T09:31:29.961+00:00",
+      "event_type": "phase_end",
+      "message": "Phase 'auto_diagnose' completed (94.39s, 16 commands)",
+      "data": {
+        "duration_sec": 94.38599991798401,
+        "command_count": 16
+      }
+    }
+  ],
+  "engine_data": {
+    "counters_before_trigger": {
+      "label": "before_trigger",
+      "timestamp": "2026-04-03T09:27:43.497+00:00",
+      "counters": {
+        "mac_count": {
+          "value": 1,
+          "timestamp": "2026-04-03T09:27:43.497+00:00",
+          "duration_ms": 100,
+          "error": null
+        },
+        "ghost_mac_count": {
+          "value": 1,
+          "timestamp": "2026-04-03T09:27:43.598+00:00",
+          "duration_ms": 50,
+          "error": null
+        }
+      }
+    },
+    "counters_after_verify": {
+      "label": "after_verify",
+      "timestamp": "2026-04-03T09:28:16.031+00:00",
+      "counters": {
+        "mac_count": {
+          "value": 1,
+          "timestamp": "2026-04-03T09:28:16.031+00:00",
+          "duration_ms": 100,
+          "error": null
+        },
+        "ghost_mac_count": {
+          "value": 1,
+          "timestamp": "2026-04-03T09:28:16.131+00:00",
+          "duration_ms": 50,
+          "error": null
+        }
+      }
+    },
+    "counter_diff": {
+      "before_label": "before_trigger",
+      "after_label": "after_verify",
+      "passed": true,
+      "fail_count": 0,
+      "items": [
+        {
+          "label": "mac_count",
+          "before": 1,
+          "after": 1,
+          "delta": 0,
+          "rule": "no_decrease",
+          "passed": true,
+          "assessment": "delta=0, stable/increased",
+          "description": "MAC count must not drop"
+        },
+        {
+          "label": "ghost_mac_count",
+          "before": 1,
+          "after": 1,
+          "delta": 0,
+          "rule": "zero",
+          "passed": true,
+          "assessment": "delta=0, zero",
+          "description": "No ghost MACs after scenario"
+        }
+      ]
+    },
+    "event_audit": {
+      "scenario_id": "SC02_learn_remote_evpn",
+      "passed": true,
+      "fail_count": 0,
+      "timestamp_start": "09:27",
+      "timestamp_end": "2026-04-03T09:28:16.182+00:00",
+      "raw_syslog_lines": 29,
+      "raw_trace_lines": 0,
+      "collection_errors": [],
+      "items": [
+        {
+          "event": "BGP_NOTIFICATION",
+          "expect": "absent",
+          "found_count": 0,
+          "passed": true,
+          "assessment": "correctly absent",
+          "description": "No BGP notifications",
+          "sample_matches": []
+        },
+        {
+          "event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED",
+          "expect": "absent",
+          "found_count": 0,
+          "passed": true,
+          "assessment": "correctly absent",
+          "description": "No suppression on normal operations",
+          "sample_matches": []
+        }
+      ]
+    }
+  }
+}

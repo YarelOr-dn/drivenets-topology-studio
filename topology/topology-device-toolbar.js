@@ -16,6 +16,7 @@
  */
 function showDeviceSelectionToolbar(editor, device) {
     if (!device || device.type !== 'device') return;
+    const safeString = (value) => String(value || '').trim();
     
     // Hide other toolbars
     hideDeviceSelectionToolbar(editor);
@@ -119,33 +120,48 @@ function showDeviceSelectionToolbar(editor, device) {
     
     // Helper to create toolbar buttons
     const createButton = (iconId, title, onClick, options = {}) => {
-        const { isDestructive = false, color = null } = options;
+        const { isDestructive = false, color = null, strongAction = false, actionLabel = '' } = options;
         const btn = document.createElement('button');
-        btn.className = 'device-tb-btn';
+        btn.className = strongAction ? 'device-tb-btn device-tb-btn-strong' : 'device-tb-btn';
         
         const isPillButton = color && (color === '#27ae60' || color === '#e74c3c');
         const iconColor = isPillButton 
             ? '#ffffff'
-            : (isDestructive 
-                ? 'rgba(255, 100, 100, 0.9)' 
-                : (isDarkMode ? 'rgba(255, 255, 255, 0.85)' : 'rgba(30, 30, 50, 0.85)'));
+            : (strongAction
+                ? '#ffffff'
+                : (isDestructive
+                    ? 'rgba(255, 100, 100, 0.9)'
+                    : (isDarkMode ? 'rgba(255, 255, 255, 0.85)' : 'rgba(30, 30, 50, 0.85)')));
         
-        btn.innerHTML = `${editor._createIconSvg ? editor._createIconSvg(iconId, 16, isPillButton ? '#ffffff' : color) : '●'}`;
+        let iconMarkup = '';
+        try {
+            iconMarkup = editor._createIconSvg
+                ? editor._createIconSvg(iconId, 16, isPillButton ? '#ffffff' : color)
+                : '●';
+        } catch (err) {
+            console.warn('[device-toolbar] icon render failed:', iconId, err?.message || err);
+            iconMarkup = '<span style="font-size:14px;line-height:1;">?</span>';
+        }
+        btn.innerHTML = `${iconMarkup}`;
         
-        const hoverBg = isPillButton 
+        const hoverBg = strongAction
+            ? 'linear-gradient(135deg, #0891b2, #0066FA)'
+            : isPillButton
             ? (color === '#27ae60' ? '#229954' : '#c0392b')
             : (isDarkMode ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.08)');
         const hoverColor = isPillButton 
             ? '#ffffff'
             : (isDestructive ? '#ff6b6b' : (isDarkMode ? '#fff' : '#1a1a2e'));
         
-        const baseBg = isPillButton ? color : 'transparent';
+        const baseBg = strongAction
+            ? 'linear-gradient(135deg, #00B4D8, #0066FA)'
+            : (isPillButton ? color : 'transparent');
         
         btn.style.cssText = `
             position: relative;
-            ${isPillButton ? 'width: auto; padding: 0 10px;' : 'width: 30px;'}
+            ${isPillButton || strongAction ? 'width: auto; padding: 0 10px;' : 'width: 30px;'}
             height: 30px;
-            border: none;
+            border: ${strongAction ? '1px solid rgba(255,255,255,0.34)' : 'none'};
             background: ${baseBg};
             color: ${iconColor};
             cursor: pointer;
@@ -158,11 +174,19 @@ function showDeviceSelectionToolbar(editor, device) {
             overflow: visible;
             user-select: none;
             -webkit-user-select: none;
-            ${isPillButton ? 'font-size: 11px; font-weight: 600;' : ''}
+            ${isPillButton || strongAction ? 'font-size: 11px; font-weight: 800; letter-spacing: .2px;' : ''}
+            ${strongAction ? 'box-shadow: 0 5px 14px rgba(0, 102, 250, 0.28), inset 0 1px 0 rgba(255,255,255,0.35);' : ''}
         `;
         
-        if (isPillButton && title) {
-            btn.innerHTML = `${editor._createIconSvg ? editor._createIconSvg(iconId, 14, '#ffffff') : '●'}<span style="color: white;">${title.replace('Enable ', '').replace(' Retry', '')}</span>`;
+        if ((isPillButton || strongAction) && title) {
+            let pillIcon = '';
+            try {
+                pillIcon = editor._createIconSvg ? editor._createIconSvg(iconId, 14, '#ffffff') : '●';
+            } catch (_) {
+                pillIcon = '<span style="font-size:12px;line-height:1;">?</span>';
+            }
+            const label = actionLabel || title.replace('Enable ', '').replace(' Retry', '');
+            btn.innerHTML = `${pillIcon}<span style="color: white;">${label}</span>`;
         }
         
         btn.onmouseenter = () => {
@@ -184,7 +208,12 @@ function showDeviceSelectionToolbar(editor, device) {
         btn.onclick = (e) => {
             e.stopPropagation();
             e.preventDefault();
-            onClick(e);
+            try {
+                onClick(e);
+            } catch (err) {
+                console.error('[device-toolbar] button action failed:', title, err);
+                if (editor.showToast) editor.showToast(`${title || 'Toolbar action'} unavailable: ${err.message || err}`, 'error');
+            }
         };
         return btn;
     };
@@ -245,7 +274,11 @@ function showDeviceSelectionToolbar(editor, device) {
             e.stopPropagation();
             e.preventDefault();
             if (dropdown) { closeDropdown(); return; }
+            if (window.SelectionPopups?.closeObjectToolbarPopups) {
+                window.SelectionPopups.closeObjectToolbarPopups(editor, 'device-layer-dropdown');
+            }
             dropdown = document.createElement('div');
+            dropdown.id = 'device-layer-dropdown';
             dropdown.style.cssText = `
                 position: fixed; z-index: 100002; min-width: 160px;
                 background: ${glassBgDrop}; border: 1px solid ${glassBorderDrop};
@@ -299,7 +332,10 @@ function showDeviceSelectionToolbar(editor, device) {
     
     // SSH/Console button: click=open SSH dialog with connection methods and Connect buttons
     const sshConfig = device.sshConfig || {};
-    const sshHost = sshConfig.host || device.deviceAddress;
+    const pickedTarget = (window.TopologySshTarget && window.TopologySshTarget.pick)
+        ? window.TopologySshTarget.pick(device, { sshConfig })
+        : { host: sshConfig.host || device.deviceAddress || '', source: '' };
+    const sshHost = pickedTarget.host || sshConfig.host || device.deviceAddress;
     const deviceMode = device._deviceMode || 'unknown';
     const isModeAlert = deviceMode === 'GI' || deviceMode === 'RECOVERY';
     const lastMethod = sshConfig._lastWorkingMethod || '';
@@ -307,11 +343,21 @@ function showDeviceSelectionToolbar(editor, device) {
     const connIcon = isConsoleMode ? 'console' : 'terminal';
     const connLabel = isConsoleMode ? 'Console' : 'SSH';
     const hasSshConfigured = !!sshHost;
-    const sshReachable = !!device._sshReachable;
+    const SSH_FRESH_MS = 10 * 60 * 1000;
+    const SSH_STALE_MS = 2 * 60 * 60 * 1000;
+    const _sshReachAt = device._sshReachableAt || 0;
+    const _ageMs = _sshReachAt ? (Date.now() - _sshReachAt) : Infinity;
+    const sshReachable = !!device._sshReachable && _ageMs <= SSH_FRESH_MS;
+    const sshReachableStale = !!device._sshReachable && _ageMs > SSH_FRESH_MS && _ageMs <= SSH_STALE_MS;
+    const sshReachableExpired = !!device._sshReachable && _ageMs > SSH_STALE_MS;
+    const _reachStr = sshReachable ? ' [OK]'
+        : sshReachableStale ? ' [stale]'
+        : sshReachableExpired ? ' [unknown]'
+        : '';
     const sshTitle = isModeAlert
         ? `${device.label || 'Device'} in ${deviceMode} mode. Click for connection settings.`
         : (hasSshConfigured
-            ? `${connLabel}: ${sshConfig.user || 'dnroot'}@${sshHost}${sshReachable ? ' [OK]' : ''} -- Click for connection settings.`
+            ? `${connLabel}: ${sshConfig.user || 'dnroot'}@${sshHost}${_reachStr} -- Click for connection settings.`
             : 'No SSH configured. Click to set credentials.');
     const sshBtn = createButton(connIcon, sshTitle, (e) => {
         if (device._upgradeInProgress) return;
@@ -325,6 +371,8 @@ function showDeviceSelectionToolbar(editor, device) {
     }
     if (sshReachable) {
         sshBtn.style.boxShadow = 'inset 0 0 0 2px #27ae60';
+    } else if (sshReachableStale) {
+        sshBtn.style.boxShadow = 'inset 0 0 0 2px #f39c12';
     }
     if (isModeAlert) {
         const sshWrap = document.createElement('div');
@@ -341,10 +389,81 @@ function showDeviceSelectionToolbar(editor, device) {
         toolbar.appendChild(sshBtn);
     }
     
-    // LLDP button - only show if SSH credentials configured
-    const hasSshCredentials = sshConfig && sshConfig.host && sshConfig.user && sshConfig.password;
-    if (hasSshCredentials) {
-        const serial = sshConfig.host || device.deviceSerial || device.label || '';
+    // LLDP button + System Stack button gate.
+    //
+    // Auto-monitor (Phase 2 MVP, OQ-7 = SHIP): tighten the gate from
+    // "credentials present" to "credentials present AND verified
+    // reachable". A typed-but-unverified credential set should NOT
+    // surface buttons that need a live SSH session -- otherwise the
+    // user clicks LLDP / Stack on an unreachable device, the
+    // background fetch fails 30s later, and the UI feels broken.
+    //
+    // ``_legacyAlwaysOn`` returns true for devices loaded from a
+    // section JSON that lacks the new ``_sshReachable`` flag (PE-1 /
+    // PE-4 / RR-SA-2 / DNAAS-* baselines). The smooth-ZTP hydrate in
+    // ``topology-devices.js`` populates ``_sshReachable=true`` for
+    // these from the registry's ``last_seen_ok`` BEFORE the first
+    // toolbar paint, so this fallback is only a defense-in-depth.
+    const _legacyAlwaysOn = (d) => {
+        // Devices that pre-date the new flag have NEITHER _sshReachable
+        // NOR _monitorRegistered set. Anything that came through the
+        // new verify-and-register path will have _monitorRegistered and
+        // we should defer to _sshReachable. Otherwise (no registry
+        // mention at all) treat as a legacy load and keep the old
+        // permissive behaviour so PE-1's toolbar doesn't regress.
+        return !d._monitorRegistered && (d._sshReachable === undefined);
+    };
+    const hasSshCredentials = !!(sshConfig && (sshConfig.host || device._registeredMgmtIp || device._registeredDeviceId) && sshConfig.user && sshConfig.password);
+    const isReachable = !!device._sshReachable || _legacyAlwaysOn(device);
+    const hasBackendIdentity = !!(device._monitorRegistered && (device._registeredMgmtIp || device._registeredDeviceId || device._monitoredKey));
+    const onboardingPhase = safeString(device._onboardingPhase || device._onboarding?.phase);
+    const isOnboarding = !!onboardingPhase && onboardingPhase !== 'api_ready' && onboardingPhase !== 'failed';
+    const metadataGuard = window.TopologyDeviceIdentity || null;
+    const resolvedIdentity = metadataGuard?.resolveIdentity
+        ? metadataGuard.resolveIdentity(device, { host: pickedTarget.host })
+        : null;
+    const metadataHostHint = resolvedIdentity?.host || pickedTarget.host || device._registeredMgmtIp || device._registeredDeviceId || device.deviceSerial || device.serial || device.label || '';
+    const hasKnownMetadataIdentity = metadataGuard?.hasKnownMetadataIdentity
+        ? metadataGuard.hasKnownMetadataIdentity(device, { host: metadataHostHint })
+        : !!(
+            hasBackendIdentity
+            || device._monitorContext
+            || device._monitorCapabilities
+            || device._metadataDiscovered
+        );
+    const canShowMetadataActions = hasKnownMetadataIdentity || (hasSshCredentials && (isReachable || hasBackendIdentity || isOnboarding));
+    if (canShowMetadataActions) {
+        const serial = resolvedIdentity?.deviceId || pickedTarget.host || device._registeredMgmtIp || device._registeredDeviceId || device._monitoredKey || device.deviceSerial || device.label || '';
+        const metadataHost = resolvedIdentity?.host || pickedTarget.host || device._registeredMgmtIp || serial;
+        const metadataDeviceId = resolvedIdentity?.deviceId || device._registeredDeviceId || device._registeredHostname || device._monitoredKey || device.deviceSerial || device.serial || serial;
+        const metadataState = (kind, data = null) => metadataGuard?.metadataState
+            ? metadataGuard.metadataState(device, kind, { host: metadataHost, deviceId: metadataDeviceId, data })
+            : { ready: true, loading: false, status: 'ready' };
+        const lldpRows = (window.LldpDialog?._sanitizeLldpNeighbors)
+            ? window.LldpDialog._sanitizeLldpNeighbors(device._lldpData?.neighbors || device._lldpData?.lldp_neighbors || [])
+            : (device._lldpData?.neighbors || []);
+        const lldpReadyState = metadataState('lldp', device._lldpData);
+        const stackReadyState = metadataState('stack', device._stackData);
+        const gitReadyState = metadataState('git');
+        const lldpReady = lldpReadyState.ready && (lldpRows.length || device._lldpData?.raw_output);
+        const stackReady = stackReadyState.ready && !!(device._stackData?.components?.length || device._stackData?.raw_output);
+        const gitReady = gitReadyState.ready && device._gitCommit !== undefined && device._gitCommit !== null && device._gitCommit !== '';
+        const metadataLoading = lldpReadyState.loading || stackReadyState.loading || gitReadyState.loading || isOnboarding;
+        const disabledMetaTitle = metadataLoading
+            ? 'Device metadata is loading. Try again after discovery finishes.'
+            : (hasKnownMetadataIdentity
+                ? 'Device metadata is not available yet. Waiting for backend context or cached monitor data.'
+                : 'Not discovered yet. Run probe/discover before opening device metadata.');
+        const applyMetadataDisabled = (btn, title = disabledMetaTitle) => {
+            btn.style.opacity = '0.42';
+            btn.style.cursor = 'not-allowed';
+            btn.style.color = isDarkMode ? 'rgba(190, 195, 205, 0.55)' : 'rgba(90, 95, 105, 0.55)';
+            btn.style.background = isDarkMode ? 'rgba(120, 130, 145, 0.08)' : 'rgba(0, 0, 0, 0.05)';
+            btn.title = title;
+        };
+        const showMetadataPending = () => {
+            if (editor.showToast) editor.showToast(disabledMetaTitle, 'info');
+        };
         const isLldpRunning = device._lldpRunning || device._lldpAnimating;
         const hasLldpData = device.lldpEnabled || device.lldpDiscoveryComplete;
         const hasNewResults = device._lldpNewResults;
@@ -370,6 +489,12 @@ function showDeviceSelectionToolbar(editor, device) {
             lldpBg = 'rgba(0, 180, 216, 0.15)';
             tooltipText = 'LLDP scanning...';
             indicatorHtml = `<span style="position:absolute;top:-2px;right:-2px;width:10px;height:10px;border:2px solid rgba(0, 180, 216, 0.3);border-top-color:#00B4D8;border-radius:50%;animation:lldpSpin 0.8s linear infinite;"></span>`;
+        } else if (!lldpReady && !hasKnownMetadataIdentity) {
+            lldpColor = isDarkMode ? 'rgba(190, 195, 205, 0.55)' : 'rgba(90, 95, 105, 0.55)';
+            lldpBg = isDarkMode ? 'rgba(120, 130, 145, 0.08)' : 'rgba(0, 0, 0, 0.05)';
+            tooltipText = disabledMetaTitle;
+        } else if (!lldpReady) {
+            tooltipText = 'LLDP Table (loads current device data)';
         } else if (hasNewResults) {
             lldpColor = '#27ae60';
             lldpBg = 'rgba(39, 174, 96, 0.15)';
@@ -395,8 +520,8 @@ function showDeviceSelectionToolbar(editor, device) {
             ${indicatorHtml}
         `;
         lldpBtn.onmouseenter = () => {
-            lldpBtn.style.background = hasNewResults ? 'rgba(39, 174, 96, 0.25)' : (isLldpRunning ? 'rgba(0, 180, 216, 0.25)' : defaultHoverBg);
-            lldpBtn.style.transform = 'scale(1.08)';
+            lldpBtn.style.background = !lldpReady && !isLldpRunning && !hasKnownMetadataIdentity ? lldpBg : (hasNewResults ? 'rgba(39, 174, 96, 0.25)' : (isLldpRunning ? 'rgba(0, 180, 216, 0.25)' : defaultHoverBg));
+            lldpBtn.style.transform = !lldpReady && !isLldpRunning && !hasKnownMetadataIdentity ? 'none' : 'scale(1.08)';
             if (editor._showToolbarTooltip) editor._showToolbarTooltip(lldpBtn, tooltipText);
         };
         lldpBtn.onmouseleave = () => {
@@ -409,6 +534,10 @@ function showDeviceSelectionToolbar(editor, device) {
             e.stopPropagation();
             e.preventDefault();
             if (device._upgradeInProgress) return;
+            if (!lldpReady && !isLldpRunning && !hasKnownMetadataIdentity) {
+                showMetadataPending();
+                return;
+            }
             if (editor._showLldpInlineSubmenu) {
                 editor._showLldpInlineSubmenu(lldpBtn, device, serial, sshConfig, toolbar, isDarkMode, defaultIconColor, defaultHoverBg);
             }
@@ -417,12 +546,18 @@ function showDeviceSelectionToolbar(editor, device) {
             lldpBtn.style.opacity = '0.35';
             lldpBtn.style.pointerEvents = 'none';
             lldpBtn.title = 'Unavailable during upgrade';
+        } else if (!lldpReady && !isLldpRunning && !hasKnownMetadataIdentity) {
+            applyMetadataDisabled(lldpBtn);
         }
         toolbar.appendChild(lldpBtn);
         
         // System Stack button (opens submenu with Stack Table + Git Commit)
         const stackBtn = createButton('layers', 'System Stack', () => {
             if (device._upgradeInProgress) return;
+            if (!stackReady && !gitReady && !hasKnownMetadataIdentity) {
+                showMetadataPending();
+                return;
+            }
             if (editor._showSystemStackInlineSubmenu) {
                 editor._showSystemStackInlineSubmenu(stackBtn, device, serial, sshConfig, toolbar, isDarkMode, defaultIconColor, defaultHoverBg);
             }
@@ -431,8 +566,17 @@ function showDeviceSelectionToolbar(editor, device) {
             stackBtn.style.opacity = '0.35';
             stackBtn.style.pointerEvents = 'none';
             stackBtn.title = 'Unavailable during upgrade';
+        } else if (!stackReady && !gitReady && !hasKnownMetadataIdentity) {
+            applyMetadataDisabled(stackBtn);
         }
         toolbar.appendChild(stackBtn);
+    } else if (device._monitorRegistered || isOnboarding) {
+        const pendingBtn = createButton('layers', 'Monitoring options are preparing from backend identity', () => {
+            if (editor.showToast) editor.showToast('Device monitoring is still preparing. Try again in a few seconds.', 'info');
+        });
+        pendingBtn.style.opacity = '0.55';
+        pendingBtn.title = 'Monitoring options are preparing';
+        toolbar.appendChild(pendingBtn);
     }
     
     toolbar.appendChild(createSeparator());
@@ -476,6 +620,37 @@ function showDeviceSelectionToolbar(editor, device) {
     }));
     
     toolbar.appendChild(createLayerWidget(device, () => showDeviceSelectionToolbar(editor, device)));
+
+    // Groups button: opens the canonical Groups panel from
+    // ``topology-groups-panel.js`` (the floating panel anchored to the
+    // top-bar `#btn-groups-panel` id and the keyboard shortcut `g`).
+    //
+    // History (2026-05-12 fix): this button used to open the per-object
+    // ``ObjectGroupPopover.toggleFor(editor, anchorEl)`` micro-popover --
+    // a quick add/remove menu attached to the toolbar. The user reported
+    // the device-toolbar Groups button "does NOT open the regular Groups
+    // panel" and asked for it to route to the canonical panel that the
+    // rest of the app uses (top-bar shortcut + sidebar entry). We
+    // delegate straight to ``GroupsPanel.toggle`` so a single click
+    // opens the same draggable, resizable floating panel that the
+    // top-bar button opens. The ObjectGroupPopover surface is preserved
+    // for shape/link/text toolbars (out of scope for this fix), and is
+    // also still reachable from keyboard shortcut workflows.
+    if (window.GroupsPanel) {
+        const groupBtn = createButton('group', 'Groups', () => {
+            try {
+                window.GroupsPanel.toggle(editor);
+            } catch (err) {
+                console.error('[device-toolbar] Failed to toggle Groups panel:', err);
+                if (editor.showToast) {
+                    editor.showToast('Groups panel failed to open. Check console.', 'error');
+                }
+            }
+        }, { strongAction: true, actionLabel: 'Groups' });
+        groupBtn.setAttribute('aria-label', 'Open Groups panel');
+        groupBtn.setAttribute('title', 'Groups panel');
+        toolbar.appendChild(groupBtn);
+    }
     
     toolbar.appendChild(createSeparator());
     
@@ -509,8 +684,13 @@ function showDeviceSelectionToolbar(editor, device) {
             window.removeEventListener('device:context-updated', editor._deviceContextRefreshHandler);
             editor._deviceContextRefreshHandler = null;
         }
-        hideDeviceSelectionToolbar(editor);
-        showDeviceSelectionToolbar(editor, d);
+        try {
+            hideDeviceSelectionToolbar(editor);
+            showDeviceSelectionToolbar(editor, d);
+        } catch (err) {
+            console.error('[device-toolbar] context refresh failed:', err);
+            if (editor.showToast) editor.showToast(`Device toolbar is waiting for backend context: ${err.message || err}`, 'warning');
+        }
     };
     editor._deviceContextRefreshHandler = refreshOnContext;
     window.addEventListener('device:context-updated', refreshOnContext);
@@ -548,6 +728,9 @@ function hideDeviceSelectionToolbar(editor) {
     if (stylePalette) stylePalette.remove();
     const labelStyleMenu = document.getElementById('device-label-style-menu');
     if (labelStyleMenu) labelStyleMenu.remove();
+    if (window.SelectionPopups?.closeObjectToolbarPopups) {
+        window.SelectionPopups.closeObjectToolbarPopups(editor);
+    }
 }
 
 // Export functions

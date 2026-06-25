@@ -1,0 +1,229 @@
+{
+  "name": "ibgp-rr-hub-spoke-6",
+  "protocol": "ibgp",
+  "scale": "medium",
+  "summary": "iBGP with a redundant Route-Reflector pair. Each PE peers with both RRs (N sessions per client) and the RRs peer with each other; the classic scaling fix to the N^2 iBGP full-mesh problem.",
+  "tags": [
+    "ibgp",
+    "route-reflector",
+    "rr",
+    "hub-spoke",
+    "6-node"
+  ],
+  "layout_hint": "hub-spoke",
+  "objects": [
+    {
+      "id": "as1",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 800,
+      "y": 540,
+      "width": 1100,
+      "height": 700,
+      "fillColor": "#3498db",
+      "fillEnabled": true,
+      "fillOpacity": 0.08,
+      "strokeColor": "#3498db",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 14,
+      "label": "AS 65001"
+    },
+    {
+      "id": "rr1",
+      "type": "device",
+      "label": "RR-1",
+      "x": 600,
+      "y": 340,
+      "role": "rr",
+      "visualStyle": "hex",
+      "color": "#f39c12",
+      "ip": "10.0.0.101",
+      "radius": 45
+    },
+    {
+      "id": "rr2",
+      "type": "device",
+      "label": "RR-2",
+      "x": 1000,
+      "y": 340,
+      "role": "rr",
+      "visualStyle": "hex",
+      "color": "#f39c12",
+      "ip": "10.0.0.102",
+      "radius": 45
+    },
+    {
+      "id": "pe1",
+      "type": "device",
+      "label": "PE-1",
+      "x": 360,
+      "y": 700,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "10.0.0.11"
+    },
+    {
+      "id": "pe2",
+      "type": "device",
+      "label": "PE-2",
+      "x": 660,
+      "y": 820,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "10.0.0.12"
+    },
+    {
+      "id": "pe3",
+      "type": "device",
+      "label": "PE-3",
+      "x": 960,
+      "y": 820,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "10.0.0.13"
+    },
+    {
+      "id": "pe4",
+      "type": "device",
+      "label": "PE-4",
+      "x": 1260,
+      "y": 700,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "10.0.0.14"
+    },
+    {
+      "id": "l_rr1_rr2",
+      "type": "link",
+      "device1": "rr1",
+      "device2": "rr2",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "width": 3,
+      "label": "iBGP RR-RR"
+    },
+    {
+      "id": "l_pe1_rr1",
+      "type": "link",
+      "device1": "pe1",
+      "device2": "rr1",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed"
+    },
+    {
+      "id": "l_pe1_rr2",
+      "type": "link",
+      "device1": "pe1",
+      "device2": "rr2",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed"
+    },
+    {
+      "id": "l_pe2_rr1",
+      "type": "link",
+      "device1": "pe2",
+      "device2": "rr1",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed"
+    },
+    {
+      "id": "l_pe2_rr2",
+      "type": "link",
+      "device1": "pe2",
+      "device2": "rr2",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed"
+    },
+    {
+      "id": "l_pe3_rr1",
+      "type": "link",
+      "device1": "pe3",
+      "device2": "rr1",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed"
+    },
+    {
+      "id": "l_pe3_rr2",
+      "type": "link",
+      "device1": "pe3",
+      "device2": "rr2",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed"
+    },
+    {
+      "id": "l_pe4_rr1",
+      "type": "link",
+      "device1": "pe4",
+      "device2": "rr1",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed"
+    },
+    {
+      "id": "l_pe4_rr2",
+      "type": "link",
+      "device1": "pe4",
+      "device2": "rr2",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "iBGP with Redundant Route Reflectors",
+      "x": 800,
+      "y": 180,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_rr",
+      "type": "text",
+      "text": "RR-1 + RR-2 (cluster-id shared)\nN RR-clients = N iBGP sessions\n(not N(N-1)/2)",
+      "x": 280,
+      "y": 280,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#334155",
+      "borderWidth": 1
+    },
+    {
+      "id": "t_legend",
+      "type": "text",
+      "text": "Clients: PE-1 .. PE-4\nEach peers with BOTH RRs\nfor redundancy",
+      "x": 1340,
+      "y": 280,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#334155",
+      "borderWidth": 1
+    }
+  ]
+}

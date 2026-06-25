@@ -1,0 +1,11 @@
+{
+  "detail": "",
+  "failed_services": 0,
+  "iteration": 3,
+  "moved_services": 200,
+  "phase": "multi_mobility_cycle_1_moved_verify",
+  "status": "running",
+  "step": "mass_mobility_poll",
+  "timestamp": "2026-05-04T11:55:53+0000",
+  "total_services": 200
+}

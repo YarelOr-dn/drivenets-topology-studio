@@ -21,8 +21,21 @@ from api.routes import devices, config, operations, dnaas
 from api.websocket_manager import manager
 
 # Project paths
-PROJECT_ROOT = Path("/home/dn/CURSOR")
+# Static-asset root (for serving the topology UI). Override with TOPOLOGY_STATIC_ROOT
+# when deploying outside the legacy /home/dn/CURSOR layout.
+PROJECT_ROOT = Path(os.environ.get("TOPOLOGY_STATIC_ROOT", "/home/dn/CURSOR"))
 STATIC_DIR = PROJECT_ROOT
+
+
+def _inventory_path() -> Path:
+    """Resolve device_inventory.json (env > /home/dn/CURSOR > co-located)."""
+    env_path = os.environ.get("TOPOLOGY_INVENTORY_PATH", "").strip()
+    if env_path:
+        return Path(env_path).expanduser()
+    legacy = Path("/home/dn/CURSOR/device_inventory.json")
+    if legacy.exists():
+        return legacy
+    return PROJECT_ROOT / "device_inventory.json"
 
 
 @asynccontextmanager
@@ -108,11 +121,12 @@ async def get_device_inventory():
     
     Returns a mapping of device serials to hostnames/IPs.
     This is used by the UI to resolve device names to serial numbers.
+    Path is resolved via TOPOLOGY_INVENTORY_PATH env (with legacy fallback).
     """
     import json
-    
-    inventory_file = PROJECT_ROOT / "device_inventory.json"
-    
+
+    inventory_file = _inventory_path()
+
     if inventory_file.exists():
         try:
             with open(inventory_file, 'r') as f:
@@ -120,8 +134,7 @@ async def get_device_inventory():
             return data
         except Exception as e:
             return {"devices": {}, "error": str(e)}
-    
-    # Return empty inventory if file doesn't exist
+
     return {"devices": {}}
 
 

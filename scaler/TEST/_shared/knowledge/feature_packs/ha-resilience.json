@@ -1,0 +1,44 @@
+{
+  "feature": "ha-resilience",
+  "_description": "Starter pack for High-Availability tests: NCC switchover, process restart, container restart, cold NCC restart. Includes the validated DNOS HA command syntax (container-prefixed process names).",
+  "show_commands": [
+    {"command": "show high-availability", "phase": "snapshot",
+     "purpose": "Active/Standby NCC roles + sync state."},
+    {"command": "show system", "phase": "snapshot",
+     "purpose": "NCC/NCP node table, with active flag."},
+    {"command": "show system process <name>", "phase": "verify",
+     "purpose": "PID, uptime, restarts, state for one process. Note container prefix: routing:bgpd, routing:fibmgrd."},
+    {"command": "show system details", "phase": "snapshot",
+     "purpose": "All processes with their containers (use to discover valid <name> args)."}
+  ],
+  "ha_triggers_validated": [
+    {"command": "request system process restart ncc 0 routing-engine routing:bgpd",
+     "purpose": "Soft bgpd restart (container-prefixed name)."},
+    {"command": "request system container restart ncc 0 routing-engine",
+     "purpose": "Restart whole routing-engine container."},
+    {"command": "request system ncc switchover",
+     "purpose": "Active->Standby NCC swap."},
+    {"command": "request system restart ncc <id>",
+     "purpose": "Cold restart of one NCC (other NCC takes over)."}
+  ],
+  "container_prefix_table": {
+    "routing:bgpd": "BGP daemon",
+    "routing:fibmgrd": "FIB manager",
+    "routing:isisd": "IS-IS daemon",
+    "routing:ldpd": "LDP daemon",
+    "routing:ospfd": "OSPF daemon",
+    "routing:rsvpd": "RSVP-TE daemon",
+    "wb_agent": "Datapath agent (no prefix - not in routing container)",
+    "wb_fe_agent": "Front-end datapath agent",
+    "cluster_manager": "Cluster manager",
+    "fabric_manager": "Fabric manager"
+  },
+  "syntax_traps": [
+    "WRONG: 'show system process bgpd' -> Unknown word",
+    "RIGHT: 'show system process routing:bgpd'",
+    "WRONG: 'show interfaces brief' -> Does not exist",
+    "RIGHT: 'show interfaces description'",
+    "WRONG: 'show logging' -> Does not exist",
+    "RIGHT: 'show file log routing_engine/system-events.log'"
+  ]
+}

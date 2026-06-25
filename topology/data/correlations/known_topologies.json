@@ -1,0 +1,209 @@
+{
+  "_comment": "Canonical knowledge packs for Topology Generate. Each entry is a hand-verified resemblance graph synthesized from live discovery on the listed DUTs (show interfaces ip / show isis neighbors / show ldp neighbors / show bgp summary / show interfaces description). The Generate flow uses these packs as ground-truth seeds for canvas placement and protocol-stack overlay rendering when the live correlator returns a matching set of devices.",
+  "version": 1,
+  "topologies": [
+    {
+      "id": "pe1-rr-sa2-pe4",
+      "label": "PE-1 / RR-SA-2 / PE-4 (Drivenets-style RR + dual-PE service)",
+      "family": "rr-pe-service",
+      "captured": "2026-04-29",
+      "bgp_overlay_default_mode": "real-legs",
+      "bgp_overlay_modes": ["real-legs", "via-rr", "both"],
+      "devices": [
+        {
+          "id": "pe1",
+          "hostname": "PE-1",
+          "aliases": ["YOR_PE-1", "YOR-PE-1"],
+          "role": "pe",
+          "placementHint": "spoke",
+          "router_id": "1.1.1.1",
+          "loopbacks": ["1.1.1.1/32", "10.0.1.1/32"],
+          "as_number": "1234567",
+          "isis": { "system_id": "0001.0001.0001", "area": "49.0001", "level": "L1L2" },
+          "mpls": { "ldp": true, "sr": false }
+        },
+        {
+          "id": "rr_sa_2",
+          "hostname": "RR-SA-2",
+          "role": "rr",
+          "placementHint": "hub",
+          "router_id": "2.2.2.2",
+          "loopbacks": ["2.2.2.2/32"],
+          "as_number": "123",
+          "isis": { "system_id": "0002.0002.0002", "area": "49.0001", "level": "L2" },
+          "mpls": { "ldp": true, "sr": false }
+        },
+        {
+          "id": "pe4",
+          "hostname": "YOR_CL_PE-4",
+          "aliases": ["PE-4", "YOR_CL_PE-4"],
+          "role": "pe",
+          "placementHint": "spoke",
+          "router_id": "4.4.4.4",
+          "loopbacks": ["4.4.4.4/32"],
+          "as_number": "1234567",
+          "isis": { "system_id": "0010.0000.0001", "area": "49.0001", "level": "L1L2" },
+          "mpls": { "ldp": true, "sr": false }
+        }
+      ],
+      "underlay": [
+        {
+          "kind": "physical-p2p",
+          "stack": "ISIS+LDP",
+          "a": { "device": "pe1", "interface": "ge400-0/0/4.12", "ip": "12.12.12.1/29" },
+          "b": { "device": "rr_sa_2", "interface": "bundle-100.12", "ip": "12.12.12.2/29" },
+          "isis_level": "L2"
+        },
+        {
+          "kind": "physical-p2p",
+          "stack": "ISIS+LDP",
+          "a": { "device": "pe1", "interface": "ge400-0/0/4.14", "ip": "14.14.14.1/29" },
+          "b": { "device": "pe4", "interface": "ge100-18/0/0.14", "ip": "14.14.14.4/29" },
+          "isis_level": "L1L2"
+        },
+        {
+          "kind": "physical-p2p",
+          "stack": "ISIS+LDP",
+          "a": { "device": "rr_sa_2", "interface": "bundle-100.24", "ip": "24.24.24.2/29" },
+          "b": { "device": "pe4", "interface": "ge100-18/0/0.24", "ip": "24.24.24.4/29" },
+          "isis_level": "L2"
+        }
+      ],
+      "ldp_sessions": [
+        { "a": "1.1.1.1", "b": "2.2.2.2", "state": "OPERATIONAL" },
+        { "a": "1.1.1.1", "b": "4.4.4.4", "state": "OPERATIONAL" },
+        { "a": "2.2.2.2", "b": "4.4.4.4", "state": "OPERATIONAL" }
+      ],
+      "bgp_overlay": [
+        {
+          "a": { "device": "pe1", "router_id": "1.1.1.1", "as": "1234567" },
+          "b": { "device": "rr_sa_2", "router_id": "2.2.2.2", "as": "123" },
+          "kind": "ebgp-mp",
+          "address_families": [
+            "ipv4-unicast", "ipv4-vpn", "ipv4-flowspec", "ipv4-flowspec-vpn",
+            "ipv6-unicast", "ipv6-vpn", "ipv6-flowspec",
+            "l2vpn-vpls", "l2vpn-evpn"
+          ],
+          "state": "established"
+        },
+        {
+          "a": { "device": "rr_sa_2", "router_id": "2.2.2.2", "as": "123" },
+          "b": { "device": "pe4", "router_id": "4.4.4.4", "as": "1234567" },
+          "kind": "ebgp-mp",
+          "address_families": [
+            "ipv4-unicast", "ipv4-vpn", "ipv4-flowspec", "ipv4-flowspec-vpn",
+            "ipv4-rt-constrain",
+            "ipv6-unicast", "ipv6-vpn", "ipv6-flowspec",
+            "l2vpn-vpls", "l2vpn-evpn"
+          ],
+          "state": "established"
+        }
+      ],
+      "services": [
+        {
+          "kind": "evpn",
+          "name": "EVPN_SI_VPLS_1",
+          "route_targets": ["1234567:2001"],
+          "members": ["pe1", "rr_sa_2", "pe4"],
+          "rds": { "pe1": "1.1.1.1:1001", "rr_sa_2": "2.2.2.2:1001" },
+          "outer_vlan": { "pe1": 214, "rr_sa_2": 214, "pe4": 219 },
+          "inner_vlan": 4001,
+          "mode": "hub-PW",
+          "note": "PE-1 <-> RR <-> PE-4 (mac mobility test)"
+        },
+        {
+          "kind": "evpn",
+          "name": "EVPN_SI_VPLS_2",
+          "route_targets": ["1234567:2002"],
+          "members": ["pe1", "rr_sa_2", "pe4"],
+          "rds": { "pe1": "1.1.1.1:1002", "rr_sa_2": "2.2.2.2:1002", "pe4": "4.4.4.4:1002" },
+          "outer_vlan": { "pe1": 214, "rr_sa_2": 214, "pe4": 219 },
+          "inner_vlan": 4002,
+          "mode": "mixed (PW + EVPN-only on PE-4)"
+        },
+        {
+          "kind": "evpn",
+          "name": "EVPN_SI_VPLS_3",
+          "route_targets": ["1234567:2003"],
+          "members": ["pe1", "rr_sa_2"],
+          "rds": { "pe1": "1.1.1.1:1003", "rr_sa_2": "2.2.2.2:1003" },
+          "outer_vlan": { "pe1": 214, "rr_sa_2": 214 },
+          "inner_vlan": 4003,
+          "mode": "PW-only"
+        },
+        {
+          "kind": "evpn",
+          "name": "EVPN_SI_VPLS_4",
+          "route_targets": ["1234567:2004"],
+          "members": ["pe1", "rr_sa_2"],
+          "rds": { "pe1": "1.1.1.1:1004", "rr_sa_2": "2.2.2.2:1004" },
+          "outer_vlan": { "pe1": 214, "rr_sa_2": 214 },
+          "inner_vlan": 4004,
+          "mode": "PW-only"
+        },
+        {
+          "kind": "evpn",
+          "name": "EVPN_SI_VPLS_5",
+          "route_targets": ["1234567:2005"],
+          "members": ["pe1", "rr_sa_2"],
+          "rds": { "pe1": "1.1.1.1:1005", "rr_sa_2": "2.2.2.2:1005" },
+          "outer_vlan": { "pe1": 214, "rr_sa_2": 214 },
+          "inner_vlan": 4005,
+          "mode": "PW-only"
+        },
+        {
+          "kind": "evpn",
+          "name": "EVPN_SI_AC_PW_test",
+          "route_targets": [],
+          "members": ["pe1", "pe4"],
+          "rds": { "pe1": "1.1.1.1:1006", "pe4": "4.4.4.4:4006" },
+          "outer_vlan": { "pe1": 214, "pe4": 219 },
+          "inner_vlan": 4006,
+          "mode": "PW-only AC mobility test"
+        },
+        {
+          "kind": "vrf",
+          "name": "ZULU",
+          "members": ["pe1", "rr_sa_2"]
+        },
+        {
+          "kind": "vrf",
+          "name": "ALPHA",
+          "members": ["pe1", "pe4"]
+        }
+      ],
+      "external_evidence": [
+        { "kind": "lldp-fabric", "device": "pe1", "neighbor": "DNAAS-LEAF-D16", "interfaces": ["ge400-0/0/4", "ge400-0/0/5"] },
+        { "kind": "lldp-fabric", "device": "rr_sa_2", "neighbor": "DNAAS-LEAF-B15", "interfaces": ["ge400-0/0/0", "ge400-0/0/2"] },
+        { "kind": "lldp-fabric", "device": "pe4", "neighbor": "DNAAS-LEAF-B10", "interfaces": ["ge100-18/0/0", "ge100-18/0/1", "ge100-18/0/6"] },
+        { "kind": "lldp-fabric", "device": "pe4", "neighbor": "DN-LEAF1.dev.drivenets.net", "interfaces": ["ge100-18/0/5"] },
+        { "kind": "isis-foreign-area", "device": "pe4", "neighbor": "jun204-rt02", "interface": "ge100-18/0/0.45", "ip": "45.45.45.5", "area": ["49.0002", "49.0003"] },
+        { "kind": "ebgp-cpe", "device": "pe4", "peer": "100.64.6.134", "as": "65200", "afs": ["ipv4-unicast", "ipv4-vpn", "ipv4-flowspec", "ipv4-flowspec-vpn"] },
+        { "kind": "ebgp-cpe", "device": "rr_sa_2", "peer": "25.25.25.1", "as": "65000", "interface": "bundle-100.215" },
+        { "kind": "ebgp-cpe-scale", "device": "pe4", "peer_subnet": "10.99.101.0/24", "as": "65200", "count": 100 }
+      ],
+      "perimeter_layout": [
+        { "id": "fabric:pe1", "anchor": "pe1", "kind": "fabric", "slot": "fabric-inboard", "label": "DNAAS fabric (D16)", "peers": ["DNAAS-LEAF-D16"] },
+        { "id": "fabric:rr_sa_2", "anchor": "rr_sa_2", "kind": "fabric", "slot": "fabric-inboard", "label": "DNAAS fabric (B15)", "peers": ["DNAAS-LEAF-B15"] },
+        { "id": "fabric:pe4", "anchor": "pe4", "kind": "fabric", "slot": "fabric-inboard", "label": "DNAAS fabric (B10/DN-LEAF1)", "peers": ["DNAAS-LEAF-B10", "DN-LEAF1.dev.drivenets.net"] },
+        { "id": "foreign-igp:pe4:jun204-rt02", "anchor": "pe4", "kind": "foreign-igp", "slot": "cpe-outward", "label": "jun204-rt02", "interface": "ge100-18/0/0.45", "ip": "45.45.45.5", "areas": ["49.0002", "49.0003"] },
+        { "id": "tester:pe4:100.64.6.134", "anchor": "pe4", "kind": "tester", "slot": "tester-outward", "label": "ExaBGP CPE 100.64.6.134", "as": "65200" },
+        { "id": "tester:rr_sa_2:25.25.25.1", "anchor": "rr_sa_2", "kind": "tester", "slot": "tester-outward", "label": "Spirent 25.25.25.1", "as": "65000" },
+        { "id": "scale-fan:pe4:10.99.101.0/24:65200", "anchor": "pe4", "kind": "scale-fan", "slot": "scale-fan-outer-corner", "label": "10.99.101.0/24 x100 eBGP AS65200", "count": 100 }
+      ],
+      "canvas_layout": {
+        "viewport": { "centerX": 720, "topY": 220, "stepY": 240 },
+        "positions": {
+          "rr_sa_2": { "x": 720, "y": 220, "_role": "hub" },
+          "pe1":     { "x": 480, "y": 470, "_role": "spoke" },
+          "pe4":     { "x": 960, "y": 470, "_role": "spoke" }
+        },
+        "edges_style": {
+          "underlay": { "color": "#34495e", "width": 3, "stroke": "solid" },
+          "bgp_overlay": { "color": "#3498db", "width": 2, "stroke": "dashed" },
+          "service": { "color": "#1abc9c", "width": 2, "stroke": "dotted" }
+        }
+      }
+    }
+  ]
+}

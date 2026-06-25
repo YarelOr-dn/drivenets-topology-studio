@@ -98,6 +98,18 @@ def kill_orphan_exabgp_processes(spare_pid=None, spare_session_ids=None, log_pat
             if pid and s.get("exabgp_alive"):
                 spare_pids.add(pid)
 
+    # Command-line markers that MENTION "exabgp" but are NOT the ExaBGP daemon.
+    # Killing these was the root cause of the user-exabgp-mcp restart loop
+    # (368x): the MCP server is launched as `python3 -m user_exabgp_mcp.server`,
+    # whose command line contains "exabgp", so the broad "exabgp in line" match
+    # SIGKILLed it every watchdog cycle. NEVER kill these.
+    NON_DAEMON_MARKERS = (
+        "user_exabgp_mcp", "_mcp.server", "mcp_common", "mcp_cli.py",
+        "dnos_mcp.py", "bgp_watchdog", "bgp_tool.py", "session.py",
+        "recipe_to_dnos_e2e", "grep", "vim ", "nano ", "less ", "tail ",
+        "/cat ", "journalctl",
+    )
+    my_pid = os.getpid()
     killed = 0
     try:
         result = subprocess.run(
@@ -105,7 +117,9 @@ def kill_orphan_exabgp_processes(spare_pid=None, spare_session_ids=None, log_pat
             capture_output=True, text=True, timeout=5
         )
         for line in result.stdout.splitlines():
-            if "exabgp" not in line or "grep" in line:
+            if "exabgp" not in line:
+                continue
+            if any(marker in line for marker in NON_DAEMON_MARKERS):
                 continue
             parts = line.split()
             if len(parts) < 2:
@@ -114,7 +128,7 @@ def kill_orphan_exabgp_processes(spare_pid=None, spare_session_ids=None, log_pat
                 pid = int(parts[1])
             except ValueError:
                 continue
-            if pid in spare_pids:
+            if pid == my_pid or pid in spare_pids:
                 continue
             try:
                 os.kill(pid, signal.SIGKILL)

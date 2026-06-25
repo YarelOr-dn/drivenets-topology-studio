@@ -1,0 +1,485 @@
+{
+  "_description": "Live-validated DNOS 26.2 corrections + per-recipe validated syntax. Append-only log. Keyed by recipe_id where possible so batch_discover.py can refresh entries in place.",
+  "_last_validated": "2026-04-30",
+  "_validated_on": "PE-1, PE-4, RR-SA-2 (YOR fabric) DNOS 26.2.0; BGP EVPN RT-2 commands revalidated on YOR_PE-1 / PE-1 100.64.2.33",
+  "evpn_si_layer_verification_commands": {
+    "_description": "Validated 2026-04-29 during AC<->EVPN MAC mobility test on EVPN_SI_VPLS_1, MAC 00:10:94:00:00:01. These are the canonical layer-1..4 verifiers for EVPN-SI MAC mobility tests.",
+    "L1_per_mac_detail": [
+      "show evpn mac-table detail",
+      "show evpn mac-table detail mac <mac>",
+      "show evpn mac-table detail instance <name>",
+      "show evpn mac-table detail instance <name> mac <mac>"
+    ],
+    "L2_evi_state": [
+      "show evpn instance <name> detail",
+      "show evpn instance <name> mac-table",
+      "show evpn instance <name> vpls-pw",
+      "show evpn instance <name> vpls-pw counters"
+    ],
+    "L3_bgp_advertise": [
+      "show bgp l2vpn evpn mac <mac>",
+      "show bgp l2vpn evpn rd <rd>",
+      "show bgp l2vpn evpn summary | no-more",
+      "show bgp l2vpn vpls summary | no-more"
+    ],
+    "L4_forwarding": [
+      "show evpn forwarding-table mac-address-table",
+      "show evpn forwarding-table mac-address-table instance <name>",
+      "show evpn forwarding-table mac-address-table instance <name> mac <mac>"
+    ],
+    "clear_baseline": [
+      "clear evpn mac-table instance <name>",
+      "clear evpn instance <name> mac-suppression",
+      "clear evpn instance <name> mac-history",
+      "clear evpn instance <name> restore-cycles"
+    ],
+    "expected_protocol_field": {
+      "Local": "PE owns the MAC locally on AC -- has full Mobility History",
+      "bgp": "PE learned MAC via EVPN RT-2 from remote PE -- only latest seq, no history",
+      "VPLS_PW": "PE learned MAC via VPLS PW from remote PE -- never tracks mobility"
+    },
+    "mobility_history_asymmetry_rule": "Mobility History is ONLY tracked on the PE that currently owns the MAC LOCALLY. On Local->bgp/VPLS_PW transition, history is FLUSHED. Remote PEs show only latest seq from RT-2."
+  },
+  "command_corrections": [
+    {
+      "wrong": "show evpn mac-table detail mac <mac>  on  PE  in  bgp/PW state expecting mobility history",
+      "correct": "Only Local-owner PE keeps mobility history. To see moves: query the CURRENT Local owner.",
+      "reason": "Live-validated 2026-04-29: PE-1 with Protocol bgp showed Sequence number 5 but EMPTY Mobility History because history is flushed on Local->bgp transition. PE-4 with Protocol Local showed full 6-event history."
+    },
+    {
+      "wrong": "show evpn instance <name> detail | include Mobility",
+      "correct": "show evpn instance <name> detail   # then read Mobility threshold + window from output",
+      "reason": "Mobility config (threshold, detection window) is in instance detail, not a separate sub-command."
+    },
+    {
+      "wrong": "show bgp l2vpn evpn route mac-address",
+      "correct": "show bgp l2vpn evpn route-type 2 | include <mac>",
+      "reason": "DNOS does not support 'route mac-address' subcommand. Live PE-1 validation 2026-04-30 showed route-type 2 is valid and filters Type-2 MAC routes."
+    },
+    {
+      "wrong": "show bgp l2vpn evpn mac-address <mac>",
+      "correct": "show bgp l2vpn evpn route-type 2 | include <mac>",
+      "reason": "Live PE-1 validation 2026-04-30 rejected 'mac-address' with ERROR: Unknown word. The completion token is 'mac', not 'mac-address'."
+    },
+    {
+      "wrong": "using only show bgp l2vpn evpn mac <mac> to prove RT-2 advertisement",
+      "correct": "For local-owner proof use show bgp l2vpn evpn neighbors <rr-peer> advertised-routes | include <mac>; for remote-owner proof use received-routes/routes | include <mac>; collect route-type 2 as fallback context.",
+      "reason": "Live PE-1 validation 2026-04-30 showed 'mac' is a valid token, but empty output is not sufficient proof of absence unless peer advertised/received route evidence is also collected."
+    },
+    {
+      "wrong": "show dnos-internal routing evpn mac-mobility-redis-count",
+      "correct": "show evpn mac summary",
+      "reason": "dnos-internal mac-mobility-redis-count may not exist; live PE-1 validation on 2026-04-30 showed 'show evpn mac summary' is valid while 'show evpn mac-table summary' is invalid."
+    },
+    {
+      "wrong": "show evpn mac-table summary",
+      "correct": "show evpn mac summary",
+      "reason": "Live PE-1 validation on 2026-04-30 rejected 'show evpn mac-table summary' with ERROR: Unknown word 'summary'."
+    },
+    {
+      "wrong": "show bridge-domain instance | no-more",
+      "correct": "show bridge-domain summary | no-more",
+      "reason": "Live PE-1 validation on 2026-04-30 showed bare show bridge-domain instance is incomplete; use summary for global BD status, or instance <bd-name>/all for scoped detail."
+    },
+    {
+      "wrong": "show dnos-internal routing evpn instance <X> mac-table-ghost | no-more",
+      "correct": "show dnos-internal routing evpn instance <X> mac-table-ghost detail | no-more",
+      "reason": "Bulk-fixed across ac_ac, ac_evpn, ac_pw, aging_timers, evpn_pw, ha_mac_mobility, irb_si_rejection, pw_pw, sticky_modes, withdraw_flush recipes on 2026-04-30. Live PE-1 rejects the bare form with ERROR: Incomplete command; the `detail` suffix is mandatory."
+    },
+    {
+      "wrong": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+      "correct": "show evpn mac summary | no-more",
+      "reason": "Bulk-fixed across ac_ac, clear_operations, evpn_evpn, ha_mac_mobility, pw_suppression_sanctions, scale_64k recipes on 2026-04-30. Live PE-1 has no mac-mobility-redis-count operational command; per-EVI MAC counts come from `show evpn mac summary`."
+    },
+    {
+      "wrong": "irb interface irb-9099",
+      "correct": "interfaces irb9099",
+      "reason": "DNOS 26.2 IRB syntax: top-level 'interfaces irbN' (no dash, no space, no nested 'irb interface' keyword). Live-validated PE-1 2026-04-19."
+    },
+    {
+      "wrong": "network-services evpn instance X bridge-domain default-bd irb interface irb-9099",
+      "correct": "network-services evpn instance X router-interface irb9099",
+      "reason": "DNOS 26.2 binds IRB to EVPN via 'router-interface <if>' directly under instance. There is NO 'bridge-domain default-bd irb interface' nested keyword. Live-validated PE-1 2026-04-19."
+    },
+    {
+      "wrong": "show evpn mac-table instance X detail",
+      "correct": "show evpn mac-table detail instance X",
+      "reason": "DNOS 26.2 requires 'detail' keyword BEFORE 'instance <name>'. Flagged in test-live-device-validation rule."
+    },
+    {
+      "wrong": "clear evpn mac-suppression instance X",
+      "correct": "clear evpn instance X mac-suppression",
+      "reason": "DNOS 26.2 clear command order: 'instance <name>' comes BEFORE 'mac-suppression'. Live-validated PE-1 2026-04-21."
+    },
+    {
+      "wrong": "clear evpn mac-history instance X",
+      "correct": "clear evpn instance X mac-history",
+      "reason": "DNOS 26.2 clear command order. Live-validated PE-1 2026-04-21."
+    },
+    {
+      "wrong": "show dnos-internal routing evpn instance X mac-table-ghost | no-more",
+      "correct": "show dnos-internal routing evpn instance X mac-table-ghost detail | no-more",
+      "reason": "DNOS 26.2 returns 'ERROR: Incomplete command.' without the 'detail' keyword (or a MAC). 'detail' is the correct suffix for batch collection. Live-validated PE-1 (DNOS 26.2.0 build 20_priv) by tools/batch_discover.py on 2026-04-20."
+    },
+    {
+      "wrong": "show system npu-resources ncp X mac | no-more",
+      "correct": "show system npu-resources ncp X | no-more",
+      "reason": "DNOS 26.2 rejects 'mac' suffix with 'ERROR: Unknown word: mac'. Base command already emits shared-buffer and SRAM counters -- no additional keyword needed. Live-validated PE-1 on 2026-04-20 via batch_discover.py."
+    },
+    {
+      "wrong": "show config network-services evpn instance X bridge-domain | no-more",
+      "correct": "show config network-services evpn instance X | no-more",
+      "reason": "DNOS 26.2 rejects 'bridge-domain' suffix -- there is no nested bridge-domain subtree under evpn instance show config. The instance show already emits all children. Live-validated PE-1 on 2026-04-20 via batch_discover.py."
+    }
+  ],
+  "dnos_26_2_irb_evpn_syntax": {
+    "device_validated": "PE-1 (100.64.4.200)",
+    "dnos_version": "DNOS 26.2.0 build 20_priv",
+    "discovered_on": "2026-04-19",
+    "global_irb_interface": {
+      "syntax": "interfaces irbN admin-state enabled",
+      "example": "interfaces irb9099 admin-state enabled",
+      "naming": "irbN where N is integer; no dash, no space"
+    },
+    "evpn_irb_binding": {
+      "syntax": "network-services evpn instance <name> router-interface irbN",
+      "example": "network-services evpn instance test_irb_reject router-interface irb9099",
+      "incompatible_with": "seamless-integration",
+      "rejection_message": "ERROR: EVPN router-interface (IRB) and Seamless VPLS (EVPN seamless-integration) cannot be configured at the same time."
+    },
+    "discovery_method": "interactive ? completion under 'network-services evpn instance HA_TEST_ELAN ?' revealed 'router-interface' keyword. 'irb interface' keyword does NOT exist in DNOS 26.2 (Confluence sample referenced legacy DNOS 25.x syntax)."
+  },
+  "dnos_26_2_loop_prevention_action": {
+    "device_validated": "PE-1 (100.64.4.200)",
+    "dnos_version": "DNOS 26.2.0 build 20_priv",
+    "discovered_on": "2026-04-21",
+    "config_path": "network-services evpn instance <name> mac-handling loop-prevention action <value>",
+    "valid_values": [
+      "suppress",
+      "blackhole",
+      "shutdown"
+    ],
+    "default": "suppress",
+    "invalid_values_rejected": [
+      "freeze",
+      "drop"
+    ],
+    "discovery_method": "? completion under 'mac-handling loop-prevention action ?' on PE-1 DNOS 26.2 showed only suppress/blackhole/shutdown.",
+    "notes": "'drop' and 'freeze' are Confluence-documented but DO NOT exist in DNOS 26.2 CLI. pw_suppression_sanctions G4 recipe must use 'blackhole' where Confluence says 'drop'."
+  },
+  "dnos_26_2_clear_commands": {
+    "device_validated": "PE-1 (100.64.4.200)",
+    "dnos_version": "DNOS 26.2.0 build 20_priv",
+    "discovered_on": "2026-04-21",
+    "valid_forms": [
+      "clear evpn instance <name> mac-suppression",
+      "clear evpn instance <name> mac-suppression mac <mac>",
+      "clear evpn instance <name> mac-history",
+      "clear evpn instance <name> restore-cycles",
+      "clear evpn mac-table instance <name>"
+    ],
+    "rule": "All 'clear evpn' sub-commands with per-instance scope put the 'instance <name>' token AFTER 'evpn' and BEFORE the action keyword.",
+    "exception": "'clear evpn mac-table instance <name>' -- mac-table comes BEFORE instance (this is the documented odd-one-out)."
+  },
+  "per_recipe_validation": {
+    "irb_si_rejection": {
+      "recipe_path": "tests/irb_si_rejection/recipe.json",
+      "validated_on": "2026-04-19",
+      "device": "PE-1",
+      "scenarios_validated": [
+        "SC01_add_irb_to_si_instance"
+      ],
+      "scenarios_pending": [
+        "SC02_add_si_to_irb_instance",
+        "SC03_remove_si_add_irb_success"
+      ],
+      "trigger_handler": "commit_check_assert (ACTION_TRIGGER_MAP)",
+      "rejection_error_captured": "ERROR: EVPN router-interface (IRB) and Seamless VPLS (EVPN seamless-integration) cannot be configured at the same time. .",
+      "notes": "SC01 live PASS. SC02/SC03 expected to PASS because they use the same stateful SSH + commit_check_assert flow as SC01.",
+      "batch_validated_on": "dry-run",
+      "batch_device": "n/a",
+      "command_counts": {
+        "show": 6,
+        "clear": 0,
+        "config": 5
+      },
+      "batch_status_breakdown": {
+        "dry_run": 11
+      },
+      "batch_failures": []
+    },
+    "clear_operations": {
+      "recipe_path": "tests/clear_operations/recipe.json",
+      "validated_on": "2026-04-21",
+      "device": "PE-1",
+      "trigger_handler": "clear_assert_state (new in Block 3) + existing clear_command fallback",
+      "notes": "Clear command forms validated via 'clear evpn instance HA_TEST_ELAN ?' ? completion. 'mac-suppression', 'mac-history', 'restore-cycles' all exist. setup_trigger 'rapid_flap_to_create_suppression' is optional -- if no suppressed MACs present, SC01 still validates 'clear suppression' returns success without error.",
+      "batch_validated_on": "2026-04-20T07:46:23.895474+00:00",
+      "batch_device": "PE-1",
+      "command_counts": {
+        "show": 10,
+        "clear": 4,
+        "config": 0
+      },
+      "batch_status_breakdown": {
+        "pass": 14
+      },
+      "batch_failures": []
+    },
+    "evpn_evpn": {
+      "recipe_path": "tests/evpn_evpn/recipe.json",
+      "validated_on": "2026-04-21",
+      "device": "PE-1 + RR-SA-2 (Spirent BGP peer)",
+      "trigger_handler": "spirent_evpn_seq_race (new in Block 3, delegates to spirent_tool evpn-routes with --seq + --label)",
+      "notes": "spirent_tool.py already supports --count, --seq, --next-hop. SC01 uses two sequential evpn-routes calls with different --seq and --next-hop to simulate PE-A vs PE-B.",
+      "batch_validated_on": "2026-04-20T07:46:23.895474+00:00",
+      "batch_device": "PE-1",
+      "command_counts": {
+        "show": 10,
+        "clear": 0,
+        "config": 0
+      },
+      "batch_status_breakdown": {
+        "pass": 10
+      },
+      "batch_failures": []
+    },
+    "scale_64k": {
+      "recipe_path": "tests/scale_64k/recipe.json",
+      "validated_on": "2026-04-21",
+      "device": "PE-1 + Spirent",
+      "trigger_handler": "spirent_bulk_learn_assert (new in Block 3, delegates to spirent_tool evpn-routes --count for RT-2 bulk OR create-stream for AC bulk)",
+      "notes": "64K via evpn-routes --count 65536 --mac 00:10:00:00:00:01 is the most reliable bulk path because it bypasses AC traffic rate limits. AC-based bulk learn would need MAC modifier on create-stream (not currently wired). First approach used.",
+      "batch_validated_on": "2026-04-20T07:46:23.895474+00:00",
+      "batch_device": "PE-1",
+      "command_counts": {
+        "show": 16,
+        "clear": 0,
+        "config": 0
+      },
+      "batch_status_breakdown": {
+        "pass": 16
+      },
+      "batch_failures": []
+    },
+    "pw_suppression_sanctions": {
+      "recipe_path": "tests/pw_suppression_sanctions/recipe.json",
+      "validated_on": "2026-04-21",
+      "device": "PE-1 + Spirent",
+      "trigger_handler": "cross_domain_sanction_assert (new in Block 3, combines config-change + rapid AC<->EVPN flap)",
+      "sanction_value_correction": "'drop' in meeting notes -> 'blackhole' in DNOS 26.2 CLI. See dnos_26_2_loop_prevention_action above.",
+      "notes": "Handler does: (1) set loop-prevention action to scenario's sanction value, (2) alternating L2 + RT-2 inject, (3) verify sanction state. Always restores action=suppress in cleanup.",
+      "batch_validated_on": "2026-04-20T07:46:23.895474+00:00",
+      "batch_device": "PE-1",
+      "command_counts": {
+        "show": 11,
+        "clear": 0,
+        "config": 5
+      },
+      "batch_status_breakdown": {
+        "pass": 12,
+        "skip": 4
+      },
+      "batch_failures": []
+    },
+    "ac_ac": {
+      "recipe_path": "tests/ac_ac/recipe.json",
+      "batch_validated_on": "dry-run",
+      "batch_device": "n/a",
+      "command_counts": {
+        "show": 14,
+        "clear": 0,
+        "config": 0
+      },
+      "batch_status_breakdown": {
+        "dry_run": 14
+      },
+      "batch_failures": []
+    },
+    "ac_evpn": {
+      "recipe_path": "tests/ac_evpn/recipe.json",
+      "batch_validated_on": "dry-run",
+      "batch_device": "n/a",
+      "command_counts": {
+        "show": 5,
+        "clear": 0,
+        "config": 0
+      },
+      "batch_status_breakdown": {
+        "dry_run": 5
+      },
+      "batch_failures": []
+    },
+    "ac_pw": {
+      "recipe_path": "tests/ac_pw/recipe.json",
+      "batch_validated_on": "dry-run",
+      "batch_device": "n/a",
+      "command_counts": {
+        "show": 16,
+        "clear": 0,
+        "config": 0
+      },
+      "batch_status_breakdown": {
+        "dry_run": 16
+      },
+      "batch_failures": []
+    },
+    "aging_timers": {
+      "recipe_path": "tests/aging_timers/recipe.json",
+      "batch_validated_on": "dry-run",
+      "batch_device": "n/a",
+      "command_counts": {
+        "show": 7,
+        "clear": 0,
+        "config": 0
+      },
+      "batch_status_breakdown": {
+        "dry_run": 7
+      },
+      "batch_failures": []
+    },
+    "basic_learning": {
+      "recipe_path": "tests/basic_learning/recipe.json",
+      "batch_validated_on": "dry-run",
+      "batch_device": "n/a",
+      "command_counts": {
+        "show": 15,
+        "clear": 0,
+        "config": 0
+      },
+      "batch_status_breakdown": {
+        "dry_run": 15
+      },
+      "batch_failures": []
+    },
+    "evpn_pw": {
+      "recipe_path": "tests/evpn_pw/recipe.json",
+      "batch_validated_on": "dry-run",
+      "batch_device": "n/a",
+      "command_counts": {
+        "show": 16,
+        "clear": 0,
+        "config": 0
+      },
+      "batch_status_breakdown": {
+        "dry_run": 16
+      },
+      "batch_failures": []
+    },
+    "ha_mac_mobility": {
+      "recipe_path": "tests/ha_mac_mobility/recipe.json",
+      "batch_validated_on": "dry-run",
+      "batch_device": "n/a",
+      "command_counts": {
+        "show": 11,
+        "clear": 0,
+        "config": 0
+      },
+      "batch_status_breakdown": {
+        "dry_run": 11
+      },
+      "batch_failures": []
+    },
+    "multihoming": {
+      "recipe_path": "tests/multihoming/recipe.json",
+      "batch_validated_on": "dry-run",
+      "batch_device": "n/a",
+      "command_counts": {
+        "show": 12,
+        "clear": 0,
+        "config": 0
+      },
+      "batch_status_breakdown": {
+        "dry_run": 12
+      },
+      "batch_failures": []
+    },
+    "pw_pw": {
+      "recipe_path": "tests/pw_pw/recipe.json",
+      "batch_validated_on": "dry-run",
+      "batch_device": "n/a",
+      "command_counts": {
+        "show": 17,
+        "clear": 0,
+        "config": 0
+      },
+      "batch_status_breakdown": {
+        "dry_run": 17
+      },
+      "batch_failures": []
+    },
+    "sticky_modes": {
+      "recipe_path": "tests/sticky_modes/recipe.json",
+      "batch_validated_on": "dry-run",
+      "batch_device": "n/a",
+      "command_counts": {
+        "show": 10,
+        "clear": 0,
+        "config": 4
+      },
+      "batch_status_breakdown": {
+        "dry_run": 14
+      },
+      "batch_failures": []
+    },
+    "withdraw_flush": {
+      "recipe_path": "tests/withdraw_flush/recipe.json",
+      "batch_validated_on": "dry-run",
+      "batch_device": "n/a",
+      "command_counts": {
+        "show": 8,
+        "clear": 10,
+        "config": 0
+      },
+      "batch_status_breakdown": {
+        "dry_run": 18
+      },
+      "batch_failures": []
+    }
+  },
+  "unverified_syntax": [],
+  "runtime_learning": {
+    "last_updated": "2026-05-01T13:38:57.950626+00:00",
+    "successful_commands": [
+      "show mpls label-allocation tables | no-more",
+      "show config protocols bgp 1234567 | flatten | include l2vpn-vpls",
+      "show config network-services evpn instance PW_TEST_ELAN | no-more",
+      "show isis neighbors | include ge400-0/0/5.3",
+      "show route 6.6.6.6",
+      "show ldp neighbors | include 17.17.17",
+      "show bgp summary | include 17.17.17",
+      "show bgp l2vpn evpn summary | no-more",
+      "show evpn vpls-pw | no-more",
+      "show config network-services evpn instance PW_TEST_ELAN | flatten | include interface",
+      "show config network-services evpn | no-more",
+      "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+      "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+      "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+      "clear evpn instance HA_TEST_ELAN mac-suppression",
+      "show evpn summary | no-more",
+      "show config network-services evpn instance HA_TEST_ELAN mac-handling | no-more",
+      "show evpn instance HA_TEST_ELAN detail | no-more",
+      "show config network-services evpn instance HA_TEST_ELAN | no-more",
+      "show evpn instance HA_TEST_ELAN | no-more",
+      "show config network-services evpn instance EVPN_SI_VPLS_1 | no-more",
+      "show config network-services evpn instance EVPN_SI_VPLS_1 | flatten | include interface",
+      "show evpn instance EVPN_SI_AC_PW_test detail | no-more",
+      "show config network-services evpn instance EVPN_SI_AC_PW_test | flatten | no-more",
+      "show evpn instance EVPN_SI_VPLS_1 detail | no-more",
+      "show evpn instance EVPN_SI_VPLS_1 vpls-pw | no-more"
+    ],
+    "failed_commands": [
+      {
+        "command": "show evpn instance HA_TEST_ELAN interface | no-more",
+        "error": "----------------------------------------------------------------^\nERROR: Unknown word: 'interface'.",
+        "timestamp": "2026-04-22T13:28:56.871148+00:00"
+      },
+      {
+        "command": "show evpn instance HA_TEST_ELAN interface | no-more",
+        "error": "----------------------------------------------------------------^\nERROR: Unknown word: 'interface'.",
+        "timestamp": "2026-04-22T13:28:56.922314+00:00"
+      }
+    ]
+  },
+  "_last_validated_note": "dry-run batch_discover"
+}

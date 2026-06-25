@@ -45,6 +45,9 @@ class DnaasManager {
             const isVisible = dnaasPanel.style.display === 'block';
             
             if (!isVisible) {
+                if (this.editor && typeof this.editor.hideAllSelectionToolbars === 'function') {
+                    this.editor.hideAllSelectionToolbars();
+                }
                 // Close Topologies dropdown if open
                 const topoDD = document.getElementById('topologies-dropdown-menu');
                 const topoBtn = document.getElementById('btn-topologies');

@@ -1,0 +1,11 @@
+{
+  "detail": "",
+  "failed_services": 185,
+  "iteration": 4,
+  "passed_services": 15,
+  "phase": "verify_mac_learn_both_sides",
+  "status": "running",
+  "step": "mac_learning_poll",
+  "timestamp": "2026-05-04T07:55:45+0000",
+  "total_services": 200
+}

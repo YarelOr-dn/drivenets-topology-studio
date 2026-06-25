@@ -1,0 +1,213 @@
+{
+  "data": {
+    "failed_services": 200,
+    "iteration": 4,
+    "passed_services": 0,
+    "sample_failures": [
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": true
+        },
+        "inner_vlan": 3101,
+        "service": "EVPN_PW_S001"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": false
+        },
+        "inner_vlan": 3102,
+        "service": "EVPN_PW_S002"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": true
+        },
+        "inner_vlan": 3103,
+        "service": "EVPN_PW_S003"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": true
+        },
+        "inner_vlan": 3104,
+        "service": "EVPN_PW_S004"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": false
+        },
+        "inner_vlan": 3105,
+        "service": "EVPN_PW_S005"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": false
+        },
+        "inner_vlan": 3106,
+        "service": "EVPN_PW_S006"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": false
+        },
+        "inner_vlan": 3107,
+        "service": "EVPN_PW_S007"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": false
+        },
+        "inner_vlan": 3108,
+        "service": "EVPN_PW_S008"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": false
+        },
+        "inner_vlan": 3109,
+        "service": "EVPN_PW_S009"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": false
+        },
+        "inner_vlan": 3110,
+        "service": "EVPN_PW_S010"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": false
+        },
+        "inner_vlan": 3111,
+        "service": "EVPN_PW_S011"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": false
+        },
+        "inner_vlan": 3112,
+        "service": "EVPN_PW_S012"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": false
+        },
+        "inner_vlan": 3113,
+        "service": "EVPN_PW_S013"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": true
+        },
+        "inner_vlan": 3114,
+        "service": "EVPN_PW_S014"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": true
+        },
+        "inner_vlan": 3115,
+        "service": "EVPN_PW_S015"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": true
+        },
+        "inner_vlan": 3116,
+        "service": "EVPN_PW_S016"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": true
+        },
+        "inner_vlan": 3117,
+        "service": "EVPN_PW_S017"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": true
+        },
+        "inner_vlan": 3118,
+        "service": "EVPN_PW_S018"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": true
+        },
+        "inner_vlan": 3119,
+        "service": "EVPN_PW_S019"
+      },
+      {
+        "checks": {
+          "pe4_sees_pe4_local": false,
+          "pe4_sees_rr_remote": false,
+          "rr_sees_pe4_remote": false,
+          "rr_sees_rr_local": true
+        },
+        "inner_vlan": 3120,
+        "service": "EVPN_PW_S020"
+      }
+    ],
+    "total_services": 200
+  },
+  "detail": "MAC learning timeout",
+  "ok": false,
+  "phase": "multi_mobility_cycle_1_baseline_verify"
+}

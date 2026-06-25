@@ -12,58 +12,208 @@
   "show_commands_validated": {
     "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more": "SHOW_COMMANDS line 10091 -- Single MAC lookup",
     "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding state and flags",
-    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more": "Ghost MAC detection",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more": "Ghost MAC detection",
     "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
   },
   "invalid_commands": {
     "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use: show evpn mac-table instance {name}",
     "show interfaces brief": "DOES NOT EXIST. Use: show interfaces description"
   },
+  "infra_required": "spirent_vpls_cp",
+  "infra_reason": "Uses Spirent as both VPLS BGP peer (for PW) and EVPN BGP peer (for remote RT-2). SI-enabled instance with VPLS RTs under SI subtree. PW is 'Installed' when only Spirent peers via l2vpn-vpls. Full ISIS+LDP+BGP chain required. Spirent vpls-stream provides MPLS-labeled PW traffic.",
+  "reference_doc": "~/.cursor/spirent-reference/vpls-pw-establishment.md",
+  "convergence_budget_seconds": 90,
   "prerequisites": [
-    {"id": "pw", "check": "pseudowire_configured", "fix_via": "VPLS PW under service"},
-    {"id": "remote_evpn", "check": "bgp_evpn_peer", "fix_via": "Remote PE with RT-2"}
+    {
+      "id": "spirent_session",
+      "check": "spirent_available",
+      "fix_via": "spirent_tool.py connect && reserve"
+    },
+    {
+      "id": "vpls_label_pool",
+      "check": "label_pool_configured",
+      "check_command": "show mpls label-allocation tables | no-more",
+      "expect": "bgp-vpls row with non-zero label count",
+      "alt_check": "show config routing-options | flatten | include bgp-vpls-label-block-size",
+      "fix_config": "routing-options bgp-vpls-label-block-size 130",
+      "fix_via": "auto_config",
+      "known_bug": "SW-253359: on cluster devices, label pool may show 0 even after config+restart"
+    },
+    {
+      "id": "bgp_l2vpn_vpls_af",
+      "check": "bgp_address_family",
+      "check_command": "show config protocols bgp {asn} | flatten | include l2vpn-vpls",
+      "expect": "address-family l2vpn-vpls",
+      "fix_via": "auto_config"
+    },
+    {
+      "id": "si_evpn_instance",
+      "check": "evpn_instance_with_si_and_vpls_rt",
+      "check_command": "show config network-services evpn instance {pw_test_evpn_name} | no-more",
+      "expect": "instance {pw_test_evpn_name} with seamless-integration and export-l2vpn-vpls route-target",
+      "fix_via": "spirent_vpls_provisioner.py auto-creates SI instance with VPLS RTs under SI subtree",
+      "critical_note": "VPLS RTs ONLY valid under seamless-integration > protocols > bgp. Discovered 2026-04-11."
+    },
+    {
+      "id": "isis_adjacency",
+      "check": "isis_neighbor_up",
+      "check_command": "show isis neighbors | include ge400-0/0/5.3",
+      "expect": "L2 Up",
+      "depends_on": ["si_evpn_instance"],
+      "convergence_time_seconds": 45,
+      "stc_encoding_trap": "STC Area1 = concatenated hex '490001', SystemId = dotted '0000.0000.0003'"
+    },
+    {
+      "id": "route_to_loopback",
+      "check": "igp_route_exists",
+      "check_command": "show route 6.6.6.6",
+      "expect": "Known via isis",
+      "depends_on": ["isis_adjacency"],
+      "convergence_time_seconds": 5
+    },
+    {
+      "id": "ldp_session",
+      "check": "ldp_neighbor_operational",
+      "check_command": "show ldp neighbors | include 17.17.17",
+      "expect": "OPERATIONAL",
+      "depends_on": ["route_to_loopback"],
+      "convergence_time_seconds": 10
+    },
+    {
+      "id": "spirent_vpls_peer",
+      "check": "bgp_vpls_session",
+      "check_command": "show bgp summary | include 17.17.17",
+      "expect": "Established",
+      "fix_via": "spirent_tool.py bgp-peer --negotiate-afi l2vpn-vpls --vpls-block-size 8 --vpls-nexthop 6.6.6.6",
+      "depends_on": ["bgp_l2vpn_vpls_af", "si_evpn_instance", "ldp_session"],
+      "validated": true,
+      "validation_note": "VALIDATED PE-1 2026-04-11: BGP ESTABLISHED after full ISIS+LDP chain"
+    },
+    {
+      "id": "spirent_evpn_peer",
+      "check": "bgp_evpn_session",
+      "check_command": "show bgp l2vpn evpn summary | no-more",
+      "expect": "Established",
+      "fix_via": "spirent_tool.py bgp-peer --negotiate-afi l2vpn-evpn (same or separate device)",
+      "note": "Spirent needs BOTH l2vpn-vpls (for PW) and l2vpn-evpn (for RT-2 injection)"
+    },
+    {
+      "id": "pw_installed",
+      "check": "vpls_pw_installed",
+      "check_command": "show evpn vpls-pw | no-more",
+      "pass_criteria": "PW exists for {pw_test_evpn_name} with Status = Installed",
+      "validated": true,
+      "validation_note": "VALIDATED PE-1 2026-04-11: PW Installed after SI + correct VPLS RT + BlkSize=8",
+      "fail_checklist": [
+        "1. RT mismatch: Spirent --vpls-rt must match DUT SI import-l2vpn-vpls RT",
+        "2. Missing SI: export-l2vpn-vpls only valid under SI subtree",
+        "3. BlkSize too small: must cover remote site-id",
+        "4. See ~/.cursor/spirent-reference/vpls-pw-establishment.md section 7"
+      ],
+      "depends_on": ["spirent_vpls_peer"]
+    },
+    {
+      "id": "pw_ingress_label",
+      "check": "ingress_label_available",
+      "check_command": "show evpn vpls-pw | no-more",
+      "extract": "pw_ingress_label",
+      "depends_on": ["pw_installed"]
+    }
   ],
+  "spirent_vpls_setup": {
+    "description": "Spirent plays two roles: (1) VPLS peer for PW data plane via vpls-stream with MPLS labels, (2) EVPN peer for RT-2 injection. MAC moves between remote-EVPN and PW are triggered by combining RT-2 inject/withdraw with vpls-stream start/stop.",
+    "mac_trigger_functions": {
+      "evpn_to_pw": "execute_mac_move_evpn_to_pw(pw_vlan, bgp_device, mac, mpls_label=pw_ingress_label)",
+      "pw_to_evpn": "execute_mac_move_pw_to_evpn(pw_vlan, bgp_device, mac, mpls_label=pw_ingress_label)"
+    }
+  },
   "scenarios": [
     {
       "id": "SC01_evpn_to_pw",
       "name": "Non-sticky: remote EVPN -> PW; no RT change; not counted",
+      "spirent_method": "1) Inject EVPN RT-2 via Spirent BGP (mac installed as remote B>). 2) Withdraw RT-2 (protocol-stop EVPN device). 3) Send same MAC via vpls-stream (PW learns it as v>). Verify: no suppression, MAC now on PW. NOTE: DNOS SI suppresses PW data-plane learning while EVPN entry exists -- must withdraw RT-2 BEFORE PW traffic.",
       "phases": {
-        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} mac {test_mac} | no-more"]},
-        "trigger": {"action": "move_evpn_to_pw"},
-        "verify": {"expect": {"suppression_not_incremented": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true}}
+        "snapshot": {"show_commands": ["show evpn mac-table instance {pw_test_evpn_name} mac {test_mac} | no-more"]},
+        "trigger": {
+          "action": "move_evpn_to_pw"
+        },
+        "verify": {"show_commands": ["show evpn mac-table instance {pw_test_evpn_name} mac {test_mac} | no-more"], "expect": {"suppression_not_incremented": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true}}
       }
     },
     {
       "id": "SC02_pw_to_evpn",
       "name": "PW -> EVPN; accept; static entry",
+      "spirent_method": "1) Send MAC via vpls-stream (PW learns it as v>). 2) Stop PW stream. 3) Inject same MAC via EVPN RT-2. Verify: MAC stays v> on PW -- PW retains priority over non-sticky EVPN RT-2. NOTE: The EVPN RT-2 is accepted but does NOT override the active PW-learned MAC.",
       "phases": {
-        "trigger": {"action": "move_pw_to_evpn"},
-        "verify": {"show_commands": ["show evpn mac-table instance {evpn_name} mac {test_mac} | no-more"], "expect": {"static_hint": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true}}
+        "trigger": {
+          "action": "move_pw_to_evpn"
+        },
+        "verify": {"show_commands": ["show evpn mac-table instance {pw_test_evpn_name} mac {test_mac} | no-more"], "expect": {"static_hint": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true}}
       }
     },
     {
       "id": "SC03_sticky_evpn_to_pw",
       "name": "Sticky EVPN RT-2 -> PW; IGNORE move (blackholing risk)",
+      "spirent_method": "1) Inject sticky EVPN RT-2 via Spirent BGP. 2) Send same MAC via vpls-stream on PW. 3) Verify: move ignored, sticky EVPN kept.",
       "phases": {
+        "trigger": {
+          "action": "move_evpn_to_pw",
+          "sticky": true
+        },
         "verify": {"expect": {"move_ignored": true, "sticky_evpn_kept": true, "check_mac_flags": true, "check_forwarding": true, "check_ghost_macs": true}}
       }
     },
     {
       "id": "SC04_pw_to_sticky_evpn",
       "name": "PW -> Sticky EVPN; accept; datapath static sticky",
+      "spirent_method": "1) Send MAC via vpls-stream on PW. 2) Inject sticky EVPN RT-2 with same MAC. 3) Verify: sticky EVPN wins.",
       "phases": {
+        "trigger": {
+          "action": "move_pw_to_evpn",
+          "sticky": true
+        },
         "verify": {"expect": {"accept_sticky_static": true, "check_mac_flags": true, "check_forwarding": true, "check_ghost_macs": true}}
       }
     }
   ],
   "runtime_parameters": {
     "evpn_name": {"resolve": "runtime"},
-    "test_mac": {"resolve": "runtime"}
+    "pw_test_evpn_name": {"default": "PW_TEST_ELAN", "description": "Non-SI EVPN instance for PW testing"},
+    "test_mac": {"resolve": "runtime", "default": "00:DE:AD:00:01:01"},
+    "pw_ingress_label": {"resolve": "from_show_command", "source": "show evpn vpls-pw | no-more", "filter_instance": "{pw_test_evpn_name}"},
+    "vpls_rd": {"resolve": "from_router_id", "format": "{router_id}:9990"},
+    "vpls_rt": {"default": "9990:9990"},
+    "vpls_ve_id": {"default": 1},
+    "asn": {"resolve": "from_device"}
+  },
+  "dnos_behavioral_discoveries": {
+    "evpn_suppresses_pw_learning": "When a MAC has a BGP-learned entry (B>), PW data-plane traffic with the same MAC does NOT create a v> entry. Must withdraw RT-2 BEFORE sending PW traffic.",
+    "pw_retains_priority_over_evpn_rt2": "When a MAC is PW-learned (v>) and an EVPN RT-2 arrives for the same MAC, the PW entry is NOT overridden. v> remains selected.",
+    "sticky_evpn_always_wins_over_pw": "Both directions: sticky EVPN ignores incoming PW moves (SC03) and overrides existing PW entries (SC04).",
+    "mac_table_format": "6 pipe-delimited columns: Flags|MAC|ESI|Nexthop|Label/VNI|Resolution. ESI is often empty. Use positional indexing, never filter empty columns.",
+    "stc_device_stop_disrupts_port": "protocol-stop on one STC device briefly disrupts the port, glitching active streams on the same port. Send fresh PW traffic AFTER withdrawal."
+  },
+  "timing_reference": {
+    "full_infra_rebuild_sec": 160,
+    "convergence_chain_sec": 60,
+    "sc01_sec": 55,
+    "sc02_sec": 40,
+    "sc03_sec": 35,
+    "sc04_sec": 40,
+    "total_4_scenarios_sec": 195,
+    "note": "Timings from PE-1 run 2026-04-11. Infra rebuild dominates; reuse saves ~160s."
+  },
+  "last_successful_run": {
+    "date": "2026-04-11T17:50:00Z",
+    "device": "PE-1",
+    "result": "ALL PASS (4/4)",
+    "pw_label": 1032263,
+    "summary": "results/RUN_20260411_1750_PE-1/SUMMARY.md"
   },
   "verdict": {"layers": 8, "stop_on_fail": false},
   "counter_commands": [
     {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
-    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more", "parser": "line_count", "description": "Ghost MAC count"}
   ],
   "counter_expectations": [
     {"label": "mac_count", "rule": "no_decrease", "description": "MAC count must not drop"},
@@ -78,9 +228,9 @@
     "check_crashes": true,
     "check_alarms": true
   },
-  "cleanup_commands": ["no debug evpn mac-mobility", "no set logging terminal"],
+  "cleanup_commands": ["no debug evpn mac-mobility", "unset logging terminal"],
   "config_baseline": {
-    "sections": ["network-services evpn", "protocols bgp"],
+    "sections": ["network-services evpn", "protocols bgp {asn}"],
     "full_config": false,
     "ignore_patterns": ["last-modified", "commit-id"]
   }

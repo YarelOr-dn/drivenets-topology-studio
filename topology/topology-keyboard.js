@@ -14,6 +14,8 @@ const _arrowKeysDown = new Set();
 let _arrowPanRaf = null;
 let _arrowPanEditor = null;
 const _ARROW_PAN_SPEED = 6;
+const _nonTextInputTypes = new Set(['color', 'checkbox', 'radio', 'range', 'button', 'submit', 'reset']);
+let _appRefreshInProgress = false;
 
 function _arrowPanTick() {
     const editor = _arrowPanEditor;
@@ -40,6 +42,64 @@ function _arrowPanTick() {
     _arrowPanRaf = requestAnimationFrame(_arrowPanTick);
 }
 
+function _elementFromEventTarget(target) {
+    if (!target) return null;
+    if (target.nodeType === 1) return target;
+    if (target.parentElement) return target.parentElement;
+    return null;
+}
+
+function _isEditableShortcutTarget(target) {
+    const el = _elementFromEventTarget(target);
+    if (!el) return false;
+
+    const editable = el.closest?.('input, textarea, select, [contenteditable]');
+    if (!editable) return false;
+
+    const tagName = editable.tagName;
+    if (tagName === 'INPUT') {
+        return !_nonTextInputTypes.has((editable.type || 'text').toLowerCase());
+    }
+    if (tagName === 'TEXTAREA' || tagName === 'SELECT') {
+        return true;
+    }
+    return editable.getAttribute('contenteditable') !== 'false';
+}
+
+function _isRKey(e) {
+    const key = typeof e.key === 'string' ? e.key.toLowerCase() : '';
+    return key === 'r' || e.code === 'KeyR';
+}
+
+function _isBrowserRefreshShortcut(e) {
+    if (e.key === 'F5') return true;
+    return _isRKey(e) && (e.ctrlKey || e.metaKey) && !e.altKey;
+}
+
+function _shouldHandleAppRefreshShortcut(e, isInputFocused) {
+    return !_appRefreshInProgress
+        && !e.repeat
+        && _isRKey(e)
+        && !isInputFocused
+        && !e.metaKey
+        && !e.ctrlKey
+        && !e.altKey
+        && !e.shiftKey;
+}
+
+function _triggerAppRefresh(e) {
+    _appRefreshInProgress = true;
+    console.log('R key pressed - refreshing...');
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === 'function') {
+        e.stopImmediatePropagation();
+    }
+    const topoMenu = document.getElementById('topologies-dropdown-menu');
+    if (topoMenu) topoMenu.style.display = 'none';
+    window.location.reload();
+}
+
 /**
  * Handle keyboard down events
  * @param {TopologyEditor} editor - The editor instance
@@ -52,6 +112,12 @@ function handleKeyDown(editor, e) {
     if (e.key === 'Shift') { editor.shiftPressed = true; }
     
     if (!e.key) return;
+
+    // Browser-native refresh shortcuts must remain untouched. The app owns
+    // only plain unmodified R/physical KeyR, handled below after focus checks.
+    if (_isBrowserRefreshShortcut(e)) {
+        return;
+    }
     
     // DIALOG GUARD: Block all editor shortcuts (except Escape) when an
     // interactive dialog/modal/popup/overlay is open. Dynamic popups are
@@ -105,25 +171,13 @@ function handleKeyDown(editor, e) {
         return;
     }
     
-    // Check if focus is on input/textarea to avoid conflicts
-    // Non-text inputs (color, checkbox, radio, range) should not block shortcuts
-    const nonTextInputTypes = new Set(['color', 'checkbox', 'radio', 'range', 'button', 'submit', 'reset']);
-    const isTextInput = e.target.tagName === 'INPUT' && !nonTextInputTypes.has(e.target.type);
-    const isInputFocused = isTextInput || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT' || e.target.isContentEditable;
+    // Check if focus is on editable text/select controls to avoid conflicts.
+    const isInputFocused = _isEditableShortcutTarget(e.target);
     
-    // 'R' key for refresh (when no input is focused)
-    // Note: beforeunload in index.html suppresses "Save As" dialog
-    if (e.key.toLowerCase() === 'r' && !isInputFocused) {
-        console.log('R key pressed - refreshing...');
-        e.preventDefault();
-        e.stopPropagation();
-        const topoMenu = document.getElementById('topologies-dropdown-menu');
-        if (topoMenu) topoMenu.style.display = 'none';
-        
-        // Use setTimeout to ensure event is fully processed
-        setTimeout(() => {
-            window.location.reload(true);
-        }, 10);
+    // Plain R refreshes the app canvas page. Physical KeyR is accepted so the
+    // shortcut remains reliable across keyboard layouts and CapsLock state.
+    if (_shouldHandleAppRefreshShortcut(e, isInputFocused)) {
+        _triggerAppRefresh(e);
         return false;
     }
     
@@ -160,22 +214,59 @@ function handleKeyDown(editor, e) {
         return;
     }
     
-    // 'G' key for Grid toggle (when no input is focused)
-    if (e.key.toLowerCase() === 'g' && !isInputFocused && !e.metaKey && !e.ctrlKey) {
-        editor.toggleGridLines();
-        return;
+    // 'G' key handling (when no input is focused):
+    //   - plain "G"           -> Groups panel toggle (new unified panel)
+    //   - Cmd/Ctrl+Shift+G    -> Grid lines toggle (was plain "G" pre 2026-04-30)
+    // The grid toggle was relocated when the Groups panel was promoted
+    // to a first-class top-toolbar feature; the Cmd/Ctrl+Shift+G combo
+    // matches the convention used by other rare-use canvas toggles.
+    if (e.key.toLowerCase() === 'g' && !isInputFocused) {
+        if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+            e.preventDefault();
+            editor.toggleGridLines();
+            return;
+        }
+        if (!e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+            if (window.GroupsPanel) {
+                window.GroupsPanel.toggle(editor);
+            }
+            return;
+        }
     }
     
-    // Number keys 1-9 to switch topologies in current domain
-    if (e.key >= '1' && e.key <= '9' && !isInputFocused && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        if (window.FileOps && window.FileOps._domainTopoCache && window.FileOps._domainTopoCache.length > 1) {
-            const idx = parseInt(e.key) - 1;
-            if (idx < window.FileOps._domainTopoCache.length) {
-                e.preventDefault();
-                window.FileOps._navigateToTopology(idx);
-                return;
+    // Bare number keys activate tools. Cmd/Ctrl+1..9 keeps topology quick-jump.
+    if (e.key >= '1' && e.key <= '9' && !isInputFocused && !e.altKey) {
+        if (e.metaKey || e.ctrlKey) {
+            if (window.FileOps && window.FileOps._domainTopoCache && window.FileOps._domainTopoCache.length > 1) {
+                const idx = parseInt(e.key) - 1;
+                if (idx < window.FileOps._domainTopoCache.length) {
+                    e.preventDefault();
+                    window.FileOps._navigateToTopology(idx);
+                    return;
+                }
             }
+            return;
         }
+
+        const slot = {
+            '1': 'select',
+            '2': 'link',
+            '3': 'device',
+            '4': 'shape',
+            '5': 'text',
+            '6': 'laser',
+        }[e.key];
+        if (slot && window.toolbarManager) {
+            e.preventDefault();
+            window.toolbarManager.activateTool(slot, { quickAccess: true, source: 'shortcut' });
+            return;
+        }
+    }
+
+    if (e.key === '0' && !isInputFocused && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        window.toolbarManager?.activateTool('settings', { quickAccess: true, source: 'shortcut' });
+        return;
     }
 
     // Alt + Left/Right arrow to navigate prev/next topology in domain
@@ -199,6 +290,9 @@ function handleKeyDown(editor, e) {
     // Arrow keys (no modifiers) - smooth canvas pan with multi-key diagonal
     if (_arrowKeys.has(e.key) && !isInputFocused && !e.altKey && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
+        if (_arrowKeysDown.size === 0 && editor.beginCanvasPanInteraction) {
+            editor.beginCanvasPanInteraction();
+        }
         _arrowKeysDown.add(e.key);
         _arrowPanEditor = editor;
         if (!_arrowPanRaf) {
@@ -364,14 +458,18 @@ function handleKeyDown(editor, e) {
         return;
     }
     
-    // Cmd/Ctrl + X to clear canvas -- REQUIRES CONFIRMATION to prevent data loss
+    // Cmd/Ctrl + X clears the currently opened topology (with confirmation).
+    // The shortcut is intentionally selection-agnostic: it always asks the
+    // user before wiping the canvas, then routes through editor.clearCanvas
+    // -> FileOps._clearCurrentTopologyOnly so the empty snapshot is written
+    // ONLY to the active topology row. Other topologies, other domains, and
+    // shared-with-me views are not touched.
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'x') {
         if (!isInputFocused) {
             e.preventDefault();
-            const count = editor.objects ? editor.objects.length : 0;
-            if (count === 0) return;
-            if (!confirm(`Clear entire canvas? This will delete all ${count} objects. This action can be undone with Ctrl+Z.`)) return;
-            editor.performClearCanvas();
+            if (typeof editor.clearCanvas === 'function') {
+                editor.clearCanvas();
+            }
         }
         return;
     }
@@ -460,6 +558,11 @@ function handleKeyDown(editor, e) {
             editor.placingDevice = null;
             editor.placementPending = null;
             editor.setMode('base');
+        } else if (editor.currentTool === 'laser') {
+            if (window.toolbarManager && window.toolbarManager.closeToolPanel) {
+                window.toolbarManager.closeToolPanel();
+            }
+            editor.setMode('base');
         } else if (editor.currentTool === 'text') {
             // Exit text placement mode
             editor.textPlacementPending = null;
@@ -471,12 +574,24 @@ function handleKeyDown(editor, e) {
                 editor.selectedObjects = [editor.selectedObject];
             }
             editor.draw();
+        } else {
+            const toolPanel = document.querySelector('#left-toolbar .tool-side-panel');
+            if (toolPanel && toolPanel.dataset.tool) {
+                if (window.toolbarManager && window.toolbarManager.closeToolPanel) {
+                    window.toolbarManager.closeToolPanel();
+                } else {
+                    toolPanel.dataset.tool = '';
+                }
+            }
         }
     } else if (e.key === ' ') {
-        editor.spacePressed = true;
-        editor.updateCursor();
-        // Prevent space from scrolling the page
-        if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+        // Polish + QA pass 2026-05-12: only flip spacePressed (which arms
+        // canvas pan-on-drag) when the user is NOT typing into an editable
+        // input. Otherwise typing a space inside an inline text editor or
+        // sidebar input would silently arm pan mode for the next click.
+        if (!_isEditableShortcutTarget(e.target)) {
+            editor.spacePressed = true;
+            editor.updateCursor();
             e.preventDefault();
         }
     }
@@ -489,16 +604,26 @@ function handleKeyDown(editor, e) {
  */
 function handleKeyUp(editor, e) {
     if (e.key === ' ') {
-        editor.spacePressed = false;
-        editor.updateCursor();
+        // Mirror the keydown gate (only release when not in an editable
+        // input). Avoids leaking spacePressed=false when the user releases
+        // space inside a textarea after typing.
+        if (!_isEditableShortcutTarget(e.target)) {
+            editor.spacePressed = false;
+            editor.updateCursor();
+        }
     }
 
     // Arrow key release - stop pan when all released
     if (_arrowKeys.has(e.key)) {
         _arrowKeysDown.delete(e.key);
-        if (_arrowKeysDown.size === 0 && _arrowPanRaf) {
-            cancelAnimationFrame(_arrowPanRaf);
-            _arrowPanRaf = null;
+        if (_arrowKeysDown.size === 0) {
+            if (_arrowPanRaf) {
+                cancelAnimationFrame(_arrowPanRaf);
+                _arrowPanRaf = null;
+            }
+            if (editor.restoreToolbarAfterCanvasPan) {
+                editor.restoreToolbarAfterCanvasPan();
+            }
         }
     }
     
@@ -524,33 +649,24 @@ function handleKeyUp(editor, e) {
 
 // Clear arrow pan on window blur to prevent stuck keys
 window.addEventListener('blur', () => {
+    const editor = _arrowPanEditor;
     _arrowKeysDown.clear();
     if (_arrowPanRaf) {
         cancelAnimationFrame(_arrowPanRaf);
         _arrowPanRaf = null;
+    }
+    if (editor && editor.restoreToolbarAfterCanvasPan) {
+        editor.restoreToolbarAfterCanvasPan();
     }
 });
 
 // Export functions to window
 window.KeyboardHandler = {
     handleKeyDown,
-    handleKeyUp
+    handleKeyUp,
+    _isEditableShortcutTarget,
+    _isBrowserRefreshShortcut,
+    _shouldHandleAppRefreshShortcut
 };
-
-// Raw diagnostic: confirm keydown events reach the document at all.
-// Shows a brief title flash so it's visible even without the console open.
-(function _kbDiag() {
-    let _diagTimer = null;
-    const _origTitle = document.title;
-    document.addEventListener('keydown', function(ev) {
-        if (ev.key === 'Shift' || ev.key === 'Control' || ev.key === 'Alt' || ev.key === 'Meta') return;
-        const ae = document.activeElement;
-        const tag = ae ? ae.tagName + (ae.id ? '#' + ae.id : '') : '?';
-        console.warn(`[KB-DIAG] key="${ev.key}" target=${ev.target.tagName}#${ev.target.id || ''} activeElement=${tag}`);
-        document.title = `[KEY: ${ev.key}] ${_origTitle}`;
-        clearTimeout(_diagTimer);
-        _diagTimer = setTimeout(() => { document.title = _origTitle; }, 1200);
-    }, true);
-})();
 
 console.log('[topology-keyboard.js] Keyboard handler module loaded');

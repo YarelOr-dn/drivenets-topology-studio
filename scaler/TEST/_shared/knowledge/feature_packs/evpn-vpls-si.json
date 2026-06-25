@@ -1,0 +1,108 @@
+{
+  "feature": "evpn-vpls-si",
+  "_description": "Starter pack of canonical show commands for EVPN VPLS Seamless Integration (SI) tests. Sourced from the DV HLD + epic SW-178648 + datapath enabler SW-183400. Any new test targeting EVPN VPLS SI starts with this set; commands are validated against a live device the first time they run and cached forever in the shared tier.",
+  "epics": ["SW-178648", "SW-183400"],
+  "confluence_anchors": [
+    "EVPN (ELAN) Seamless integration with VPLS (BGP) - HLD",
+    "EVPN (ELAN) Seamless integration with VPLS (BGP) - MAC and MAC-IP Handling Design",
+    "(v26.2) EVPN(ELAN) Seamless integration with VPLS (BGP)"
+  ],
+  "show_commands": [
+    {
+      "command": "show evpn summary",
+      "purpose": "Top-level EVPN state summary; first sanity check.",
+      "phase": "snapshot"
+    },
+    {
+      "command": "show evpn instance <name> detail",
+      "purpose": "Per-instance state including VPLS PW counters, AC list, MAC counts.",
+      "phase": "snapshot"
+    },
+    {
+      "command": "show evpn instance <name> mac-table",
+      "purpose": "Verify which interface/PW each MAC was learned on.",
+      "phase": "verify"
+    },
+    {
+      "command": "show evpn instance <name> vpls-pw",
+      "purpose": "Per-PW state, label, peer, last move.",
+      "phase": "snapshot"
+    },
+    {
+      "command": "show evpn instance <name> vpls-pw counters",
+      "purpose": "PW-level packet/byte counters, plus error counters.",
+      "phase": "verify"
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance <name>",
+      "purpose": "Datapath MAC table view (vs control-plane mac-table above).",
+      "phase": "verify"
+    },
+    {
+      "command": "show bgp l2vpn vpls",
+      "purpose": "BGP routes carrying VPLS NLRI for this peer set.",
+      "phase": "snapshot"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary",
+      "purpose": "BGP EVPN session state -- both peers must be Established.",
+      "phase": "snapshot"
+    },
+    {
+      "command": "show mpls label-allocation tables",
+      "purpose": "Confirm VPLS / EVPN label-pool carving (see SW-253359 known bug).",
+      "phase": "snapshot"
+    },
+    {
+      "command": "show config network-services bridge-domain instance <name>",
+      "purpose": "Read the running config for the EVI/BD under test.",
+      "phase": "config"
+    }
+  ],
+  "trace_layers": [
+    {
+      "layer": "bgpd",
+      "commands": [
+        "show file traces routing_engine/bgpd_traces | include <HH:MM>",
+        "show file traces routing_engine/bgpd_traces | include 'l2vpn vpls'",
+        "show file traces routing_engine/bgpd_traces | include 'EVPN'",
+        "show file traces routing_engine/bgpd_traces | include 'RT-2'"
+      ]
+    },
+    {
+      "layer": "rib-manager",
+      "commands": [
+        "show file traces routing_engine/rib-manager_traces | include 'EVPN'",
+        "show file traces routing_engine/rib-manager_traces | include 'VPLS'",
+        "show file traces routing_engine/rib-manager_traces | include 'PW'"
+      ]
+    },
+    {
+      "layer": "fib-manager",
+      "commands": [
+        "show file traces routing_engine/fibmgrd_traces | include 'VPLS_PW'",
+        "show file traces routing_engine/fibmgrd_traces | include 'EvpnLocalMac'",
+        "show file traces routing_engine/fibmgrd_traces | include 'L2Neighbor'",
+        "show file traces routing_engine/fibmgrd_traces | include 'MOVE_LOCAL_TO_PW'",
+        "show file traces routing_engine/fibmgrd_traces | include 'MOVE_PW_TO_LOCAL'"
+      ]
+    },
+    {
+      "layer": "ncp-wb_agent",
+      "commands": [
+        "show file ncp 0 traces datapath/wb_agent.evpn | include <HH:MM>",
+        "show file ncp 0 traces datapath/wb_agent.l2 | include <HH:MM>"
+      ]
+    }
+  ],
+  "expected_keywords": {
+    "ac_to_pw_move": ["MOVE_LOCAL_TO_PW", "L2Neighbor", "VPLS_PW"],
+    "pw_to_ac_move": ["MOVE_PW_TO_LOCAL", "EvpnLocalMac"]
+  },
+  "known_gotchas": [
+    "BD instance name is NOT the VLAN ID. Use show interfaces or show config interfaces <port>.<subif> for the actual vlan-id.",
+    "EVPN MAC table shows source-qualified entries: 'Local'/'L>' for AC-learned, 'v>' for PW-learned. Always assert against the source qualifier.",
+    "After bgpd restart with LLGR enabled, evpn-vpws single-homed AC may incorrectly enter blocking-all (SW-248517).",
+    "bgp-vpls-label-block-size committed AFTER cluster boot may permanently fail to carve labels (SW-253359 -- no operational fix)."
+  ]
+}

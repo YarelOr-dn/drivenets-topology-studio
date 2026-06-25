@@ -1,0 +1,12 @@
+{
+  "data": {
+    "logical_flows_per_side": 200,
+    "stream_names": [
+      "pw_scale_pe4_all_i3101_3300",
+      "pw_scale_rr_all_i3101_3300"
+    ]
+  },
+  "detail": "started 2 modifier StreamBlocks",
+  "ok": true,
+  "phase": "modifier_stream_activation"
+}

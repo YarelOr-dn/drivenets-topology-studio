@@ -1,0 +1,20 @@
+[
+  {
+    "command": "clear evpn mac-table",
+    "timestamp": "2026-04-18T20:17:44.892+00:00",
+    "duration_ms": 50,
+    "phase": "mac_cleanup",
+    "output_length": 78,
+    "output_preview": "-------------------------------------------^\nERROR: Unknown word: 'mac-table'.",
+    "output_full": "-------------------------------------------^\nERROR: Unknown word: 'mac-table'."
+  },
+  {
+    "command": "clear evpn mac-table instance PW_TEST_ELAN",
+    "timestamp": "2026-04-18T20:17:44.942+00:00",
+    "duration_ms": 50,
+    "phase": "mac_cleanup",
+    "output_length": 100,
+    "output_preview": "--------------------------------------------------------------^\nERROR: Unknown word: 'PW_TEST_ELAN'.",
+    "output_full": "--------------------------------------------------------------^\nERROR: Unknown word: 'PW_TEST_ELAN'."
+  }
+]

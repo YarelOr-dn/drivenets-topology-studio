@@ -249,23 +249,26 @@ window.ToolbarSetup = {
         // Update palette to show active color
         const updateLinkColorPalette = (color) => {
             linkColorPalette.forEach(swatch => {
-                if (swatch.dataset.color.toLowerCase() === color.toLowerCase()) {
-                    swatch.style.border = '2px solid rgba(255,255,255,0.8)';
-                    swatch.style.boxShadow = '0 0 8px rgba(255,255,255,0.4)';
-                } else {
-                    swatch.style.border = '2px solid transparent';
-                    swatch.style.boxShadow = 'none';
-                }
+                swatch.classList.toggle('active', swatch.dataset.color.toLowerCase() === color.toLowerCase());
             });
+        };
+        const applyLinkColor = (color, remember = false) => {
+            if (!color) return;
+            editor.defaultLinkColor = color;
+            localStorage.setItem('defaultLinkColor', color);
+            if (defaultLinkColor) defaultLinkColor.value = color;
+            if (defaultLinkColorHex) defaultLinkColorHex.textContent = color.toUpperCase();
+            updateLinkColorPalette(color);
+            if (remember) editor.addToLastUsedColors(color);
         };
         updateLinkColorPalette(editor.defaultLinkColor);
         
         if (defaultLinkColor) {
             defaultLinkColor.addEventListener('input', (e) => {
-                editor.defaultLinkColor = e.target.value;
-                localStorage.setItem('defaultLinkColor', editor.defaultLinkColor);
-                if (defaultLinkColorHex) defaultLinkColorHex.textContent = editor.defaultLinkColor.toUpperCase();
-                updateLinkColorPalette(editor.defaultLinkColor);
+                applyLinkColor(e.target.value);
+            });
+            defaultLinkColor.addEventListener('change', (e) => {
+                editor.addToLastUsedColors(e.target.value);
             });
         }
         
@@ -273,12 +276,7 @@ window.ToolbarSetup = {
         linkColorPalette.forEach(swatch => {
             swatch.addEventListener('click', () => {
                 const color = swatch.dataset.color;
-                editor.defaultLinkColor = color;
-                localStorage.setItem('defaultLinkColor', color);
-                if (defaultLinkColor) defaultLinkColor.value = color;
-                if (defaultLinkColorHex) defaultLinkColorHex.textContent = color.toUpperCase();
-                updateLinkColorPalette(color);
-                editor.addToLastUsedColors(color);
+                applyLinkColor(color, true);
             });
         });
         
@@ -300,6 +298,64 @@ window.ToolbarSetup = {
                 editor.showNotification(`Applied color to ${count} links`, 'success');
             });
         }
+
+        // Laser pointer display preferences are client-only UI settings.
+        const laserColorInput = document.getElementById('laser-pointer-color');
+        const laserColorHex = document.getElementById('laser-pointer-color-hex');
+        const laserFadeSlider = document.getElementById('laser-pointer-fade');
+        const laserFadeValue = document.getElementById('laser-pointer-fade-value');
+        const normalizeLaserColor = (color) => /^#[0-9a-fA-F]{6}$/.test(color || '') ? color.toUpperCase() : '#00B4D8';
+        const clampLaserFadeMs = (value) => {
+            const parsed = parseInt(value, 10);
+            if (!Number.isFinite(parsed)) return 850;
+            return Math.min(3000, Math.max(250, parsed));
+        };
+        const updateLaserFadeLabel = (value) => {
+            if (laserFadeValue) laserFadeValue.textContent = `${value} ms`;
+        };
+        const applyLaserColor = (color, remember = false) => {
+            const normalized = normalizeLaserColor(color);
+            editor._laserColor = normalized;
+            localStorage.setItem('laserPointerColor', normalized);
+            if (laserColorInput) laserColorInput.value = normalized;
+            if (laserColorHex) laserColorHex.textContent = normalized;
+            if (remember && editor.addToLastUsedColors) editor.addToLastUsedColors(normalized);
+            if (editor.requestDraw) editor.requestDraw();
+            else if (editor.draw) editor.draw();
+        };
+        const initialLaserColor = normalizeLaserColor(editor._laserColor || localStorage.getItem('laserPointerColor'));
+        const initialLaserFadeMs = clampLaserFadeMs(editor._laserFadeMs || localStorage.getItem('laserPointerFadeMs'));
+        editor._laserColor = initialLaserColor;
+        editor._laserFadeMs = initialLaserFadeMs;
+        if (laserColorInput) laserColorInput.value = initialLaserColor;
+        if (laserColorHex) laserColorHex.textContent = initialLaserColor;
+        if (laserFadeSlider) laserFadeSlider.value = String(initialLaserFadeMs);
+        updateLaserFadeLabel(initialLaserFadeMs);
+
+        if (laserColorInput) {
+            laserColorInput.addEventListener('input', (e) => applyLaserColor(e.target.value));
+            laserColorInput.addEventListener('change', (e) => applyLaserColor(e.target.value, true));
+        }
+        if (laserFadeSlider) {
+            const applyLaserFade = (value) => {
+                const fadeMs = clampLaserFadeMs(value);
+                editor._laserFadeMs = fadeMs;
+                localStorage.setItem('laserPointerFadeMs', String(fadeMs));
+                laserFadeSlider.value = String(fadeMs);
+                updateLaserFadeLabel(fadeMs);
+                if (editor.requestDraw) editor.requestDraw();
+                else if (editor.draw) editor.draw();
+            };
+            laserFadeSlider.addEventListener('input', (e) => applyLaserFade(e.target.value));
+            laserFadeSlider.addEventListener('change', (e) => applyLaserFade(e.target.value));
+        }
+        document.querySelectorAll('#laser-last-used-colors > div').forEach(swatch => {
+            swatch.addEventListener('click', (e) => {
+                const color = e.currentTarget.dataset.color;
+                if (!color) return;
+                applyLaserColor(color, true);
+            });
+        });
         
         // btn-router removed; device style buttons now enter placement mode
         // Text tool button (existing)
@@ -521,6 +577,7 @@ window.ToolbarSetup = {
                     if (linkColorHex) linkColorHex.textContent = color.toUpperCase();
                     editor.defaultLinkColor = color;
                     localStorage.setItem('defaultLinkColor', color);
+                    updateLinkColorPalette(color);
                 } else {
                     // Unified text color palette - apply to active target
                     switch (editor.activeColorTarget) {
@@ -735,29 +792,63 @@ window.ToolbarSetup = {
             });
         }
         
-        // Link type labels toggle button (debug view)
+        // Labels toggle button: link type labels plus auto-generated interface TBs.
         const linkTypeLabelsBtn = document.getElementById('btn-link-type-labels');
         if (linkTypeLabelsBtn) {
+            const syncLinkLabelsToolbarButton = (targetEditor = editor) => {
+                const enabled = !!targetEditor.showLinkTypeLabels;
+                const statusText = linkTypeLabelsBtn.querySelector('.status-text');
+                linkTypeLabelsBtn.classList.toggle('active', enabled);
+                linkTypeLabelsBtn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+                if (statusText) statusText.textContent = enabled ? 'Labels: ON' : 'Labels: OFF';
+            };
+            window.syncLinkLabelsToolbarButton = syncLinkLabelsToolbarButton;
+            syncLinkLabelsToolbarButton(editor);
+
             linkTypeLabelsBtn.addEventListener('click', () => {
                 editor.showLinkTypeLabels = !editor.showLinkTypeLabels;
-                const statusText = linkTypeLabelsBtn.querySelector('.status-text');
-                
+                syncLinkLabelsToolbarButton(editor);
+
                 if (editor.showLinkTypeLabels) {
-                    linkTypeLabelsBtn.classList.add('active');
-                    if (statusText) statusText.textContent = 'Labels: ON';
                     if (editor.debugger) {
-                        editor.debugger.logSuccess('Link type labels enabled');
+                        editor.debugger.logSuccess('Canvas labels enabled');
                     }
                 } else {
-                    linkTypeLabelsBtn.classList.remove('active');
-                    if (statusText) statusText.textContent = 'Labels: OFF';
                     if (editor.debugger) {
-                        editor.debugger.logInfo('Link type labels disabled');
+                        editor.debugger.logInfo('Canvas labels disabled');
                     }
                 }
                 
                 editor.draw();
                 editor.scheduleAutoSave();
+            });
+        }
+
+        // Groups panel toggle button -- floating draggable card listing
+        // both manual groups and BD-derived groups. The same toggle is
+        // bound to the keyboard shortcut "G" in topology-keyboard.js.
+        //
+        // Important: bind the click even if topology-groups-panel.js has
+        // not finished registering yet. The previous implementation gated
+        // the listener on `window.GroupsPanel` at setup time; in some load
+        // orders the button ended up with no listener at all.
+        const groupsPanelBtn = document.getElementById('btn-groups-panel');
+        if (groupsPanelBtn) {
+            groupsPanelBtn.addEventListener('click', (e) => {
+                if (window.toggleGroupsPanelFromToolbar) {
+                    window.toggleGroupsPanelFromToolbar(e);
+                    return;
+                }
+                if (window.GroupsPanel && typeof window.GroupsPanel.toggle === 'function') {
+                    if (e && e.__groupsPanelHandled) return;
+                    if (e) e.__groupsPanelHandled = true;
+                    window.GroupsPanel.toggle(editor);
+                    return;
+                }
+                console.warn('[ToolbarSetup] GroupsPanel is not loaded yet');
+                if (editor.showToast) {
+                    editor.showToast('Groups panel is still loading. Try again in a second.', 'warning');
+                }
             });
         }
         
@@ -1782,10 +1873,39 @@ window.ToolbarSetup = {
             saveLinkTableBtn.addEventListener('click', () => editor.saveLinkDetails());
         }
         
-        // Fetch Details button for DNAAS interface details
+        // Fetch Details button now refreshes live Link Telemetry first. The
+        // legacy DNAAS endpoint is only a fallback when the telemetry module
+        // did not load.
         const fetchDetailsBtn = document.getElementById('lt-fetch-details-btn');
         if (fetchDetailsBtn) {
-            fetchDetailsBtn.addEventListener('click', () => editor.fetchDnaasInterfaceDetails());
+            fetchDetailsBtn.addEventListener('click', () => {
+                if (window.LinkTelemetry && editor.editingLink) {
+                    const originalHtml = fetchDetailsBtn.innerHTML;
+                    fetchDetailsBtn.disabled = true;
+                    fetchDetailsBtn.style.opacity = '0.7';
+                    fetchDetailsBtn.textContent = 'Refreshing...';
+                    window.LinkTelemetry.refreshAll(editor, null, {
+                        force: true,
+                        overwriteExisting: true,
+                        hint: 'align-with-devices',
+                    }).then(() => {
+                        if (editor.editingLink) {
+                            const result = editor.editingLink.linkDetails?.live;
+                            if (result) window.LinkTelemetry.renderTelemetry(editor.editingLink, result);
+                        }
+                        if (editor.showToast) editor.showToast('Link tables aligned with live telemetry', 'success');
+                    }).catch(err => {
+                        console.warn('[LinkTelemetry] Fetch Details failed:', err);
+                        if (editor.showToast) editor.showToast(`Telemetry refresh failed: ${err.message || err}`, 'error');
+                    }).finally(() => {
+                        fetchDetailsBtn.innerHTML = originalHtml;
+                        fetchDetailsBtn.disabled = false;
+                        fetchDetailsBtn.style.opacity = '1';
+                    });
+                    return;
+                }
+                editor.fetchDnaasInterfaceDetails();
+            });
         }
         
         const createLinkTextBtn = document.getElementById('btn-create-link-text');
@@ -1799,15 +1919,44 @@ window.ToolbarSetup = {
             if (rotationValue) rotationValue.textContent = e.target.value + '°';
         });
 
-        // XRAY Settings - Mac / Wireshark config
+        // XRAY Settings - workstation / Wireshark config (per-user, OS-aware)
         const xraySection = document.getElementById('xray-settings-section');
         if (xraySection) {
+            // ---- OS detection so defaults match where the user actually runs Wireshark ----
+            const detectOS = () => {
+                const ua = (navigator.userAgent || '').toLowerCase();
+                const platform = (navigator.platform || '').toLowerCase();
+                if (platform.includes('mac') || ua.includes('mac os')) return 'macos';
+                if (platform.includes('win') || ua.includes('windows')) return 'windows';
+                if (platform.includes('linux') || ua.includes('linux')) return 'linux';
+                return 'unknown';
+            };
+            const OS_DEFAULTS = {
+                macos:   { wireshark_path: '/Applications/Wireshark.app/Contents/MacOS/Wireshark',
+                           pcap_directory: '~/Desktop/Packet-captures' },
+                linux:   { wireshark_path: '/usr/bin/wireshark',
+                           pcap_directory: '~/Packet-captures' },
+                windows: { wireshark_path: 'C:\\Program Files\\Wireshark\\Wireshark.exe',
+                           pcap_directory: '%USERPROFILE%\\Documents\\Packet-captures' },
+                unknown: { wireshark_path: '',
+                           pcap_directory: '~/Packet-captures' },
+            };
+            const detectedOs = detectOS();
+            const osDefaults = OS_DEFAULTS[detectedOs] || OS_DEFAULTS.unknown;
+            const xrayFetch = (url, opts) => {
+                if (window.TopologyAuth && typeof window.TopologyAuth.authFetch === 'function') {
+                    return window.TopologyAuth.authFetch(url, opts);
+                }
+                return fetch(url, opts);
+            };
+
             const loadXrayConfig = async () => {
                 try {
-                    const resp = await fetch('/api/xray/config');
+                    const resp = await xrayFetch('/api/xray/config');
                     if (resp.ok) {
                         const cfg = await resp.json();
                         const mac = cfg.mac || {};
+                        const client = cfg.client || {};
                         const ipInput = document.getElementById('xray-mac-ip');
                         const userInput = document.getElementById('xray-mac-user');
                         const passInput = document.getElementById('xray-mac-password');
@@ -1816,8 +1965,17 @@ window.ToolbarSetup = {
                         if (ipInput) ipInput.value = mac.ip_vpn || '';
                         if (userInput) userInput.value = mac.user || '';
                         if (passInput) passInput.value = mac.password || '';
-                        if (wsInput) wsInput.value = mac.wireshark_path || '/Applications/Wireshark.app/Contents/MacOS/Wireshark';
-                        if (dirInput) dirInput.value = mac.pcap_directory || '~/Desktop/Packet-captures';
+                        // Per-user saved value takes precedence; otherwise use the OS-aware default.
+                        if (wsInput) wsInput.value = mac.wireshark_path || osDefaults.wireshark_path;
+                        if (dirInput) dirInput.value = mac.pcap_directory || osDefaults.pcap_directory;
+                        // Update placeholder hints to match the detected OS so users
+                        // know what shape the path should take when their field is empty.
+                        if (wsInput) wsInput.placeholder = osDefaults.wireshark_path || 'wireshark binary path';
+                        if (dirInput) dirInput.placeholder = osDefaults.pcap_directory || 'pcap directory';
+                        // Surface the detected OS once captured per-user.
+                        if (client && client.host_os && client.host_os !== detectedOs) {
+                            console.info('[XRAY] Profile OS:', client.host_os, '| Browser OS:', detectedOs);
+                        }
                     }
                 } catch (e) {
                     console.warn('[XRAY] Failed to load config:', e);
@@ -1835,11 +1993,28 @@ window.ToolbarSetup = {
                         wireshark_path: document.getElementById('xray-wireshark-path')?.value?.trim() || null,
                         pcap_directory: document.getElementById('xray-pcap-dir')?.value?.trim() || null
                     };
+                    // Workstation profile -- recorded so future sessions know which
+                    // OS the user prefers without re-detecting in the wizard.
+                    const client = {
+                        host_os: detectedOs,
+                        user_agent: navigator.userAgent || '',
+                        last_seen_at: new Date().toISOString()
+                    };
+                    // Capture the prior IP so we can notify any open XRAY popup
+                    // to re-gate Start Capture when the IP actually changes.
+                    let priorIp = '';
                     try {
-                        const resp = await fetch('/api/xray/config', {
+                        const cfgResp = await xrayFetch('/api/xray/config');
+                        if (cfgResp.ok) {
+                            const cfg = await cfgResp.json();
+                            priorIp = (cfg?.mac?.ip_vpn || '').trim();
+                        }
+                    } catch (_) {}
+                    try {
+                        const resp = await xrayFetch('/api/xray/config', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ mac })
+                            body: JSON.stringify({ mac, client })
                         });
                         const result = await resp.json();
                         if (result.error) {
@@ -1847,6 +2022,14 @@ window.ToolbarSetup = {
                             return;
                         }
                         editor.showToast('XRAY config saved', 'success');
+                        const newIp = (mac.ip_vpn || '').trim();
+                        if (newIp !== priorIp) {
+                            try {
+                                window.dispatchEvent(new CustomEvent('xray-mac-ip-changed', {
+                                    detail: { oldIp: priorIp, newIp }
+                                }));
+                            } catch (_) {}
+                        }
                     } catch (e) {
                         editor.showToast('Failed to save XRAY config: ' + e.message, 'error');
                     }
@@ -1868,7 +2051,10 @@ window.ToolbarSetup = {
                     verifyStatus.textContent = 'Verifying...';
                     verifyStatus.className = 'xray-verify-status';
                     try {
-                        const resp = await fetch('/api/xray/verify-mac', {
+                        const authFetch = window.TopologyAuth && window.TopologyAuth.authFetch
+                            ? window.TopologyAuth.authFetch.bind(window.TopologyAuth)
+                            : fetch;
+                        const resp = await authFetch('/api/xray/verify-mac', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ ip, user: user || undefined, password: pass || undefined })
@@ -1877,19 +2063,34 @@ window.ToolbarSetup = {
                         if (data.reachable) {
                             verifyStatus.textContent = 'Mac reachable (SSH OK)';
                             verifyStatus.className = 'xray-verify-status ok';
-                        } else if (data.ping && !data.ssh) {
+                            try {
+                                const atMs = typeof data.verified_at === 'number'
+                                    ? data.verified_at * 1000
+                                    : Date.now();
+                                window.dispatchEvent(new CustomEvent('xray-mac-verified', {
+                                    detail: { ip: data.ip || ip, at: atMs }
+                                }));
+                            } catch (_) {}
+                        } else {
                             verifyStatus.innerHTML = '';
                             const line1 = document.createElement('div');
-                            line1.textContent = 'Ping OK but SSH failed';
+                            const causeTitles = {
+                                auth_failed: 'Wrong Mac username or password',
+                                missing_password: 'Mac password missing',
+                                missing_user: 'Mac username missing',
+                                ssh_refused: 'Remote Login is disabled',
+                                ssh_timeout: 'SSH timed out',
+                                network_unreachable: 'Mac network unreachable',
+                                bad_host: 'Invalid Mac IP or host',
+                                missing_sshpass: 'XRAY dependency missing'
+                            };
+                            line1.textContent = causeTitles[data.cause] || 'Mac verification failed';
                             line1.style.fontWeight = '600';
                             const line2 = document.createElement('div');
-                            line2.textContent = data.error || 'Enable Remote Login on Mac';
+                            line2.textContent = data.error || 'Check Mac IP, Remote Login, username, and password.';
                             line2.style.cssText = 'font-size:10px;opacity:0.85;margin-top:2px;';
                             verifyStatus.appendChild(line1);
                             verifyStatus.appendChild(line2);
-                            verifyStatus.className = 'xray-verify-status fail';
-                        } else {
-                            verifyStatus.textContent = data.error || 'Mac not reachable';
                             verifyStatus.className = 'xray-verify-status fail';
                         }
                     } catch (e) {
@@ -2052,7 +2253,7 @@ window.ToolbarSetup = {
         ];
 
         const USAGE_TIPS = [
-            { icon: 'ico-hand', title: 'Keyboard Shortcuts', desc: '<span class="helper-key">R</span> Refresh <span class="helper-key">D</span> DNAAS <span class="helper-key">B</span> BD Panel <span class="helper-key">T</span> Topologies <span class="helper-key">M</span> Minimap <span class="helper-key">G</span> Grid <span class="helper-key">L</span> Light/Dark <span class="helper-key">F</span> Fit View <span class="helper-key">C</span> Copy Style <span class="helper-key">Del</span> Delete' },
+            { icon: 'ico-hand', title: 'Keyboard Shortcuts', desc: '<span class="helper-key">R</span> Refresh <span class="helper-key">D</span> DNAAS <span class="helper-key">B</span> BD Panel <span class="helper-key">T</span> Topologies <span class="helper-key">M</span> Minimap <span class="helper-key">G</span> Groups <span class="helper-key">Cmd/Ctrl+Shift+G</span> Grid <span class="helper-key">L</span> Light/Dark <span class="helper-key">F</span> Fit View <span class="helper-key">C</span> Copy Style <span class="helper-key">Del</span> Delete' },
             { icon: 'ico-router', title: 'Place Devices', desc: 'Select a device type from the toolbar, then click on the canvas to place it. Hold Shift and click multiple times for continuous placement.' },
             { icon: 'ico-link', title: 'Create Links', desc: 'Click "Link" mode, then click the first device and then the second. Use the Link Table to fill in interface details. Hold Alt + click a device to quick-start link mode.' },
             { icon: 'ico-search', title: 'Packet Capture', desc: 'Click the magnifying glass icon on any link to open capture popup. Set your Mac IP, user, and password in the Packet-Capture section above. Enable "Remote Login" on Mac.' },

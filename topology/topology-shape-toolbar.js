@@ -23,7 +23,7 @@ function _showShapeColorPalette(editor, type, shape, toolbar, colorPalette, rece
     // Close existing palette
     const existingPalette = document.getElementById('shape-color-palette-popup');
     if (existingPalette) { existingPalette.remove(); return; }
-    
+
     const colorBtn = toolbar.querySelector(type === 'fill' ? '#shape-fill-color-btn' : '#shape-stroke-color-btn');
     if (!colorBtn) return;
     
@@ -644,6 +644,33 @@ function showShapeSelectionToolbar(editor, shape) {
         { isActive: shape.locked, autoClose: false }
     ));
     
+    // Container toggle (2026-04-26): when ON, dragging the shape carries
+    // every object whose centre is inside it as a single unit. Used by
+    // AS / OSPF area / VRF / tenant grouping shapes so the user can
+    // reorganise the diagram per-AS without losing the per-object handles.
+    actionsRow.appendChild(createIconBtn(
+        'package',
+        shape.containerMode
+            ? 'Disable container mode (shape will move on its own)'
+            : 'Enable container mode (drag shape to move every object inside)',
+        () => {
+            if (editor.saveState) editor.saveState();
+            shape.containerMode = !shape.containerMode;
+            if (editor.showToast) {
+                editor.showToast(
+                    shape.containerMode
+                        ? 'Container mode ON: dragging this shape now moves every object inside it.'
+                        : 'Container mode OFF: shape moves on its own.',
+                    shape.containerMode ? 'success' : 'info'
+                );
+            }
+            editor.draw();
+            if (editor.scheduleAutoSave) editor.scheduleAutoSave();
+            setTimeout(() => showShapeSelectionToolbar(editor, shape), 50);
+        },
+        { isActive: !!shape.containerMode, color: shape.containerMode ? 'rgba(52, 152, 219, 0.95)' : null, autoClose: false }
+    ));
+
     // Layer widget
     actionsRow.appendChild(createLayerWidget(shape));
     
@@ -690,7 +717,22 @@ function showShapeSelectionToolbar(editor, shape) {
             setTimeout(() => showShapeSelectionToolbar(editor, editor.selectedObject), 100);
         }
     }));
-    
+
+    // Group button -- open the canonical floating Groups panel.
+    if (window.GroupsPanel) {
+        const _shapeGroupBtn = createIconBtn('group', 'Groups', () => {
+            try {
+                window.GroupsPanel.toggle(editor);
+            } catch (err) {
+                console.error('[shape-toolbar] Failed to toggle Groups panel:', err);
+                if (editor.showToast) editor.showToast('Groups panel failed to open. Check console.', 'error');
+            }
+        }, { autoClose: false });
+        _shapeGroupBtn.setAttribute('aria-label', 'Open Groups panel');
+        _shapeGroupBtn.setAttribute('title', 'Groups panel');
+        actionsRow.appendChild(_shapeGroupBtn);
+    }
+
     // Delete button
     actionsRow.appendChild(createIconBtn('trash', 'Delete Shape', () => {
         const idx = editor.objects.indexOf(shape);

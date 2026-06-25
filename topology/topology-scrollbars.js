@@ -56,7 +56,9 @@ window.ScrollbarsModule = {
             hThumb.addEventListener('pointerdown', hThumbDown);
         }
         
-        // Global mouse/pointer events for scrollbar dragging
+        // Global mouse/pointer events for scrollbar dragging.
+        // Coalesce all draw work via scheduleDraw + _viewportOnly so a single rAF
+        // handles many high-frequency scroll events (avoids per-event O(n^2) recalc).
         const handleScrollbarMove = (e) => {
             if (editor.draggingScrollbar === 'vertical') {
                 const deltaY = e.clientY - editor.scrollbarDragStart.y;
@@ -69,8 +71,9 @@ window.ScrollbarsModule = {
                 const panRange = baseRange * zoomFactor;
                 editor.panOffset.y = editor.scrollbarDragStart.panOffset - (scrollRatio * panRange * 2);
                 editor.savePanOffset();
+                editor._viewportOnly = true;
                 editor.updateScrollbars();
-                editor.draw();
+                editor.scheduleDraw();
             } else if (editor.draggingScrollbar === 'horizontal') {
                 const deltaX = e.clientX - editor.scrollbarDragStart.x;
                 const scrollbarWidth = hScrollbar.clientWidth;
@@ -82,8 +85,9 @@ window.ScrollbarsModule = {
                 const panRange = baseRange * zoomFactor;
                 editor.panOffset.x = editor.scrollbarDragStart.panOffset - (scrollRatio * panRange * 2);
                 editor.savePanOffset();
+                editor._viewportOnly = true;
                 editor.updateScrollbars();
-                editor.draw();
+                editor.scheduleDraw();
             }
         };
         
@@ -106,8 +110,9 @@ window.ScrollbarsModule = {
                 const panRange = baseRange * zoomFactor;
                 editor.panOffset.y = -scrollRatio * panRange;
                 editor.savePanOffset();
+                editor._viewportOnly = true;
                 editor.updateScrollbars();
-                editor.draw();
+                editor.scheduleDraw();
                 editor.updateHud();
             }
         });
@@ -126,8 +131,9 @@ window.ScrollbarsModule = {
                 const panRange = baseRange * zoomFactor;
                 editor.panOffset.x = -scrollRatio * panRange;
                 editor.savePanOffset();
+                editor._viewportOnly = true;
                 editor.updateScrollbars();
-                editor.draw();
+                editor.scheduleDraw();
                 editor.updateHud();
             }
         });
@@ -185,8 +191,13 @@ window.ScrollbarsModule = {
         hThumb.style.transform = `translateX(${hPosClamped}px)`;
         hThumb.style.left = '0';
         
-        // Update minimap to reflect current viewport
-        editor.renderMinimap();
+        // Update minimap to reflect current viewport.
+        // Coalesce via rAF so rapid pan/scroll storms collapse to one render per frame.
+        if (window.MinimapRender && typeof window.MinimapRender.scheduleRender === 'function') {
+            window.MinimapRender.scheduleRender(editor);
+        } else {
+            editor.renderMinimap();
+        }
     }
 };
 

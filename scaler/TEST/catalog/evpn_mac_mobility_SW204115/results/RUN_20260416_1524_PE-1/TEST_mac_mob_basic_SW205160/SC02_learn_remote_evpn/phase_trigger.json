@@ -1,0 +1,115 @@
+{
+  "phase_name": "trigger",
+  "started_at": "2026-04-16T15:26:19.523+00:00",
+  "completed_at": "2026-04-16T15:27:28.452+00:00",
+  "duration_sec": 68.929,
+  "command_count": 13,
+  "commands": [
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T15:26:19.523+00:00",
+      "duration_ms": 250,
+      "phase": "trigger",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d01h14m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11947      12336    0     0       0 1d20h52m   Active          \n\nTotal number of est"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T15:26:30.417+00:00",
+      "duration_ms": 250,
+      "phase": "trigger",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d01h15m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11947      12336    0     0       0 1d20h52m   Active          \n\nTotal number of est"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T15:26:35.669+00:00",
+      "duration_ms": 250,
+      "phase": "trigger",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d01h15m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11947      12336    0     0       0 1d20h52m   Active          \n\nTotal number of est"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T15:26:40.921+00:00",
+      "duration_ms": 250,
+      "phase": "trigger",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d01h15m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11947      12336    0     0       0 1d20h52m   Active          \n\nTotal number of est"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T15:26:46.174+00:00",
+      "duration_ms": 250,
+      "phase": "trigger",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d01h15m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11947      12336    0     0       0 1d20h53m   Active          \n\nTotal number of est"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T15:26:51.429+00:00",
+      "duration_ms": 250,
+      "phase": "trigger",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d01h15m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11947      12336    0     0       0 1d20h53m   Active          \n\nTotal number of est"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T15:26:56.681+00:00",
+      "duration_ms": 250,
+      "phase": "trigger",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d01h15m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11947      12336    0     0       0 1d20h53m   Active          \n\nTotal number of est"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T15:27:01.933+00:00",
+      "duration_ms": 251,
+      "phase": "trigger",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d01h15m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11947      12336    0     0       0 1d20h53m   Active          \n\nTotal number of est"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T15:27:07.189+00:00",
+      "duration_ms": 200,
+      "phase": "trigger",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d01h15m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11947      12336    0     0       0 1d20h53m   Active          \n\nTotal number of est"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T15:27:12.393+00:00",
+      "duration_ms": 250,
+      "phase": "trigger",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d01h15m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11947      12336    0     0       0 1d20h53m   Active          \n\nTotal number of est"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T15:27:17.645+00:00",
+      "duration_ms": 250,
+      "phase": "trigger",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d01h15m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11947      12336    0     0       0 1d20h53m   Active          \n\nTotal number of est"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T15:27:22.897+00:00",
+      "duration_ms": 300,
+      "phase": "trigger",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d01h15m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11947      12336    0     0       0 1d20h53m   Active          \n\nTotal number of est"
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T15:27:28.201+00:00",
+      "duration_ms": 250,
+      "phase": "trigger",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d01h15m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11947      12336    0     0       0 1d20h53m   Active          \n\nTotal number of est"
+    }
+  ],
+  "parsed_values": {},
+  "anomalies": []
+}

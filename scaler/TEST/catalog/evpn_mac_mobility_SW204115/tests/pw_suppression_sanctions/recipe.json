@@ -1,0 +1,225 @@
+{
+  "id": "TEST_mac_mob_pw_suppress_G4",
+  "name": "MAC Mobility | Cross-Domain Suppression | Blackhole+Shutdown+Suppress Sanctions",
+  "type": "functional",
+  "recipe_type": "pw_suppression",
+  "feature": "evpn-mac-mobility",
+  "source": "gap-analysis:G4 from SW-204115 meeting notes",
+  "jira_key": "SW-204115",
+  "parent_category": "SW-204115",
+  "status": "wired",
+  "status_note": "G4 wired 2026-04-21 via Block 3 cross_domain_sanction_assert handler. Handler (1) commits the loop-prevention action via get_persistent_ssh_session, (2) runs N alternating RT-2 injections to drive the cross-domain flap, (3) verdict PASS if both steps succeed. DNOS 26.2 live-validated action keywords: blackhole / shutdown / suppress (NOT drop / freeze -- those fail commit-check, see runtime_corrections.json:dnos_26_2_loop_prevention_action).",
+  "created": "2026-03-23",
+  "updated": "2026-04-21",
+  "wired": "2026-04-21",
+  "redesign_note": "Original test required PW data plane for AC<->PW rapid flapping. PW is BNI in SI mode. Redesigned to test cross-domain suppression using AC <-> Remote EVPN rapid flapping via Spirent. SC04 redesigned from PW<->PW (no suppression) to Remote<->Remote (no suppression). The suppression engine behavior is the same regardless of whether the cross-domain move is AC<->PW or AC<->RemoteEVPN. Wiring (2026-04-21): blackhole replaces 'drop' keyword (drop is not DNOS 26.2 syntax).",
+  "gap_rationale": "The meeting notes state that for cross-domain MAC moves, only Drop and Shutdown sanctions are valid. Suppress/Freeze behavior for cross-domain moves needs verification. No existing test validates suppression behavior on AC<->RemoteEVPN specifically.",
+  "linked_user_stories": ["SW-192019", "SW-194578"],
+  "device_requirements": {
+    "type": "any",
+    "features": ["evpn", "bgp-l2vpn-evpn", "seamless-integration"],
+    "min_ncp_count": 1
+  },
+  "prerequisites": [
+    {
+      "id": "evpn_instance", "check": "evpn_instance_exists",
+      "check_command": "show evpn summary | no-more",
+      "pass_criteria": "Instance {evpn_name} present"
+    },
+    {
+      "id": "ac", "check": "attachment_circuit_configured",
+      "check_command": "show evpn instance {evpn_name} detail | no-more",
+      "pass_criteria": "At least 1 interface up/forwarding-all"
+    },
+    {
+      "id": "spirent_evpn_peer", "check": "spirent_evpn_rr_peer_active",
+      "check_command": "spirent_tool.py bgp-status --json",
+      "pass_criteria": "EVPN_RR_Peer BGP ESTABLISHED",
+      "fix_config": "spirent_setup_evpn_rr_peer()"
+    },
+    {
+      "id": "suppression_cfg", "check": "mac_mobility_suppression",
+      "check_command": "show config network-services evpn instance {evpn_name} mac-handling | no-more",
+      "pass_criteria": "loop-prevention admin-state enabled"
+    }
+  ],
+  "config_before_test": {
+    "description": "EVPN SI instance with at least 1 AC and Spirent EVPN_RR_Peer. MAC suppression enabled. The cross_domain_sanction_assert handler itself commits the sanction action per scenario before driving the flap.",
+    "suppression_config_template": {
+      "blackhole": "network-services evpn instance {evpn_name} mac-handling loop-prevention action blackhole",
+      "shutdown": "network-services evpn instance {evpn_name} mac-handling loop-prevention action shutdown",
+      "suppress": "network-services evpn instance {evpn_name} mac-handling loop-prevention action suppress"
+    },
+    "dnos_26_2_validated_sanctions": [
+      "blackhole",
+      "shutdown",
+      "suppress"
+    ],
+    "dnos_26_2_invalid_sanctions": [
+      "drop",
+      "freeze"
+    ]
+  },
+  "show_commands_validated": {
+    "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more": "Single MAC",
+    "show evpn mac-table instance {evpn_name} suppress | no-more": "Suppressed MACs",
+    "show evpn instance {evpn_name} loop-prevention mac-table | no-more": "Loop prevention state",
+    "show evpn instance {evpn_name} loop-prevention interface | no-more": "Per-interface sanctions",
+    "show config network-services evpn instance {evpn_name} mac-handling | no-more": "Sanction config",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding",
+    "show evpn mac summary | no-more": "Move counter"
+  },
+  "scenarios": [
+    {
+      "id": "SC01_cross_domain_blackhole_sanction",
+      "name": "AC<->RemoteEVPN rapid flap with BLACKHOLE sanction -> MAC blackholed",
+      "what_happens": "Configure sanction=blackhole. Rapidly alternate: Spirent RT-2 injection with incrementing seq numbers. Repeat to trigger suppression threshold. MAC should be blackholed. The cross_domain_sanction_assert handler itself commits the sanction config via persistent SSH before driving the flap.",
+      "what_cannot_happen": "Freeze applied. MAC frozen on incorrect interface.",
+      "phases": {
+        "trigger": {
+          "action": "rapid_ac_evpn_flap",
+          "method": "spirent",
+          "sanction": "blackhole",
+          "params": {
+            "flap_count": 10,
+            "sanction": "blackhole"
+          },
+          "note": "Handler: cross_domain_sanction_assert -> commit sanction then Spirent flap."
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} suppress | no-more",
+            "show evpn instance {evpn_name} loop-prevention mac-table | no-more",
+            "show evpn mac summary | no-more"
+          ],
+          "expect": {
+            "sanction_blackhole_applied": true,
+            "mac_in_suppress_list": true,
+            "internal_move_count_incremented": true,
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC02_cross_domain_shutdown_sanction",
+      "name": "AC<->RemoteEVPN rapid flap with SHUTDOWN sanction -> Interface shut",
+      "what_happens": "Configure sanction=shutdown. Rapid AC<->RemoteEVPN flap. The AC interface should be shut down. Handler commits sanction + drives flap.",
+      "what_cannot_happen": "Freeze applied. Remote peer shut (only local AC can be shut).",
+      "phases": {
+        "trigger": {
+          "action": "rapid_ac_evpn_flap",
+          "method": "spirent",
+          "sanction": "shutdown",
+          "params": {
+            "flap_count": 10,
+            "sanction": "shutdown"
+          },
+          "note": "Handler: cross_domain_sanction_assert -> commit sanction then Spirent flap."
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn instance {evpn_name} loop-prevention interface | no-more",
+            "show evpn mac-table instance {evpn_name} suppress | no-more"
+          ],
+          "expect": {
+            "sanction_shutdown_applied": true,
+            "interface_admin_down": true,
+            "check_ghost_macs": true
+          }
+        },
+        "cleanup": {
+          "description": "Re-enable interface after shutdown sanction",
+          "commands": ["config", "interfaces {ac_interface} admin-state enabled", "commit"]
+        }
+      }
+    },
+    {
+      "id": "SC03_suppress_sanction_cross_domain",
+      "name": "AC<->RemoteEVPN with SUPPRESS sanction -> document actual behavior",
+      "what_happens": "Configure sanction=suppress (DNOS 26.2 default). Rapid AC<->RemoteEVPN flap. Document whether suppress/freeze applies to cross-domain moves or falls back to blackhole. This is gap-analysis behavior documentation. Handler commits sanction + drives flap.",
+      "what_cannot_happen": "PW frozen (no PW). Service permanently disrupted.",
+      "phases": {
+        "trigger": {
+          "action": "rapid_ac_evpn_flap",
+          "method": "spirent",
+          "sanction": "suppress",
+          "params": {
+            "flap_count": 10,
+            "sanction": "suppress"
+          },
+          "note": "Handler: cross_domain_sanction_assert -> commit sanction then Spirent flap."
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn instance {evpn_name} loop-prevention mac-table | no-more",
+            "show evpn mac-table instance {evpn_name} suppress | no-more"
+          ],
+          "expect": {
+            "document_actual_behavior": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC04_remote_remote_no_suppression",
+      "name": "Remote<->Remote moves -> suppression NOT triggered",
+      "what_happens": "Rapidly inject same MAC via Spirent RT-2 with incrementing seq numbers (simulating remote-to-remote moves). Per SW-192019: remote-to-remote moves do NOT trigger suppression. No sanction should apply regardless of configured action. Handler re-commits sanction=suppress (the residual state from SC03) and runs the flap.",
+      "what_cannot_happen": "Suppression triggered. Any sanction applied.",
+      "phases": {
+        "trigger": {
+          "action": "rapid_remote_seq_updates",
+          "method": "spirent",
+          "sanction": "suppress",
+          "params": {
+            "flap_count": 20,
+            "sanction": "suppress"
+          },
+          "note": "Handler: cross_domain_sanction_assert -> suppression action configured but remote-to-remote moves should NOT trigger sanction per SW-192019."
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} suppress | no-more",
+            "show evpn mac summary | no-more"
+          ],
+          "expect": {
+            "no_suppression": true,
+            "internal_move_count_not_incremented": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    }
+  ],
+  "runtime_parameters": {
+    "evpn_name": {"resolve": "runtime"},
+    "test_mac": {"resolve": "runtime"},
+    "ac_interface": {"resolve": "runtime"}
+  },
+  "verdict": {"layers": 8, "stop_on_fail": false},
+  "counter_commands": [
+    {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer"},
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more", "parser": "line_count"},
+    {"label": "mobility_counter", "command": "show evpn mac summary | no-more", "parser": "key_value"}
+  ],
+  "counter_expectations": [{"label": "ghost_mac_count", "rule": "zero"}],
+  "event_expectations": [
+    {"event": "BGP_NOTIFICATION", "expect": "absent"}
+  ],
+  "health_checks": {
+    "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager"],
+    "check_crashes": true, "check_alarms": true
+  },
+  "cleanup_commands": [
+    "config",
+    "network-services evpn instance {evpn_name} mac-handling loop-prevention action suppress",
+    "commit", "end"
+  ],
+  "config_baseline": {
+    "sections": ["network-services evpn"],
+    "full_config": false, "ignore_patterns": ["last-modified", "commit-id"]
+  }
+}

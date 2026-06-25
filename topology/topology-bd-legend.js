@@ -738,6 +738,30 @@ window.BDLegend = {
         }
     },
 
+    /**
+     * localStorage key for BD panel state, scoped to the authenticated
+     * user. Multi-user rule: never use a global key for per-user UI
+     * state -- two operators share the same browser session in lab
+     * setups and the global key produced cross-user state leaks
+     * (operator A's BD visibility map painted on operator B's canvas).
+     *
+     * Falls back to the legacy global key ``bd_panel_state`` when no
+     * authenticated user is present (anonymous session, login flow,
+     * unit tests). Read-side legacy migration is best-effort: when
+     * the per-user key is empty but the global one has data we use
+     * the global value once and immediately re-save under the
+     * per-user key so the migration is idempotent.
+     */
+    _bdPanelKey() {
+        try {
+            const auth = window.TopologyAuth;
+            const u = auth && auth.getCurrentUser && auth.getCurrentUser();
+            const username = u && u.username ? String(u.username).trim() : '';
+            if (username) return 'bd_panel_state_' + username;
+        } catch (_) {}
+        return 'bd_panel_state';
+    },
+
     _saveBDPanelState(editor) {
         const legend = document.getElementById('bd-legend-panel');
         const state = {
@@ -750,13 +774,28 @@ window.BDLegend = {
             viewMode: editor._multiBDMetadata?.view_mode || 'separate',
             bridgeDomains: editor._multiBDMetadata?.bridge_domains || []
         };
-        localStorage.setItem('bd_panel_state', JSON.stringify(state));
+        try {
+            localStorage.setItem(this._bdPanelKey(), JSON.stringify(state));
+        } catch (e) {
+            console.warn('Failed to save BD panel state:', e);
+        }
     },
 
     _loadBDPanelState(editor) {
         try {
-            const saved = localStorage.getItem('bd_panel_state');
-            if (saved) return JSON.parse(saved);
+            const key = this._bdPanelKey();
+            let raw = localStorage.getItem(key);
+            // One-shot migration: when the per-user key is empty but
+            // the legacy global key has state, copy it across so
+            // existing users don't lose their layout/visibility on
+            // first login after this refactor.
+            if (!raw && key !== 'bd_panel_state') {
+                raw = localStorage.getItem('bd_panel_state');
+                if (raw) {
+                    try { localStorage.setItem(key, raw); } catch (_) {}
+                }
+            }
+            if (raw) return JSON.parse(raw);
         } catch (e) {
             console.warn('Failed to load BD panel state:', e);
         }
@@ -764,6 +803,13 @@ window.BDLegend = {
     },
 
     restoreBDPanelIfNeeded(editor) {
+        // Bug fix (2026-04-26): the BD legend panel used to auto-pop on every
+        // DNAAS topology load (and again whenever the theme refreshed), which
+        // covered the canvas. We now only:
+        //   1. Reconstruct BD metadata so the BD-hierarchy badge can light up
+        //   2. Restore the panel ONLY if the user had it open at last save
+        //      (legacy `bd_panel_state.visible === true`). Default = closed.
+        //   3. Update the badge so the user can re-open it via the toolbar.
         let isDnaas = false;
         try {
             const info = JSON.parse(localStorage.getItem('topo_active'));
@@ -772,12 +818,59 @@ window.BDLegend = {
         if (isDnaas && (!editor._multiBDMetadata || !editor._multiBDMetadata.bridge_domains?.length)) {
             this._reconstructBDMetadataFromCanvas(editor);
         }
+
+        // Bug fix (2026-04-29): on a hard refresh, the auto-save / history
+        // strip removes `_hidden` from links/unbound objects (intended for
+        // transient generator-overlay flags), which makes BD-hidden links
+        // reappear after page reload while the matching devices stay
+        // hidden -- a confusing half-state. Restore the persisted
+        // `_bdVisibility` map onto the actual canvas objects BEFORE we
+        // decide whether to open the panel, so the canvas always reflects
+        // what the user last selected, panel open or not.
+        let savedBdVisibility = null;
+        let savedVisible = false;
+        try {
+            const s = this._loadBDPanelState(editor);
+            if (s && typeof s === 'object') {
+                savedVisible = s.visible === true;
+                savedBdVisibility = (s.bdVisibility && typeof s.bdVisibility === 'object')
+                    ? s.bdVisibility : null;
+            }
+        } catch (_) {}
+
+        if (savedBdVisibility) {
+            editor._bdVisibility = Object.assign({}, savedBdVisibility);
+            (editor.objects || []).forEach(obj => {
+                if (obj.type === 'link' || obj.type === 'unbound') {
+                    const bdName = obj.linkDetails?.bd_name || obj._bdName;
+                    if (bdName && Object.prototype.hasOwnProperty.call(savedBdVisibility, bdName)) {
+                        obj._hidden = savedBdVisibility[bdName] === false;
+                    }
+                }
+            });
+            this.updateDeviceVisibilityByBD(editor);
+            try { editor.draw(); } catch (_) { /* draw might not be ready yet */ }
+        }
+
+        if (savedVisible
+            && editor._multiBDMetadata
+            && editor._multiBDMetadata.bridge_domains?.length > 0
+            && !document.getElementById('bd-legend-panel')) {
+            this.showBDLegend(editor, editor._multiBDMetadata.bridge_domains);
+        }
+
         this.updateBDHierarchyButton(editor);
     },
 
     _updateBDPanelTheme(editor) {
+        // Bug fix (2026-04-26): only redraw if the panel is ALREADY open. The
+        // previous version would re-open the panel on theme switch even when
+        // the user had explicitly closed it.
         const panel = document.getElementById('bd-legend-panel');
-        if (!panel) return;
+        if (!panel) {
+            this.updateBDHierarchyButton(editor);
+            return;
+        }
 
         this._saveBDPanelState(editor);
 

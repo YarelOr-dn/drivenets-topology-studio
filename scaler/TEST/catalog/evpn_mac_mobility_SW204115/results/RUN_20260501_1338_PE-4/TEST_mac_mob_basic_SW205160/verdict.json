@@ -1,0 +1,76 @@
+{
+  "test_id": "TEST_mac_mob_basic_SW205160",
+  "device": "PE-4",
+  "overall": "FAIL",
+  "total_elapsed_sec": 31.25,
+  "scenarios": [
+    {
+      "scenario_id": "SC01_L_local_ac",
+      "scenario_name": "SC01: L> Local AC -- PE-4 learns MAC from its own untagged AC and advertises RT-2",
+      "overall": "FAIL",
+      "convergence_sec": null,
+      "trigger_timestamp": "",
+      "debug_hint": "",
+      "layers": [
+        {
+          "layer": "preflight_smoke_test",
+          "status": "FAIL",
+          "detail": "L2 path BROKEN: MAC 00:DE:AD:FF:FF:01 never appeared in EVPN_SI_VPLS_1 mac-table after 10.2s (10 polls). Check: DNAAS BD, DUT AC state, VLAN tags, Spirent port link.",
+          "evidence": "[\n  {\n    \"action\": \"lab_probe\",\n    \"fast\": true,\n    \"create_timeout_sec\": 30\n  },\n  {\n    \"action\": \"create_stream\",\n    \"result\": \"ok\"\n  },\n  {\n    \"action\": \"traffic_start\"\n  },\n  {\n    \"action\": \"poll_mac\",\n    \"found\": false,\n    \"poll_elapsed_sec\": 10.2,\n    \"polls\": 10\n  }\n]",
+          "elapsed_sec": 0.0
+        }
+      ]
+    },
+    {
+      "scenario_id": "SC02_B_remote_evpn",
+      "scenario_name": "SC02: B> Remote EVPN -- PE-1 learns MAC locally; PE-4 receives via RT-2",
+      "overall": "FAIL",
+      "convergence_sec": null,
+      "trigger_timestamp": "",
+      "debug_hint": "",
+      "layers": [
+        {
+          "layer": "preflight_smoke_test",
+          "status": "FAIL",
+          "detail": "L2 path BROKEN: MAC 00:DE:AD:FF:FF:01 never appeared in EVPN_SI_VPLS_1 mac-table after 10.2s (10 polls). Check: DNAAS BD, DUT AC state, VLAN tags, Spirent port link.",
+          "evidence": "[\n  {\n    \"action\": \"lab_probe\",\n    \"fast\": true,\n    \"create_timeout_sec\": 30\n  },\n  {\n    \"action\": \"create_stream\",\n    \"result\": \"ok\"\n  },\n  {\n    \"action\": \"traffic_start\"\n  },\n  {\n    \"action\": \"poll_mac\",\n    \"found\": false,\n    \"poll_elapsed_sec\": 10.2,\n    \"polls\": 10\n  }\n]",
+          "elapsed_sec": 0.0
+        }
+      ]
+    },
+    {
+      "scenario_id": "SC03_v_pw_via_rrsa2_ac",
+      "scenario_name": "SC03: v> VPLS PW -- RR-SA-2 learns MAC locally on its AC; PE-4 sees it via VPLS PW (label 1032269)",
+      "overall": "FAIL",
+      "convergence_sec": null,
+      "trigger_timestamp": "",
+      "debug_hint": "",
+      "layers": [
+        {
+          "layer": "preflight_smoke_test",
+          "status": "FAIL",
+          "detail": "L2 path BROKEN: MAC 00:DE:AD:FF:FF:01 never appeared in EVPN_SI_VPLS_1 mac-table after 10.2s (10 polls). Check: DNAAS BD, DUT AC state, VLAN tags, Spirent port link.",
+          "evidence": "[\n  {\n    \"action\": \"lab_probe\",\n    \"fast\": true,\n    \"create_timeout_sec\": 30\n  },\n  {\n    \"action\": \"create_stream\",\n    \"result\": \"ok\"\n  },\n  {\n    \"action\": \"traffic_start\"\n  },\n  {\n    \"action\": \"poll_mac\",\n    \"found\": false,\n    \"poll_elapsed_sec\": 10.2,\n    \"polls\": 10\n  }\n]",
+          "elapsed_sec": 0.0
+        }
+      ]
+    },
+    {
+      "scenario_id": "SC04_counts_and_stability",
+      "scenario_name": "SC04: Counts + stability -- all three sources coexist (L+B+v), no suppression, no ghosts, BGP stable",
+      "overall": "FAIL",
+      "convergence_sec": null,
+      "trigger_timestamp": "",
+      "debug_hint": "",
+      "layers": [
+        {
+          "layer": "preflight_smoke_test",
+          "status": "FAIL",
+          "detail": "L2 path BROKEN: MAC 00:DE:AD:FF:FF:01 never appeared in EVPN_SI_VPLS_1 mac-table after 10.2s (10 polls). Check: DNAAS BD, DUT AC state, VLAN tags, Spirent port link.",
+          "evidence": "[\n  {\n    \"action\": \"lab_probe\",\n    \"fast\": true,\n    \"create_timeout_sec\": 30\n  },\n  {\n    \"action\": \"create_stream\",\n    \"result\": \"ok\"\n  },\n  {\n    \"action\": \"traffic_start\"\n  },\n  {\n    \"action\": \"poll_mac\",\n    \"found\": false,\n    \"poll_elapsed_sec\": 10.2,\n    \"polls\": 10\n  }\n]",
+          "elapsed_sec": 0.0
+        }
+      ]
+    }
+  ]
+}

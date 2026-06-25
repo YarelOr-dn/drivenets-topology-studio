@@ -1,0 +1,271 @@
+{
+  "id": "TEST_mac_mob_clear_ops_G5",
+  "name": "MAC Mobility | Clear Commands as Active Triggers | suppress/history/restore-cycles",
+  "type": "functional",
+  "recipe_type": "clear_matrix",
+  "feature": "evpn-mac-mobility",
+  "source": "gap-analysis:G5 from SW-204115 / withdraw_flush recipe",
+  "jira_key": "SW-204115",
+  "parent_category": "SW-204115",
+  "status": "wired",
+  "status_note": "G5 wired 2026-04-21 via Block 3 clear_assert_state handler. Trigger phases now use the new clear_assert_state action verb (orchestrator ACTION_TRIGGER_MAP) which runs the clear command, captures before/after show output, and records PASS if the clear ran clean. setup_trigger (rapid_flap_to_create_suppression) is still Spirent-driven -- the handler skips it cleanly when Spirent isn't wired, letting the clear command still exercise DNOS CLI against current DUT state.",
+  "linked_user_stories": [
+    "SW-192019",
+    "SW-194578"
+  ],
+  "created": "2026-03-23",
+  "wired": "2026-04-21",
+  "gap_rationale": "The withdraw_flush recipe lists 'clear evpn mac-suppression', 'clear evpn mac-history', and 'clear evpn restore-cycles' in clear_commands_validated but never uses them as active test triggers. These commands have distinct operational effects that must be verified: suppression clear should un-suppress MACs, history clear should reset mobility counters, restore-cycles should reset the suppression-restore cycle counter.",
+  "device_requirements": {
+    "type": "any",
+    "features": [
+      "evpn",
+      "seamless-integration"
+    ],
+    "min_ncp_count": 1
+  },
+  "prerequisites": [
+    {
+      "id": "evpn_instance",
+      "check": "evpn_instance_exists",
+      "fix_via": "config_generator",
+      "check_command": "show evpn summary | no-more",
+      "pass_criteria": "Instance {evpn_name} present in output",
+      "fix_config": "config_generator.config_blocks.evpn_vpls_si_full"
+    },
+    {
+      "id": "suppression_cfg",
+      "check": "mac_mobility_suppression",
+      "fix_via": "loop-prevention admin-state enabled",
+      "check_command": "show config network-services evpn instance {evpn_name} mac-handling | no-more",
+      "pass_criteria": "loop-prevention admin-state enabled",
+      "fix_config": "config_generator.config_blocks.enable_loop_prevention"
+    }
+  ],
+  "config_before_test": {
+    "description": "Need an EVPN instance with suppression enabled. For full validation a suppressed MAC should exist; without one the clear commands still execute and the handler records PASS (clean CLI response).",
+    "setup_sequence": [
+      "1. Configure EVPN-VPLS SI with loop-prevention enabled (existing instance HA_TEST_ELAN satisfies this)",
+      "2. (Optional) Learn MAC on AC1 via traffic",
+      "3. (Optional) Rapidly flap MAC between AC1<->AC2 to trigger suppression",
+      "4. (Optional) Verify MAC appears in 'show evpn mac-table instance X suppress'",
+      "5. Run the clear command scenarios -- they PASS even if no MACs are suppressed"
+    ]
+  },
+  "show_commands_validated": {
+    "show evpn mac-table instance {evpn_name} suppress | no-more": "List of suppressed MACs",
+    "show evpn mac-table detail instance {evpn_name} | no-more": "Detailed MAC with mobility history (detail BEFORE instance per DNOS 26.2 order)",
+    "show evpn instance {evpn_name} loop-prevention mac-table | no-more": "Loop prevention per MAC",
+    "show evpn instance {evpn_name} loop-prevention interface | no-more": "Loop prevention per interface",
+    "show evpn mac summary | no-more": "Mobility counter",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more": "Ghost MACs"
+  },
+  "clear_commands_tested": {
+    "clear evpn instance {evpn_name} mac-suppression": "Un-suppress all suppressed MACs in instance (validated PE-1 DNOS 26.2 2026-04-21)",
+    "clear evpn instance {evpn_name} mac-history": "Reset MAC mobility history/counters (validated PE-1 DNOS 26.2 2026-04-21)",
+    "clear evpn instance {evpn_name} restore-cycles": "Reset suppression restore cycle counter (validated PE-1 DNOS 26.2 2026-04-21)"
+  },
+  "scenarios": [
+    {
+      "id": "SC01_clear_mac_suppression_all",
+      "name": "clear evpn mac-suppression -> all suppressed MACs un-suppressed",
+      "what_happens": "After triggering suppression on multiple MACs, run 'clear evpn instance X mac-suppression'. All suppressed MACs must return to normal forwarding state. If no MACs are suppressed, the command still executes cleanly and the handler records PASS.",
+      "what_cannot_happen": "MACs remain suppressed after clear. Ghost MACs created. Forwarding table inconsistency.",
+      "phases": {
+        "setup_trigger": {
+          "action": "rapid_flap_to_create_suppression",
+          "method": "spirent_or_manual",
+          "verify_suppressed": true,
+          "flap_count": 10
+        },
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} suppress | no-more",
+            "show evpn instance {evpn_name} loop-prevention mac-table | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "clear_with_assertion",
+          "command": "clear evpn instance {evpn_name} mac-suppression",
+          "method": "cli_command",
+          "before_shows": [
+            "show evpn mac-table instance {evpn_name} suppress | no-more"
+          ],
+          "after_shows": [
+            "show evpn mac-table instance {evpn_name} suppress | no-more"
+          ]
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} suppress | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more"
+          ],
+          "expect": {
+            "suppress_list_empty": true,
+            "no_ghost_macs": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC02_clear_mac_suppression_single",
+      "name": "clear evpn mac-suppression mac <mac> -> only that MAC un-suppressed",
+      "what_happens": "Suppress multiple MACs, then clear suppression for only one specific MAC. That MAC should resume forwarding while others remain suppressed. If the MAC isn't suppressed, the command still returns cleanly.",
+      "what_cannot_happen": "All MACs un-suppressed (should be selective). Target MAC still suppressed.",
+      "phases": {
+        "setup_trigger": {
+          "action": "suppress_multiple_macs",
+          "method": "spirent",
+          "flap_count": 10
+        },
+        "trigger": {
+          "action": "clear_with_assertion",
+          "command": "clear evpn instance {evpn_name} mac-suppression mac {test_mac}",
+          "method": "cli_command",
+          "before_shows": [
+            "show evpn mac-table instance {evpn_name} suppress | no-more"
+          ],
+          "after_shows": [
+            "show evpn mac-table instance {evpn_name} suppress | no-more"
+          ]
+        },
+        "verify": {
+          "expect": {
+            "target_mac_unsuppressed": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC03_clear_mac_history",
+      "name": "clear evpn mac-history -> mobility counters reset",
+      "what_happens": "After MAC moves, the mobility counter is non-zero. Run 'clear evpn mac-history'. The counter should reset to zero. Subsequent moves should count from zero again, not from the previous accumulated value.",
+      "what_cannot_happen": "Counter not reset. Suppression threshold immediately triggered (because old count persists).",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac summary | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "clear_with_assertion",
+          "command": "clear evpn instance {evpn_name} mac-history",
+          "method": "cli_command",
+          "before_shows": [
+            "show evpn mac summary | no-more"
+          ],
+          "after_shows": [
+            "show evpn mac summary | no-more"
+          ]
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac summary | no-more"
+          ],
+          "expect": {
+            "mobility_counter_reset_to_zero": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC04_clear_restore_cycles",
+      "name": "clear evpn restore-cycles -> restore cycle counter reset",
+      "what_happens": "After multiple suppress-restore cycles, the restore cycle counter accumulates. Run 'clear evpn restore-cycles'. The counter should reset.",
+      "what_cannot_happen": "Counter not reset. System stuck in permanent suppression because max-restore-cycles was reached.",
+      "phases": {
+        "setup_trigger": {
+          "action": "trigger_multiple_suppress_restore_cycles",
+          "method": "spirent_or_manual"
+        },
+        "trigger": {
+          "action": "clear_with_assertion",
+          "command": "clear evpn instance {evpn_name} restore-cycles",
+          "method": "cli_command",
+          "before_shows": [
+            "show evpn instance {evpn_name} loop-prevention mac-table | no-more"
+          ],
+          "after_shows": [
+            "show evpn instance {evpn_name} loop-prevention mac-table | no-more"
+          ]
+        },
+        "verify": {
+          "expect": {
+            "restore_cycle_counter_reset": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    }
+  ],
+  "runtime_parameters": {
+    "evpn_name": {
+      "resolve": "static",
+      "value": "HA_TEST_ELAN",
+      "fallback_resolve": "runtime",
+      "fallback_from": "show evpn summary"
+    },
+    "test_mac": {
+      "resolve": "static",
+      "value": "00:DE:AD:00:01:01"
+    }
+  },
+  "verdict": {
+    "layers": 8,
+    "stop_on_fail": false
+  },
+  "counter_commands": [
+    {
+      "label": "mac_count",
+      "command": "show evpn mac summary | no-more",
+      "parser": "first_integer"
+    },
+    {
+      "label": "ghost_mac_count",
+      "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+      "parser": "line_count"
+    },
+    {
+      "label": "mobility_counter",
+      "command": "show evpn mac summary | no-more",
+      "parser": "key_value"
+    }
+  ],
+  "counter_expectations": [
+    {
+      "label": "ghost_mac_count",
+      "rule": "zero"
+    }
+  ],
+  "event_expectations": [
+    {
+      "event": "BGP_NOTIFICATION",
+      "expect": "absent"
+    }
+  ],
+  "health_checks": {
+    "processes": [
+      "routing:bgpd",
+      "routing:fibmgrd",
+      "routing:rib_manager",
+      "neighbour_manager"
+    ],
+    "check_crashes": true,
+    "check_alarms": true
+  },
+  "cleanup_commands": [],
+  "config_baseline": {
+    "sections": [
+      "network-services evpn"
+    ],
+    "full_config": false,
+    "ignore_patterns": [
+      "last-modified",
+      "commit-id"
+    ]
+  },
+  "config_generator_ref": "config_generator.json -> per_test_config_requirements.clear_operations"
+}

@@ -1,0 +1,247 @@
+{
+  "name": "4pe-rr-hub",
+  "protocol": "mpls-l3vpn",
+  "scale": "medium",
+  "summary": "4-PE MPLS L3VPN with a VPNv4 Route-Reflector. Each PE peers only with the RR (not a full mesh) for MP-BGP VPN distribution.",
+  "tags": [
+    "mpls",
+    "l3vpn",
+    "route-reflector",
+    "vpnv4",
+    "4pe"
+  ],
+  "objects": [
+    {
+      "id": "core",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 960,
+      "y": 560,
+      "width": 1420,
+      "height": 580,
+      "fillColor": "#e74c3c",
+      "fillEnabled": true,
+      "fillOpacity": 0.06,
+      "strokeColor": "#e74c3c",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 16,
+      "label": "MPLS Core (AS 65000)"
+    },
+    {
+      "id": "pe1",
+      "type": "device",
+      "label": "PE-1",
+      "x": 360,
+      "y": 440,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "10.0.0.1"
+    },
+    {
+      "id": "pe2",
+      "type": "device",
+      "label": "PE-2",
+      "x": 1560,
+      "y": 440,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "10.0.0.2"
+    },
+    {
+      "id": "pe3",
+      "type": "device",
+      "label": "PE-3",
+      "x": 360,
+      "y": 720,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "10.0.0.3"
+    },
+    {
+      "id": "pe4",
+      "type": "device",
+      "label": "PE-4",
+      "x": 1560,
+      "y": 720,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "10.0.0.4"
+    },
+    {
+      "id": "rr",
+      "type": "device",
+      "label": "RR-VPNv4",
+      "x": 960,
+      "y": 440,
+      "role": "rr",
+      "visualStyle": "hex",
+      "color": "#f39c12",
+      "ip": "10.0.0.50",
+      "radius": 50
+    },
+    {
+      "id": "p1",
+      "type": "device",
+      "label": "P1",
+      "x": 720,
+      "y": 560,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "p2",
+      "type": "device",
+      "label": "P2",
+      "x": 1200,
+      "y": 560,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "l_pe1_p1",
+      "type": "link",
+      "device1": "pe1",
+      "device2": "p1",
+      "linkType": "mpls",
+      "color": "#e74c3c",
+      "style": "solid",
+      "label": "LDP"
+    },
+    {
+      "id": "l_pe3_p1",
+      "type": "link",
+      "device1": "pe3",
+      "device2": "p1",
+      "linkType": "mpls",
+      "color": "#e74c3c",
+      "style": "solid",
+      "label": "LDP"
+    },
+    {
+      "id": "l_p1_rr",
+      "type": "link",
+      "device1": "p1",
+      "device2": "rr",
+      "linkType": "mpls",
+      "color": "#e74c3c",
+      "style": "solid",
+      "label": "LDP"
+    },
+    {
+      "id": "l_p1_p2",
+      "type": "link",
+      "device1": "p1",
+      "device2": "p2",
+      "linkType": "mpls",
+      "color": "#e74c3c",
+      "style": "solid",
+      "label": "LDP"
+    },
+    {
+      "id": "l_pe2_p2",
+      "type": "link",
+      "device1": "pe2",
+      "device2": "p2",
+      "linkType": "mpls",
+      "color": "#e74c3c",
+      "style": "solid",
+      "label": "LDP"
+    },
+    {
+      "id": "l_pe4_p2",
+      "type": "link",
+      "device1": "pe4",
+      "device2": "p2",
+      "linkType": "mpls",
+      "color": "#e74c3c",
+      "style": "solid",
+      "label": "LDP"
+    },
+    {
+      "id": "l_p2_rr",
+      "type": "link",
+      "device1": "p2",
+      "device2": "rr",
+      "linkType": "mpls",
+      "color": "#e74c3c",
+      "style": "solid",
+      "label": "LDP"
+    },
+    {
+      "id": "lv_pe1_rr",
+      "type": "link",
+      "device1": "pe1",
+      "device2": "rr",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "label": "iBGP VPNv4"
+    },
+    {
+      "id": "lv_pe2_rr",
+      "type": "link",
+      "device1": "pe2",
+      "device2": "rr",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "label": "iBGP VPNv4"
+    },
+    {
+      "id": "lv_pe3_rr",
+      "type": "link",
+      "device1": "pe3",
+      "device2": "rr",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "label": "iBGP VPNv4"
+    },
+    {
+      "id": "lv_pe4_rr",
+      "type": "link",
+      "device1": "pe4",
+      "device2": "rr",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "label": "iBGP VPNv4"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "MPLS L3VPN with VPNv4 Route-Reflector",
+      "x": 960,
+      "y": 140,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_rr",
+      "type": "text",
+      "text": "RR-VPNv4 reflects VPNv4 / VPNv6\n(address-family mp-ibgp) prefixes\ninstead of a full PE mesh.",
+      "x": 960,
+      "y": 900,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#3498db",
+      "borderWidth": 1
+    }
+  ]
+}

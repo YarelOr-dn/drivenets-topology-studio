@@ -1,0 +1,13 @@
+{"detail": "", "phase": "setup", "result_dir": "/home/dn/drivenets-topology-studio/scaler/TEST/catalog/pw_scale_200_mobility_ha_SW204115/tests/pw_scale_mac_mobility_ha/results/RUN_dnaas_verify_20260504_1419_PE4_RRSA2/TEST_pw_scale_mac_mobility_ha_SW204115", "service_count": 200, "status": "running", "step": "initialized", "stream_count": 2, "timestamp": "2026-05-04T11:30:50+0000", "traffic_strategy": "modifier"}
+{"completed": 0, "detail": "running 10 smart DNAAS checks for 400 service-side frame recipes", "phase": "dnaas_preflight_ready", "status": "running", "step": "start", "timestamp": "2026-05-04T11:30:50+0000", "total": 10}
+{"completed": 1, "detail": "", "failures": 0, "phase": "dnaas_preflight_ready", "status": "running", "step": "dnaas_check", "timestamp": "2026-05-04T11:30:53+0000", "total": 10}
+{"completed": 2, "detail": "", "failures": 0, "phase": "dnaas_preflight_ready", "status": "running", "step": "dnaas_check", "timestamp": "2026-05-04T11:30:56+0000", "total": 10}
+{"completed": 3, "detail": "", "failures": 0, "phase": "dnaas_preflight_ready", "status": "running", "step": "dnaas_check", "timestamp": "2026-05-04T11:30:57+0000", "total": 10}
+{"completed": 4, "detail": "", "failures": 0, "phase": "dnaas_preflight_ready", "status": "running", "step": "dnaas_check", "timestamp": "2026-05-04T11:31:31+0000", "total": 10}
+{"completed": 5, "detail": "", "failures": 0, "phase": "dnaas_preflight_ready", "status": "running", "step": "dnaas_check", "timestamp": "2026-05-04T11:31:46+0000", "total": 10}
+{"completed": 6, "detail": "", "failures": 0, "phase": "dnaas_preflight_ready", "status": "running", "step": "dnaas_check", "timestamp": "2026-05-04T11:33:08+0000", "total": 10}
+{"completed": 7, "detail": "", "failures": 0, "phase": "dnaas_preflight_ready", "status": "running", "step": "dnaas_check", "timestamp": "2026-05-04T11:33:13+0000", "total": 10}
+{"completed": 8, "detail": "", "failures": 0, "phase": "dnaas_preflight_ready", "status": "running", "step": "dnaas_check", "timestamp": "2026-05-04T11:34:38+0000", "total": 10}
+{"completed": 9, "detail": "", "failures": 0, "phase": "dnaas_preflight_ready", "status": "running", "step": "dnaas_check", "timestamp": "2026-05-04T11:34:43+0000", "total": 10}
+{"completed": 10, "detail": "", "failures": 0, "phase": "dnaas_preflight_ready", "status": "running", "step": "dnaas_check", "timestamp": "2026-05-04T11:34:48+0000", "total": 10}
+{"completed": 10, "detail": "", "failures": 0, "phase": "dnaas_preflight_ready", "status": "pass", "step": "done", "timestamp": "2026-05-04T11:34:48+0000", "total": 10}

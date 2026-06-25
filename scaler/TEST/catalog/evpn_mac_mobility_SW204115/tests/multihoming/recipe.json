@@ -9,10 +9,76 @@
   "created": "2026-03-20",
   "notes": "PW moves: suppression Drop+Shutdown only per meeting notes; multihoming learning hop behavior",
   "device_requirements": {"type": "cluster", "features": ["evpn", "esi", "multihoming"], "min_ncp_count": 1},
+  "infra_required": "dual_pe_mode",
+  "infra_reason": "Full MH data-plane testing requires two PEs with same ESI. Control-plane-only testing (DF election) can use Spirent RT-1/RT-4 injection.",
   "prerequisites": [
-    {"id": "esi", "check": "ethernet_segment_configured", "fix_via": "ESI on AC interfaces"},
-    {"id": "df_election", "check": "evpn_df_operational", "fix_via": "Lab MH topology"}
+    {
+      "id": "esi",
+      "check": "ethernet_segment_configured",
+      "check_command": "show config network-services multihoming | no-more",
+      "expect": "interface {ac_interface}",
+      "fix_via": "network-services multihoming interface {ac_interface} esi arbitrary value {esi_9bytes}",
+      "fix_note": "ESI config is under 'network-services multihoming', NOT under evpn instance"
+    },
+    {
+      "id": "df_election",
+      "check": "evpn_df_operational",
+      "check_command": "show evpn instance {evpn_name} ethernet-segments-info | no-more",
+      "expect": "ESI listed with DF role",
+      "fix_via": "Lab MH topology or Spirent RT-1/RT-4 CP simulation"
+    },
+    {
+      "id": "spirent_bgp_evpn",
+      "check": "spirent_evpn_peer_established",
+      "check_command": "spirent_tool.py bgp-status --json",
+      "expect": "ESTABLISHED with l2vpn-evpn AFI",
+      "fix_via": "spirent_tool.py bgp-peer --negotiate-afi l2vpn-evpn",
+      "purpose": "Required for RT-1/RT-4 injection (control-plane MH simulation)"
+    }
   ],
+
+  "test_approaches": {
+    "control_plane_mh": {
+      "label": "Spirent RT-1/RT-4 Control Plane Simulation (available NOW)",
+      "description": "Spirent BGP peer injects EVPN RT-1 (Ethernet Auto-Discovery per-EVI and per-ES) and RT-4 (ES route) to simulate a remote PE in the same Ethernet Segment. Tests DF election, mass-withdraw, split-horizon filtering on PE-1.",
+      "what_it_tests": ["DF election logic", "mass-withdraw on ES route withdrawal", "split-horizon filtering based on ESI", "RT-1 per-EVI aliasing behavior"],
+      "what_it_cannot_test": ["Actual dual-homed CE traffic forwarding", "Active-active vs active-standby data plane", "BUM traffic split-horizon on PW/AC"],
+      "spirent_steps": [
+        "1. Configure ESI on PE-1's AC (e.g., ESI 00:11:22:33:44:55:66:77:88:99)",
+        "2. Spirent BGP peer injects RT-4 (ES route) with SAME ESI -> PE-1 thinks remote PE shares segment",
+        "3. PE-1 runs DF election. Verify: show evpn instance {evpn_name} ethernet-segments-info",
+        "4. Spirent injects RT-1 per-ES (AD per-ES) -> mass-withdraw test: withdraw RT-4 and check PE-1 withdraws all MACs",
+        "5. Spirent injects RT-1 per-EVI (AD per-EVI) -> aliasing test: verify PE-1 considers remote PE for load balancing"
+      ],
+      "spirent_objects": {
+        "rt1_per_evi": "BgpEvpnAdRouteConfig with EvpnADRouteType=PER_EVI (validated 2026-04-01)",
+        "rt1_per_es": "BgpEvpnAdRouteConfig with EvpnADRouteType=PER_ESI (validated 2026-04-01)",
+        "rt4": "BgpEvpnEthernetSegmentRouteConfig with OriginatingRouterIpv4Addr (validated 2026-04-01)"
+      },
+      "trigger_functions": {
+        "inject_rt1": "spirent_inject_evpn_rt1_route(bgp_device_name, esi, evi, rd, rt)",
+        "inject_rt4": "spirent_inject_evpn_rt4_route(bgp_device_name, esi, rd, rt, originator_ip)",
+        "withdraw": "spirent_withdraw by protocol-stop or explicit withdraw"
+      }
+    },
+
+    "data_plane_mh_via_dnaas": {
+      "label": "DNAAS Dual-PE Data Plane (requires PE-4 or equivalent)",
+      "description": "Real dual-homed topology via DNAAS. Spirent port on B-14 reaches both PE-1 and PE-2 through different DNAAS BD paths.",
+      "requirements": [
+        "PE-4 (or equivalent) available with EVPN instance and same ESI as PE-1",
+        "DNAAS BD from B-14 to PE-4's leaf (need to identify PE-4's leaf from LLDP)",
+        "VPLS peering between PE-1 and PE-4",
+        "Spirent sends L2 traffic to both PEs through different outer VLANs"
+      ],
+      "dnaas_path": {
+        "pe1": "B-14 -> fabric -> D-16 -> PE-1 (existing, fabric VLAN 214)",
+        "pe2": "B-14 -> fabric -> {pe2_leaf} -> PE-4 (needs new BD)",
+        "note": "Each PE gets traffic on a different DNAAS BD. Same inner MAC on both paths."
+      },
+      "what_it_tests": "Everything including actual dual-homed data-plane forwarding"
+    }
+  },
   "show_commands_validated": {
     "show evpn mac-table instance {evpn_name} | no-more": "SHOW_COMMANDS line 10089 -- MAC entries for specific instance",
     "show config network-services evpn | no-more": "Running EVPN config",
@@ -21,9 +87,11 @@
     "show evpn instance {evpn_name} local-ethernet-segments | no-more": "Local ES membership",
     "show evpn instance {evpn_name} detail | no-more": "Detailed instance with DF election info",
     "show dnos-internal routing evpn instance {evpn_name} vpls-df-info | no-more": "DF election debug info",
-    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding state and flags",
-    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more": "Ghost MAC detection",
-    "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
+    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding state and flags (VALIDATED PE-1 2026-04-01)",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more": "Ghost MAC detection (needs 'detail' keyword, VALIDATED PE-1 2026-04-01)",
+    "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state",
+    "show config network-services multihoming | no-more": "ESI/MH config (VALIDATED PE-1 2026-04-01)",
+    "show evpn mac summary | no-more": "EVPN MAC summary with MH ACs column (VALIDATED PE-1 2026-04-01)"
   },
   "invalid_commands": {
     "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use: show evpn mac-table instance {name}",
@@ -31,41 +99,146 @@
   },
   "scenarios": [
     {
-      "id": "SC01_esi_move_between_pes",
-      "name": "ESI multi-homed AC; MAC move between PEs",
+      "id": "SC01_df_election_via_rt4",
+      "name": "DF Election via Spirent RT-4 injection (control-plane MH)",
+      "approach": "control_plane_mh",
+      "infra_required": "si_mode",
+      "spirent_method": "Spirent injects RT-4 (ES route) with same ESI as PE-1's AC. PE-1 runs DF election and chooses DF/non-DF.",
       "phases": {
-        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more", "show config network-services evpn | no-more"]},
-        "trigger": {"action": "move_ac_across_pe", "method": "manual_lab"},
-        "verify": {"expect": {"mh_consistent": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true}}
+        "setup": {
+          "config": [
+            "network-services multihoming interface {ac_interface} esi arbitrary value {esi_9bytes}",
+            "network-services multihoming interface {ac_interface} redundancy-mode all-active",
+            "commit"
+          ],
+          "config_note": "ESI is under 'network-services multihoming' (separate from evpn). Type-0 = 'arbitrary'. Value is 9 hex octets (colon-separated). Validated on PE-1 2026-04-01.",
+          "spirent": [
+            {"action": "inject_rt4", "esi": "{esi}", "originator_ip": "10.99.99.1", "detail": "Simulate remote PE in same ES"}
+          ]
+        },
+        "snapshot": {"show_commands": [
+          "show evpn instance {evpn_name} ethernet-segments-info | no-more",
+          "show evpn instance {evpn_name} detail | no-more",
+          "show dnos-internal routing evpn instance {evpn_name} vpls-df-info | no-more"
+        ]},
+        "verify": {
+          "expect": {
+            "df_election_occurred": true,
+            "esi_recognized": true,
+            "two_pe_in_es": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_ghost_macs": true
+          }
+        },
+        "cleanup": {"spirent": [{"action": "withdraw_rt4"}]}
       }
     },
     {
-      "id": "SC02_df_election_learning",
-      "name": "DF election + MAC learning behavior",
+      "id": "SC02_mass_withdraw_on_es_down",
+      "name": "Mass-withdraw: RT-4 withdrawal triggers MAC flush",
+      "approach": "control_plane_mh",
+      "infra_required": "si_mode",
+      "spirent_method": "Inject RT-4 + RT-1 per-ES, then withdraw RT-4. PE-1 should mass-withdraw all MACs learned from that ES.",
       "phases": {
+        "setup": {
+          "spirent": [
+            {"action": "inject_rt4", "esi": "{esi}"},
+            {"action": "inject_rt1_per_es", "esi": "{esi}", "detail": "AD per-ES route for mass-withdraw"},
+            {"action": "inject_rt2", "mac": "{test_mac}", "detail": "MAC via remote PE in same ES"},
+            {"action": "wait", "seconds": 5}
+          ]
+        },
+        "trigger": {
+          "action": "withdraw_rt4",
+          "detail": "Simulate remote PE ES failure. PE-1 should mass-withdraw MACs from that ES."
+        },
         "verify": {
-          "show_commands": ["show evpn summary | no-more", "show evpn mac-table instance {evpn_name} | no-more"],
-          "expect": {"df_role_correct": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true}
+          "expect": {
+            "mac_withdrawn": true,
+            "mass_withdraw_triggered": true,
+            "check_mac_flags": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": true
+          }
         }
       }
     },
     {
-      "id": "SC03_single_to_multi_migration",
-      "name": "Migration single-homed -> multi-homed",
+      "id": "SC03_rt1_per_evi_aliasing",
+      "name": "RT-1 per-EVI aliasing: load-balancing to remote ES peer",
+      "approach": "control_plane_mh",
+      "infra_required": "si_mode",
+      "spirent_method": "Inject RT-1 per-EVI with same ESI. PE-1 should consider the remote PE for ECMP/aliasing to the ES.",
       "phases": {
-        "trigger": {"action": "attach_second_pe_esi", "method": "config_validate"},
-        "verify": {"expect": {"no_duplicate_forwarding": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true}}
+        "setup": {
+          "spirent": [
+            {"action": "inject_rt4", "esi": "{esi}"},
+            {"action": "inject_rt1_per_evi", "esi": "{esi}", "evi": "{evi}", "detail": "AD per-EVI for aliasing"}
+          ]
+        },
+        "verify": {
+          "expect": {
+            "aliasing_active": true,
+            "remote_pe_in_ecmp": true,
+            "check_forwarding": true
+          }
+        }
       }
+    },
+    {
+      "id": "SC04_dual_pe_mac_move",
+      "name": "MAC move between dual-homed PEs (data-plane MH)",
+      "approach": "data_plane_mh_via_dnaas",
+      "infra_required": "dual_pe_mode",
+      "blocker": "Requires second PE with DNAAS path from Spirent and same ESI. See infrastructure_modes.json for setup.",
+      "phases": {
+        "trigger": {"action": "move_ac_across_pe", "method": "dnaas_dual_path"},
+        "verify": {
+          "expect": {
+            "mh_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": true
+          }
+        }
+      },
+      "prerequisites": [
+        {"id": "second_pe", "check": "pe2_available_with_esi", "fix_via": "Lab topology with PE-4"},
+        {"id": "dnaas_path_pe2", "check": "dnaas_bd_to_pe2", "fix_via": "/SPIRENT dnaas fix for PE-4"}
+      ]
     }
   ],
   "runtime_parameters": {
     "evpn_name": {"resolve": "runtime"},
+    "ac_interface": {"resolve": "runtime", "example": "ge400-0/0/5.1"},
+    "esi_9bytes": {"resolve": "runtime", "format": "9 hex octets colon-separated", "example": "00:AA:BB:CC:DD:EE:FF:00:01"},
     "test_mac": {"resolve": "runtime"}
+  },
+  "dnos_mh_syntax_reference": {
+    "validated_on": "PE-1 (YOR_PE-1) 2026-04-01 via live ? completion",
+    "config_path": "network-services multihoming",
+    "NOT_under": "network-services evpn instance -- ESI is NOT here",
+    "subtree": {
+      "interface <if> esi arbitrary value <9-hex-octets>": "Type-0 ESI (manual)",
+      "interface <if> esi lacp remote-id": "Type-1 ESI (LACP-based)",
+      "interface <if> redundancy-mode <all-active|single-active|port-active>": "MH forwarding mode",
+      "interface <if> designated-forwarder algorithm <mod|highest-preference>": "DF election algorithm",
+      "interface <if> designated-forwarder election-time <N>": "DF election timer",
+      "interface <if> designated-forwarder no-preemption": "Disable DF preemption",
+      "designated-forwarder algorithm <mod|highest-preference>": "Global default DF algorithm",
+      "redundancy-mode <all-active|single-active|port-active>": "Global default redundancy",
+      "startup-delay <60-1800>": "Startup delay in seconds"
+    },
+    "esi_format": "9 hex octets colon-separated (type byte implied by 'arbitrary' or 'lacp' keyword)",
+    "stc_esi_format": "Also 9 hex bytes colon-separated (same format as DNOS)"
   },
   "verdict": {"layers": 10, "stop_on_fail": false},
   "counter_commands": [
     {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
-    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more", "parser": "line_count", "description": "Ghost MAC count"}
   ],
   "counter_expectations": [
     {"label": "mac_count", "rule": "no_decrease", "description": "MAC count must not drop"},
@@ -80,9 +253,9 @@
     "check_crashes": true,
     "check_alarms": true
   },
-  "cleanup_commands": ["no debug evpn mac-mobility", "no set logging terminal"],
+  "cleanup_commands": ["no debug evpn mac-mobility", "unset logging terminal"],
   "config_baseline": {
-    "sections": ["network-services evpn", "protocols bgp"],
+    "sections": ["network-services evpn", "protocols bgp {asn}"],
     "full_config": false,
     "ignore_patterns": ["last-modified", "commit-id"]
   }

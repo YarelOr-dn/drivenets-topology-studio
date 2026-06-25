@@ -1,0 +1,96 @@
+{
+  "ok": true,
+  "phases": [
+    {
+      "data": {
+        "dnaas_preflight_plan": {
+          "data": {
+            "mode": "smart",
+            "require_ready": false,
+            "sampled_services": [
+              "EVPN_PW_S001",
+              "EVPN_PW_S002",
+              "EVPN_PW_S003",
+              "EVPN_PW_S004",
+              "EVPN_PW_S005",
+              "EVPN_PW_S006",
+              "EVPN_PW_S007",
+              "EVPN_PW_S008",
+              "EVPN_PW_S009",
+              "EVPN_PW_S010"
+            ],
+            "strategy": "aggregate"
+          },
+          "detail": "dry-run planned 8 DNAAS preflight checks",
+          "ok": true,
+          "phase": "dnaas_preflight_prereq"
+        },
+        "expected_traffic_count": 20,
+        "first_service": {
+          "evi": 3101,
+          "index": 1,
+          "inner_vlan": 3101,
+          "label_block_budget_end": 7,
+          "label_block_budget_start": 0,
+          "label_block_ordinal": 0,
+          "label_block_size": 8,
+          "name": "EVPN_PW_S001",
+          "pe4_ac": "ge100-18/0/0.3101",
+          "pe4_device": "YOR_CL_PE-4",
+          "pe4_dst_mac": "02:aa:ad:01:00:01",
+          "pe4_outer_vlan": 219,
+          "pe4_ownership_tag": "[STC-PE4-S001-i3101]",
+          "pe4_rd": "4.4.4.4:3101",
+          "pe4_site_id": 10001,
+          "pe4_src_mac": "00:de:ad:01:00:01",
+          "pe4_stream_name": "pw_scale_pe4_s001_i3101",
+          "route_target": "1234567:3101",
+          "rr_ac": "bundle-100.3101",
+          "rr_device": "RR-SA-2",
+          "rr_dst_mac": "02:aa:be:01:00:01",
+          "rr_ownership_tag": "[STC-RRSA2-S001-i3101]",
+          "rr_rd": "2.2.2.2:3101",
+          "rr_site_id": 20001,
+          "rr_spirent_outer_vlan": 215,
+          "rr_src_mac": "00:de:be:01:00:01",
+          "rr_stream_name": "pw_scale_rr_s001_i3101",
+          "rr_wire_outer_vlan": 4
+        },
+        "last_service": {
+          "evi": 3110,
+          "index": 10,
+          "inner_vlan": 3110,
+          "label_block_budget_end": 79,
+          "label_block_budget_start": 72,
+          "label_block_ordinal": 9,
+          "label_block_size": 8,
+          "name": "EVPN_PW_S010",
+          "pe4_ac": "ge100-18/0/0.3110",
+          "pe4_device": "YOR_CL_PE-4",
+          "pe4_dst_mac": "02:aa:ad:01:00:0a",
+          "pe4_outer_vlan": 219,
+          "pe4_ownership_tag": "[STC-PE4-S010-i3110]",
+          "pe4_rd": "4.4.4.4:3110",
+          "pe4_site_id": 10010,
+          "pe4_src_mac": "00:de:ad:01:00:0a",
+          "pe4_stream_name": "pw_scale_pe4_s010_i3110",
+          "route_target": "1234567:3110",
+          "rr_ac": "bundle-100.3110",
+          "rr_device": "RR-SA-2",
+          "rr_dst_mac": "02:aa:be:01:00:0a",
+          "rr_ownership_tag": "[STC-RRSA2-S010-i3110]",
+          "rr_rd": "2.2.2.2:3110",
+          "rr_site_id": 20010,
+          "rr_spirent_outer_vlan": 215,
+          "rr_src_mac": "00:de:be:01:00:0a",
+          "rr_stream_name": "pw_scale_rr_s010_i3110",
+          "rr_wire_outer_vlan": 4
+        },
+        "service_count": 10
+      },
+      "detail": "dry-run prerequisite context generated",
+      "ok": true,
+      "phase": "prerequisite_gate"
+    }
+  ]
+}

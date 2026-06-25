@@ -1,0 +1,197 @@
+{
+  "name": "ixp-route-server",
+  "protocol": "ebgp",
+  "scale": "medium",
+  "summary": "IXP route-server topology. Each member AS peers with a single central route-server instead of building a full mesh, scaling peering from N^2 to N sessions.",
+  "tags": [
+    "ebgp",
+    "ixp",
+    "route-server",
+    "peering"
+  ],
+  "objects": [
+    {
+      "id": "ixp",
+      "type": "shape",
+      "shapeType": "ellipse",
+      "x": 960,
+      "y": 540,
+      "width": 520,
+      "height": 520,
+      "fillColor": "#1abc9c",
+      "fillEnabled": true,
+      "fillOpacity": 0.1,
+      "strokeColor": "#1abc9c",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "label": "IXP Fabric"
+    },
+    {
+      "id": "rs",
+      "type": "device",
+      "label": "Route-Server",
+      "x": 960,
+      "y": 540,
+      "role": "rr",
+      "visualStyle": "hex",
+      "color": "#f39c12",
+      "ip": "198.51.100.1",
+      "radius": 55
+    },
+    {
+      "id": "m1",
+      "type": "device",
+      "label": "AS65010",
+      "x": 1320.0,
+      "y": 540.0,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "198.51.100.10"
+    },
+    {
+      "id": "l_rs_m1",
+      "type": "link",
+      "device1": "rs",
+      "device2": "m1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "multi-hop eBGP"
+    },
+    {
+      "id": "m2",
+      "type": "device",
+      "label": "AS65020",
+      "x": 1140.0,
+      "y": 851.7691453623979,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "198.51.100.11"
+    },
+    {
+      "id": "l_rs_m2",
+      "type": "link",
+      "device1": "rs",
+      "device2": "m2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "multi-hop eBGP"
+    },
+    {
+      "id": "m3",
+      "type": "device",
+      "label": "AS65030",
+      "x": 780.0000000000001,
+      "y": 851.7691453623979,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "198.51.100.12"
+    },
+    {
+      "id": "l_rs_m3",
+      "type": "link",
+      "device1": "rs",
+      "device2": "m3",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "multi-hop eBGP"
+    },
+    {
+      "id": "m4",
+      "type": "device",
+      "label": "AS65040",
+      "x": 600.0,
+      "y": 540.0,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "198.51.100.13"
+    },
+    {
+      "id": "l_rs_m4",
+      "type": "link",
+      "device1": "rs",
+      "device2": "m4",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "multi-hop eBGP"
+    },
+    {
+      "id": "m5",
+      "type": "device",
+      "label": "AS65050",
+      "x": 779.9999999999998,
+      "y": 228.2308546376022,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "198.51.100.14"
+    },
+    {
+      "id": "l_rs_m5",
+      "type": "link",
+      "device1": "rs",
+      "device2": "m5",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "multi-hop eBGP"
+    },
+    {
+      "id": "m6",
+      "type": "device",
+      "label": "AS65060",
+      "x": 1140.0,
+      "y": 228.23085463760208,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "198.51.100.15"
+    },
+    {
+      "id": "l_rs_m6",
+      "type": "link",
+      "device1": "rs",
+      "device2": "m6",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "multi-hop eBGP"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "Internet Exchange Point (Route-Server Model)",
+      "x": 960,
+      "y": 120,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_note",
+      "type": "text",
+      "text": "Each member establishes a single eBGP session\nwith the Route-Server instead of a full mesh\nof N(N-1)/2 pairwise peerings",
+      "x": 960,
+      "y": 960,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#334155",
+      "borderWidth": 1
+    }
+  ]
+}

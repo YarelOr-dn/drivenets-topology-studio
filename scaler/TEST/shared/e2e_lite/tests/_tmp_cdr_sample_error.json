@@ -1,0 +1,21 @@
+{
+  "started_at": "2026-04-23T15:25:09.948+00:00",
+  "stopped_at": "",
+  "poll_interval_sec": 30.0,
+  "poll_count": 1,
+  "new_cores_total": 0,
+  "ok": true,
+  "devices": [
+    {
+      "device": "PE-4",
+      "baseline": [],
+      "observed": [],
+      "new_events": [],
+      "last_poll_ts": 0.0,
+      "last_poll_error": "sample totally failed",
+      "poll_count": 1,
+      "new_count": 0
+    }
+  ],
+  "updated_at": "2026-04-23T15:25:09.948+00:00"
+}

@@ -1,0 +1,14 @@
+{
+  "detail": "",
+  "iteration": 1,
+  "missing_pe4": [],
+  "missing_rr": [],
+  "pe4_installed": 0,
+  "pe4_seen": 200,
+  "phase": "verify_pw_establishment",
+  "rr_installed": 0,
+  "rr_seen": 200,
+  "status": "running",
+  "step": "pw_poll",
+  "timestamp": "2026-05-04T07:30:11+0000"
+}

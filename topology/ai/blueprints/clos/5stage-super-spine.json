@@ -1,0 +1,500 @@
+{
+  "name": "5stage-super-spine",
+  "protocol": "clos",
+  "scale": "large",
+  "summary": "Clos 5-stage hyperscale DC fabric. Three super-spines aggregate five spines over eight leaves -- the scaling step beyond the 3-stage baseline.",
+  "tags": [
+    "clos",
+    "5-stage",
+    "super-spine",
+    "hyperscale"
+  ],
+  "layout_hint": "clos-5-stage",
+  "objects": [
+    {
+      "id": "fab",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 960,
+      "y": 600,
+      "width": 1680,
+      "height": 820,
+      "fillColor": "#3498db",
+      "fillEnabled": true,
+      "fillOpacity": 0.05,
+      "strokeColor": "#3498db",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 16,
+      "label": "Clos 5-stage (Super-Spine / Spine / Leaf)"
+    },
+    {
+      "id": "ss1",
+      "type": "device",
+      "label": "SS-1",
+      "x": 680,
+      "y": 260,
+      "role": "super-spine",
+      "visualStyle": "classic",
+      "color": "#2c3e50"
+    },
+    {
+      "id": "ss2",
+      "type": "device",
+      "label": "SS-2",
+      "x": 1000,
+      "y": 260,
+      "role": "super-spine",
+      "visualStyle": "classic",
+      "color": "#2c3e50"
+    },
+    {
+      "id": "ss3",
+      "type": "device",
+      "label": "SS-3",
+      "x": 1320,
+      "y": 260,
+      "role": "super-spine",
+      "visualStyle": "classic",
+      "color": "#2c3e50"
+    },
+    {
+      "id": "sp1",
+      "type": "device",
+      "label": "Spine-1",
+      "x": 480,
+      "y": 540,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "sp2",
+      "type": "device",
+      "label": "Spine-2",
+      "x": 780,
+      "y": 540,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "sp3",
+      "type": "device",
+      "label": "Spine-3",
+      "x": 1080,
+      "y": 540,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "sp4",
+      "type": "device",
+      "label": "Spine-4",
+      "x": 1380,
+      "y": 540,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "sp5",
+      "type": "device",
+      "label": "Spine-5",
+      "x": 1680,
+      "y": 540,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "lf1",
+      "type": "device",
+      "label": "Leaf-1",
+      "x": 340,
+      "y": 860,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "lf2",
+      "type": "device",
+      "label": "Leaf-2",
+      "x": 540,
+      "y": 860,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "lf3",
+      "type": "device",
+      "label": "Leaf-3",
+      "x": 740,
+      "y": 860,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "lf4",
+      "type": "device",
+      "label": "Leaf-4",
+      "x": 940,
+      "y": 860,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "lf5",
+      "type": "device",
+      "label": "Leaf-5",
+      "x": 1140,
+      "y": 860,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "lf6",
+      "type": "device",
+      "label": "Leaf-6",
+      "x": 1340,
+      "y": 860,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "lf7",
+      "type": "device",
+      "label": "Leaf-7",
+      "x": 1540,
+      "y": 860,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "lf8",
+      "type": "device",
+      "label": "Leaf-8",
+      "x": 1740,
+      "y": 860,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "l_ss1_sp1",
+      "type": "link",
+      "device1": "ss1",
+      "device2": "sp1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss1_sp2",
+      "type": "link",
+      "device1": "ss1",
+      "device2": "sp2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss1_sp3",
+      "type": "link",
+      "device1": "ss1",
+      "device2": "sp3",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss1_sp4",
+      "type": "link",
+      "device1": "ss1",
+      "device2": "sp4",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss1_sp5",
+      "type": "link",
+      "device1": "ss1",
+      "device2": "sp5",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss2_sp1",
+      "type": "link",
+      "device1": "ss2",
+      "device2": "sp1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss2_sp2",
+      "type": "link",
+      "device1": "ss2",
+      "device2": "sp2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss2_sp3",
+      "type": "link",
+      "device1": "ss2",
+      "device2": "sp3",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss2_sp4",
+      "type": "link",
+      "device1": "ss2",
+      "device2": "sp4",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss2_sp5",
+      "type": "link",
+      "device1": "ss2",
+      "device2": "sp5",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss3_sp1",
+      "type": "link",
+      "device1": "ss3",
+      "device2": "sp1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss3_sp2",
+      "type": "link",
+      "device1": "ss3",
+      "device2": "sp2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss3_sp3",
+      "type": "link",
+      "device1": "ss3",
+      "device2": "sp3",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss3_sp4",
+      "type": "link",
+      "device1": "ss3",
+      "device2": "sp4",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "l_ss3_sp5",
+      "type": "link",
+      "device1": "ss3",
+      "device2": "sp5",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf1_sp1",
+      "type": "link",
+      "device1": "lf1",
+      "device2": "sp1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf1_sp3",
+      "type": "link",
+      "device1": "lf1",
+      "device2": "sp3",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf2_sp2",
+      "type": "link",
+      "device1": "lf2",
+      "device2": "sp2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf2_sp4",
+      "type": "link",
+      "device1": "lf2",
+      "device2": "sp4",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf3_sp3",
+      "type": "link",
+      "device1": "lf3",
+      "device2": "sp3",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf3_sp5",
+      "type": "link",
+      "device1": "lf3",
+      "device2": "sp5",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf4_sp4",
+      "type": "link",
+      "device1": "lf4",
+      "device2": "sp4",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf4_sp1",
+      "type": "link",
+      "device1": "lf4",
+      "device2": "sp1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf5_sp5",
+      "type": "link",
+      "device1": "lf5",
+      "device2": "sp5",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf5_sp2",
+      "type": "link",
+      "device1": "lf5",
+      "device2": "sp2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf6_sp1",
+      "type": "link",
+      "device1": "lf6",
+      "device2": "sp1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf6_sp3",
+      "type": "link",
+      "device1": "lf6",
+      "device2": "sp3",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf7_sp2",
+      "type": "link",
+      "device1": "lf7",
+      "device2": "sp2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf7_sp4",
+      "type": "link",
+      "device1": "lf7",
+      "device2": "sp4",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf8_sp3",
+      "type": "link",
+      "device1": "lf8",
+      "device2": "sp3",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "u_lf8_sp5",
+      "type": "link",
+      "device1": "lf8",
+      "device2": "sp5",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "Clos 5-stage (Super-Spine / Spine / Leaf)",
+      "x": 960,
+      "y": 120,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_scale",
+      "type": "text",
+      "text": "Super-spines aggregate PODs for east-west traffic\n5-stage = 3 super-spine layers of folded Clos",
+      "x": 960,
+      "y": 1020,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#334155",
+      "borderWidth": 1
+    }
+  ]
+}

@@ -44,8 +44,14 @@ window.DrawModule = {
         const dpr = editor.dpr || 1;
         editor.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         
-        editor.ctx.imageSmoothingEnabled = true;
-        editor.ctx.imageSmoothingQuality = 'high';
+        if (typeof editor.configureCanvasQuality === 'function') {
+            editor.configureCanvasQuality(editor.ctx, { smoothing: editor.zoom >= 0.55 });
+        } else {
+            editor.ctx.imageSmoothingEnabled = true;
+            editor.ctx.imageSmoothingQuality = 'high';
+            editor.ctx.lineJoin = 'round';
+            editor.ctx.lineCap = 'round';
+        }
         
         // Clear with appropriate background color (logical dimensions)
         const cw = editor.canvasW || editor.canvas.width;
@@ -67,19 +73,41 @@ window.DrawModule = {
             }
         }
         
+        let laserNeedsFade = false;
+
         editor.ctx.save();
-        // ULTRA: Translate to half-pixel boundaries for sharper rendering
-        editor.ctx.translate(Math.round(editor.panOffset.x) + 0.5, Math.round(editor.panOffset.y) + 0.5);
+        // Translate to sharp pixel boundaries for clearer strokes at any DPR/zoom.
+        const sharpPan = editor.getSharpPanOffset
+            ? editor.getSharpPanOffset()
+            : { x: Math.round(editor.panOffset.x), y: Math.round(editor.panOffset.y) };
+        editor.ctx.translate(sharpPan.x, sharpPan.y);
         editor.ctx.scale(editor.zoom, editor.zoom);
         
-        // Enable anti-aliasing for smooth circles and lines
-        editor.ctx.lineJoin = 'round';
-        editor.ctx.lineCap = 'round';
+        // Keep vector joins/caps consistent after restore/save boundaries.
+        if (typeof editor.configureCanvasQuality === 'function') {
+            editor.configureCanvasQuality(editor.ctx, { smoothing: editor.zoom >= 0.55 });
+        } else {
+            editor.ctx.lineJoin = 'round';
+            editor.ctx.lineCap = 'round';
+        }
         
         // Skip expensive O(n^2) position recalc during pure viewport changes (zoom/pan).
         // World positions don't move -- only the view transform changes.
         const skipPositionUpdate = !!editor._viewportOnly;
         editor._viewportOnly = false;
+
+        // ───── Per-frame caches (rebuilt every draw) ─────
+        // Topology graph is immutable for the duration of one draw().
+        // Cache id→object lookups and merged-link chains to avoid O(n²)
+        // `objects.find()` storms during many label/MP/TP draw helpers.
+        const idMap = new Map();
+        for (let i = 0, len = editor.objects.length; i < len; i++) {
+            const o = editor.objects[i];
+            if (o && o.id !== undefined) idMap.set(o.id, o);
+        }
+        editor._frameIdMap = idMap;
+        if (!editor._frameMergedLinks) editor._frameMergedLinks = new Map();
+        else editor._frameMergedLinks.clear();
 
         if (!skipPositionUpdate)
         editor.objects.forEach(obj => {
@@ -96,8 +124,8 @@ window.DrawModule = {
                 
                 if (isSUL && hasBothDevices) {
                     // ===== SUL WITH BOTH DEVICES: USE EXACT QL LOGIC =====
-                    const device1 = editor.objects.find(o => o.id === obj.device1);
-                    const device2 = editor.objects.find(o => o.id === obj.device2);
+                    const device1 = editor.getObjectById(obj.device1);
+                    const device2 = editor.getObjectById(obj.device2);
                     
                     if (device1 && device2) {
                         // Calculate connection points - EXACTLY like drawLink()
@@ -196,8 +224,8 @@ window.DrawModule = {
                 
                 // Calculate offset if both endpoints are attached to devices
                 if (endpoints.hasEndpoints && endpoints.device1 && endpoints.device2) {
-                    const device1 = editor.objects.find(o => o.id === endpoints.device1);
-                    const device2 = editor.objects.find(o => o.id === endpoints.device2);
+                    const device1 = editor.getObjectById(endpoints.device1);
+                    const device2 = editor.getObjectById(endpoints.device2);
                     
                     if (device1 && device2) {
                         // Base angle between the two endpoint devices
@@ -221,7 +249,7 @@ window.DrawModule = {
                 
                 // Update start TP if attached to device1
                 if (obj.device1) {
-                const device1 = editor.objects.find(o => o.id === obj.device1);
+                const device1 = editor.getObjectById(obj.device1);
                     if (device1) {
                         let angle = baseAngle;
                         
@@ -244,7 +272,7 @@ window.DrawModule = {
                                 const connectedDevices = editor.getAllConnectedDevices(obj);
                                 const otherDeviceId = connectedDevices.deviceIds.find(id => id !== obj.device1);
                                 if (otherDeviceId) {
-                                    const otherDevice = editor.objects.find(o => o.id === otherDeviceId);
+                                    const otherDevice = editor.getObjectById(otherDeviceId);
                                     if (otherDevice) {
                                         targetPoint = { x: otherDevice.x, y: otherDevice.y };
                                     }
@@ -303,14 +331,14 @@ window.DrawModule = {
                             obj.mergedWith.connectionPoint.y = obj.start.y;
                             
                             // Also update child's connection point
-                            const childLink = editor.objects.find(o => o.id === obj.mergedWith.linkId);
+                            const childLink = editor.getObjectById(obj.mergedWith.linkId);
                             if (childLink && childLink.mergedInto) {
                                 childLink.mergedInto.connectionPoint.x = obj.start.x;
                                 childLink.mergedInto.connectionPoint.y = obj.start.y;
                             }
                         }
                         if (obj.mergedInto) {
-                            const parentLink = editor.objects.find(o => o.id === obj.mergedInto.parentId);
+                            const parentLink = editor.getObjectById(obj.mergedInto.parentId);
                             if (parentLink && parentLink.mergedWith && parentLink.mergedWith.childFreeEnd !== 'start') {
                                 obj.mergedInto.connectionPoint.x = obj.start.x;
                                 obj.mergedInto.connectionPoint.y = obj.start.y;
@@ -323,7 +351,7 @@ window.DrawModule = {
                 
                 // Update end TP if attached to device2
                 if (obj.device2) {
-                const device2 = editor.objects.find(o => o.id === obj.device2);
+                const device2 = editor.getObjectById(obj.device2);
                     if (device2) {
                         let angle = baseAngle !== null ? baseAngle + Math.PI : null; // Opposite direction
                         
@@ -346,7 +374,7 @@ window.DrawModule = {
                                 const connectedDevices = editor.getAllConnectedDevices(obj);
                                 const otherDeviceId = connectedDevices.deviceIds.find(id => id !== obj.device2);
                                 if (otherDeviceId) {
-                                    const otherDevice = editor.objects.find(o => o.id === otherDeviceId);
+                                    const otherDevice = editor.getObjectById(otherDeviceId);
                                     if (otherDevice) {
                                         targetPoint = { x: otherDevice.x, y: otherDevice.y };
                                     }
@@ -405,14 +433,14 @@ window.DrawModule = {
                             obj.mergedWith.connectionPoint.y = obj.end.y;
                             
                             // Also update child's connection point
-                            const childLink = editor.objects.find(o => o.id === obj.mergedWith.linkId);
+                            const childLink = editor.getObjectById(obj.mergedWith.linkId);
                             if (childLink && childLink.mergedInto) {
                                 childLink.mergedInto.connectionPoint.x = obj.end.x;
                                 childLink.mergedInto.connectionPoint.y = obj.end.y;
                             }
                         }
                         if (obj.mergedInto) {
-                            const parentLink = editor.objects.find(o => o.id === obj.mergedInto.parentId);
+                            const parentLink = editor.getObjectById(obj.mergedInto.parentId);
                             if (parentLink && parentLink.mergedWith && parentLink.mergedWith.childFreeEnd !== 'end') {
                                 obj.mergedInto.connectionPoint.x = obj.end.x;
                                 obj.mergedInto.connectionPoint.y = obj.end.y;
@@ -429,6 +457,13 @@ window.DrawModule = {
         editor.objects.forEach(obj => {
             if (obj.type === 'text' && obj.linkId && obj.position) {
                 editor.updateAdjacentTextPosition(obj);
+            } else if (obj.type === 'packet' && obj.linkId && window.PacketMethods) {
+                // Packets attached to a link follow the cable midpoint (or any
+                // cached parametric t) every frame, in the same pre-draw pass
+                // text labels use. This keeps packet chips glued to their
+                // links during pan/zoom/curve changes without storing stale
+                // coordinates in the saved topology JSON.
+                window.PacketMethods.updatePacketPosition(editor, obj);
             }
         });
         
@@ -447,8 +482,11 @@ window.DrawModule = {
             if (layerA !== layerB) {
                 return layerA - layerB; // Lower layers first
             }
-            // Within same layer, maintain type order: shapes < links < devices < text
-            const typeOrder = { 'shape': -1, 'link': 0, 'unbound': 0, 'device': 1, 'text': 2 };
+            // Within same layer, maintain type order: shapes < links < devices < text < packet
+            // Packet chips sit ABOVE everything else within their layer because
+            // they are scenario callouts the reader needs to see on top of the
+            // cable they describe.
+            const typeOrder = { 'shape': -1, 'link': 0, 'unbound': 0, 'device': 1, 'text': 2, 'packet': 3 };
             return (typeOrder[a.type] || 0) - (typeOrder[b.type] || 0);
         });
         
@@ -469,9 +507,20 @@ window.DrawModule = {
                 if (obj.linkId && !editor.showLinkAttachments) {
                     return; // Skip drawing this attached text
                 }
+                if (obj.linkId && obj._interfaceLabel === true && !editor.showLinkTypeLabels) {
+                    return; // Labels toggle controls auto-generated interface TBs
+                }
                 editor.drawText(obj);
             } else if (obj.type === 'shape') {
                 editor.drawShape(obj);
+            } else if (obj.type === 'packet') {
+                // Packet chips: respect the global "show link attachments" toggle so
+                // power users can hide them in one click, the same way text labels
+                // attached to links can be hidden.
+                if (obj.linkId && editor.showLinkAttachments === false) return;
+                if (window.PacketMethods && window.PacketMethods.drawPacket) {
+                    window.PacketMethods.drawPacket(editor, obj);
+                }
             }
         });
         
@@ -1136,6 +1185,57 @@ window.DrawModule = {
             }
         }
         
+        if (Array.isArray(editor._laserTrail) && editor._laserTrail.length > 0) {
+            const trailNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+            const configuredFadeMs = parseInt(editor._laserFadeMs, 10);
+            const fadeMs = Number.isFinite(configuredFadeMs) && configuredFadeMs >= 250 && configuredFadeMs <= 3000 ? configuredFadeMs : 850;
+            const laserColor = /^#[0-9a-fA-F]{6}$/.test(editor._laserColor || '') ? editor._laserColor : '#00B4D8';
+            const laserRgb = {
+                r: parseInt(laserColor.slice(1, 3), 16),
+                g: parseInt(laserColor.slice(3, 5), 16),
+                b: parseInt(laserColor.slice(5, 7), 16)
+            };
+            const laserRgba = (alpha) => `rgba(${laserRgb.r}, ${laserRgb.g}, ${laserRgb.b}, ${alpha})`;
+            editor._laserTrail = editor._laserTrail.filter(point => (trailNow - point.t) < fadeMs);
+
+            if (editor._laserTrail.length > 0) {
+                const ctx = editor.ctx;
+                ctx.save();
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                for (let i = 1; i < editor._laserTrail.length; i++) {
+                    const prev = editor._laserTrail[i - 1];
+                    const point = editor._laserTrail[i];
+                    if (point.breakBefore || prev.strokeId !== point.strokeId) {
+                        continue;
+                    }
+                    const age = trailNow - point.t;
+                    const alpha = Math.max(0, 1 - age / fadeMs);
+                    ctx.strokeStyle = laserRgba(alpha);
+                    ctx.lineWidth = (6 * alpha + 1.5) / editor.zoom;
+                    ctx.shadowColor = laserRgba(0.45 * alpha);
+                    ctx.shadowBlur = 14 / editor.zoom;
+                    ctx.beginPath();
+                    ctx.moveTo(prev.x, prev.y);
+                    ctx.lineTo(point.x, point.y);
+                    ctx.stroke();
+                }
+
+                const head = editor._laserTrail[editor._laserTrail.length - 1];
+                const headAge = trailNow - head.t;
+                const headAlpha = Math.max(0, 1 - headAge / fadeMs);
+                ctx.fillStyle = laserRgba(headAlpha);
+                ctx.shadowColor = laserRgba(0.65 * headAlpha);
+                ctx.shadowBlur = 18 / editor.zoom;
+                ctx.beginPath();
+                ctx.arc(head.x, head.y, 5 / editor.zoom, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+                laserNeedsFade = true;
+            }
+        }
+
         editor.ctx.restore();
         
         // Active topology label removed — shown only in the indicator bar next to minimap
@@ -1163,7 +1263,7 @@ window.DrawModule = {
             }
         });
         
-        if (needsMoreAnimation && !editor._smoothAnimationPending) {
+        if ((needsMoreAnimation || laserNeedsFade) && !editor._smoothAnimationPending) {
             editor._smoothAnimationPending = true;
             requestAnimationFrame(() => {
                 editor._smoothAnimationPending = false;
@@ -1174,6 +1274,11 @@ window.DrawModule = {
         if (editor.minimap && editor.minimap.visible !== false && window.MinimapRender) {
             window.MinimapRender.scheduleRender(editor);
         }
+
+        // Clear per-frame caches once the draw completes so that mutations
+        // between frames are never observed through stale references.
+        editor._frameIdMap = null;
+        if (editor._frameMergedLinks) editor._frameMergedLinks.clear();
     }
     
     // ==================== DEVICE VISUAL STYLES ====================

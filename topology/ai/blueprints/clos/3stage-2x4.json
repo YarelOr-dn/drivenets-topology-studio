@@ -1,0 +1,201 @@
+{
+  "name": "3stage-2x4",
+  "protocol": "clos",
+  "scale": "medium",
+  "summary": "Clos 3-stage DC fabric with 2 spines and 4 leaves. Canonical non-blocking spine-leaf design used by every modern hyperscale DC.",
+  "tags": [
+    "clos",
+    "3-stage",
+    "spine-leaf",
+    "dc-fabric"
+  ],
+  "layout_hint": "clos-3-stage",
+  "objects": [
+    {
+      "id": "fab",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 960,
+      "y": 540,
+      "width": 1500,
+      "height": 540,
+      "fillColor": "#3498db",
+      "fillEnabled": true,
+      "fillOpacity": 0.06,
+      "strokeColor": "#3498db",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 16,
+      "label": "Clos 3-stage (2 spines / 4 leaves)"
+    },
+    {
+      "id": "s1",
+      "type": "device",
+      "label": "Spine-1",
+      "x": 700,
+      "y": 320,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "s2",
+      "type": "device",
+      "label": "Spine-2",
+      "x": 1220,
+      "y": 320,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "l1",
+      "type": "device",
+      "label": "Leaf-1",
+      "x": 460,
+      "y": 720,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "l2",
+      "type": "device",
+      "label": "Leaf-2",
+      "x": 800,
+      "y": 720,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "l3",
+      "type": "device",
+      "label": "Leaf-3",
+      "x": 1140,
+      "y": 720,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "l4",
+      "type": "device",
+      "label": "Leaf-4",
+      "x": 1480,
+      "y": 720,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "u_l1_s1",
+      "type": "link",
+      "device1": "l1",
+      "device2": "s1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP"
+    },
+    {
+      "id": "u_l1_s2",
+      "type": "link",
+      "device1": "l1",
+      "device2": "s2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP"
+    },
+    {
+      "id": "u_l2_s1",
+      "type": "link",
+      "device1": "l2",
+      "device2": "s1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP"
+    },
+    {
+      "id": "u_l2_s2",
+      "type": "link",
+      "device1": "l2",
+      "device2": "s2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP"
+    },
+    {
+      "id": "u_l3_s1",
+      "type": "link",
+      "device1": "l3",
+      "device2": "s1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP"
+    },
+    {
+      "id": "u_l3_s2",
+      "type": "link",
+      "device1": "l3",
+      "device2": "s2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP"
+    },
+    {
+      "id": "u_l4_s1",
+      "type": "link",
+      "device1": "l4",
+      "device2": "s1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP"
+    },
+    {
+      "id": "u_l4_s2",
+      "type": "link",
+      "device1": "l4",
+      "device2": "s2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "Clos 3-stage Fabric (2 spine / 4 leaf)",
+      "x": 960,
+      "y": 140,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_fabric",
+      "type": "text",
+      "text": "Non-blocking 2:1 oversubscription\nEvery leaf has 2 uplinks (one per spine)\nFull-bandwidth server-to-server",
+      "x": 960,
+      "y": 900,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#334155",
+      "borderWidth": 1
+    }
+  ]
+}

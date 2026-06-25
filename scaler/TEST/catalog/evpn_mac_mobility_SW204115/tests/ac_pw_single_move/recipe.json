@@ -1,0 +1,490 @@
+{
+  "id": "TEST_mac_mob_ac_pw_single_move_SW205198",
+  "name": "MAC Mobility | AC <-> PW Single Move (real PE path)",
+  "type": "functional",
+  "feature": "evpn-mac-mobility",
+  "source": "jira:SW-204115 / SW-205198 + passed TEST_mac_mob_basic_SW205160",
+  "jira_key": "SW-205198",
+  "parent_category": "SW-204115",
+  "created": "2026-05-03",
+  "knowledge_revision": "2026-05-03-ac-pw-single-move-from-basic-learning",
+  "infra_required": "dual_pe_shared_rt_inner_vlan_divergence",
+  "default_cleanup_scope": "test_mac",
+  "infra_detail": "Uses the same real, passed topology as TEST_mac_mob_basic_SW205160: PE-4 local untagged AC ge100-18/0/1 and RR-SA-2 remote AC bundle-100.2001, both in EVPN_SI_VPLS_1. The same source MAC is first learned locally on PE-4, then moved to RR-SA-2 so PE-4 sees it via VPLS PW (v>), then moved back to PE-4 local AC (L>). No synthetic Spirent VPLS peer and no guessed VLAN flags are allowed.",
+  "rewrite_rationale": [
+    "The legacy ac_pw recipe uses a synthetic Spirent VPLS peer and MPLS vpls-stream path. That remains valid for the spirent_vpls_cp infrastructure mode, but it is not the next accurate real-topology regression derived from the passed 2026-05-01 run.",
+    "This recipe tests true AC<->PW mobility using the real PE-4 <-> RR-SA-2 service path proven by basic_learning SC01 and SC03.",
+    "Move scenarios explicitly preserve the prior MAC source state before trigger; clearing the MAC before a move would turn the scenario into fresh learning and invalidate the test.",
+    "All Spirent flags are copied from teach-plan-backed expected_traffic entries and revalidated at RUN prerequisite time through strict mcp_dnaas_teach_plan checks."
+  ],
+  "device_requirements": {
+    "type": "any",
+    "features": ["evpn", "bgp-l2vpn-evpn", "seamless-integration", "vpls-pw"],
+    "min_ncp_count": 1
+  },
+  "service_capabilities": {
+    "requires": ["native_evpn_rt", "seamless_integration", "seamless_integration_rt", "real_remote_vpls_pw"],
+    "preferred_instance": "EVPN_SI_VPLS_1",
+    "rationale": "EVPN_SI_VPLS_1 is the passed shared service where PE-4 owns the local AC and RR-SA-2 is the VPLS PW peer. PE-4 must have both native EVPN RT and VPLS-SI RT so Local->PW withdraw and PW->Local advertise can be observed."
+  },
+  "topology_anchor": {
+    "evpn_instance": "EVPN_SI_VPLS_1",
+    "dut": "YOR_CL_PE-4",
+    "dut_short": "PE-4",
+    "dut_loopback": "4.4.4.4",
+    "dut_local_site_id": 4001,
+    "dut_evi_id": 2,
+    "dut_ac": {
+      "interface": "ge100-18/0/1",
+      "encapsulation": "untagged",
+      "port_mode": true,
+      "fabric_vlan": 211,
+      "spirent_ingress_leaf": "DNAAS-LEAF-B14",
+      "spirent_ingress_physical": "ge100-0/0/15.211",
+      "spirent_ingress_bd": "g_yor_v211_CL-TO-STC_Port_mode",
+      "egress_leaf": "DNAAS-LEAF-B10",
+      "egress_leaf_port": "ge100-0/0/4",
+      "egress_leaf_bd": "g_yor_v211_STC-TO-CL_port-mode"
+    },
+    "vpls_pw_peer": {
+      "device": "RR-SA-2",
+      "loopback": "2.2.2.2",
+      "ac_interface": "bundle-100.2001",
+      "encapsulation": "double-tagged",
+      "fabric_vlan": 215,
+      "outer_vlan": 4,
+      "inner_vlan": 3001,
+      "spirent_outer_vlan": 215,
+      "remote_site_id": 2001,
+      "ingress_label_on_pe4": 1032269,
+      "egress_label_on_pe4": 1032335
+    }
+  },
+  "expected_traffic": {
+    "L": {
+      "label": "L> Local AC source on PE-4 untagged port-mode AC",
+      "via_device": "YOR_CL_PE-4",
+      "via_ac": "ge100-18/0/1",
+      "encapsulation": "untagged",
+      "port_mode": true,
+      "fabric_vlan": 211,
+      "src_mac_base": "00:de:ad:00:04:01",
+      "ownership_tag": "[STC-PE-4-211-L-MOVE]",
+      "spirent_flags": ["--no-qinq"],
+      "spirent_forbidden_flags": ["--vlan", "--inner-vlan"],
+      "expected_dut_flag": "L>",
+      "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=211, dut=YOR_CL_PE-4, test_mac={test_mac}) MUST return encap='untagged'",
+      "verification_command_on_dut": "show evpn mac-table mac 00:de:ad:00:04:01 | no-more"
+    },
+    "v": {
+      "label": "v> VPLS PW source via RR-SA-2 AC -> PW -> PE-4",
+      "via_device": "RR-SA-2",
+      "via_ac": "bundle-100.2001",
+      "encapsulation": "double-tagged",
+      "fabric_vlan": 215,
+      "outer_vlan": 4,
+      "inner_vlan": 3001,
+      "spirent_outer_vlan": 215,
+      "src_mac_base": "00:de:ad:00:04:01",
+      "ownership_tag": "[STC-RRSA2-215-i3001-v-MOVE]",
+      "spirent_flags": ["--vlan", "215", "--inner-vlan", "3001"],
+      "spirent_forbidden_flags": [],
+      "expected_dut_flag": "v>",
+      "pw_peer_on_dut": "2.2.2.2",
+      "pw_label_on_dut": 1032269,
+      "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=215, dut=RR-SA-2, test_mac={test_mac}, inner_vlan=3001) MUST return encap='double-tagged'",
+      "verification_command_on_dut": "show evpn mac-table mac 00:de:ad:00:04:01 | no-more",
+      "pw_proof_command": "show evpn instance EVPN_SI_VPLS_1 vpls-pw | no-more"
+    }
+  },
+  "prerequisites": [
+    {
+      "id": "evpn_instance",
+      "check": "evpn_instance_exists",
+      "check_command": "show evpn instance {evpn_name} detail | no-more",
+      "expect_pattern": "EVI ID"
+    },
+    {
+      "id": "pe4_local_ac_present",
+      "check": "ac_interface_in_evpn_instance",
+      "check_command": "show evpn instance {evpn_name} detail | no-more",
+      "expect_pattern": "Associated interfaces.*ge100-18/0/1",
+      "rationale": "Local side of AC<->PW move must be PE-4 ge100-18/0/1, the passed untagged port-mode AC."
+    },
+    {
+      "id": "rrsa2_vpls_pw_installed",
+      "check": "vpls_pw_installed",
+      "check_command": "show evpn instance {evpn_name} vpls-pw | no-more",
+      "expect_pattern": "2.2.2.2.*Installed",
+      "rationale": "PW side of the move must be the real RR-SA-2 PW peer, not a synthetic Spirent VPLS peer."
+    },
+    {
+      "id": "bgp_l2vpn_evpn_established",
+      "check": "bgp_l2vpn_evpn_established",
+      "check_command": "show bgp l2vpn evpn summary | no-more",
+      "expect_pattern": "1.1.1.1.*Established",
+      "rationale": "PW->Local should re-advertise RT-2 after PE-4 relearns locally."
+    },
+    {
+      "id": "spirent_ac_teach_plan_pe4",
+      "check": "mcp_dnaas_teach_plan",
+      "fix_via_mcp": {
+        "tool": "dnos_dnaas_teach_plan",
+        "args": {"vlan": 211, "dut": "YOR_CL_PE-4", "test_mac": "{test_mac}"}
+      },
+      "pass_when": "frame_recipe.recipe_blockers == [] and frame_recipe.encapsulation == 'untagged'",
+      "feeds": "active_test_session.expected_traffic.L"
+    },
+    {
+      "id": "spirent_ac_teach_plan_rrsa2",
+      "check": "mcp_dnaas_teach_plan",
+      "fix_via_mcp": {
+        "tool": "dnos_dnaas_teach_plan",
+        "args": {"vlan": 215, "dut": "RR-SA-2", "test_mac": "{test_mac}", "inner_vlan": 3001}
+      },
+      "pass_when": "frame_recipe.recipe_blockers == [] and frame_recipe.encapsulation == 'double-tagged'",
+      "feeds": "active_test_session.expected_traffic.v"
+    },
+    {
+      "id": "spirent_session_alive",
+      "check": "spirent_session_reachable",
+      "expect": "session 'dn_spirent_main' reservable on port //100.64.3.238/6/13"
+    }
+  ],
+  "show_commands_validated": {
+    "show evpn instance {evpn_name} detail | no-more": "Per-instance detail including ACs, neighbors, counters, and suppression/move counters",
+    "show evpn instance {evpn_name} vpls-pw | no-more": "VPLS PW status; RR-SA-2 peer 2.2.2.2 must be Installed",
+    "show evpn mac-table mac {test_mac} | no-more": "Single MAC global view with source-qualified flags",
+    "show evpn mac-table detail instance {evpn_name} | no-more": "Per-instance MAC table with flags and sequence; detail comes before instance",
+    "show bgp l2vpn evpn route-type 2 | include {test_mac} | no-more": "RT-2 presence/withdraw proof for this MAC",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} mac {test_mac} | no-more": "NCP-level datapath programming for this MAC",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more": "Ghost MAC detection",
+    "show interfaces ge100-18/0/1 | no-more": "PE-4 local AC RX proof during local phases"
+  },
+  "invalid_commands": {
+    "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use 'show evpn mac-table instance {name}'",
+    "show evpn mac-table instance {name} detail": "WRONG order. Use 'show evpn mac-table detail instance {name}'",
+    "show interfaces brief": "DOES NOT EXIST. Use 'show interfaces description' or 'show interfaces <if>'",
+    "show bgp l2vpn evpn mac-address {mac}": "DOES NOT EXIST. Use 'show bgp l2vpn evpn route-type 2 | include {mac}'"
+  },
+  "scenarios": [
+    {
+      "id": "SC01_seed_local_ac",
+      "name": "Seed: PE-4 learns the move MAC locally on its untagged AC",
+      "expected_source_flag": "L>",
+      "test_mac_override": "00:de:ad:00:04:01",
+      "traffic_source_key": "L",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} detail | no-more",
+            "show evpn mac-table mac 00:de:ad:00:04:01 | no-more",
+            "show interfaces ge100-18/0/1 | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "traffic_on_ac1",
+          "method": "spirent_or_manual",
+          "cleanup_scope": "all",
+          "encapsulation": "untagged",
+          "port_mode": true,
+          "spirent_flags_pinned": ["--no-qinq"],
+          "spirent_flags_forbidden": ["--vlan", "--inner-vlan"],
+          "spirent_rate_mbps": 1,
+          "spirent_frame_size": 128,
+          "smoke_poll_timeout_sec": 25,
+          "duration_sec": 5,
+          "ownership_tag": "[STC-PE-4-211-L-MOVE]"
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table mac 00:de:ad:00:04:01 | no-more",
+            "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:04:01 | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} mac 00:de:ad:00:04:01 | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+            "show interfaces ge100-18/0/1 | no-more"
+          ],
+          "expect": {
+            "source_contains": ["L>", "ge100-18/0/1"],
+            "rt2_advertised": true,
+            "check_mac_flags": true,
+            "expected_flag": "L>",
+            "forbidden_flags": ["F", "D", "s", "v>", "B>"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "ac_rx_must_increase": true
+          }
+        }
+      },
+      "step_table": [
+        {
+          "step": 1,
+          "name": "trigger_local_ac",
+          "action": "Start only the PE-4 untagged AC stream using teach-plan-derived untagged flags",
+          "spirent_command": "spirent_tool.py create-stream --protocol l2 --src-mac 00:de:ad:00:04:01 --dst-mac ff:ff:ff:ff:ff:ff --frame-size 128 --rate-mbps 1 --no-qinq --name sc01_pe4_l_move_[STC-PE-4-211-L-MOVE]",
+          "on_fail": "infra_issue -- do not continue to move phases"
+        },
+        {
+          "step": 2,
+          "name": "verify_local_source",
+          "command": "show evpn mac-table mac 00:de:ad:00:04:01 | no-more",
+          "expect_pattern": "L>.*ge100-18/0/1",
+          "on_fail": "BUG_FINDING_GUARD after AC RX proof"
+        }
+      ]
+    },
+    {
+      "id": "SC02_move_local_to_pw",
+      "name": "Move: Local AC -> VPLS PW via RR-SA-2 real AC",
+      "expected_source_flag": "v>",
+      "test_mac_override": "00:de:ad:00:04:01",
+      "traffic_source_key": "v",
+      "remote_pe_device": "RR-SA-2",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac-table mac 00:de:ad:00:04:01 | no-more",
+            "show evpn instance {evpn_name} vpls-pw | no-more",
+            "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:04:01 | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "remote_pe_traffic",
+          "method": "spirent_or_manual",
+          "cleanup_scope": "preserve",
+          "stop_spirent_before_trigger": true,
+          "remote_device": "RR-SA-2",
+          "spirent_flags_pinned": ["--vlan", "215", "--inner-vlan", "3001"],
+          "spirent_flags_forbidden": [],
+          "duration_sec": 8,
+          "rate_mbps": 1,
+          "frame_size": 128,
+          "ownership_tag": "[STC-RRSA2-215-i3001-v-MOVE]",
+          "stream_name": "sc02_move_l_to_v_rrsa2_[STC-RRSA2-215-i3001-v-MOVE]"
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table mac 00:de:ad:00:04:01 | no-more",
+            "show evpn mac-table detail instance {evpn_name} | no-more",
+            "show evpn instance {evpn_name} vpls-pw | no-more",
+            "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:04:01 | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} mac 00:de:ad:00:04:01 | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more"
+          ],
+          "expect": {
+            "source_contains": ["v>", "2.2.2.2"],
+            "previous_source": "L>",
+            "move_direction": "local_to_pw",
+            "rt2_withdrawn": true,
+            "check_mac_flags": true,
+            "expected_flag": "v>",
+            "forbidden_flags": ["F", "D", "L>", "B>"],
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        }
+      },
+      "step_table": [
+        {
+          "step": 1,
+          "name": "preserve_l_source_precondition",
+          "command": "show evpn mac-table mac 00:de:ad:00:04:01 | no-more",
+          "expect_pattern": "L>.*ge100-18/0/1",
+          "on_fail": "abort -- this is a move test; missing previous L source means SC01 did not seed correctly"
+        },
+        {
+          "step": 2,
+          "name": "trigger_rrsa2_ac_same_mac",
+          "action": "Stop PE-4 stream, preserve DUT MAC state, then start RR-SA-2 Q-in-Q 215/3001 stream with the same source MAC",
+          "spirent_command": "spirent_tool.py create-stream --protocol l2 --vlan 215 --inner-vlan 3001 --src-mac 00:de:ad:00:04:01 --dst-mac ff:ff:ff:ff:ff:ff --frame-size 128 --rate-mbps 1 --name sc02_move_l_to_v_rrsa2_[STC-RRSA2-215-i3001-v-MOVE]",
+          "on_fail": "infra_issue -- DNAAS/RR-SA-2 AC did not receive traffic"
+        },
+        {
+          "step": 3,
+          "name": "verify_pw_source",
+          "command": "show evpn mac-table mac 00:de:ad:00:04:01 | no-more",
+          "expect_pattern": "v>.*2.2.2.2",
+          "expect_flags_absent": ["L>", "B>", "F", "D"],
+          "on_fail": "BUG_FINDING_GUARD -- traffic reached RR-SA-2 but PE-4 did not move MAC to PW"
+        },
+        {
+          "step": 4,
+          "name": "verify_rt2_withdrawn",
+          "command": "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:04:01 | no-more",
+          "expect_pattern_absent": "00:de:ad:00:04:01",
+          "on_fail": "BUG_FINDING_GUARD -- Local->PW move did not withdraw RT-2"
+        }
+      ]
+    },
+    {
+      "id": "SC03_move_pw_to_local",
+      "name": "Move: VPLS PW -> Local AC on PE-4",
+      "expected_source_flag": "L>",
+      "test_mac_override": "00:de:ad:00:04:01",
+      "traffic_source_key": "L",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac-table mac 00:de:ad:00:04:01 | no-more",
+            "show evpn instance {evpn_name} vpls-pw | no-more",
+            "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:04:01 | no-more",
+            "show interfaces ge100-18/0/1 | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "traffic_on_ac1",
+          "method": "spirent_or_manual",
+          "cleanup_scope": "preserve",
+          "stop_spirent_before_trigger": true,
+          "encapsulation": "untagged",
+          "port_mode": true,
+          "spirent_flags_pinned": ["--no-qinq"],
+          "spirent_flags_forbidden": ["--vlan", "--inner-vlan"],
+          "spirent_rate_mbps": 1,
+          "spirent_frame_size": 128,
+          "smoke_poll_timeout_sec": 25,
+          "duration_sec": 5,
+          "ownership_tag": "[STC-PE-4-211-L-MOVE]"
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table mac 00:de:ad:00:04:01 | no-more",
+            "show evpn mac-table detail instance {evpn_name} | no-more",
+            "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:04:01 | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} mac 00:de:ad:00:04:01 | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+            "show interfaces ge100-18/0/1 | no-more"
+          ],
+          "expect": {
+            "source_contains": ["L>", "ge100-18/0/1"],
+            "previous_source": "v>",
+            "move_direction": "pw_to_local",
+            "rt2_advertised": true,
+            "check_mac_flags": true,
+            "expected_flag": "L>",
+            "forbidden_flags": ["F", "D", "v>", "B>"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "ac_rx_must_increase": true
+          }
+        }
+      },
+      "step_table": [
+        {
+          "step": 1,
+          "name": "preserve_v_source_precondition",
+          "command": "show evpn mac-table mac 00:de:ad:00:04:01 | no-more",
+          "expect_pattern": "v>.*2.2.2.2",
+          "on_fail": "abort -- this is a move test; missing previous v source means SC02 did not move correctly"
+        },
+        {
+          "step": 2,
+          "name": "trigger_pe4_local_same_mac",
+          "action": "Stop RR-SA-2 stream, preserve DUT MAC state, then start PE-4 untagged local stream with the same source MAC",
+          "spirent_command": "spirent_tool.py create-stream --protocol l2 --src-mac 00:de:ad:00:04:01 --dst-mac ff:ff:ff:ff:ff:ff --frame-size 128 --rate-mbps 1 --no-qinq --name sc03_move_v_to_l_pe4_[STC-PE-4-211-L-MOVE]",
+          "on_fail": "infra_issue -- PE-4 local AC did not receive traffic"
+        },
+        {
+          "step": 3,
+          "name": "verify_local_source_returned",
+          "command": "show evpn mac-table mac 00:de:ad:00:04:01 | no-more",
+          "expect_pattern": "L>.*ge100-18/0/1",
+          "expect_flags_absent": ["v>", "B>", "F", "D"],
+          "on_fail": "BUG_FINDING_GUARD -- traffic reached PE-4 AC but MAC did not move back from PW"
+        },
+        {
+          "step": 4,
+          "name": "verify_rt2_advertised_again",
+          "command": "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:04:01 | no-more",
+          "expect_pattern": "00:de:ad:00:04:01",
+          "on_fail": "BUG_FINDING_GUARD -- PW->Local move did not re-advertise RT-2"
+        }
+      ]
+    }
+  ],
+  "traffic_config": {
+    "rate_mbps": 1,
+    "frame_size": 128,
+    "duration_per_scenario_sec": 5,
+    "note": "Low-rate single-MAC streams isolate source transitions and avoid DNAAS rate noise."
+  },
+  "runtime_parameters": {
+    "evpn_name": {"resolve": "runtime", "from": "recipe.service_capabilities.preferred_instance OR ctx.evpn_name_primary OR --evpn-instance flag"},
+    "test_mac": {"resolve": "per_scenario", "from": "scenario.test_mac_override"},
+    "active_ncc_id": {"resolve": "runtime", "from": "show system"}
+  },
+  "verdict": {
+    "layers": 14,
+    "stop_on_fail": true,
+    "scenario_pass_definition": "SC01 proves initial L> source, SC02 preserves that state and moves to v>, SC03 preserves v> state and moves back to L>. Any failed source-qualified assertion after traffic proof invokes Bug Finding Guard."
+  },
+  "bug_finding_guard": {
+    "enabled": true,
+    "stop_after_first_functional_fail": true,
+    "infrastructure_correct_checklist": [
+      "SC01 starts from a clean MAC and proves PE-4 local AC RX plus L> source.",
+      "SC02 uses cleanup_scope=preserve so Local->PW is a real move, not fresh PW learning.",
+      "SC03 uses cleanup_scope=preserve so PW->Local is a real move, not fresh local learning.",
+      "Spirent streams use only the flags from expected_traffic.L or expected_traffic.v after strict mcp_dnaas_teach_plan prerequisites pass.",
+      "Verifier uses source-qualified DNOS state (L> / v>) and RT-2 presence/absence, not generic Spirent TX counters."
+    ],
+    "invoke_debug_dnos_context": {
+      "feature": "evpn-vpls-si",
+      "epic": "SW-178648",
+      "dp_enabler": "SW-183400",
+      "jira": "SW-205198",
+      "move": "ac_to_pw|pw_to_ac",
+      "expected_sources": ["L>", "v>"]
+    }
+  },
+  "debug_layers": {
+    "enabled": true,
+    "mode": "on_fail",
+    "feature_context": "evpn-vpls-si",
+    "knowledge_bootstrap": [
+      "search-company-knowledge: EVPN VPLS seamless integration HLD component BGP Zebra FIB Manager NCP MAC mobility AC PW",
+      "SW-178648",
+      "SW-183400"
+    ],
+    "trace_plan": [
+      {"layer": "bgpd", "commands": ["show file traces routing_engine/bgpd_traces | include {test_mac} | no-more"]},
+      {"layer": "rib-manager", "commands": ["show file traces routing_engine/rib-manager_traces | include {test_mac} | no-more"]},
+      {"layer": "fib-manager", "commands": ["show file traces routing_engine/fibmgrd_traces | include {test_mac} | no-more"]},
+      {"layer": "ncp_wb_agent", "commands": ["show file ncp 0 traces datapath/wb_agent.evpn | include {test_mac} | no-more"]}
+    ],
+    "bug_evidence": {"save_session_log": true, "invoke_debug_dnos": true}
+  },
+  "counter_commands": [
+    {"label": "mac_count", "command": "show evpn mac-table instance {evpn_name} | no-more", "parser": "count_lines_with_pattern", "pattern": "^(L>|B>|v>|M)", "description": "Total MAC entries in instance"},
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more", "parser": "ghost_mac_count", "description": "Ghost MAC count"},
+    {"label": "fwd_table_count", "command": "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more", "parser": "line_count", "description": "NCP datapath MAC entries"}
+  ],
+  "counter_expectations": [
+    {"label": "ghost_mac_count", "rule": "zero", "description": "No ghost MACs after either move"}
+  ],
+  "event_expectations": [
+    {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "No BGP notifications during AC<->PW moves"},
+    {"event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED", "expect": "absent", "description": "No freeze/suppression event for this clean single-MAC move"}
+  ],
+  "health_checks": {
+    "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager", "neighbour_manager", "wb_agent"],
+    "check_crashes": true,
+    "check_alarms": true
+  },
+  "cleanup_commands": [
+    "unset logging terminal"
+  ],
+  "config_baseline": {
+    "sections": ["network-services evpn", "protocols bgp {asn}"],
+    "full_config": false,
+    "ignore_patterns": ["last-modified", "commit-id"],
+    "must_be_pristine_after_run": true
+  },
+  "traceability": {
+    "source_user_story": "SW-205198",
+    "source_epic": "SW-204115",
+    "linked_epics": ["SW-178648", "SW-183400"],
+    "derived_from_passed_test": "TEST_mac_mob_basic_SW205160",
+    "knowledge_revision": "2026-05-03-ac-pw-single-move-from-basic-learning"
+  }
+}

@@ -15,6 +15,25 @@ Both directories have their own git history and can sync back to their original 
 **NEVER use emojis anywhere in this codebase.** Use SVG icons (defined in `topology/index.html`)
 or text prefixes like `[OK]`, `[WARN]`, `[ERROR]`, `[INFO]`.
 
+## MULTI-USER BY DEFAULT (CRITICAL, 2026-04-20)
+
+**Every new feature, endpoint, state file, or database MUST be per-user from the first commit.**
+
+- No new global JSON / SQLite / in-memory dict. All per-user state lives under
+  `~/.topology_users/<username>/` and is accessed via
+  `user_store.user_data_path(username, "<file>")` -- never hand-roll the path.
+- Mutating endpoints (`POST`/`PUT`/`DELETE`) require JWT auth + role check via
+  `user_store.has_role_or_higher(...)`.
+- New SQLite DBs use the `_open_db()` WAL + `busy_timeout=5000` pattern from
+  `topology/api/auth/user_store.py`.
+- Frontend fetches through `window.TopologyAuth.authFetch(...)`; `localStorage`
+  keys that cache user-specific data are scoped with `_<username>` suffix.
+- Shareable state goes through the existing `shared_domains` / `shared_topologies`
+  tables -- do not invent a new "share" mechanism.
+
+Full doctrine (with audit of pending legacy globals + migration priorities):
+`topology/DEVELOPMENT_GUIDELINES.md` -> "Multi-User is the Default".
+
 ## Key Paths (UNIFIED REPO)
 
 | What | Path |

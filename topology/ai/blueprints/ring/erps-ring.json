@@ -1,0 +1,221 @@
+{
+  "name": "erps-ring",
+  "protocol": "ring",
+  "scale": "medium",
+  "summary": "8-node ERPS (Ethernet Ring Protection Switching) ring with two core-facing gateways. Single RPL blocked during normal operation per G.8032v2.",
+  "tags": [
+    "ring",
+    "erps",
+    "g8032",
+    "metro",
+    "8-node"
+  ],
+  "layout_hint": "ring",
+  "objects": [
+    {
+      "id": "ring",
+      "type": "shape",
+      "shapeType": "ellipse",
+      "x": 960,
+      "y": 540,
+      "width": 900,
+      "height": 640,
+      "fillColor": "#1abc9c",
+      "fillEnabled": true,
+      "fillOpacity": 0.06,
+      "strokeColor": "#1abc9c",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "label": "ERPS Ring (open)"
+    },
+    {
+      "id": "en1",
+      "type": "device",
+      "label": "EN-1",
+      "x": 960.0,
+      "y": 260.0,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6"
+    },
+    {
+      "id": "en2",
+      "type": "device",
+      "label": "EN-2",
+      "x": 1228.700576850888,
+      "y": 342.0101012677667,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "en3",
+      "type": "device",
+      "label": "EN-3",
+      "x": 1340.0,
+      "y": 540.0,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "en4",
+      "type": "device",
+      "label": "EN-4",
+      "x": 1228.700576850888,
+      "y": 737.9898987322333,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "en5",
+      "type": "device",
+      "label": "EN-5",
+      "x": 960.0,
+      "y": 820.0,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6"
+    },
+    {
+      "id": "en6",
+      "type": "device",
+      "label": "EN-6",
+      "x": 691.299423149112,
+      "y": 737.9898987322333,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "en7",
+      "type": "device",
+      "label": "EN-7",
+      "x": 580.0,
+      "y": 540.0,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "en8",
+      "type": "device",
+      "label": "EN-8",
+      "x": 691.2994231491118,
+      "y": 342.0101012677667,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "l_en1_en2",
+      "type": "link",
+      "device1": "en1",
+      "device2": "en2",
+      "color": "#16a085",
+      "style": "solid",
+      "width": 3,
+      "label": "Ring"
+    },
+    {
+      "id": "l_en2_en3",
+      "type": "link",
+      "device1": "en2",
+      "device2": "en3",
+      "color": "#16a085",
+      "style": "solid",
+      "width": 3,
+      "label": "Ring"
+    },
+    {
+      "id": "l_en3_en4",
+      "type": "link",
+      "device1": "en3",
+      "device2": "en4",
+      "color": "#16a085",
+      "style": "solid",
+      "width": 3,
+      "label": "Ring"
+    },
+    {
+      "id": "l_rpl",
+      "type": "link",
+      "device1": "en4",
+      "device2": "en5",
+      "color": "#e74c3c",
+      "style": "dashed",
+      "width": 3,
+      "label": "RPL (blocked)"
+    },
+    {
+      "id": "l_en5_en6",
+      "type": "link",
+      "device1": "en5",
+      "device2": "en6",
+      "color": "#16a085",
+      "style": "solid",
+      "width": 3,
+      "label": "Ring"
+    },
+    {
+      "id": "l_en6_en7",
+      "type": "link",
+      "device1": "en6",
+      "device2": "en7",
+      "color": "#16a085",
+      "style": "solid",
+      "width": 3,
+      "label": "Ring"
+    },
+    {
+      "id": "l_en7_en8",
+      "type": "link",
+      "device1": "en7",
+      "device2": "en8",
+      "color": "#16a085",
+      "style": "solid",
+      "width": 3,
+      "label": "Ring"
+    },
+    {
+      "id": "l_en8_en1",
+      "type": "link",
+      "device1": "en8",
+      "device2": "en1",
+      "color": "#16a085",
+      "style": "solid",
+      "width": 3,
+      "label": "Ring"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "ERPS Ring (8 nodes, 2 gateways)",
+      "x": 960,
+      "y": 120,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_erps",
+      "type": "text",
+      "text": "ITU-T G.8032v2 / MEF-specified\nEN-1 and EN-5 are edge gateways to the core\nRPL blocks normal traffic; R-APS messages\nprotect on failure.",
+      "x": 960,
+      "y": 1020,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#16a085",
+      "borderWidth": 1
+    }
+  ]
+}

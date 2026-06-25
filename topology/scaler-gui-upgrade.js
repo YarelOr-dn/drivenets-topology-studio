@@ -12,6 +12,10 @@
     }
     Object.assign(G, {
         async _checkRunningUpgrades() {
+            if (window.TopologyAuth && typeof window.TopologyAuth.isAuthenticated === 'function'
+                && !window.TopologyAuth.isAuthenticated()) {
+                return;
+            }
             try {
                 const res = await ScalerAPI.getJobs();
                 const allJobs = res.jobs || [];
@@ -58,8 +62,99 @@
                     } catch (_) { localStorage.removeItem('scaler_active_upgrade'); }
                 }
             } catch (_) {}
+
+            // Stuck-upgrade banner: surface devices where the bridge
+            // crashed mid-upgrade and the orphan scanner couldn't auto-
+            // resume (typically because the deploy URLs / system_type /
+            // ncc_id weren't persisted). The Resume Stuck Upgrade panel
+            // lets the operator complete it without SSH'ing manually.
+            try {
+                await this._checkStuckDevices();
+            } catch (_) {}
         },
-        
+
+        async _checkStuckDevices() {
+            try {
+                if (!ScalerAPI || typeof ScalerAPI.getStuckDevices !== 'function') return;
+                const res = await ScalerAPI.getStuckDevices();
+                const stuck = (res && res.stuck_devices) || [];
+                if (stuck.length === 0) {
+                    const banner = document.getElementById('upgrade-stuck-banner');
+                    if (banner) banner.remove();
+                    return;
+                }
+                this._showStuckUpgradeBanner(stuck);
+            } catch (e) {
+                console.warn('[upgrade] stuck-devices check failed:', e?.message || e);
+            }
+        },
+
+        _showStuckUpgradeBanner(stuckDevices) {
+            const self = this;
+            let banner = document.getElementById('upgrade-stuck-banner');
+            if (banner) banner.remove();
+            banner = document.createElement('div');
+            banner.id = 'upgrade-stuck-banner';
+            banner.className = 'upgrade-failed-banner';
+            banner.style.background = '#7a4d00';
+            const devSummary = stuckDevices.map(d => {
+                const missing = (d.missing && d.missing.length)
+                    ? ` (missing: ${d.missing.join(', ')})` : '';
+                return `<span class="upgrade-failed-dev">${self.escapeHtml(d.device_id)}</span>` +
+                       `<span class="upgrade-failed-phase">${self.escapeHtml(missing)}</span>`;
+            }).join(', ');
+            banner.innerHTML = `
+                <div class="upgrade-failed-banner-content">
+                    <span class="upgrade-failed-icon">!</span>
+                    <div class="upgrade-failed-text">
+                        <strong>Stuck upgrade(s) need attention</strong> -- ${devSummary}
+                    </div>
+                    <div class="upgrade-failed-actions">
+                        <button type="button" class="scaler-btn scaler-btn-sm scaler-btn-primary" id="upgrade-stuck-resume">Resume</button>
+                        <button type="button" class="scaler-btn scaler-btn-sm" id="upgrade-stuck-clear">Clear flag</button>
+                        <button type="button" class="scaler-btn scaler-btn-sm" id="upgrade-stuck-dismiss">Dismiss</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(banner);
+            banner.querySelector('#upgrade-stuck-dismiss').addEventListener('click', () => banner.remove());
+            banner.querySelector('#upgrade-stuck-clear').addEventListener('click', async () => {
+                try {
+                    const ids = stuckDevices.map(d => d.device_id);
+                    await ScalerAPI.clearStuckDevices(ids);
+                    self.showNotification(`Cleared stuck-upgrade flag for ${ids.length} device(s)`, 'info');
+                    banner.remove();
+                } catch (e) {
+                    self.showNotification(`Clear failed: ${e?.message || e}`, 'error');
+                }
+            });
+            banner.querySelector('#upgrade-stuck-resume').addEventListener('click', async () => {
+                // Auto-resumable devices are those with no missing fields.
+                const autoResumable = stuckDevices.filter(d => !d.missing || d.missing.length === 0);
+                const needsInput = stuckDevices.filter(d => d.missing && d.missing.length > 0);
+                if (needsInput.length > 0) {
+                    self.showNotification(
+                        `${needsInput.length} device(s) missing fields (${needsInput[0].missing.join(', ')}). ` +
+                        `Open the upgrade wizard, fill in the missing parameters, then retry.`,
+                        'warning', 8000
+                    );
+                }
+                if (autoResumable.length === 0) return;
+                try {
+                    const ids = autoResumable.map(d => d.device_id);
+                    const res = await ScalerAPI.resumeStuckDevices(ids);
+                    const queued = Object.entries(res.results || {})
+                        .filter(([, v]) => v.status === 'queued')
+                        .map(([k]) => k);
+                    self.showNotification(`Recovery queued for ${queued.length} device(s): ${queued.join(', ')}`, 'success');
+                    banner.remove();
+                    setTimeout(() => self._checkRunningUpgrades(), 1500);
+                } catch (e) {
+                    self.showNotification(`Resume failed: ${e?.message || e}`, 'error');
+                }
+            });
+        },
+
         /**
          * Persisted dismiss keys: "jobId:deviceLabel" so the canvas red badge and bottom
          * banner stay cleared after the user dismisses (job watcher skips re-applying).
@@ -287,7 +382,7 @@
             self.WizardController.data._runningBuildCheckedBranch = branch;
             let rb = null;
             try {
-                const url = (ScalerAPI.baseUrl || '') + `/api/operations/image-upgrade/build-status/${encodeURIComponent(branch)}?latest=true&_t=${Date.now()}`;
+                const url = ScalerAPI._api(`/api/operations/image-upgrade/build-status/${encodeURIComponent(branch)}?latest=true&_t=${Date.now()}`);
                 console.log('[UpgradeWiz] Fetching:', url);
                 const resp = await fetch(url, { cache: 'no-store' });
                 console.log('[UpgradeWiz] Response status:', resp.status);
@@ -393,7 +488,18 @@
             };
             inject(0);
         },
-        
+
+        _detectParentBranch(branch) {
+            if (!branch) return null;
+            const featureMatch = branch.match(/^feature\/(dev_v\d+[_\d]*)\/./);
+            if (featureMatch) return featureMatch[1];
+            const bugMatch = branch.match(/^(?:bugfix|hotfix|fix)\/(dev_v\d+[_\d]*)\/./);
+            if (bugMatch) return bugMatch[1];
+            const relMatch = branch.match(/^feature\/(rel_v\d+[_\d]*)\/./);
+            if (relMatch) return relMatch[1];
+            return null;
+        },
+
         async openUpgradeWizard(opts) {
             const options = opts || {};
         
@@ -423,19 +529,62 @@
                     } else {
                         deviceContexts[d.id] = {};
                     }
-                    if (!deviceContexts[d.id].system_type && d.platform) {
-                        const _st = this._sanitizeWizardSystemType(d.platform);
-                        if (_st) deviceContexts[d.id].system_type = _st;
-                    }
+                    // Seed system_type from the canvas device first --
+                    // monitor and prior deploys both write here, so a
+                    // device that the operator never opened in the wizard
+                    // before still gets a pre-fill instead of "sys-type?".
                     if (!deviceContexts[d.id].system_type) {
+                        const _seed = this._sanitizeWizardSystemType(d.platform)
+                            || this._sanitizeWizardSystemType(d._systemType)
+                            || this._sanitizeWizardSystemType(d._deploySystemType)
+                            || '';
+                        if (_seed) deviceContexts[d.id].system_type = _seed;
+                    }
+                    // Non-SSH canvas nodes (e.g. "VRF-A CE", "VRF-A server") are
+                    // illustrative topology labels, not real devices registered
+                    // in the backend. Hitting /api/devices/<name>/context for
+                    // them just returns 404 and pollutes the console. Skip the
+                    // fetch for anything without SSH configured.
+                    if (!deviceContexts[d.id].system_type && (d.hasSSH || d.ssh_host || d.ip)) {
                         const _did = d.id;
                         const _ssh = d.ssh_host || d.ip || '';
+                        // Route through the orchestrator so three open
+                        // wizards (or wizard + monitor + SSH dialog) all
+                        // share a single SSH hit for this device within
+                        // the TTL window.
+                        const _ctxPromise = (typeof window !== 'undefined' && window.DeviceState && typeof window.DeviceState.getContext === 'function')
+                            ? window.DeviceState.getContext(_did, { live: false, sshHost: _ssh })
+                            : ScalerAPI.getDeviceContext(_did, false, _ssh);
                         _ctxFetchPromises.push(
-                            ScalerAPI.getDeviceContext(_did, false, _ssh).then(ctx => {
-                                if (ctx?.system_type) {
+                            _ctxPromise.then(ctx => {
+                                // Accept `deploy_system_type` as a fallback
+                                // when `system_type` came back empty -- this
+                                // is the post-`request system delete` shape
+                                // (operational.json reads "N/A" but the
+                                // backend's resolver still has the chassis
+                                // type from devices.json or a config
+                                // backup). User report 2026-04-24:
+                                // RR-SA-2 was painting red after delete
+                                // even though the type was recoverable.
+                                const _rawSt = ctx?.system_type || ctx?.deploy_system_type || '';
+                                if (_rawSt) {
                                     const merged = { ...deviceContexts[_did], ...ctx, _fetchedAt: Date.now() };
-                                    const cleanSt = this._sanitizeWizardSystemType(merged.system_type);
+                                    const cleanSt = this._sanitizeWizardSystemType(_rawSt);
                                     merged.system_type = cleanSt || '';
+                                    if (ctx?.deploy_system_type) merged.deploy_system_type = ctx.deploy_system_type;
+                                    deviceContexts[_did] = merged;
+                                    this._deviceContexts[_did] = deviceContexts[_did];
+                                } else if (ctx) {
+                                    // Even when system_type was unresolvable
+                                    // we still want to merge the rest of
+                                    // the context (mode, stack hints, NCC
+                                    // info). Without this branch the wizard
+                                    // would lose every other field too.
+                                    const merged = { ...deviceContexts[_did], ...ctx, _fetchedAt: Date.now() };
+                                    delete merged.system_type;
+                                    if (deviceContexts[_did].system_type) {
+                                        merged.system_type = deviceContexts[_did].system_type;
+                                    }
                                     deviceContexts[_did] = merged;
                                     this._deviceContexts[_did] = deviceContexts[_did];
                                 }
@@ -462,7 +611,12 @@
         
                 const _bgStatusFetch = ScalerAPI.getUpgradeDeviceStatus(allIds, allSshHosts, true).then(cachedResult => {
                     const cachedDevices = cachedResult.devices || {};
-                    const _giLike = ['GI', 'BASEOS_SHELL', 'UPGRADING', 'DEPLOYING', 'ONIE'];
+                    // Transient states only: these indicate the device is in the middle of an
+                    // operation, so a stable canvas DNOS may be more accurate. Clean "GI" from
+                    // operational.json, however, is an authoritative classification (already
+                    // written by the backend from device_state) and must NOT be overridden --
+                    // that was the bug where PE-4 displayed DNOS while actually in GI.
+                    const _transientStates = ['BASEOS_SHELL', 'UPGRADING', 'DEPLOYING', 'ONIE'];
                     let changed = false;
                     for (const [did, st] of Object.entries(cachedDevices)) {
                         const dev = devices.find(x => x.id === did);
@@ -472,11 +626,15 @@
                             changed = true;
                         } else {
                             if (st.install_status !== undefined) { deviceStatus[did].install_status = st.install_status; changed = true; }
-                            if (st.mode && !_giLike.includes((st.mode || '').toUpperCase())) {
+                            // Accept any non-transient backend mode (including GI) -- operational.json
+                            // is authoritative for stable states.
+                            if (st.mode && !_transientStates.includes((st.mode || '').toUpperCase())) {
                                 deviceStatus[did].mode = st.mode; changed = true;
                             }
                         }
-                        if (canvasMode === 'DNOS' && _giLike.includes((deviceStatus[did]?.mode || '').toUpperCase())) {
+                        // Only preserve canvas DNOS when the backend cache is in a transient state
+                        // (mid-upgrade, shell, etc.). A stable GI from operational.json wins.
+                        if (canvasMode === 'DNOS' && _transientStates.includes((deviceStatus[did]?.mode || '').toUpperCase())) {
                             deviceStatus[did].mode = 'DNOS'; changed = true;
                         }
                     }
@@ -518,6 +676,211 @@
                 const formatAge = (h) => this._formatUpgradeAge(h);
                 const devicesWithSsh = devices.filter(d => d.hasSSH);
                 const devicesNoSsh = devices.filter(d => !d.hasSSH);
+                const RECENT_SOURCES_LIMIT = 12;
+                const LEGACY_LAST_BRANCHES_KEY = 'scaler_upgrade_last_branches';
+                const _recentSourceUsername = () => {
+                    try {
+                        const auth = window.TopologyAuth;
+                        const u = auth && auth.getCurrentUser && auth.getCurrentUser();
+                        const username = u && u.username ? String(u.username).trim() : '';
+                        return username ? username.replace(/[^A-Za-z0-9_.@-]/g, '_') : 'anon';
+                    } catch (_) {
+                        return 'anon';
+                    }
+                };
+                const _recentSourcesKey = () => `scaler_upgrade_recent_sources_${_recentSourceUsername()}`;
+                const _decodeRecentText = (value) => {
+                    let result = String(value || '');
+                    for (let i = 0; i < 5 && result.includes('%'); i++) {
+                        try {
+                            const decoded = decodeURIComponent(result);
+                            if (decoded === result) break;
+                            result = decoded;
+                        } catch (_) {
+                            break;
+                        }
+                    }
+                    return result;
+                };
+                const _normalizeBranch = (value) => {
+                    const raw = String(value || '').trim();
+                    if (!raw) return '';
+                    if (!raw.startsWith('http')) return raw;
+                    const classicM = raw.match(/\/job\/[^/]+\/job\/[^/]+\/job\/([^/]+)/);
+                    const blueM = raw.match(/\/detail\/([^/]+)(?:\/(\d+))?/);
+                    const branch = (classicM && classicM[1]) || (blueM && blueM[1]) || '';
+                    return branch ? _decodeRecentText(branch) : raw;
+                };
+                const _normalizeSourceUrl = (value) => {
+                    const raw = String(value || '').trim();
+                    if (!raw) return '';
+                    try {
+                        const parsed = new URL(raw);
+                        parsed.hash = '';
+                        parsed.searchParams.sort();
+                        return parsed.toString().replace(/\/$/, '');
+                    } catch (_) {
+                        return raw.replace(/\/$/, '');
+                    }
+                };
+                const _shortRecentText = (value, maxLen = 48) => {
+                    const text = _decodeRecentText(value || '');
+                    if (text.length <= maxLen) return text;
+                    return '...' + text.slice(-(maxLen - 3));
+                };
+                const _fileNameFromUrl = (url) => {
+                    try {
+                        const u = new URL(url);
+                        const last = u.pathname.split('/').filter(Boolean).pop() || u.hostname;
+                        return _decodeRecentText(last);
+                    } catch (_) {
+                        const parts = String(url || '').split('/').filter(Boolean);
+                        return _decodeRecentText(parts.pop() || url || '');
+                    }
+                };
+                const _componentListFromEntry = (entry) => {
+                    if (Array.isArray(entry.components) && entry.components.length) return entry.components;
+                    const build = entry.selectedBuild || {};
+                    const out = [];
+                    if (entry.dnosUrl || build.dnos_url) out.push('DNOS');
+                    if (entry.giUrl || build.gi_url) out.push('GI');
+                    if (entry.baseosUrl || build.baseos_url) out.push('BaseOS');
+                    return out;
+                };
+                const _recentEntryKey = (entry) => {
+                    const type = entry?.type || 'branch';
+                    if (type === 'url') return `url:${_normalizeSourceUrl(entry.url || entry.branch || '')}`;
+                    if (type === 'directUrls') {
+                        return `direct:${[entry.dnosUrl || '', entry.giUrl || '', entry.baseosUrl || ''].map(v => String(v).trim()).join('|')}`;
+                    }
+                    return `branch:${_normalizeBranch(entry.branch || entry.name || '')}`;
+                };
+                const _normalizeRecentEntry = (entry) => {
+                    if (!entry) return null;
+                    if (typeof entry === 'string') {
+                        const branch = _normalizeBranch(entry);
+                        if (!branch) return null;
+                        return { type: 'branch', branch, updatedAt: 0 };
+                    }
+                    const type = entry.type === 'manual' || entry.type === 'url' || entry.type === 'directUrls'
+                        ? entry.type
+                        : 'branch';
+                    const now = Date.now();
+                    if (type === 'url') {
+                        const url = _normalizeSourceUrl(entry.url || entry._sourceUrl || entry.branch || '');
+                        if (!url) return null;
+                        const selectedBuild = entry.selectedBuild ? {
+                            ...entry.selectedBuild,
+                            dnos_url: entry.selectedBuild.dnos_url || entry.dnosUrl || '',
+                            gi_url: entry.selectedBuild.gi_url || entry.giUrl || '',
+                            baseos_url: entry.selectedBuild.baseos_url || entry.baseosUrl || '',
+                        } : null;
+                        return {
+                            type,
+                            url,
+                            branch: _normalizeBranch(entry.branch || '') || '',
+                            buildNumber: entry.buildNumber || selectedBuild?.build_number || entry._resolvedBuildNumber || '',
+                            displayName: entry.displayName || entry.name || '',
+                            dnosUrl: entry.dnosUrl || selectedBuild?.dnos_url || '',
+                            giUrl: entry.giUrl || selectedBuild?.gi_url || '',
+                            baseosUrl: entry.baseosUrl || selectedBuild?.baseos_url || '',
+                            selectedBuild,
+                            isExpired: !!(entry.isExpired || entry.is_expired || selectedBuild?.is_expired),
+                            isDraft: !!(entry.isDraft || entry.draft || entry.pending || !selectedBuild),
+                            status: entry.status || (selectedBuild ? 'resolved' : 'pending'),
+                            ageHours: entry.ageHours ?? entry.age_hours ?? selectedBuild?.age_hours,
+                            components: entry.components || [],
+                            updatedAt: Number(entry.updatedAt || entry.at || now),
+                        };
+                    }
+                    if (type === 'directUrls') {
+                        const dnosUrl = String(entry.dnosUrl || entry.dnos_url || '').trim();
+                        const giUrl = String(entry.giUrl || entry.gi_url || '').trim();
+                        const baseosUrl = String(entry.baseosUrl || entry.baseos_url || '').trim();
+                        if (!dnosUrl && !giUrl && !baseosUrl) return null;
+                        const selectedBuild = {
+                            build_number: 'direct',
+                            dnos_url: dnosUrl,
+                            gi_url: giUrl,
+                            baseos_url: baseosUrl,
+                            has_dnos: !!dnosUrl,
+                            has_gi: !!giUrl,
+                            has_baseos: !!baseosUrl,
+                            _urlsVerified: true,
+                        };
+                        return {
+                            type,
+                            dnosUrl,
+                            giUrl,
+                            baseosUrl,
+                            selectedBuild,
+                            displayName: entry.displayName || _fileNameFromUrl(dnosUrl || giUrl || baseosUrl),
+                            components: entry.components || [],
+                            updatedAt: Number(entry.updatedAt || entry.at || now),
+                        };
+                    }
+                    const branch = _normalizeBranch(entry.branch || entry.name || '');
+                    if (!branch) return null;
+                    return {
+                        type,
+                        branch,
+                        displayName: entry.displayName || '',
+                        updatedAt: Number(entry.updatedAt || entry.at || now),
+                    };
+                };
+                const _loadRecentSources = () => {
+                    const seen = new Set();
+                    const out = [];
+                    const push = (entry) => {
+                        const normalized = _normalizeRecentEntry(entry);
+                        if (!normalized) return;
+                        const key = _recentEntryKey(normalized);
+                        if (!key || seen.has(key)) return;
+                        seen.add(key);
+                        out.push(normalized);
+                    };
+                    try {
+                        const raw = localStorage.getItem(_recentSourcesKey());
+                        const arr = raw ? JSON.parse(raw) : [];
+                        if (Array.isArray(arr)) arr.forEach(push);
+                    } catch (_) {}
+                    try {
+                        const legacy = JSON.parse(localStorage.getItem(LEGACY_LAST_BRANCHES_KEY) || '[]');
+                        if (Array.isArray(legacy)) legacy.forEach(push);
+                    } catch (_) {}
+                    out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+                    return out.slice(0, RECENT_SOURCES_LIMIT);
+                };
+                const _saveRecentSources = (entries) => {
+                    try {
+                        localStorage.setItem(_recentSourcesKey(), JSON.stringify((entries || []).slice(0, RECENT_SOURCES_LIMIT)));
+                    } catch (_) {}
+                };
+                const _branchRecentNames = (entries) => {
+                    const seen = new Set();
+                    return (entries || [])
+                        .filter(e => (e.type === 'branch' || e.type === 'manual') && e.branch)
+                        .map(e => e.branch)
+                        .filter(b => {
+                            if (seen.has(b)) return false;
+                            seen.add(b);
+                            return true;
+                        });
+                };
+                const _recordRecentSource = (entry) => {
+                    const normalized = _normalizeRecentEntry({ ...entry, updatedAt: Date.now() });
+                    if (!normalized) return _loadRecentSources();
+                    const key = _recentEntryKey(normalized);
+                    const entries = _loadRecentSources().filter(e => _recentEntryKey(e) !== key);
+                    entries.unshift(normalized);
+                    _saveRecentSources(entries);
+                    if (self.WizardController?.data) {
+                        self.WizardController.data._recentSources = entries.slice(0, RECENT_SOURCES_LIMIT);
+                        self.WizardController.data._lastUsedBranches = _branchRecentNames(entries);
+                    }
+                    return entries;
+                };
+                const _saveLastUsed = (branch, type = 'branch') => _recordRecentSource({ type, branch });
                 this.WizardController.init({
                     panelName: 'upgrade-wizard',
                     quickNavKey: 'upgrade',
@@ -574,16 +937,24 @@
                             const monitorStack = d._stackData?.components || [];
                             const ctxStack = Array.isArray(ctx.stack) ? ctx.stack : [];
                             const parsed = self._parseStackVersions(monitorStack.length ? monitorStack : ctxStack);
-                            const mode = d._deviceMode || st.mode || ctx.mode || '';
+                            // Prefer live backend status (st.mode -- refreshed by Phase 2 live SSH)
+                            // over the canvas monitor cache (d._deviceMode), which can lag behind
+                            // when a device reboots into GI/BaseOS. Phase 2 is authoritative.
+                            const mode = st.mode || d._deviceMode || ctx.mode || '';
                             const modeUpper = (mode || '').toUpperCase();
                             const isGiLike = _giLikeModes.includes(modeUpper);
-                            const dnos = isGiLike ? '--' : (st.dnos_ver || parsed.dnos);
-                            const gi = isGiLike ? '--' : (st.gi_ver || parsed.gi);
-                            const baseos = isGiLike ? '--' : (st.baseos_ver || parsed.baseos);
+                            // Ghost-IP: backend identity guard caught us landing on a
+                            // different device at the stored mgmt IP. Suppress all
+                            // "version/status" fields -- they belong to a stranger.
+                            const isGhostIp = modeUpper === 'GHOST-IP';
+                            const dnos = (isGiLike || isGhostIp) ? '--' : (st.dnos_ver || parsed.dnos);
+                            const gi = (isGiLike || isGhostIp) ? '--' : (st.gi_ver || parsed.gi);
+                            const baseos = (isGiLike || isGhostIp) ? '--' : (st.baseos_ver || parsed.baseos);
+                            const _badgeCls = isGhostIp ? 'ghost-ip' : mode.toLowerCase();
                             const modeBadge = mode
-                                ? `<span class="upgrade-mode-badge upgrade-mode-${mode.toLowerCase()}">${mode}</span>`
+                                ? `<span class="upgrade-mode-badge upgrade-mode-${_badgeCls}">${mode}</span>`
                                 : '<span class="upgrade-mode-badge upgrade-mode-loading">...</span>';
-                            const _isEmptyStack = isGiLike || (monitorStack.length === 0 && ctxStack.length === 0
+                            const _isEmptyStack = isGiLike || isGhostIp || (monitorStack.length === 0 && ctxStack.length === 0
                                 && dnos === '--' && gi === '--' && baseos === '--');
                             const _isUpgrading = !!(d._upgradeInProgress || d._activeUpgradeJob);
                             const shortVer = (v) => {
@@ -594,15 +965,25 @@
                             const verCell = (v) => `<td class="upgrade-stack-ver" title="${(v || '--').replace(/"/g, '&quot;')}">${shortVer(v)}</td>`;
                             const hostname = d.hostname || d.id;
                             const installStatus = st.install_status || '';
-                            const statusText = isGiLike
-                                ? (modeUpper === 'DEPLOYING' ? 'Deploying...' : `${mode} mode`)
-                                : installStatus;
+                            let statusText;
+                            if (isGhostIp) {
+                                statusText = installStatus || 'Ghost IP: stored mgmt IP now belongs to another device';
+                            } else if (isGiLike) {
+                                statusText = (modeUpper === 'DEPLOYING' ? 'Deploying...' : `${mode} mode`);
+                            } else {
+                                statusText = installStatus;
+                            }
                             const statusCell = hasStatus
                                 ? `<td class="upgrade-stack-status">${statusText ? self.escapeHtml(statusText) : '--'}</td>`
                                 : '';
                             if (_isEmptyStack) {
-                                const emptyMsg = _isUpgrading ? 'Upgrading...' : (isGiLike ? `${mode || 'GI'} -- no DNOS stack` : `Empty stack (${mode || 'unknown'})`);
-                                return `<tr style="opacity:0.6"><td class="upgrade-stack-device">${hostname}</td><td>${modeBadge}</td><td colspan="3" style="text-align:center;font-style:italic;color:var(--dn-orange,#e67e22)">${emptyMsg}</td>${statusCell}</tr>`;
+                                const emptyMsg = _isUpgrading
+                                    ? 'Upgrading...'
+                                    : (isGhostIp
+                                        ? 'IP answers as a different device'
+                                        : (isGiLike ? `${mode || 'GI'} -- no DNOS stack` : `Empty stack (${mode || 'unknown'})`));
+                                const emptyColor = isGhostIp ? 'var(--dn-danger, #e74c3c)' : 'var(--dn-orange,#e67e22)';
+                                return `<tr style="opacity:0.6"><td class="upgrade-stack-device">${hostname}</td><td>${modeBadge}</td><td colspan="3" style="text-align:center;font-style:italic;color:${emptyColor}">${emptyMsg}</td>${statusCell}</tr>`;
                             }
                             return `<tr><td class="upgrade-stack-device">${hostname}</td><td>${modeBadge}</td>${verCell(dnos)}${verCell(gi)}${verCell(baseos)}${statusCell}</tr>`;
                         }).join('');
@@ -661,10 +1042,14 @@
                                     const baseos = st.baseos_ver || parsed.baseos;
                                     const ctxDevState = (ctx.device_state || '').toUpperCase();
                                     const monitorMode = d._deviceMode || '';
-                                    const mode = monitorMode || st.mode || ctx.mode || self._classifyDeviceState(ctxDevState);
+                                    // Backend status (st.mode) wins -- the canvas monitor cache can
+                                    // be stale for minutes after a GI/BaseOS transition. Phase 2
+                                    // live SSH populates st.mode authoritatively.
+                                    const mode = st.mode || monitorMode || ctx.mode || self._classifyDeviceState(ctxDevState);
                                     const checked = (data.selectedDeviceIds || []).includes(d.id) ? 'checked' : '';
+                                    const _badgeCls = ((mode || '').toUpperCase() === 'GHOST-IP') ? 'ghost-ip' : (mode || '').toLowerCase();
                                     const modeBadge = mode
-                                        ? `<span class="upgrade-mode-badge upgrade-mode-${mode.toLowerCase()}">${mode}</span>`
+                                        ? `<span class="upgrade-mode-badge upgrade-mode-${_badgeCls}">${mode}</span>`
                                         : '';
                                     const dnosBadge = mode
                                         ? ''
@@ -791,6 +1176,9 @@
                             render: (data) => {
                                 const st = data.sourceType || 'browse';
                                 const branch = data.branch || '';
+                                const recentSources = Array.isArray(data._recentSources) ? data._recentSources : _loadRecentSources();
+                                data._recentSources = recentSources;
+                                data._lastUsedBranches = _branchRecentNames(recentSources);
                                 const lastUsed = data._lastUsedBranches || [];
                                 const bbt = data._branchesByType || {};
                                 const hasBranches = (bbt.dev?.length || bbt.release?.length || bbt.feature?.length);
@@ -817,20 +1205,53 @@
                                 const _colState = data._sectionCollapsed || {};
                                 const _sums = data._branchSummaries || {};
                                 const _fmtAge = (h) => { if (!h && h !== 0) return '--'; if (h < 1) return `${Math.round(h*60)}m`; if (h < 24) return `${Math.round(h)}h`; return `${(h/24).toFixed(1)}d`; };
+                                const _fmtSeen = (ts) => {
+                                    if (!ts) return '--';
+                                    const ageMs = Math.max(0, Date.now() - Number(ts));
+                                    const mins = Math.round(ageMs / 60000);
+                                    if (mins < 1) return 'now';
+                                    if (mins < 60) return `${mins}m ago`;
+                                    const hrs = Math.round(mins / 60);
+                                    if (hrs < 24) return `${hrs}h ago`;
+                                    return `${Math.round(hrs / 24)}d ago`;
+                                };
+                                const _typeBadge = (type) => {
+                                    const label = type === 'manual' ? 'Manual' : (type === 'url' ? 'URL' : (type === 'directUrls' ? 'Direct' : 'Branch'));
+                                    return `<span class="upgrade-build-count" style="font-size:10px;padding:1px 6px;margin-right:6px">${label}</span>`;
+                                };
+                                const _componentsHtml = (entry) => {
+                                    const comps = _componentListFromEntry(entry);
+                                    const text = comps.length ? comps.join(' / ') : '--';
+                                    const expired = entry.isExpired || entry.selectedBuild?.is_expired;
+                                    const cls = expired ? 'upgrade-build-fail' : (comps.length ? 'upgrade-build-ok' : '');
+                                    const suffix = expired ? ' | Expired' : '';
+                                    return cls ? `<span class="${cls}">${self.escapeHtml(text + suffix)}</span>` : self.escapeHtml(text);
+                                };
                                 const renderRecentRows = () => {
-                                    if (!lastUsed.length) return '';
-                                    const rows = lastUsed.map(b => {
-                                        const n = typeof b === 'string' ? b : (b.name || b);
-                                        const display = _decodeBranch(n);
-                                        const short = display.length > 50 ? '...' + display.slice(-45) : display;
-                                        const sel = data.branch === n ? ' upgrade-recent-row--active' : '';
-                                        const sum = _sums[n];
-                                        const isLoading = !sum;
+                                    if (!recentSources.length) return '';
+                                    const rows = recentSources.map((entry, idx) => {
+                                        const type = entry.type || 'branch';
+                                        const isBranchLike = type === 'branch' || type === 'manual';
+                                        const n = _normalizeBranch(entry.branch || entry.name || '');
+                                        const display = isBranchLike
+                                            ? _decodeBranch(n)
+                                            : (entry.displayName || entry.branch || entry.url || _fileNameFromUrl(entry.dnosUrl || entry.giUrl || entry.baseosUrl || ''));
+                                        const short = _shortRecentText(display, 54);
+                                        const activeBranch = isBranchLike && data.branch === n;
+                                        const activeUrl = type === 'url' && data._sourceUrl && _normalizeSourceUrl(data._sourceUrl) === entry.url;
+                                        const sel = (activeBranch || activeUrl) ? ' upgrade-recent-row--active' : '';
+                                        const sum = isBranchLike ? _sums[n] : null;
                                         let buildCell = '<span class="upgrade-recent-loading">...</span>';
                                         let validCell = '<span class="upgrade-recent-loading">...</span>';
                                         let ageCell = '';
                                         let rowDimClass = '';
-                                        if (sum) {
+                                        if (!isBranchLike) {
+                                            const buildNum = entry.buildNumber || entry.selectedBuild?.build_number || '';
+                                            buildCell = buildNum ? `<span class="upgrade-recent-build">#${self.escapeHtml(String(buildNum))}</span>` : `<span class="upgrade-build-warn">${entry.isDraft || entry.status === 'pending' ? 'Pending' : 'Saved source'}</span>`;
+                                            validCell = _componentsHtml(entry);
+                                            ageCell = _fmtSeen(entry.updatedAt);
+                                            if (entry.isExpired || entry.selectedBuild?.is_expired) rowDimClass = ' upgrade-recent-row--expired';
+                                        } else if (sum) {
                                             if (sum.latest) {
                                                 const ok = sum.latest.result === 'SUCCESS';
                                                 const building = sum.latest.result === 'BUILDING';
@@ -860,8 +1281,9 @@
                                                 rowDimClass = ' upgrade-recent-row--dim';
                                             }
                                         }
-                                        return `<tr class="upgrade-recent-row${sel}${rowDimClass}" data-branch="${self.escapeHtml(n)}">
-                                            <td class="upgrade-recent-name" title="${self.escapeHtml(n)}">${self.escapeHtml(short)}</td>
+                                        const title = isBranchLike ? n : (entry.url || entry.dnosUrl || entry.displayName || display);
+                                        return `<tr class="upgrade-recent-row${sel}${rowDimClass}" data-recent-index="${idx}">
+                                            <td class="upgrade-recent-name" title="${self.escapeHtml(title)}">${_typeBadge(type)}${self.escapeHtml(short)}</td>
                                             <td class="upgrade-recent-build-cell">${buildCell}</td>
                                             <td class="upgrade-recent-valid-cell">${validCell}</td>
                                             <td class="upgrade-recent-age-cell">${ageCell}</td>
@@ -869,18 +1291,21 @@
                                     }).join('');
                                     const sumsLoaded = Object.keys(_sums).length > 0;
                                     const validCount = sumsLoaded ? lastUsed.filter(b => { const s = _sums[typeof b === 'string' ? b : (b.name || b)]; return s && s.valid > 0; }).length : -1;
+                                    const typedCount = recentSources.filter(e => e.type && e.type !== 'branch').length;
                                     const countLabel = validCount >= 0
-                                        ? `<span class="upgrade-section-count">${lastUsed.length}</span>${validCount > 0 ? ` <span class="upgrade-build-ok" style="font-size:0.8em;margin-left:4px">${validCount} with images</span>` : ` <span class="upgrade-build-fail" style="font-size:0.8em;margin-left:4px">all expired</span>`}`
-                                        : `<span class="upgrade-section-count">${lastUsed.length}</span>`;
+                                        ? `<span class="upgrade-section-count">${recentSources.length}</span>${validCount > 0 ? ` <span class="upgrade-build-ok" style="font-size:0.8em;margin-left:4px">${validCount} branches with images</span>` : ''}${typedCount ? ` <span style="font-size:0.8em;margin-left:4px;opacity:0.75">${typedCount} saved inputs</span>` : ''}`
+                                        : `<span class="upgrade-section-count">${recentSources.length}</span>${typedCount ? ` <span style="font-size:0.8em;margin-left:4px;opacity:0.75">${typedCount} saved inputs</span>` : ''}`;
+                                    const _refreshing = data._branchSummariesRefreshing;
                                     return `<div class="upgrade-branch-group upgrade-branch-group--recent">
                                         <div class="upgrade-section-header" data-collapsible="lastused">
                                             <span class="upgrade-section-icon">${_colState.lastused ? '\u25B6' : '\u25BC'}</span>
-                                            <span class="upgrade-section-label">Recent Branches</span>
+                                            <span class="upgrade-section-label">Recent Activity</span>
                                             ${countLabel}
+                                            <button class="scaler-btn scaler-btn-sm" id="upgrade-refresh-recents" title="Refresh build status for recent branch/manual rows" style="margin-left:8px;font-size:10px;padding:2px 8px;opacity:${_refreshing || !lastUsed.length ? '0.5' : '0.75'}" ${_refreshing || !lastUsed.length ? 'disabled' : ''}>${_refreshing ? 'Refreshing...' : 'Refresh'}</button>
                                         </div>
                                         <div class="upgrade-recent-table-wrap" id="upgrade-chips-lastused" ${_colState.lastused ? 'style="display:none"' : ''}>
                                             <table class="upgrade-recent-table"><thead><tr>
-                                                <th>Branch</th><th>Latest Build</th><th>Images</th><th>Age</th>
+                                                <th>Source</th><th>Build / Name</th><th>Images</th><th>Age / Seen</th>
                                             </tr></thead><tbody>${rows}</tbody></table>
                                         </div>
                                     </div>`;
@@ -900,9 +1325,9 @@
                                         <button type="button" class="upgrade-source-tab${st === 'url' ? ' active' : ''}" data-src="url">URL</button>
                                         <button type="button" class="upgrade-source-tab${st === 'directUrls' ? ' active' : ''}" data-src="directUrls">Direct Images</button>
                                     </div>
+                                    ${renderRecentRows()}
                                     <div class="upgrade-source-body">
                                         <div id="upgrade-src-browse" class="upgrade-src-pane" style="display:${st === 'browse' ? 'block' : 'none'}">
-                                            ${renderRecentRows()}
                                             ${hasBranches ? (() => {
                                                 let html = '';
                                                 if (bbt.release?.length) html += `<div class="upgrade-branch-group">${renderSectionHeader('release', 'Release', bbt.release.length)}<div class="upgrade-chip-grid${_colState.release !== false ? ' upgrade-chips-collapsed' : ''}" id="upgrade-chips-release">${renderBranchChips(bbt.release, 'release')}</div></div>`;
@@ -922,7 +1347,7 @@
                                         <div id="upgrade-src-url" class="upgrade-src-pane" style="display:${st === 'url' ? 'block' : 'none'}">
                                             <div class="scaler-form-group">
                                                 <label>Jenkins Build URL</label>
-                                                <input type="text" id="upgrade-jenkins-url" class="scaler-input" placeholder="Paste Jenkins build URL">
+                                                <input type="text" id="upgrade-jenkins-url" class="scaler-input" placeholder="Paste Jenkins build URL" value="${self.escapeHtml(data._sourceUrl || (st === 'url' && branch.startsWith('http') ? branch : ''))}">
                                             </div>
                                         </div>
                                         <div id="upgrade-src-directUrls" class="upgrade-src-pane" style="display:${st === 'directUrls' ? 'block' : 'none'}">
@@ -937,49 +1362,9 @@
                                 </div>`;
                             },
                             afterRender: async (data) => {
-                                const LAST_USED_KEY = 'scaler_upgrade_last_branches';
-                                const _normalizeBranch = (val) => {
-                                    if (!val) return '';
-                                    if (!val.startsWith('http')) return val;
-                                    const classicM = val.match(/\/job\/[^/]+\/job\/[^/]+\/job\/([^/]+)/);
-                                    const blueM = val.match(/\/detail\/([^/]+)(?:\/(\d+))?/);
-                                    const raw = (classicM && classicM[1]) || (blueM && blueM[1]) || '';
-                                    if (!raw) return val;
-                                    let decoded = raw;
-                                    for (let i = 0; i < 5; i++) {
-                                        try { const next = decodeURIComponent(decoded); if (next === decoded) break; decoded = next; } catch (_) { break; }
-                                    }
-                                    return decoded;
-                                };
-                                const _loadLastUsed = () => {
-                                    try {
-                                        const raw = localStorage.getItem(LAST_USED_KEY);
-                                        if (!raw) return [];
-                                        const arr = JSON.parse(raw);
-                                        const normalized = arr.map(b => _normalizeBranch(b)).filter(Boolean);
-                                        const deduped = [...new Set(normalized)];
-                                        if (deduped.length !== arr.length || deduped.some((v, i) => v !== arr[i])) {
-                                            localStorage.setItem(LAST_USED_KEY, JSON.stringify(deduped.slice(0, 10)));
-                                        }
-                                        return deduped;
-                                    } catch (_) { return []; }
-                                };
-                                const _saveLastUsed = (branch) => {
-                                    try {
-                                        const clean = _normalizeBranch(branch);
-                                        if (!clean) return;
-                                        let arr = _loadLastUsed();
-                                        arr = arr.filter(b => b !== clean);
-                                        arr.unshift(clean);
-                                        localStorage.setItem(LAST_USED_KEY, JSON.stringify(arr.slice(0, 10)));
-                                    } catch (_) {}
-                                };
-                                if (!data._lastUsedBranches?.length) {
-                                    self.WizardController.data._lastUsedBranches = _loadLastUsed();
-                                    if (self.WizardController.data._lastUsedBranches.length > 0) {
-                                        self.WizardController.render();
-                                        return;
-                                    }
+                                if (!Array.isArray(data._recentSources)) {
+                                    self.WizardController.data._recentSources = _loadRecentSources();
+                                    self.WizardController.data._lastUsedBranches = _branchRecentNames(self.WizardController.data._recentSources);
                                 }
                                 const panes = {
                                     browse: document.getElementById('upgrade-src-browse'),
@@ -994,10 +1379,70 @@
                                 document.querySelectorAll('.upgrade-source-tab').forEach(tab => {
                                     tab.onclick = () => {
                                         const v = tab.dataset.src;
+                                        const currentUrlInput = document.getElementById('upgrade-jenkins-url');
+                                        if (currentUrlInput) {
+                                            const currentUrl = currentUrlInput.value.trim();
+                                            if (currentUrl) {
+                                                self.WizardController.data._sourceUrl = currentUrl;
+                                                if (self.WizardController.data.sourceType === 'url' && currentUrl.startsWith('http')) {
+                                                    _recordRecentSource({ type: 'url', url: currentUrl, isDraft: true, status: 'pending' });
+                                                }
+                                            }
+                                        }
                                         self.WizardController.data.sourceType = v;
                                         showPane(v);
                                     };
                                 });
+                                const urlInput = document.getElementById('upgrade-jenkins-url');
+                                if (urlInput) {
+                                    const persistUrlDraft = (renderAfter = false) => {
+                                        const value = urlInput.value.trim();
+                                        const wd = self.WizardController.data;
+                                        if (!value) return;
+                                        const previousUrl = wd._sourceUrl || '';
+                                        wd.sourceType = 'url';
+                                        wd._sourceUrl = value;
+                                        if (value.startsWith('http') && previousUrl !== value) {
+                                            wd.branch = value;
+                                            wd._resolveUrl = true;
+                                            wd._directUrls = false;
+                                            wd.selectedBuild = null;
+                                            wd.dnosUrl = '';
+                                            wd.giUrl = '';
+                                            wd.baseosUrl = '';
+                                            wd.builds = [];
+                                            wd._fetchAttempted = false;
+                                            wd._fetchError = '';
+                                            wd._upgradePlan = null;
+                                        }
+                                        if (value.startsWith('http')) {
+                                            _recordRecentSource({
+                                                type: 'url',
+                                                url: value,
+                                                branch: wd.branch && wd.branch !== value ? wd.branch : '',
+                                                isDraft: true,
+                                                status: 'pending',
+                                            });
+                                            if (renderAfter) {
+                                                const cursorPos = urlInput.selectionStart || value.length;
+                                                try { self.WizardController.render(); } catch (_) {}
+                                                setTimeout(() => {
+                                                    const nextInput = document.getElementById('upgrade-jenkins-url');
+                                                    if (!nextInput) return;
+                                                    nextInput.focus();
+                                                    try { nextInput.setSelectionRange(cursorPos, cursorPos); } catch (_) {}
+                                                }, 0);
+                                            }
+                                        }
+                                    };
+                                    urlInput.addEventListener('input', () => {
+                                        persistUrlDraft(false);
+                                        clearTimeout(self.WizardController.data._urlDraftTimer);
+                                        self.WizardController.data._urlDraftTimer = setTimeout(() => persistUrlDraft(true), 700);
+                                    });
+                                    urlInput.addEventListener('change', () => persistUrlDraft(true));
+                                    urlInput.addEventListener('blur', () => persistUrlDraft(false));
+                                }
                                 document.querySelectorAll('.upgrade-chip').forEach(chip => {
                                     chip.onclick = () => {
                                         document.querySelectorAll('.upgrade-chip').forEach(c => c.classList.remove('upgrade-chip--active'));
@@ -1029,19 +1474,111 @@
                                 document.querySelectorAll('.upgrade-recent-row').forEach(row => {
                                     row.style.cursor = 'pointer';
                                     row.onclick = () => {
+                                        const idx = Number(row.dataset.recentIndex);
+                                        const entry = (self.WizardController.data._recentSources || [])[idx];
+                                        if (!entry) return;
                                         document.querySelectorAll('.upgrade-recent-row').forEach(r => r.classList.remove('upgrade-recent-row--active'));
                                         document.querySelectorAll('.upgrade-chip').forEach(c => c.classList.remove('upgrade-chip--active'));
                                         row.classList.add('upgrade-recent-row--active');
-                                        self.WizardController.data.branch = row.dataset.branch;
-                                        _saveLastUsed(row.dataset.branch);
+                                        const wd = self.WizardController.data;
+                                        wd._fetchAttempted = false;
+                                        wd._fetchError = '';
+                                        wd._resolving = false;
+                                        wd._planLoading = false;
+                                        wd._upgradePlan = null;
+                                        if (entry.type === 'url') {
+                                            const build = entry.selectedBuild || null;
+                                            wd.sourceType = 'url';
+                                            wd.branch = build ? (entry.branch || entry.url || '') : (entry.url || entry.branch || '');
+                                            wd._sourceUrl = entry.url || '';
+                                            wd._resolveUrl = !build;
+                                            wd._directUrls = !!build;
+                                            wd.dnosUrl = entry.dnosUrl || build?.dnos_url || '';
+                                            wd.giUrl = entry.giUrl || build?.gi_url || '';
+                                            wd.baseosUrl = entry.baseosUrl || build?.baseos_url || '';
+                                            wd.selectedBuild = build;
+                                            wd.builds = [];
+                                            showPane('url');
+                                            const urlInput = document.getElementById('upgrade-jenkins-url');
+                                            if (urlInput) urlInput.value = entry.url || '';
+                                        } else if (entry.type === 'directUrls') {
+                                            wd.sourceType = 'directUrls';
+                                            wd.branch = '';
+                                            wd._directUrls = true;
+                                            wd.dnosUrl = entry.dnosUrl || '';
+                                            wd.giUrl = entry.giUrl || '';
+                                            wd.baseosUrl = entry.baseosUrl || '';
+                                            wd.selectedBuild = entry.selectedBuild || {
+                                                build_number: 'direct',
+                                                dnos_url: wd.dnosUrl,
+                                                gi_url: wd.giUrl,
+                                                baseos_url: wd.baseosUrl,
+                                                has_dnos: !!wd.dnosUrl,
+                                                has_gi: !!wd.giUrl,
+                                                has_baseos: !!wd.baseosUrl,
+                                                _urlsVerified: true,
+                                            };
+                                            wd.builds = [];
+                                            showPane('directUrls');
+                                            const dnosInput = document.getElementById('upgrade-dnos-url');
+                                            const giInput = document.getElementById('upgrade-gi-url');
+                                            const baseosInput = document.getElementById('upgrade-baseos-url');
+                                            if (dnosInput) dnosInput.value = wd.dnosUrl;
+                                            if (giInput) giInput.value = wd.giUrl;
+                                            if (baseosInput) baseosInput.value = wd.baseosUrl;
+                                        } else {
+                                            const type = entry.type === 'manual' ? 'manual' : 'browse';
+                                            wd.sourceType = type;
+                                            wd.branch = entry.branch || '';
+                                            wd._directUrls = false;
+                                            wd.selectedBuild = null;
+                                            wd.builds = [];
+                                            showPane(type);
+                                            const branchInput = document.getElementById('upgrade-branch');
+                                            if (branchInput) branchInput.value = wd.branch;
+                                        }
+                                        _recordRecentSource(entry);
                                     };
                                 });
+                                const _refreshSummaries = async (silent = false) => {
+                                    const branches = self.WizardController?.data?._lastUsedBranches;
+                                    if (!branches?.length) return;
+                                    if (!silent) {
+                                        self.WizardController.data._branchSummariesRefreshing = true;
+                                        try { self.WizardController.render(); } catch (_) {}
+                                    }
+                                    try {
+                                        const sums = await ScalerAPI.getBranchSummaries(branches);
+                                        if (sums && Object.keys(sums).length > 0) {
+                                            self.WizardController.data._branchSummaries = sums;
+                                        } else {
+                                            console.warn('[UpgradeWiz] Branch summaries returned empty -- keeping stale data');
+                                        }
+                                    } catch (err) {
+                                        console.error('[UpgradeWiz] Branch summaries fetch failed:', err);
+                                    }
+                                    self.WizardController.data._branchSummariesRefreshing = false;
+                                    try { self.WizardController.render(); } catch (_) {}
+                                };
                                 if (data._lastUsedBranches?.length && !data._branchSummariesLoaded) {
                                     self.WizardController.data._branchSummariesLoaded = true;
-                                    ScalerAPI.getBranchSummaries(data._lastUsedBranches).then(sums => {
-                                        self.WizardController.data._branchSummaries = sums;
-                                        self.WizardController.render();
-                                    }).catch(() => {});
+                                    _refreshSummaries(true);
+                                } else if (data._lastUsedBranches?.length && !data._branchSummaryPollId) {
+                                    _refreshSummaries(true);
+                                }
+                                document.getElementById('upgrade-refresh-recents')?.addEventListener('click', (e) => {
+                                    e.stopPropagation();
+                                    _refreshSummaries(false);
+                                });
+                                if (data._lastUsedBranches?.length && !data._branchSummaryPollId) {
+                                    self.WizardController.data._branchSummaryPollId = setInterval(() => {
+                                        if (document.querySelector('.upgrade-branch-group--recent')) {
+                                            _refreshSummaries(true);
+                                        } else {
+                                            clearInterval(self.WizardController.data._branchSummaryPollId);
+                                            self.WizardController.data._branchSummaryPollId = null;
+                                        }
+                                    }, 60000);
                                 }
                                 const loadBranches = async () => {
                                     if (self.WizardController.data._branchesLoading) return;
@@ -1082,7 +1619,34 @@
                                 else if (st === 'url') {
                                     const u = document.getElementById('upgrade-jenkins-url')?.value?.trim() || '';
                                     if (u.startsWith('http')) {
-                                        return { sourceType: st, branch: u, _resolveUrl: true };
+                                        _recordRecentSource({
+                                            type: 'url',
+                                            url: u,
+                                            branch: self.WizardController?.data?._sourceUrl === u ? self.WizardController?.data?.branch : '',
+                                            dnosUrl: self.WizardController?.data?._sourceUrl === u ? self.WizardController?.data?.dnosUrl : '',
+                                            giUrl: self.WizardController?.data?._sourceUrl === u ? self.WizardController?.data?.giUrl : '',
+                                            baseosUrl: self.WizardController?.data?._sourceUrl === u ? self.WizardController?.data?.baseosUrl : '',
+                                            selectedBuild: self.WizardController?.data?._sourceUrl === u ? self.WizardController?.data?.selectedBuild : null,
+                                        });
+                                        const existing = self.WizardController?.data || {};
+                                        const reuseResolved = existing._sourceUrl === u && existing.selectedBuild && (existing.dnosUrl || existing.selectedBuild.dnos_url);
+                                        return {
+                                            sourceType: st,
+                                            branch: reuseResolved ? (existing.branch || u) : u,
+                                            _sourceUrl: u,
+                                            _resolveUrl: !reuseResolved,
+                                            _fetchAttempted: false,
+                                            _fetchError: '',
+                                            builds: [],
+                                            selectedBuild: reuseResolved ? existing.selectedBuild : null,
+                                            dnosUrl: reuseResolved ? (existing.dnosUrl || existing.selectedBuild.dnos_url || '') : '',
+                                            giUrl: reuseResolved ? (existing.giUrl || existing.selectedBuild.gi_url || '') : '',
+                                            baseosUrl: reuseResolved ? (existing.baseosUrl || existing.selectedBuild.baseos_url || '') : '',
+                                            _directUrls: !!reuseResolved,
+                                            _resolving: false,
+                                            _planLoading: false,
+                                            _upgradePlan: null
+                                        };
                                     }
                                     branch = u;
                                 }
@@ -1090,20 +1654,26 @@
                                     const dnosUrl = document.getElementById('upgrade-dnos-url')?.value?.trim() || '';
                                     const giUrl = document.getElementById('upgrade-gi-url')?.value?.trim() || '';
                                     const baseosUrl = document.getElementById('upgrade-baseos-url')?.value?.trim() || '';
+                                    const selectedBuild = {
+                                        build_number: 'direct',
+                                        dnos_url: dnosUrl,
+                                        gi_url: giUrl,
+                                        baseos_url: baseosUrl,
+                                        has_dnos: !!dnosUrl,
+                                        has_gi: !!giUrl,
+                                        has_baseos: !!baseosUrl,
+                                        _urlsVerified: true,
+                                    };
+                                    if (dnosUrl) _recordRecentSource({ type: st, dnosUrl, giUrl, baseosUrl, selectedBuild });
                                     return {
                                         sourceType: st,
                                         dnosUrl, giUrl, baseosUrl,
                                         _directUrls: true,
-                                        selectedBuild: { build_number: 'direct', dnos_url: dnosUrl, gi_url: giUrl, baseos_url: baseosUrl }
+                                        selectedBuild
                                     };
                                 }
                                 if (branch && st !== 'url') {
-                                    try {
-                                        const KEY = 'scaler_upgrade_last_branches';
-                                        let arr = []; try { arr = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (_) {}
-                                        arr = arr.filter(b => b !== branch); arr.unshift(branch);
-                                        localStorage.setItem(KEY, JSON.stringify(arr.slice(0, 10)));
-                                    } catch (_) {}
+                                    _saveLastUsed(branch, st === 'manual' ? 'manual' : 'branch');
                                 }
                                 const prevBranch = self.WizardController?.data?.branch || '';
                                 if (branch && branch !== prevBranch) {
@@ -1116,7 +1686,8 @@
                                 if (st === 'manual' && !data.branch) { self.showNotification('Enter a branch name', 'warning'); return false; }
                                 if (st === 'browse' && !data.branch) { self.showNotification('Select a branch', 'warning'); return false; }
                                 if (st === 'url') {
-                                    if (!(data.branch || '').startsWith('http')) { self.showNotification('Enter a Jenkins URL', 'warning'); return false; }
+                                    const urlSource = data._sourceUrl || data.branch || '';
+                                    if (!urlSource.startsWith('http') && !(data._directUrls && data.selectedBuild)) { self.showNotification('Enter a Jenkins URL', 'warning'); return false; }
                                 }
                                 if (st === 'directUrls' && !data.dnosUrl) { self.showNotification('Enter at least DNOS URL', 'warning'); return false; }
                                 return true;
@@ -1168,7 +1739,7 @@
                                         <div class="scaler-info-box">Branch: <strong title="${self.escapeHtml(branch)}">${self.escapeHtml(shortBranch || '(not set)')}</strong>${resolvedBuild ? ` | Build: <strong>#${resolvedBuild}</strong>` : ''}</div>
                                         ${runningBannerHtml}
                                         ${expiredMsg}
-                                        ${fetchErr ? `<div class="scaler-info-box upgrade-fetch-error${data._runningBuild ? ' upgrade-fetch-error--running' : ''}">${self.escapeHtml(fetchErr)}</div>` : ''}
+                                        ${fetchErr ? `<div class="scaler-info-box upgrade-fetch-error${data._runningBuild ? ' upgrade-fetch-error--running' : ''}">${self.escapeHtml(fetchErr)}${data._suggestedParentBranch ? ` <button class="scaler-btn scaler-btn-sm" id="upgrade-switch-parent" style="margin-left:8px;vertical-align:middle">${self.escapeHtml(data._suggestedParentBranch)}</button>` : ''}</div>` : ''}
                                         <label class="scaler-checkbox-item" style="margin-bottom:8px"><input type="checkbox" id="upgrade-include-failed" ${inclFailed ? 'checked' : ''}> Include failed builds with valid images</label>
                                         <div class="upgrade-build-actions">
                                             <button class="scaler-btn scaler-btn-primary" id="upgrade-fetch-builds">Fetch builds</button>
@@ -1249,20 +1820,43 @@
                             },
                             afterRender: (data) => {
                                 const _setDirectBuild = (branch, buildNum, stack, extra) => {
-                                    self.WizardController.data.selectedBuild = {
+                                    const selectedBuild = {
                                         build_number: buildNum,
                                         display_name: `#${buildNum}`,
                                         dnos_url: stack.dnos_url || '', gi_url: stack.gi_url || '', baseos_url: stack.baseos_url || '',
                                         is_sanitizer: extra?.is_sanitizer || false,
                                         result: extra?.result || 'SUCCESS',
+                                        age_hours: extra?.age_hours || stack.age_hours || 0,
+                                        is_expired: extra?.is_expired || stack.is_expired || false,
+                                        _urlsVerified: true,
                                         has_dnos: !!stack.dnos_url, has_gi: !!stack.gi_url, has_baseos: !!stack.baseos_url,
                                     };
+                                    self.WizardController.data.selectedBuild = selectedBuild;
                                     self.WizardController.data._directUrls = true;
                                     self.WizardController.data.dnosUrl = stack.dnos_url || '';
                                     self.WizardController.data.giUrl = stack.gi_url || '';
                                     self.WizardController.data.baseosUrl = stack.baseos_url || '';
                                     self.WizardController.data.branch = branch;
+                                    self.WizardController.data._resolveUrl = false;
+                                    self.WizardController.data._fetchAttempted = true;
                                     self.WizardController.data._resolving = false;
+                                    const sourceUrl = self.WizardController.data._sourceUrl || (data.sourceType === 'url' && data.branch?.startsWith('http') ? data.branch : '');
+                                    if (sourceUrl) {
+                                        _recordRecentSource({
+                                            type: 'url',
+                                            url: sourceUrl,
+                                            branch,
+                                            buildNumber: buildNum,
+                                            dnosUrl: stack.dnos_url || '',
+                                            giUrl: stack.gi_url || '',
+                                            baseosUrl: stack.baseos_url || '',
+                                            selectedBuild,
+                                            isExpired: selectedBuild.is_expired,
+                                            ageHours: selectedBuild.age_hours,
+                                        });
+                                    } else if (branch) {
+                                        _saveLastUsed(branch, data.sourceType === 'manual' ? 'manual' : 'branch');
+                                    }
                                     self.WizardController.next();
                                 };
                                 const _extractBranchFromUrl = (url) => {
@@ -1282,15 +1876,6 @@
                                 };
                                 const fetchBuilds = async () => {
                                     let branch = data.branch || '';
-                                    if (branch.startsWith('http')) {
-                                        const extracted = _extractBranchFromUrl(branch);
-                                        if (extracted) {
-                                            branch = extracted;
-                                            self.WizardController.data.branch = branch;
-                                            self.WizardController.data._resolveUrl = false;
-                                            _saveLastUsed(branch);
-                                        }
-                                    }
                                     if (data._resolveUrl && branch.startsWith('http')) {
                                         const origUrl = branch;
                                         self.WizardController.data._resolving = true;
@@ -1300,7 +1885,6 @@
                                             if (r.branch) {
                                                 branch = r.branch;
                                                 self.WizardController.data.branch = branch;
-                                                _saveLastUsed(branch);
                                             }
                                             self.WizardController.data._resolveUrl = false;
                                             self.WizardController.data._resolvedBuildNumber = r.build_number || null;
@@ -1336,6 +1920,13 @@
                                             }
                                         }
                                         self.WizardController.data._resolving = false;
+                                    } else if (branch.startsWith('http')) {
+                                        const extracted = _extractBranchFromUrl(branch);
+                                        if (extracted) {
+                                            branch = extracted;
+                                            self.WizardController.data.branch = branch;
+                                            self.WizardController.data._resolveUrl = false;
+                                        }
                                     }
                                     if (!branch) { self.showNotification('No branch selected', 'warning'); return; }
                                     self.WizardController.data._runningBuildCheckedBranch = branch;
@@ -1357,7 +1948,7 @@
                                         console.log('%c[UpgradeWiz] fetchBuilds: got ' + (self.WizardController.data.builds.length) + ' builds, now checking running build...', 'color:#ff9800');
                                         let rb = null;
                                         try {
-                                            const statusUrl = (ScalerAPI.baseUrl || '') + `/api/operations/image-upgrade/build-status/${encodeURIComponent(branch)}?latest=true&_t=${Date.now()}`;
+                                            const statusUrl = ScalerAPI._api(`/api/operations/image-upgrade/build-status/${encodeURIComponent(branch)}?latest=true&_t=${Date.now()}`);
                                             console.log('[UpgradeWiz] Running build check URL:', statusUrl);
                                             const statusResp = await fetch(statusUrl, { cache: 'no-store' });
                                             if (statusResp.ok) {
@@ -1390,7 +1981,14 @@
                                             if (rb) {
                                                 self.WizardController.data._fetchError = `No completed builds yet -- build #${rb.build_number} is still running.`;
                                             } else {
-                                                self.WizardController.data._fetchError = 'No builds found for this branch.';
+                                                const _parentBranch = self._detectParentBranch(branch);
+                                                if (_parentBranch) {
+                                                    self.WizardController.data._fetchError = `No builds found -- branch may be merged. Try parent branch:`;
+                                                    self.WizardController.data._suggestedParentBranch = _parentBranch;
+                                                } else {
+                                                    self.WizardController.data._fetchError = 'No builds found for this branch.';
+                                                    self.WizardController.data._suggestedParentBranch = null;
+                                                }
                                             }
                                         }
                                         // Auto-open trigger panel when all builds are expired and no running build
@@ -1420,6 +2018,19 @@
                                         fetchBuilds();
                                     };
                                 }
+                                document.getElementById('upgrade-switch-parent')?.addEventListener('click', () => {
+                                    const parent = self.WizardController.data._suggestedParentBranch;
+                                    if (!parent) return;
+                                    self.WizardController.data.branch = parent;
+                                    self.WizardController.data._suggestedParentBranch = null;
+                                    self.WizardController.data._fetchAttempted = false;
+                                    self.WizardController.data._fetchError = '';
+                                    self.WizardController.data.builds = [];
+                                    self.WizardController.data.selectedBuild = null;
+                                    self.WizardController.data._runningBuild = null;
+                                    self.WizardController.data._runningBuildCheckedBranch = null;
+                                    fetchBuilds();
+                                });
                                 document.getElementById('upgrade-trigger-from-build')?.addEventListener('click', async function() {
                                     const panel = document.getElementById('upgrade-inline-trigger');
                                     if (!panel) return;
@@ -1567,7 +2178,7 @@
                                     (async () => {
                                         try {
                                             const br = data.branch;
-                                            const url = (ScalerAPI.baseUrl || '') + `/api/operations/image-upgrade/build-status/${encodeURIComponent(br)}?latest=true&_t=${Date.now()}`;
+                                            const url = ScalerAPI._api(`/api/operations/image-upgrade/build-status/${encodeURIComponent(br)}?latest=true&_t=${Date.now()}`);
                                             console.log('[UpgradeWiz] Running build check:', url);
                                             const resp = await fetch(url, { cache: 'no-store' });
                                             if (!resp.ok) { console.warn('[UpgradeWiz] build-status returned', resp.status); return; }
@@ -1638,6 +2249,31 @@
                                     const wd = self.WizardController.data;
                                     const allDeviceIds = wd.selectedDeviceIds || [];
                                     const devicePlans = wd.device_plans || wd._upgradePlan?.devices || {};
+                                    // PE-4 chassis identity guards. The CL-86
+                                    // system_type and YOR_CL_PE-4 deploy_name
+                                    // are immutable cluster facts -- the
+                                    // DNOS deploy command syntactically
+                                    // rejects anything else, so backfilling
+                                    // them is safe. ncc_id is NOT immutable
+                                    // (the cluster fails over during
+                                    // `request system delete`); leaving it
+                                    // unset forces the server-side trust
+                                    // gate to require a fresh probe via
+                                    // Re-detect rather than silently using
+                                    // the legacy `pe4_deploy_default=1`
+                                    // fallback that produced the 2026-05-12
+                                    // stuck-in-GI incident.
+                                    Object.keys(devicePlans).forEach(did => {
+                                        const dev = (wd.devices || []).find(x => x.id === did) || {};
+                                        const label = (dev.hostname || did || '').trim();
+                                        if (!/^(YOR[_-]CL[_-])?PE[_-]?4$/i.test(label)) return;
+                                        devicePlans[did].system_type = 'CL-86';
+                                        devicePlans[did].is_cluster = true;
+                                        devicePlans[did].deploy_params = devicePlans[did].deploy_params || {};
+                                        devicePlans[did].deploy_params.system_type = 'CL-86';
+                                        devicePlans[did].deploy_params.name = 'YOR_CL_PE-4';
+                                        devicePlans[did].deploy_params.deploy_name = 'YOR_CL_PE-4';
+                                    });
                                     const deviceIds = allDeviceIds.filter(did => (devicePlans[did]?.upgrade_type || 'normal') !== 'blocked');
                                     const components = wd.components || ['DNOS', 'GI', 'BaseOS'];
                                     const sshHosts = {};
@@ -1648,6 +2284,47 @@
                                         self.showNotification('No devices to upgrade (all blocked/skipped)', 'warning');
                                         if (btn) { btn.disabled = false; btn.textContent = 'Wait & Upgrade'; }
                                         return;
+                                    }
+                                    // Active-NCC trust pre-flight (2026-05-12).
+                                    // Mirrors the backend trust gate in
+                                    // `image_upgrade_execute`; identical
+                                    // doctrine to the Execute click handler.
+                                    {
+                                        const _WU_TRUST_PREFIXES = [
+                                            'kvm_', 'virsh_console_verified',
+                                            'pre_upgrade_snapshot', 'pre_upgrade_backup',
+                                            'scaler_db_cache', 'topology_virsh_probe',
+                                            'upgrade_start_snapshot', 'post_reboot_virsh_probe',
+                                        ];
+                                        const _isTrustedWU = (s) => {
+                                            const v = String(s || '').trim();
+                                            return !!v && _WU_TRUST_PREFIXES.some(p => v.startsWith(p));
+                                        };
+                                        const _wuUntrusted = [];
+                                        for (const _did of deviceIds) {
+                                            const _plan = devicePlans[_did] || {};
+                                            const _type = String(_plan.upgrade_type || 'normal').toLowerCase();
+                                            if (_type !== 'delete_deploy' && _type !== 'gi_deploy') continue;
+                                            const _sys = String(_plan.system_type
+                                                || _plan.deploy_params?.system_type || '').toUpperCase();
+                                            const _isCluster = _plan.is_cluster || _sys.startsWith('CL-');
+                                            if (!_isCluster) continue;
+                                            const _src = String(_plan.active_ncc_source
+                                                || _plan.deploy_params?.active_ncc_source || '').trim();
+                                            if (!_isTrustedWU(_src)) {
+                                                _wuUntrusted.push(`${_did} (active_ncc_source=${_src || 'empty'})`);
+                                            }
+                                        }
+                                        if (_wuUntrusted.length > 0) {
+                                            self.showNotification(
+                                                `Refusing destructive Wait & Upgrade for cluster device(s): `
+                                                + `${_wuUntrusted.join(', ')}. Click "Re-detect" in the device row `
+                                                + `to refresh the Active-NCC probe, then retry. `
+                                                + `(2026-05-12 trust gate.)`,
+                                                'error', 12000);
+                                            if (btn) { btn.disabled = false; btn.textContent = 'Wait & Upgrade'; }
+                                            return;
+                                        }
                                     }
                                     try {
                                         const result = await ScalerAPI.waitAndUpgrade({
@@ -1843,11 +2520,15 @@
                                     const devInGi = _isGiMode(d);
                                     const isMajorJump = !devInGi && curMaj > 0 && tgtMaj > 0 && curMaj !== tgtMaj;
                                     const isDowngrade = !devInGi && curMaj > 0 && tgtMaj > 0 && curMaj > tgtMaj;
+                                    const _bsDD = data._branchSwitch?.requires_delete_deploy;
+                                    const _bsSwitch = data._branchSwitch?.is_switch;
                                     const jumpBadge = devInGi
                                         ? '<span class="upgrade-compare-badge upgrade-compare-badge--gi">GI Deploy</span>'
                                         : isMajorJump
                                             ? `<span class="upgrade-compare-badge upgrade-compare-badge--danger">v${curMaj} -> v${tgtMaj} ${isDowngrade ? 'DOWNGRADE' : 'MAJOR JUMP'}</span>`
-                                            : (curMaj > 0 && tgtMaj > 0 ? '<span class="upgrade-compare-badge upgrade-compare-badge--ok">Same major</span>' : '');
+                                            : (_bsDD || _bsSwitch)
+                                                ? '<span class="upgrade-compare-badge upgrade-compare-badge--danger">BRANCH SWITCH</span>'
+                                                : (curMaj > 0 && tgtMaj > 0 ? '<span class="upgrade-compare-badge upgrade-compare-badge--ok">Same major</span>' : '');
                                     const collapsed = i > 0 ? ' upgrade-compare-card--collapsed' : '';
                                     const _verRow = (label, cur, tgt) => {
                                         const changed = cur !== '--' && tgt !== '--' && cur !== tgt;
@@ -1921,17 +2602,32 @@
                                 }
                                 if (!allGi && data._branchSwitch) {
                                     const bs = data._branchSwitch;
-                                    if (bs.requires_delete_deploy && jumpDevs.length > 0) {
-                                        const devNames = jumpDevs.map(d => d.hostname || d.id).join(', ');
+                                    const _nonGiDevs = devs.filter(d => !_isGiMode(d));
+                                    const _branchAffected = jumpDevs.length > 0 ? jumpDevs : _nonGiDevs;
+                                    const affectedDevNames = _branchAffected.map(d => d.hostname || d.id).join(', ');
+                                    const _giNote = giDevsList.length > 0
+                                        ? ` <span style="opacity:0.65;font-size:0.88em">(${giDevsList.map(d => self.escapeHtml(d.hostname || d.id)).join(', ')} already in GI -- handled via Fresh Deploy above)</span>`
+                                        : '';
+                                    if (_branchAffected.length === 0) {
+                                        alertsHtml = alertsHtml;
+                                    } else if (bs.requires_delete_deploy && jumpDevs.length > 0) {
                                         alertsHtml += `<div class="upgrade-compare-alert upgrade-compare-alert--danger">
                                             <strong>[WARN] Major version jump detected</strong>
-                                            <div style="margin-top:4px">Affected: <strong>${self.escapeHtml(devNames)}</strong></div>
+                                            <div style="margin-top:4px">Affected: <strong>${self.escapeHtml(affectedDevNames)}</strong>${_giNote}</div>
                                             <div style="margin-top:4px;font-size:0.9em">Delete-deploy required. All existing config on these devices will be erased and replaced. Back up configuration first.</div>
+                                        </div>`;
+                                    } else if (bs.requires_delete_deploy && bs.is_switch) {
+                                        alertsHtml += `<div class="upgrade-compare-alert upgrade-compare-alert--danger">
+                                            <strong>[WARN] Branch switch -- Delete+Deploy required</strong>
+                                            <div style="margin-top:4px">${self.escapeHtml(bs.current_branch || '?')} -> ${self.escapeHtml(bs.target_branch || '?')}</div>
+                                            <div style="margin-top:4px">Affected: <strong>${self.escapeHtml(affectedDevNames)}</strong>${_giNote}</div>
+                                            <div style="margin-top:4px;font-size:0.9em">Switching between branches requires delete+deploy. Existing config will be erased and replaced. Back up configuration first.</div>
                                         </div>`;
                                     } else if (bs.is_switch) {
                                         alertsHtml += `<div class="upgrade-compare-alert upgrade-compare-alert--warn">
                                             <strong>[WARN] Branch switch</strong>
                                             <div style="margin-top:4px">${self.escapeHtml(bs.current_branch || '?')} -> ${self.escapeHtml(bs.target_branch || '?')}</div>
+                                            <div style="margin-top:4px">Affected: <strong>${self.escapeHtml(affectedDevNames)}</strong>${_giNote}</div>
                                             <div style="margin-top:4px;font-size:0.9em">This changes the dev branch. Consider Delete+Deploy if config is incompatible.</div>
                                         </div>`;
                                     } else {
@@ -2039,6 +2735,7 @@
                                         if (nm.includes('dnos') || nm === 'system') { curVer = c.current || c.version || ''; break; }
                                     }
                                 }
+                                const curVerFull = ctx.dnos_version || curVer || '';
                                 const branch = data.branch || '';
                                 const _extractVer = (s) => {
                                     if (!s) return '';
@@ -2054,7 +2751,7 @@
         
                                 const _hasEmptyStack = compsArr.length === 0 && !curVer;
                                 if (_hasEmptyStack) {
-                                    const _mode = (first._deviceMode || st.mode || '').toUpperCase();
+                                    const _mode = (st.mode || first._deviceMode || '').toUpperCase();
                                     self.WizardController.data._branchSwitch = {
                                         is_switch: true,
                                         requires_delete_deploy: false,
@@ -2095,7 +2792,11 @@
                                 if (curVerClean && tgtVerClean) {
                                     (async () => {
                                         try {
-                                            const bs = await ScalerAPI.detectBranchSwitch({ current_version: curVerClean, target_version: tgtVerClean });
+                                            const bs = await ScalerAPI.detectBranchSwitch({
+                                                current_version: curVerFull || curVer || curVerClean,
+                                                target_version: tgtVerClean,
+                                                target_branch_name: branch
+                                            });
                                             self.WizardController.data._branchSwitch = bs;
                                             const compat = await ScalerAPI.checkVersionCompat({ source_version: curVerClean, target_version: tgtVerClean });
                                             self.WizardController.data._compatReport = compat;
@@ -2155,18 +2856,82 @@
                                         } else if (mode === 'GI') {
                                             upgrade_type = 'gi_deploy';
                                             reason = 'Device in GI mode -- deploy flow';
-                                        } else if (requiresDD || devMajorJump) {
+                                        } else if (devMajorJump) {
                                             upgrade_type = 'delete_deploy';
-                                            reason = curMaj > 0 ? `Major version change (v${curMaj} -> v${tgtMaj})` : 'Major version jump detected';
+                                            reason = `Major version change (v${curMaj} -> v${tgtMaj})`;
                                             warnings.push('Delete+Deploy required');
-                                        } else if (isBranchSwitch) {
-                                            reason = 'Branch switch -- normal upgrade';
+                                        } else if (requiresDD || isBranchSwitch) {
+                                            upgrade_type = 'delete_deploy';
+                                            const bsCur = data._branchSwitch?.current_branch || '(unknown)';
+                                            const bsTgt = data._branchSwitch?.target_branch || '(unknown)';
+                                            reason = `Branch switch: ${bsCur} -> ${bsTgt}`;
+                                            warnings.push('Branch switch requires Delete+Deploy');
                                         } else {
                                             reason = curDnos !== '--' ? 'Same major version' : 'Version not detected';
                                         }
-                                        const rawSys = ctx.system_type || d.platform || '';
-                                        const sysType = (self._sanitizeWizardSystemType(rawSys) || '').toUpperCase();
-                                        const isCluster = sysType.startsWith('CL-');
+                                        // Fall back across every cached source so we
+                                        // never paint "sys-type?" for a device whose
+                                        // chassis is already known. Order matches
+                                        // `_getWizardDeviceListSync`. The
+                                        // `deploy_system_type` fallback covers the
+                                        // post-`system delete` case where
+                                        // operational.json was wiped to "N/A" but
+                                        // devices.json / backups still remember the
+                                        // chassis as e.g. SA-36CD-S.
+                                        const _hostLabel = (d.hostname || d.id || '').trim();
+                                        const _isPe4DeployTarget = /^(YOR[_-]CL[_-])?PE[_-]?4$/i.test(_hostLabel);
+                                        const rawSys = ctx.system_type
+                                            || ctx.deploy_system_type
+                                            || d.platform
+                                            || d._systemType
+                                            || d._deploySystemType
+                                            || '';
+                                        let sysType = (self._sanitizeWizardSystemType(rawSys) || '').toUpperCase();
+                                        if (_isPe4DeployTarget) {
+                                            sysType = 'CL-86';
+                                        }
+                                        // Cluster detection must not rely on the
+                                        // resolved sys-type alone. When a CL-*
+                                        // device is only partially discovered
+                                        // (NCC1 down, stale op-state, snapshot
+                                        // from before convert, etc.) the cached
+                                        // `system_type` can come back as the
+                                        // NCP-1 chassis code (e.g. `SA-40C8CD`).
+                                        // Treating that as standalone strips the
+                                        // NCC selector, sends `ncc-id None` to
+                                        // the bridge and silently runs the SA
+                                        // deploy path. Trust any cluster signal
+                                        // the canvas or hostname gives us, and
+                                        // flag the mismatch so the UI can force
+                                        // the operator to pick a CL-* sys-type.
+                                        // See "Cluster vs SA sys-type guard" in
+                                        // DEVELOPMENT_GUIDELINES.md.
+                                        const _ctxClusterHint = !!(ctx.is_cluster
+                                            || ctx.active_ncc_vm
+                                            || ctx.active_ncc_node
+                                            || ctx.pre_upgrade_active_ncc_vm
+                                            || ctx.kvm_host
+                                            || ctx.kvm_host_ip);
+                                        const _clusterSignal = !!(d._isCluster
+                                            || _ctxClusterHint
+                                            || sysType.startsWith('CL-'));
+                                        const isCluster = _clusterSignal;
+                                        // Operator's own override wins over every
+                                        // other signal. If the ctx came back with
+                                        // ``user_override_*`` as the source, the
+                                        // value in ``sysType`` IS what the operator
+                                        // explicitly picked -- never flag that as
+                                        // a mismatch. Without this, even after the
+                                        // operator corrects SA->CL the banner
+                                        // reappears next time Step 5 opens because
+                                        // the backend scaler-CLI plan still reads
+                                        // the stale SA from db/devices.json.
+                                        const _ctxIsOverride = (ctx.system_type_source || '').startsWith('user_override');
+                                        const _sysTypeClaimsSA = sysType.startsWith('SA-');
+                                        const _sysTypeMismatch = !_ctxIsOverride && isCluster && _sysTypeClaimsSA;
+                                        if (_sysTypeMismatch) {
+                                            warnings.push('Cluster device reported SA sys-type -- pick CL-* below before Execute');
+                                        }
                                         const prevSysType = (ctx.deploy_system_type || ctx.previous_system_type || '').toUpperCase();
                                         const sysTypeChanged = prevSysType && sysType && prevSysType !== sysType;
                                         const sysTypeCategoryChange = sysTypeChanged && (
@@ -2179,29 +2944,160 @@
                                         if (sysTypeCategoryChange) {
                                             warnings.push('SA<->CL change requires cleaner on ALL NCEs after deploy');
                                         }
+                                        // Active NCC detection for cluster devices. Order of trust:
+                                        //   0. `ctx.pre_upgrade_active_ncc_vm`  -- explicit pre-upgrade
+                                        //      snapshot stamped the moment the operator begins an
+                                        //      upgrade (see `snapshot_active_ncc_for_upgrade` in
+                                        //      `topology/routes/bridge_helpers.py`). Wins over live
+                                        //      probes while `ctx.pre_upgrade_cleared_at` is unset,
+                                        //      because the cluster state can flip during the upgrade
+                                        //      window and the wizard MUST keep pointing at the NCC
+                                        //      that was active when the operator hit Execute.
+                                        //   1. `sshConfig._virshInfo.activeNcc`  -- set by a live
+                                        //      virsh console probe (authoritative live signal).
+                                        //   2. `ctx.active_ncc_node` / `ctx.active_ncc_vm` -- populated
+                                        //      by the backend from operational.json's `active_ncc_vm`
+                                        //      (written by a real probe OR by the pre-upgrade
+                                        //      snapshot path -- the resolver chain in
+                                        //      `_get_device_context` normalizes the value).
+                                        // If none of these are available we MUST NOT silently label
+                                        // NCC-0 "(active)": on a two-NCC cluster that is a 50/50 coin
+                                        // flip and pushing a deploy to the standby NCC fails. Track
+                                        // provenance so the UI can down-grade the badge to
+                                        // "(default)" and the code above the plan can trigger a live
+                                        // probe. See 2026-04-24 note in DEVELOPMENT_GUIDELINES.md.
+                                        // 2026-05-12: do NOT silently seed
+                                        // `ncc_id=1` / `pe4_deploy_default`
+                                        // for PE-4. The destructive-op trust
+                                        // gate at Execute would refuse the
+                                        // value anyway; leaving these empty
+                                        // forces the orange "Re-detect" badge
+                                        // to surface instead.
+                                        let _activeNccId = 0;
+                                        let _activeNccSource = '';
+                                        let _activeNccVm = '';
+                                        // Propagate `ctx.active_ncc_source` verbatim
+                                        // when we adopt the ctx VM, so a fresh
+                                        // `kvm_virsh_probe` from the resolver shows
+                                        // up as TRUSTED in the dropdown render.
+                                        // `ctx.active_ncc_source` may be empty when
+                                        // scaler's raw write of operational.json
+                                        // dropped the provenance -- in that case
+                                        // we tag the value 'context_unverified'
+                                        // so the render path can ask for a fresh
+                                        // probe instead of mislabelling it
+                                        // "(active)".
+                                        if (isCluster) {
+                                            const _vi = d.sshConfig?._virshInfo || {};
+                                            const _preUpgradeVm = (!ctx.pre_upgrade_cleared_at
+                                                ? (ctx.pre_upgrade_active_ncc_vm || '')
+                                                : '');
+                                            const _activeVm = _preUpgradeVm
+                                                || _vi.activeNcc
+                                                || ctx.active_ncc_node
+                                                || ctx.active_ncc_vm
+                                                || '';
+                                            const _nccMatch = _activeVm.match(/ncc[_-]?(\d+)/i);
+                                            if (_nccMatch) {
+                                                _activeNccId = parseInt(_nccMatch[1], 10);
+                                                _activeNccVm = _activeVm;
+                                                if (_preUpgradeVm) {
+                                                    _activeNccSource = 'upgrade_start_snapshot';
+                                                } else if (_vi.activeNcc) {
+                                                    _activeNccSource = 'virsh_console_verified';
+                                                } else {
+                                                    const _ctxSrc = String(ctx.active_ncc_source || '').trim();
+                                                    _activeNccSource = _ctxSrc || 'context_unverified';
+                                                }
+                                            }
+                                            // 2026-05-12: removed unconditional
+                                            // _activeNccId=1 / source=pe4_deploy_default
+                                            // PE-4 override. The Execute trust
+                                            // gate now refuses any untrusted
+                                            // source, so silently seeding a
+                                            // legacy default just hides the
+                                            // "click Re-detect" prompt.
+                                        }
+                                        // ncc_id contract with the bridge (mirrors scaler CLI):
+                                        // - Cluster (KVM/CL): use probed _activeNccId if known,
+                                        //   fall back to 0 when probe was inconclusive. Bridge
+                                        //   CLI retry flips to 1 automatically if the wrong
+                                        //   slot was picked ("doesn't match / auto detected").
+                                        // - Single-access (SA): always 0 (only one NCC slot
+                                        //   exists on SA hardware).
+                                        // NEVER send null -- the bridge used to interpolate
+                                        // that as the literal text "ncc-id None" into the
+                                        // `request system deploy` command, which GI silently
+                                        // accepts without registering any install task. That
+                                        // was RR-SA-2's 20-minute-timeout root cause.
+                                        const _resolvedNccId = isCluster
+                                            ? (Number.isInteger(_activeNccId) ? _activeNccId : 0)
+                                            : 0;
                                         plan.devices[d.id] = {
                                             mode, upgrade_type, reason, warnings,
                                             current_version: curDnos !== '--' ? curDnos : '-',
                                             target_version: targetVer,
                                             components: ['DNOS', 'GI', 'BaseOS'],
-                                            ncc_id: isCluster ? 0 : null,
+                                            ncc_id: _resolvedNccId,
+                                            active_ncc_source: _activeNccSource,
+                                            active_ncc_vm: _activeNccVm,
                                             is_cluster: isCluster,
-                                            system_type: sysType,
+                                            // Blank out the sys-type when the
+                                            // cluster signal disagrees with an
+                                            // SA-* resolve so the wizard paints
+                                            // the red "sys-type?" selector and
+                                            // the operator is forced to pick a
+                                            // CL-* before Execute. `reason`
+                                            // above already captures the
+                                            // mismatch via the pushed warning.
+                                            system_type: _sysTypeMismatch ? '' : sysType,
+                                            system_type_mismatch: _sysTypeMismatch || false,
+                                            system_type_raw: sysType,
+                                            cluster_signal_source: (
+                                                d._clusterHintSource
+                                                || (ctx.is_cluster ? 'context_flag' : '')
+                                                || (_ctxClusterHint ? 'context_ncc' : '')
+                                                || (sysType.startsWith('CL-') ? 'system_type' : '')
+                                                || ''
+                                            ),
                                             previous_system_type: prevSysType || '',
                                             system_type_changed: sysTypeChanged || false,
                                             system_type_category_change: sysTypeCategoryChange || false,
                                             deploy_params: {
-                                                system_type: sysType,
-                                                ncc_id: isCluster ? 0 : null,
-                                                name: (d.hostname || d.id || '').trim(),
+                                                system_type: _sysTypeMismatch ? '' : sysType,
+                                                ncc_id: _resolvedNccId,
+                                                active_ncc_source: _activeNccSource,
+                                                name: _isPe4DeployTarget ? 'YOR_CL_PE-4' : _hostLabel,
+                                                deploy_name: _isPe4DeployTarget ? 'YOR_CL_PE-4' : _hostLabel,
                                             },
                                         };
                                     }
                                     return plan;
                                 };
-                                const _planDevEntries = data._upgradePlan ? Object.values(data._upgradePlan.devices || {}) : [];
-                                const _planMissingSysType = _planDevEntries.length > 0 && _planDevEntries.some(e => !e.system_type);
-                                if (!data._upgradePlan || Object.keys(data._upgradePlan.devices || {}).length === 0 || _planMissingSysType) {
+                                const _planDevEntries = data._upgradePlan ? Object.entries(data._upgradePlan.devices || {}) : [];
+                                const _planMissingSysType = _planDevEntries.length > 0 && _planDevEntries.some(([_, e]) => !e.system_type);
+                                // Rebuild the plan when a row's current_version
+                                // is empty ("-") but the canvas now has live
+                                // stack data for that device. Without this
+                                // trigger a plan that was built before the
+                                // monitor finished would keep painting
+                                // "CURRENT: -" forever, making the branch-
+                                // switch reason look unjustified. Only
+                                // applies to `_planSource === 'local'` so we
+                                // never overwrite an SSH-verified plan.
+                                const _devsNow = (data.devices || []).filter(d => (data.selectedDeviceIds || []).includes(d.id));
+                                const _planHasStaleCurrent = data._planSource !== 'ssh'
+                                    && _planDevEntries.length > 0
+                                    && _planDevEntries.some(([did, e]) => {
+                                        const cv = (e.current_version || '').trim();
+                                        if (cv && cv !== '-' && cv !== '--') return false;
+                                        const dev = _devsNow.find(x => x.id === did);
+                                        const hasStack = !!(dev && dev._stackData && dev._stackData.components && dev._stackData.components.length);
+                                        const ctxNow = data.deviceContexts?.[did] || {};
+                                        const hasCtxStack = Array.isArray(ctxNow.stack) && ctxNow.stack.length > 0;
+                                        return hasStack || hasCtxStack;
+                                    });
+                                if (!data._upgradePlan || Object.keys(data._upgradePlan.devices || {}).length === 0 || _planMissingSysType || _planHasStaleCurrent) {
                                     data._upgradePlan = _buildClientPlan();
                                     data._planSource = 'local';
                                 }
@@ -2227,6 +3123,51 @@
                                 const targetVer = _cleanVer(sb);
                                 const _exMaj = (s) => { if (!s || s === '--') return 0; const m = s.match(/(\d+)\./); return m ? parseInt(m[1]) : 0; };
                                 const tgtMaj = _exMaj(targetVer);
+                                const _attr = (v) => String(v ?? '')
+                                    .replace(/&/g, '&amp;')
+                                    .replace(/"/g, '&quot;')
+                                    .replace(/</g, '&lt;')
+                                    .replace(/>/g, '&gt;');
+                                const _firstVersionToken = (text) => {
+                                    const s = String(text || '').trim();
+                                    if (!s) return '';
+                                    const ver = s.match(/(\d+\.\d+\.\d+(?:[._-]\d+)*)/);
+                                    if (ver) return ver[1];
+                                    const build = s.match(/#\d+/);
+                                    if (build) return build[0];
+                                    return '';
+                                };
+                                const _isStatusBlob = (text) => {
+                                    const s = String(text || '').trim();
+                                    return s.length > 48
+                                        && /(warn|error|failed|failure|cached|unknown|mismatch|required|blocked|cannot|not detected)/i.test(s);
+                                };
+                                const _renderPlanVersionCell = (value, rowNotes, label) => {
+                                    const raw = String(value ?? '').trim() || '-';
+                                    if (_isStatusBlob(raw)) {
+                                        rowNotes.push({ label, text: raw });
+                                        const compact = _firstVersionToken(raw) || 'See note';
+                                        return `<div class="upgrade-plan-ver-cell upgrade-plan-ver-cell--note" title="${_attr(raw)}">${self.escapeHtml(compact)}</div>`;
+                                    }
+                                    const parts = raw
+                                        .split(/\s*(?:;|\s\/\s|\n)\s*/g)
+                                        .map(part => part.trim())
+                                        .filter(Boolean);
+                                    if (parts.length > 1 && parts.length <= 4) {
+                                        return `<div class="upgrade-plan-ver-stack" title="${_attr(raw)}">
+                                            ${parts.map(part => `<span class="upgrade-plan-ver-pill">${self.escapeHtml(part)}</span>`).join('')}
+                                        </div>`;
+                                    }
+                                    return `<div class="upgrade-plan-ver-cell" title="${_attr(raw)}">${self.escapeHtml(raw)}</div>`;
+                                };
+                                const _renderPlanNotes = (items) => {
+                                    if (!items.length) return '';
+                                    const notes = items.map(item => `<div class="upgrade-plan-note">
+                                        <span class="upgrade-plan-note-label">${self.escapeHtml(item.label)}:</span>
+                                        <span class="upgrade-plan-note-text">${self.escapeHtml(item.text)}</span>
+                                    </div>`).join('');
+                                    return `<tr class="upgrade-plan-note-row"><td colspan="4"><div class="upgrade-plan-note-list">${notes}</div></td></tr>`;
+                                };
                                 const rows = devs.map(d => {
                                     const p = devices[d.id] || {};
                                     const upType = p.upgrade_type || 'normal';
@@ -2265,12 +3206,77 @@
                                     const selVal = devNeedsDD && upType === 'normal' ? 'delete_deploy' : upType;
                                     const optionsHtml = opts.map(o => `<option value="${o.val}" ${selVal === o.val ? 'selected' : ''}>${o.label}</option>`).join('');
                                     const _sysType = p.system_type || '';
-                                    const _isClDev = _sysType.startsWith('CL-') || p.is_cluster;
+                                    // Cluster detection in the row: union of
+                                    // every signal we have. `p.is_cluster` is
+                                    // now set by `_buildClientPlan` when the
+                                    // context / canvas / hostname convention
+                                    // says cluster, even if the resolved
+                                    // sys-type is SA-*. Keep the hostname
+                                    // regex as a last-resort safety net so
+                                    // an SSH-verified plan built by an older
+                                    // backend (no `is_cluster` field) still
+                                    // paints the row correctly.
+                                    const _nameLooksCL = /(^|[_\-])CL([_\-]|$)/i.test(d.hostname || d.id || '');
+                                    const _isClDev = !!(
+                                        p.is_cluster
+                                        || _sysType.startsWith('CL-')
+                                        || d._isCluster
+                                        || _nameLooksCL
+                                    );
+                                    // `system_type_mismatch` is stamped by
+                                    // `_buildClientPlan`. The SSH-verified plan
+                                    // from a newer backend surfaces the same
+                                    // through `p.system_type_mismatch`; older
+                                    // backends won't, so re-derive here when
+                                    // we see a CL-class device with an SA-*
+                                    // sys-type.
+                                    //
+                                    // CRUCIAL: if the cached context says this
+                                    // value came from the per-user override
+                                    // store (``system_type_source`` starts with
+                                    // ``user_override``) and the resolved value
+                                    // is already CL-*, the operator has
+                                    // explicitly agreed to this pick -- do NOT
+                                    // re-flag the mismatch regardless of what
+                                    // the backend plan (which doesn't consult
+                                    // the override layer) stamped. Without
+                                    // this guard YOR_CL_PE-4 keeps showing the
+                                    // red banner on every Step-5 open even
+                                    // though the operator corrected it.
+                                    const _rawSysType = p.system_type_raw || _sysType;
+                                    const _ctxOverrideActive = (ctx.system_type_source || '').startsWith('user_override')
+                                        && (ctx.system_type || '').toUpperCase().startsWith('CL-');
+                                    const _sysTypeMismatch = _ctxOverrideActive ? false : !!(
+                                        p.system_type_mismatch
+                                        || (_isClDev && _rawSysType.startsWith('SA-'))
+                                    );
                                     const _knownSysTypes = self._WIZARD_KNOWN_SYS_TYPES;
                                     let _sysTypeHtml = '';
-                                    if (!_sysType) {
-                                        const _stOpts = _knownSysTypes.map(t => `<option value="${t}">${t}</option>`).join('');
-                                        _sysTypeHtml = `<div style="margin-top:1px"><select class="upgrade-plan-systype-select upgrade-plan-select" data-device="${d.id}" style="width:auto;border-color:var(--dn-orange,#e67e22);color:var(--dn-orange)"><option value="" selected disabled>sys-type?</option>${_stOpts}</select></div>`;
+                                    if (!_sysType || _sysTypeMismatch) {
+                                        // Mismatch path: force a CL-only picker
+                                        // so the operator can't proceed with an
+                                        // SA deploy on a cluster chassis. The
+                                        // dropdown is seeded with the current
+                                        // raw value (if any) for context.
+                                        const _clOnly = _isClDev;
+                                        const _filtered = _clOnly
+                                            ? _knownSysTypes.filter(t => t.startsWith('CL-'))
+                                            : _knownSysTypes;
+                                        const _stOpts = _filtered.map(t => `<option value="${t}">${t}</option>`).join('');
+                                        const _placeholder = _sysTypeMismatch
+                                            ? `sys-type mismatch (${_rawSysType || 'SA-*'}) -- pick CL-*`
+                                            : 'sys-type?';
+                                        _sysTypeHtml = `<div style="margin-top:1px">
+                                            <select class="upgrade-plan-systype-select upgrade-plan-select" data-device="${d.id}" style="width:auto;border-color:var(--dn-red,#e74c3c);color:var(--dn-red,#e74c3c)">
+                                                <option value="" selected disabled>${_placeholder}</option>
+                                                ${_stOpts}
+                                            </select>
+                                            ${_sysTypeMismatch ? `<div class="upgrade-plan-systype-warn upgrade-plan-systype-warn--critical" style="margin-top:2px">
+                                                <svg width="12" height="12" style="vertical-align:middle;margin-right:3px"><use href="#ico-warning"/></svg>
+                                                <strong>Cluster device reported SA chassis</strong>
+                                                <br><span style="font-size:9px">Resolved ${self.escapeHtml(_rawSysType || 'SA-*')} but ${self.escapeHtml(d.hostname || d.id)} is a cluster (${self.escapeHtml(p.cluster_signal_source || 'canvas/hostname')}). Pick the correct CL-* before Execute or the deploy will target the wrong profile.</span>
+                                            </div>` : ''}
+                                        </div>`;
                                     } else {
                                         const _clLabel = _isClDev ? ' cluster' : '';
                                         _sysTypeHtml = `<span style="font-size:10px;opacity:0.65;margin-left:3px">[${_sysType}${_clLabel}]</span>`;
@@ -2304,12 +3310,71 @@
                                         </div>`;
                                     } else if (_isClDev && !_pfFail) {
                                         const _defNcc = p.ncc_id != null ? p.ncc_id : 0;
+                                        const _src = String(p.active_ncc_source || '').trim();
+                                        // Mirror `_TRUSTED_ACTIVE_NCC_SOURCES` from
+                                        // `routes/bridge_helpers.py`. Anything outside
+                                        // this set (including the legacy bare
+                                        // `ctx.active_ncc_vm` with no source -- which
+                                        // we now tag `context_unverified`) means
+                                        // scaler's raw json dump dropped the
+                                        // provenance and we cannot trust the value
+                                        // without a fresh probe.
+                                        const _NCC_TRUST_PREFIXES_R = [
+                                            'kvm_', 'virsh_console_verified',
+                                            'pre_upgrade_snapshot', 'pre_upgrade_backup',
+                                            'scaler_db_cache', 'topology_virsh_probe',
+                                            'upgrade_start_snapshot', 'post_reboot_virsh_probe',
+                                        ];
+                                        const _isTrusted = _src
+                                            && _NCC_TRUST_PREFIXES_R.some(pref => _src.startsWith(pref));
+                                        const _isPreUpgrade = _src === 'upgrade_start_snapshot';
+                                        const _isUnverifiedCtx = _src === 'context_unverified';
+                                        const _hasGuessedVm = !!p.active_ncc_vm;
+                                        const _probing = !!(self._nccProbeInFlight && self._nccProbeInFlight[d.id]);
+                                        // Tag semantics:
+                                        //   "(active)"     -- trusted live/probe signal.
+                                        //   "(pre-upgrade)"-- frozen snapshot stamped when
+                                        //                     the upgrade began.
+                                        //   "(unverified)" -- a value exists in
+                                        //                     operational.json but its
+                                        //                     `active_ncc_source` was
+                                        //                     dropped (scaler raw write).
+                                        //                     Operator must Re-detect
+                                        //                     before Execute.
+                                        //   "(detecting...)"/"(default -- verify!)" --
+                                        //                     no value at all yet.
+                                        const _tag = (n) => {
+                                            if (_defNcc !== n) return '';
+                                            if (_isTrusted) return _isPreUpgrade ? ' (pre-upgrade)' : ' (active)';
+                                            if (_isUnverifiedCtx && _hasGuessedVm) return ' (unverified -- re-detect!)';
+                                            return _probing ? ' (detecting...)' : ' (default -- verify!)';
+                                        };
+                                        const _ncc0Label = `NCC-0${_tag(0)}`;
+                                        const _ncc1Label = `NCC-1${_tag(1)}`;
+                                        const _showWarn = !_isTrusted && !_probing;
+                                        const _warnText = _isUnverifiedCtx
+                                            ? 'Active NCC source was dropped by scaler write -- '
+                                            : 'Active NCC not detected -- ';
+                                        const _warn = _showWarn
+                                            ? `<div class="upgrade-plan-ncc-warn" style="color:var(--dn-orange,#e67e22);font-size:10px;margin-top:2px">
+                                                ${_warnText}click
+                                                <a href="#" data-action="probe-active-ncc" data-device="${d.id}" style="color:var(--dn-orange,#e67e22);text-decoration:underline">Re-detect</a>
+                                                or verify manually before Execute.
+                                            </div>`
+                                            : '';
+                                        const _preUpgradeHint = _isPreUpgrade
+                                            ? `<div class="upgrade-plan-ncc-hint" style="color:var(--dn-green,#27ae60);font-size:10px;margin-top:2px">
+                                                Using pre-upgrade snapshot (frozen when upgrade began).
+                                               </div>`
+                                            : '';
                                         _nccSelectorHtml = `<div class="upgrade-plan-ncc-selector">
                                             <label class="upgrade-plan-ncc-label">Deploy NCC:</label>
                                             <select class="upgrade-plan-ncc-select" data-device="${d.id}">
-                                                <option value="0" ${_defNcc === 0 ? 'selected' : ''}>NCC-0 (default)</option>
-                                                <option value="1" ${_defNcc === 1 ? 'selected' : ''}>NCC-1</option>
+                                                <option value="0" ${_defNcc === 0 ? 'selected' : ''}>${_ncc0Label}</option>
+                                                <option value="1" ${_defNcc === 1 ? 'selected' : ''}>${_ncc1Label}</option>
                                             </select>
+                                            ${_warn}
+                                            ${_preUpgradeHint}
                                         </div>`;
                                     }
                                     const _jumpTag = devMajorJump ? ` <span class="upgrade-plan-jump-tag">v${curMaj}->v${tgtMaj}</span>` : '';
@@ -2329,12 +3394,42 @@
                                             System type change: ${self.escapeHtml(_prevSt)} -> ${self.escapeHtml(_sysType)}
                                         </div>`;
                                     }
-                                    return `<tr class="upgrade-plan-row${blocked ? ' upgrade-plan-row--blocked' : ''}${devNeedsDD ? ' upgrade-plan-row--forced' : ''}${_pfFail ? ' upgrade-plan-row--preflight-fail' : ''}${!_sysType ? ' upgrade-plan-row--no-systype' : ''}${_stCatChange ? ' upgrade-plan-row--systype-critical' : ''}" title="${(reason + ' ' + warnings).replace(/"/g, '&quot;')}">
-                                        <td class="upgrade-plan-device">${d.hostname || d.id}${_sysTypeHtml}${_jumpTag}${_stChangeHtml}${_pfHtml}${_nccSelectorHtml}</td>
-                                        <td class="upgrade-plan-ver">${curVer}</td>
-                                        <td class="upgrade-plan-ver">${tgtVer}</td>
+                                    const _rowNotes = [];
+                                    // 2026-05-12: surface the provenance of `Current` so the
+                                    // operator knows whether it came from a live SSH probe
+                                    // or the operational.json cache (PE-4 / cluster fallback
+                                    // path). Without this, the row was visually identical
+                                    // whether the SSH probe succeeded, the SSH probe failed
+                                    // and we fell back to cache, or the value was simply
+                                    // never detected -- and the bug report showed exactly
+                                    // that confusion.
+                                    const _curVerSrc = String(p.current_version_source || '');
+                                    if (_curVerSrc.startsWith('operational_json_cache') || _curVerSrc === 'ssh_failed') {
+                                        const _ageSec = Number(p.current_version_age_sec);
+                                        const _ageHint = Number.isFinite(_ageSec) && _ageSec >= 0
+                                            ? ` (~${_ageSec}s old)`
+                                            : '';
+                                        const _srcLabel = _curVerSrc === 'ssh_failed'
+                                            ? 'SSH probe failed; no cached version available -- click Verify via SSH.'
+                                            : `Current from operational.json cache${_ageHint}. Click Verify via SSH for a live re-probe.`;
+                                        _rowNotes.push({ label: 'Source', text: _srcLabel });
+                                    }
+                                    const _curVerHtml = _renderPlanVersionCell(curVer, _rowNotes, 'Current');
+                                    const _tgtVerHtml = _renderPlanVersionCell(tgtVer, _rowNotes, 'Target');
+                                    const _deviceLabel = self.escapeHtml(d.hostname || d.id);
+                                    const _rowTitle = _attr(`${reason} ${warnings}`.trim());
+                                    return `<tr class="upgrade-plan-row${blocked ? ' upgrade-plan-row--blocked' : ''}${devNeedsDD ? ' upgrade-plan-row--forced' : ''}${_pfFail ? ' upgrade-plan-row--preflight-fail' : ''}${!_sysType ? ' upgrade-plan-row--no-systype' : ''}${_stCatChange ? ' upgrade-plan-row--systype-critical' : ''}" title="${_rowTitle}">
+                                        <td class="upgrade-plan-device">
+                                            <div class="upgrade-plan-device-main">
+                                                <span class="upgrade-plan-device-name">${_deviceLabel}</span>
+                                                ${_jumpTag}
+                                            </div>
+                                            <div class="upgrade-plan-device-meta">${_sysTypeHtml}${_stChangeHtml}${_pfHtml}${_nccSelectorHtml}</div>
+                                        </td>
+                                        <td class="upgrade-plan-ver">${_curVerHtml}</td>
+                                        <td class="upgrade-plan-ver">${_tgtVerHtml}</td>
                                         <td class="upgrade-plan-type"><select class="upgrade-plan-select" data-device="${d.id}" ${blocked ? 'disabled' : ''}>${optionsHtml}</select></td>
-                                    </tr>`;
+                                    </tr>${_renderPlanNotes(_rowNotes)}`;
                                 }).join('');
                                 const sourceLabel = data._planSource === 'ssh' ? 'Verified via SSH' : 'Based on cached data';
                                 const verifyHtml = verifying
@@ -2348,17 +3443,25 @@
                                 const giNames = devs.filter(d => ((devices[d.id] || {}).upgrade_type || 'normal') === 'gi_deploy').map(d => d.hostname || d.id);
                                 let configRepairBanner = '';
                                 if (hasDeleteDeploy) {
-                                    configRepairBanner = `<div class="scaler-info-box" style="border-color:var(--dn-orange,#e67e22);color:var(--dn-orange,#e67e22);margin-bottom:8px;font-size:0.82em;line-height:1.35;padding:6px 10px"><strong>Delete+Deploy</strong> (${ddNames.join(', ')}): Config backup -> delete -> deploy -> restore.</div>`;
+                                    configRepairBanner = `<div class="scaler-info-box" style="border-color:var(--dn-orange,#e67e22);color:var(--dn-orange,#e67e22);margin-bottom:8px;font-size:0.82em;line-height:1.35;padding:6px 10px"><strong>Delete+Deploy</strong> (${ddNames.join(', ')}): Config backup -> delete -> load 3 tarballs (GI) -> deploy -> restore.</div>`;
                                 }
                                 return `<div class="scaler-form" style="gap:6px">
                                     ${configRepairBanner}
-                                    <table class="upgrade-plan-table">
-                                        <thead><tr><th>Device</th><th>Current</th><th>Target</th><th>Type</th></tr></thead>
-                                        <tbody>${rows}</tbody>
-                                    </table>
-                                    <div style="display:flex;align-items:center;gap:10px;margin-top:2px">
-                                        <label style="font-size:11px;opacity:0.7;white-space:nowrap">Max parallel:</label>
-                                        <input type="number" id="upgrade-max-concurrent" class="scaler-input" value="${maxConcurrent}" min="1" max="10" style="width:60px;font-size:11px;padding:3px 5px">
+                                    <div class="upgrade-plan-table-wrap">
+                                        <table class="upgrade-plan-table">
+                                            <colgroup>
+                                                <col class="upgrade-plan-col-device">
+                                                <col class="upgrade-plan-col-current">
+                                                <col class="upgrade-plan-col-target">
+                                                <col class="upgrade-plan-col-type">
+                                            </colgroup>
+                                            <thead><tr><th>Device</th><th>Current</th><th>Target</th><th>Type</th></tr></thead>
+                                            <tbody>${rows}</tbody>
+                                        </table>
+                                    </div>
+                                    <div class="upgrade-plan-footer">
+                                        ${devs.length > 1 ? `<label style="font-size:11px;opacity:0.7;white-space:nowrap">Max parallel:</label>
+                                        <input type="number" id="upgrade-max-concurrent" class="scaler-input" value="${maxConcurrent}" min="1" max="${devs.length}" style="width:60px;font-size:11px;padding:3px 5px">` : ''}
                                         <button type="button" class="scaler-btn scaler-btn-secondary" id="upgrade-plan-verify" style="font-size:11px;padding:3px 10px" ${verifying ? 'disabled' : ''}>${verifying ? 'Verifying...' : 'Verify via SSH'}</button>
                                         ${verifyHtml}
                                     </div>
@@ -2391,8 +3494,221 @@
                                         } else {
                                             params.target_version = '0.0.0';
                                         }
-                                        const _planTimeout = new Promise((_, rej) => setTimeout(() => rej(new Error('SSH verify timed out after 45s')), 45000));
+                                        // 2026-05-12: extend the timeout from 45s to 90s.
+                                        // Cluster devices (CL-86, e.g. PE-4) whose mgmt_ip
+                                        // rejects password SSH must fall through the slow
+                                        // virsh-console probe in connect_for_upgrade -- one
+                                        // device alone can spend 20-30s on that path. With
+                                        // 3+ devices selected the 45s budget reliably
+                                        // tripped, leaving the row painted with the
+                                        // "current_version: -" / "mode: ?" stub the
+                                        // exception handler produces (the bug screenshot
+                                        // from 2026-05-12). The actual server-side SSH
+                                        // call has its own per-step timeouts and bails
+                                        // far sooner than 90s when the device is truly
+                                        // unreachable; this larger budget just lets the
+                                        // virsh-fallback path finish during the same
+                                        // user-perceived load.
+                                        const _planTimeout = new Promise((_, rej) => setTimeout(() => rej(new Error('SSH verify timed out after 90s')), 90000));
                                         const result = await Promise.race([ScalerAPI.getUpgradePlan(params), _planTimeout]);
+                                        // Backend safety-net: older backends only
+                                        // set `result_item.system_type` for cluster
+                                        // devices, leaving SA-* rows with an empty
+                                        // top-level field even when
+                                        // `deploy_params.system_type` had the real
+                                        // chassis. The newer backend (see
+                                        // `routes/upgrade.py` 2026-04-24 patch)
+                                        // surfaces it everywhere, but we keep this
+                                        // client-side lift so the wizard also works
+                                        // against an un-synced server.
+                                        try {
+                                            const _devsPlan = (result && result.devices) || {};
+                                            const _wizDevices = (self.WizardController?.data?.devices) || [];
+                                            Object.keys(_devsPlan).forEach(_did => {
+                                                const _entry = _devsPlan[_did];
+                                                if (!_entry) return;
+                                                const _dpSt = (_entry.deploy_params && _entry.deploy_params.system_type) || '';
+                                                if (!_entry.system_type && _dpSt) {
+                                                    _entry.system_type = _dpSt;
+                                                }
+                                                // Also backfill from the local
+                                                // `_deviceContexts` cache (which
+                                                // already went through the fallback
+                                                // chain in `openUpgradeWizard`). This
+                                                // catches devices the backend still
+                                                // has no snapshot for but the UI
+                                                // already knows about.
+                                                if (!_entry.system_type) {
+                                                    const _cachedCtx = self._deviceContexts?.[_did];
+                                                    const _cachedSt = _cachedCtx?.system_type || _cachedCtx?.deploy_system_type || '';
+                                                    if (_cachedSt) _entry.system_type = _cachedSt;
+                                                }
+                                                // Cluster-vs-SA guard on the
+                                                // SSH-verified plan: if the
+                                                // canvas / hostname / context
+                                                // all say cluster but the plan
+                                                // came back with an SA chassis,
+                                                // promote `is_cluster` and blank
+                                                // out the bad sys-type so the
+                                                // row renders the CL-only
+                                                // picker. See user report
+                                                // 2026-04-24 (YOR_CL_PE-4).
+                                                const _wizDev = _wizDevices.find(x => x.id === _did) || {};
+                                                const _cachedCtx = self._deviceContexts?.[_did] || {};
+                                                const _nameLooksCL = /(^|[_\-])CL([_\-]|$)/i.test(_wizDev.hostname || _did || '');
+                                                const _isPe4DeployTarget = /^(YOR[_-]CL[_-])?PE[_-]?4$/i.test((_wizDev.hostname || _did || '').trim());
+                                                if (_isPe4DeployTarget) {
+                                                    // PE-4 is a CL-86 cluster -- this is a
+                                                    // safety net for legacy backends that
+                                                    // didn't surface `system_type` at the
+                                                    // top-level. The newer backend
+                                                    // (`routes/upgrade.py` 2026-05-12 patch)
+                                                    // already surfaces `system_type`,
+                                                    // `active_ncc_vm`, and
+                                                    // `active_ncc_source` from
+                                                    // operational.json so the agent's
+                                                    // pre-existing `kvm_first_running`
+                                                    // signal flows through to the
+                                                    // wizard. We keep the cluster /
+                                                    // system_type stamp but ONLY OVERRIDE
+                                                    // the active-NCC fields when the
+                                                    // backend hasn't already published
+                                                    // a value -- otherwise the wizard
+                                                    // forces every PE-4 row to the
+                                                    // legacy `pe4_deploy_default` source
+                                                    // which is NOT in the trusted prefix
+                                                    // list, producing the orange
+                                                    // "Active NCC not detected" warning
+                                                    // the bug screenshot showed.
+                                                    if (!_entry.system_type || !_entry.system_type.startsWith('CL-')) {
+                                                        _entry.system_type = 'CL-86';
+                                                    }
+                                                    _entry.system_type_raw = _entry.system_type_raw || _entry.system_type || 'CL-86';
+                                                    _entry.is_cluster = true;
+                                                    _entry.system_type_mismatch = false;
+                                                    _entry.deploy_params = _entry.deploy_params || {};
+                                                    if (!_entry.deploy_params.system_type || !String(_entry.deploy_params.system_type).startsWith('CL-')) {
+                                                        _entry.deploy_params.system_type = _entry.system_type || 'CL-86';
+                                                    }
+                                                    if (!_entry.deploy_params.name) {
+                                                        _entry.deploy_params.name = 'YOR_CL_PE-4';
+                                                    }
+                                                    if (!_entry.deploy_params.deploy_name) {
+                                                        _entry.deploy_params.deploy_name = 'YOR_CL_PE-4';
+                                                    }
+                                                    // If the backend gave us NOTHING,
+                                                    // try the cached context the
+                                                    // wizard already collected (often
+                                                    // has the live virsh probe
+                                                    // result). When that ALSO has
+                                                    // nothing, leave ncc_id unset and
+                                                    // tag the source as
+                                                    // `untrusted_no_probe` so the
+                                                    // Execute trust gate refuses to
+                                                    // submit and the operator is
+                                                    // prompted to click Re-detect.
+                                                    // Silently filling ncc_id=1 with
+                                                    // source=pe4_deploy_default was
+                                                    // the root cause of the
+                                                    // 2026-05-12 PE-4 stuck-in-GI
+                                                    // incident.
+                                                    if (_entry.active_ncc_vm == null
+                                                        && (_entry.active_ncc_source == null || _entry.active_ncc_source === '')) {
+                                                        const _ctxNccVm = _cachedCtx.active_ncc_vm || '';
+                                                        const _ctxNccSrc = _cachedCtx.active_ncc_source || '';
+                                                        if (_ctxNccVm) {
+                                                            _entry.active_ncc_vm = _ctxNccVm;
+                                                            _entry.active_ncc_source = _ctxNccSrc || 'context_unverified';
+                                                            const _m = String(_ctxNccVm).match(/ncc[\s_-]*(\d+)/i);
+                                                            if (_m) {
+                                                                _entry.ncc_id = parseInt(_m[1], 10);
+                                                                _entry.deploy_params.ncc_id = _entry.ncc_id;
+                                                            }
+                                                        } else {
+                                                            _entry.active_ncc_source = 'untrusted_no_probe';
+                                                        }
+                                                    } else {
+                                                        // Backend gave us a trusted /
+                                                        // tagged value -- mirror it
+                                                        // into deploy_params and pick
+                                                        // ncc_id from the VM name when
+                                                        // not already set.
+                                                        if (_entry.ncc_id == null && _entry.active_ncc_vm) {
+                                                            const _m = String(_entry.active_ncc_vm).match(/ncc[\s_-]*(\d+)/i);
+                                                            if (_m) {
+                                                                _entry.ncc_id = parseInt(_m[1], 10);
+                                                            }
+                                                        }
+                                                        if (_entry.ncc_id != null
+                                                            && (_entry.deploy_params.ncc_id == null
+                                                                || _entry.deploy_params.ncc_id === '')) {
+                                                            _entry.deploy_params.ncc_id = _entry.ncc_id;
+                                                        }
+                                                    }
+                                                }
+                                                const _clusterSignal = !!(
+                                                    _entry.is_cluster
+                                                    || _entry.system_type?.startsWith?.('CL-')
+                                                    || _wizDev._isCluster
+                                                    || _cachedCtx.is_cluster
+                                                    || _cachedCtx.active_ncc_vm
+                                                    || _cachedCtx.active_ncc_node
+                                                    || _cachedCtx.kvm_host
+                                                    || _cachedCtx.kvm_host_ip
+                                                    || _nameLooksCL
+                                                );
+                                                // Lift the per-user override BEFORE the
+                                                // mismatch detection fires. The backend
+                                                // scaler-CLI plan (``/plan/build``) reads
+                                                // straight from ``db/devices.json`` and
+                                                // never consults the per-user override
+                                                // layer, so it will happily return the
+                                                // stale SA-* reading for a cluster
+                                                // device whose operator already picked
+                                                // CL-86 in a previous session. Trust the
+                                                // context's override source -- it's
+                                                // authoritative for THIS user on THIS
+                                                // topology. Without this check the red
+                                                // mismatch banner kept reappearing for
+                                                // YOR_CL_PE-4 every time the operator
+                                                // opened Step 5 (report 2026-04-24).
+                                                const _ctxSrc = (_cachedCtx.system_type_source || '');
+                                                const _ctxSt = (_cachedCtx.system_type || '').toUpperCase();
+                                                if (_ctxSrc.startsWith('user_override') && _ctxSt.startsWith('CL-')) {
+                                                    _entry.system_type = _ctxSt;
+                                                    _entry.system_type_raw = _entry.system_type_raw || _ctxSt;
+                                                    if (_entry.deploy_params) _entry.deploy_params.system_type = _ctxSt;
+                                                    _entry.is_cluster = true;
+                                                    _entry.system_type_mismatch = false;
+                                                    _entry.system_type_override_scope = _cachedCtx.system_type_override_scope || 'user';
+                                                    if (Array.isArray(_entry.warnings)) {
+                                                        _entry.warnings = _entry.warnings.filter(w =>
+                                                            !/cluster device reported sa/i.test(w));
+                                                    }
+                                                    return; // don't fall through to the SA mismatch stamp
+                                                }
+                                                const _saNow = (_entry.system_type || '').toUpperCase().startsWith('SA-');
+                                                if (_clusterSignal && _saNow) {
+                                                    _entry.system_type_raw = _entry.system_type;
+                                                    _entry.system_type = '';
+                                                    if (_entry.deploy_params) _entry.deploy_params.system_type = '';
+                                                    _entry.is_cluster = true;
+                                                    _entry.system_type_mismatch = true;
+                                                    _entry.cluster_signal_source = _entry.cluster_signal_source
+                                                        || _wizDev._clusterHintSource
+                                                        || (_cachedCtx.is_cluster ? 'context_flag' : '')
+                                                        || (_cachedCtx.active_ncc_vm || _cachedCtx.active_ncc_node ? 'context_ncc' : '')
+                                                        || (_nameLooksCL ? 'hostname' : '');
+                                                    const _warn = 'Cluster device reported SA sys-type -- pick CL-* below before Execute';
+                                                    _entry.warnings = Array.isArray(_entry.warnings) ? _entry.warnings : [];
+                                                    if (!_entry.warnings.includes(_warn)) _entry.warnings.push(_warn);
+                                                } else if (_clusterSignal) {
+                                                    _entry.is_cluster = true;
+                                                }
+                                            });
+                                        } catch (_liftExc) {
+                                            console.warn('[Upgrade] system_type lift failed:', _liftExc);
+                                        }
                                         self.WizardController.data._upgradePlan = result;
                                         self.WizardController.data._planSource = 'ssh';
                                         self.WizardController.data._planLoading = false;
@@ -2440,12 +3756,83 @@
                                         if (!plan.devices[did]) plan.devices[did] = {};
                                         plan.devices[did].system_type = val;
                                         plan.devices[did].is_cluster = val.startsWith('CL-');
+                                        // Clear the SA<->CL mismatch flag once
+                                        // the operator picks an explicit value.
+                                        // Keep the raw (pre-override) sys-type
+                                        // in `system_type_raw` for auditing.
+                                        plan.devices[did].system_type_mismatch = false;
                                         if (!plan.devices[did].deploy_params) plan.devices[did].deploy_params = {};
                                         plan.devices[did].deploy_params.system_type = val;
                                         e.target.style.borderColor = 'var(--dn-cyan, #00b4d8)';
                                         e.target.style.background = 'rgba(0,180,216,0.08)';
                                         const row = e.target.closest('.upgrade-plan-row');
-                                        if (row) row.classList.remove('upgrade-plan-row--no-systype');
+                                        if (row) {
+                                            row.classList.remove('upgrade-plan-row--no-systype');
+                                            row.classList.remove('upgrade-plan-row--systype-critical');
+                                        }
+                                        // Persist to the authenticated operator's
+                                        // per-user workspace
+                                        // (``~/.topology_users/<user>/device_overrides.json``)
+                                        // so the next Step-5 open for this same
+                                        // user / topology resolves cleanly via
+                                        // the override layer instead of falling
+                                        // back to the stale SA-* in
+                                        // db/devices.json. Scope is attached by
+                                        // ``ScalerAPI.persistSystemType`` from
+                                        // ``TopologySync.getActive()``. Fire-and
+                                        // -forget; the backend is idempotent
+                                        // and a failed POST just means we re-
+                                        // prompt next time. The live DNOS probe
+                                        // continues to auto-heal
+                                        // ``operational.json`` / ``db/devices.json``
+                                        // (hardware truth) but no longer stomps
+                                        // the user's per-topology pick.
+                                        try {
+                                            const dev = (self.WizardController?.data?.devices || []).find(x => x.id === did);
+                                            const sshHost = dev?.ssh_host || dev?.ip || '';
+                                            // Cluster picks (CL-*) additionally promote the
+                                            // correction into SCALER/db/devices.json with
+                                            // provenance ``operator_pinned``. That's the
+                                            // file the scaler CLI's plan-builder reads when
+                                            // emitting ``request system deploy system-type
+                                            // <T> name <N>``, so without this hop the
+                                            // deploy command would keep stamping the stale
+                                            // NCP-1 ``SA-*`` code that DNAAS inventory
+                                            // remembers for a chassis that briefly wore
+                                            // this hostname. The backend rejects
+                                            // commit_global for non-cluster picks to
+                                            // preserve multi-user isolation on the global
+                                            // file. See ``devices.py::persist_device_system_type``.
+                                            const isClusterPick = String(val || '').toUpperCase().startsWith('CL-');
+                                            ScalerAPI.persistSystemType(did, val, sshHost, { commitGlobal: isClusterPick })
+                                                .then(r => {
+                                                    if (r && r.persisted) {
+                                                        const scopeNote = r.topology_id
+                                                            ? `user+topology (${r.topology_id})`
+                                                            : 'user';
+                                                        const pinNote = r.global_pinned
+                                                            ? ' + scaler DB (operator_pinned)'
+                                                            : '';
+                                                        console.info(`[Upgrade] Persisted system_type=${val} for ${did} -> ${scopeNote} override${pinNote}`);
+                                                        // Reflect the override on the plan
+                                                        // entry so subsequent SSH-verify
+                                                        // lifts / row renders don't re-
+                                                        // flag the mismatch locally.
+                                                        if (plan.devices[did]) {
+                                                            plan.devices[did].system_type_override_scope =
+                                                                r.scope === 'per_topology' ? 'topology' : 'user';
+                                                            if (r.global_pinned) {
+                                                                plan.devices[did].system_type_source = 'operator_pinned';
+                                                            }
+                                                        }
+                                                    }
+                                                })
+                                                .catch(err => {
+                                                    console.warn(`[Upgrade] persistSystemType failed for ${did}:`, err && err.message);
+                                                });
+                                        } catch (_persistExc) {
+                                            console.warn('[Upgrade] persistSystemType setup failed:', _persistExc);
+                                        }
                                     });
                                 });
                                 document.getElementById('upgrade-max-concurrent')?.addEventListener('change', (e) => {
@@ -2454,6 +3841,139 @@
                                         self.WizardController.data.maxConcurrent = v;
                                     }
                                 });
+
+                                // Active-NCC detection for cluster devices. The plan
+                                // builder falls back to NCC-0 when neither
+                                // `ctx.active_ncc_node` nor the virsh probe have been
+                                // seen -- but that's a 50/50 coin flip on a two-NCC
+                                // cluster. Live SSH to the KVM host runs
+                                // `virsh console` against each NCC; the backend
+                                // persists the winner to `operational.json.active_ncc_vm`
+                                // which a subsequent `/api/devices/<id>/context` read
+                                // re-exposes as `ctx.active_ncc_node`. We trigger it
+                                // once per cluster per plan open, and on explicit
+                                // user click of the "Detect" link we added next to
+                                // the NCC dropdown (see render above).
+                                self._nccProbeInFlight = self._nccProbeInFlight || {};
+                                // Trust prefixes mirror `_TRUSTED_ACTIVE_NCC_SOURCES`
+                                // in `topology/routes/bridge_helpers.py`. A bare
+                                // `ctx.active_ncc_vm` with an empty/legacy source
+                                // means scaler's raw `connect_for_upgrade` path
+                                // overwrote our atomic write and dropped the
+                                // provenance -- treat it as un-verified and force
+                                // a fresh probe instead of accepting the guess.
+                                const _NCC_TRUST_PREFIXES = [
+                                    'kvm_', 'virsh_console_verified',
+                                    'pre_upgrade_snapshot', 'pre_upgrade_backup',
+                                    'scaler_db_cache', 'topology_virsh_probe',
+                                    'upgrade_start_snapshot', 'post_reboot_virsh_probe',
+                                ];
+                                const _isTrustedNccSrc = (s) => {
+                                    const v = String(s || '').trim();
+                                    if (!v) return false;
+                                    return _NCC_TRUST_PREFIXES.some(p => v.startsWith(p));
+                                };
+                                const _probeActiveNcc = async (did, forceLive = false) => {
+                                    if (self._nccProbeInFlight[did]) return;
+                                    const dev = (data.devices || []).find(x => x.id === did);
+                                    if (!dev) return;
+                                    const ctx = data.deviceContexts?.[did] || {};
+                                    const vi = dev.sshConfig?._virshInfo || {};
+                                    const _haveTrustedNcc = vi.activeNcc
+                                        || _isTrustedNccSrc(ctx.active_ncc_source);
+                                    if (_haveTrustedNcc && !forceLive) return;
+                                    self._nccProbeInFlight[did] = true;
+                                    try {
+                                        self.WizardController.render();
+                                        const ssh = dev.ssh_host || dev.ip || '';
+                                        let fresh = null;
+                                        const _useOrch = (typeof window !== 'undefined' && window.DeviceState && typeof window.DeviceState.getContext === 'function');
+                                        if (!forceLive) {
+                                            try {
+                                                fresh = _useOrch
+                                                    ? await window.DeviceState.getContext(did, { live: false, sshHost: ssh })
+                                                    : await ScalerAPI.getDeviceContext(did, false, ssh);
+                                            } catch (_) { /* fall through to live */ }
+                                        }
+                                        const _hasNcc = (c) => !!(c && (c.active_ncc_vm || c.active_ncc_node));
+                                        const _hasTrustedNcc = (c) => _hasNcc(c) && _isTrustedNccSrc(c?.active_ncc_source);
+                                        // When `forceLive` is set we know the
+                                        // prior ctx was untrusted (scaler
+                                        // clobber). Re-accept the cached
+                                        // value only if it now carries a
+                                        // trusted source -- otherwise hit the
+                                        // backend live probe which will
+                                        // re-run `_cluster_preprobe` and
+                                        // re-stamp `kvm_virsh_probe`.
+                                        const _needLive = forceLive
+                                            ? !_hasTrustedNcc(fresh)
+                                            : !_hasNcc(fresh);
+                                        if (_needLive) {
+                                            fresh = _useOrch
+                                                ? await window.DeviceState.getContext(did, { live: true, sshHost: ssh, bypassCache: true })
+                                                : await ScalerAPI.getDeviceContext(did, true, ssh);
+                                        }
+                                        if (_hasNcc(fresh)) {
+                                            const merged = { ...ctx, ...fresh, _fetchedAt: Date.now() };
+                                            data.deviceContexts = data.deviceContexts || {};
+                                            data.deviceContexts[did] = merged;
+                                            if (self._deviceContexts) self._deviceContexts[did] = merged;
+                                            data._upgradePlan = null;
+                                            self.showNotification(
+                                                `Active NCC for ${dev.hostname || did}: ${fresh.active_ncc_vm || fresh.active_ncc_node}`,
+                                                'info'
+                                            );
+                                        } else {
+                                            self.showNotification(
+                                                `Active NCC probe returned no result for ${dev.hostname || did} -- verify manually before Execute.`,
+                                                'warning'
+                                            );
+                                        }
+                                    } catch (e) {
+                                        self.showNotification(`Active NCC probe failed (${dev.hostname || did}): ${e.message}`, 'warning');
+                                    } finally {
+                                        delete self._nccProbeInFlight[did];
+                                        self.WizardController.render();
+                                    }
+                                };
+                                document.querySelectorAll('[data-action="probe-active-ncc"]').forEach(a => {
+                                    a.addEventListener('click', (ev) => {
+                                        ev.preventDefault();
+                                        _probeActiveNcc(a.dataset.device, /* forceLive */ true);
+                                    });
+                                });
+                                const _deviceIds = data.selectedDeviceIds || [];
+                                for (const did of _deviceIds) {
+                                    const dev = (data.devices || []).find(x => x.id === did);
+                                    if (!dev) continue;
+                                    const ctx = data.deviceContexts?.[did] || {};
+                                    const sysTypeStr = String(ctx.system_type || dev.platform || '').toUpperCase();
+                                    const isCl = sysTypeStr.startsWith('CL-') || ctx.is_cluster;
+                                    const vi = dev.sshConfig?._virshInfo || {};
+                                    // Auto-probe condition: cluster device that
+                                    // doesn't yet have a TRUSTED active-NCC
+                                    // signal. We deliberately ignore an
+                                    // un-sourced `ctx.active_ncc_vm` here
+                                    // because scaler's raw write of
+                                    // operational.json drops the source field
+                                    // and can clobber a fresh `kvm_virsh_probe`
+                                    // result with a guessed "ncc-0" value
+                                    // (see DEVELOPMENT_GUIDELINES.md, "Scaler
+                                    // raw-write provenance loss").
+                                    const haveTrusted = vi.activeNcc
+                                        || _isTrustedNccSrc(ctx.active_ncc_source);
+                                    if (isCl && !haveTrusted && !self._nccProbeInFlight[did]) {
+                                        // If a stale untrusted VM is already
+                                        // sitting in ctx (scaler clobber), the
+                                        // non-live branch of `_probeActiveNcc`
+                                        // would just re-read the same poisoned
+                                        // context. Force a live virsh probe so
+                                        // the resolver re-stamps `kvm_virsh_probe`
+                                        // and the wizard repaints the trusted tag.
+                                        const _ctxHasStaleVm = !!(ctx.active_ncc_vm || ctx.active_ncc_node);
+                                        _probeActiveNcc(did, /* forceLive */ _ctxHasStaleVm);
+                                    }
+                                }
                             },
                             collectData: () => {
                                 const plan = self.WizardController?.data?._upgradePlan || {};
@@ -2488,6 +4008,25 @@
                                         device_plans[did].deploy_params.ncc_id = isNaN(nccVal) ? 0 : nccVal;
                                         if (vmName) device_plans[did].deploy_params.selected_ncc_vm = vmName;
                                     }
+                                });
+                                Object.keys(device_plans).forEach(did => {
+                                    const dev = (self.WizardController?.data?.devices || []).find(x => x.id === did) || {};
+                                    const label = (dev.hostname || did || '').trim();
+                                    if (!/^(YOR[_-]CL[_-])?PE[_-]?4$/i.test(label)) return;
+                                    // PE-4 chassis identity guards only. The
+                                    // CL-86 system_type + YOR_CL_PE-4 deploy
+                                    // name are immutable cluster facts; the
+                                    // DNOS deploy command will syntactically
+                                    // reject anything else. NEVER silently
+                                    // fill ncc_id=1 + pe4_deploy_default --
+                                    // that was the 2026-05-12 stuck-in-GI
+                                    // root cause.
+                                    device_plans[did].system_type = 'CL-86';
+                                    device_plans[did].is_cluster = true;
+                                    device_plans[did].deploy_params = device_plans[did].deploy_params || {};
+                                    device_plans[did].deploy_params.system_type = 'CL-86';
+                                    device_plans[did].deploy_params.name = 'YOR_CL_PE-4';
+                                    device_plans[did].deploy_params.deploy_name = 'YOR_CL_PE-4';
                                 });
                                 const maxC = parseInt(document.getElementById('upgrade-max-concurrent')?.value || '3', 10);
                                 const missingSysType = Object.entries(device_plans).filter(([_, dp]) => {
@@ -2625,7 +4164,7 @@
                                                     const _selVm = dp.selected_ncc_vm || dp.deploy_params?.selected_ncc_vm || '';
                                                     extra += ` ncc-id ${_selNcc}${_selVm ? ' (' + _selVm + ')' : ''}`;
                                                 }
-                                                return `${d.hostname || d.id}: request system delete -> deploy${extra}`;
+                                                return `${d.hostname || d.id}: request system delete -> load 3 tarballs (GI) -> deploy${extra}`;
                                             }
                                             if (ut === 'gi_deploy') {
                                                 let extra = _sysLabel ? ` system-type ${_sysLabel}` : '';
@@ -2764,6 +4303,52 @@
                             return;
                         }
         
+                        // Pre-flight trust gate for destructive upgrades.
+                        // Mirrors the backend
+                        // `_assert_active_ncc_trusted_for_destructive_op`
+                        // helper so the operator gets an immediate
+                        // "click Re-detect first" prompt rather than a
+                        // round-trip 412 from the server. The trust
+                        // prefix list MUST match
+                        // `_NCC_TRUST_PREFIXES` in this file (and
+                        // `_TRUSTED_ACTIVE_NCC_SOURCES` in
+                        // `routes/bridge_helpers.py`).
+                        const _UPG_TRUST_PREFIXES = [
+                            'kvm_', 'virsh_console_verified',
+                            'pre_upgrade_snapshot', 'pre_upgrade_backup',
+                            'scaler_db_cache', 'topology_virsh_probe',
+                            'upgrade_start_snapshot', 'post_reboot_virsh_probe',
+                        ];
+                        const _isTrustedUpgSrc = (s) => {
+                            const v = String(s || '').trim();
+                            return !!v && _UPG_TRUST_PREFIXES.some(p => v.startsWith(p));
+                        };
+                        const _untrustedDevs = [];
+                        for (const _did of deviceIds) {
+                            const _plan = device_plans[_did] || {};
+                            const _type = String(_plan.upgrade_type || 'normal').toLowerCase();
+                            if (_type !== 'delete_deploy' && _type !== 'gi_deploy') continue;
+                            const _sys = String(_plan.system_type
+                                || _plan.deploy_params?.system_type || '').toUpperCase();
+                            const _isCluster = _plan.is_cluster || _sys.startsWith('CL-');
+                            if (!_isCluster) continue;
+                            const _src = String(_plan.active_ncc_source
+                                || _plan.deploy_params?.active_ncc_source || '').trim();
+                            if (!_isTrustedUpgSrc(_src)) {
+                                _untrustedDevs.push(`${_did} (active_ncc_source=${_src || 'empty'})`);
+                            }
+                        }
+                        if (_untrustedDevs.length > 0) {
+                            self.showNotification(
+                                `Refusing destructive upgrade for cluster device(s): ${_untrustedDevs.join(', ')}. `
+                                + `Click "Re-detect" next to each device in the plan to refresh the live `
+                                + `Active-NCC probe, then retry. (Background: \`request system delete\` reboots `
+                                + `one NCC and the cluster fails over to the other -- without a trusted live `
+                                + `snapshot the deploy targets the wrong NCC. See 2026-05-12 incident.)`,
+                                'error', 12000);
+                            return;
+                        }
+        
                         try {
                             let stack;
                             if (data._directUrls && data.dnosUrl) {
@@ -2792,7 +4377,6 @@
                                 self.showNotification(
                                     `${reason}. Returning to Source step -- trigger a new build.`,
                                     'error', 8000);
-                                if (btn) { btn.disabled = false; btn.textContent = 'Start Upgrade'; }
                                 self.WizardController.goTo(1);
                                 return;
                             }
@@ -2877,9 +4461,68 @@
                     const sshHosts = {};
                     devicesWithIp.forEach(d => { sshHosts[d.id] = d.ssh_host || d.ip || ''; });
                     ScalerAPI.getUpgradeDeviceStatus(ids, sshHosts, false).then(liveResult => {
+                        // Propagate authoritative live-SSH mode back to the canvas monitor so
+                        // stale _deviceMode doesn't mislead other UI surfaces (canvas badges,
+                        // context menu gating, etc.). This is the most accurate source we have.
+                        const liveDevices = liveResult.devices || {};
+                        const _validModes = ['GI', 'DNOS', 'RECOVERY', 'BASEOS_SHELL', 'ONIE', 'UPGRADING', 'DEPLOYING'];
+                        for (const [did, liveSt] of Object.entries(liveDevices)) {
+                            const dev = devices.find(x => x.id === did);
+                            if (!dev) continue;
+                            const newMode = (liveSt.mode || '').toUpperCase();
+                            if (newMode && _validModes.includes(newMode) && dev._deviceMode !== newMode) {
+                                const prevMode = dev._deviceMode;
+                                dev._deviceMode = newMode;
+                                try {
+                                    window.dispatchEvent(new CustomEvent('device:mode-changed', {
+                                        detail: { deviceId: did, device: dev, mode: newMode, prevMode }
+                                    }));
+                                } catch (_) {}
+                            }
+                        }
                         if (self.WizardController?.panelName === 'upgrade-wizard') {
                             const wd = self.WizardController.data;
-                            Object.assign(wd.deviceStatus, liveResult.devices || {});
+                            wd.deviceStatus = wd.deviceStatus || {};
+                            // 2026-05-12 cluster-fallback: when the Phase 2 live
+                            // SSH probe returns an empty / inconclusive payload
+                            // (mode "" or "?" AND no version fields populated),
+                            // PRESERVE the Phase 1 cached row instead of letting
+                            // the live result clobber a known-good cached
+                            // device_state. This was the silent failure that
+                            // produced the bug screenshot's "Mode = ?, DNOS = -"
+                            // for PE-4: Phase 1 read operational.json and got
+                            // DNOS + full stack versions, then Phase 2's slow
+                            // virsh-fallback path either timed out or returned
+                            // partial output, and the wizard re-rendered with
+                            // the live row overwriting the cached row. The
+                            // guard below keeps cache when live is empty,
+                            // merges otherwise.
+                            for (const [_did, liveSt] of Object.entries(liveDevices)) {
+                                const prev = wd.deviceStatus[_did] || {};
+                                const _liveMode = String(liveSt?.mode || '').trim();
+                                const _liveModeBlank = !_liveMode || _liveMode === '?' || _liveMode === '...';
+                                const _liveVerBlank = !((liveSt?.dnos_ver || '').trim() && (liveSt?.dnos_ver || '').trim() !== '-')
+                                    && !((liveSt?.gi_ver || '').trim() && (liveSt?.gi_ver || '').trim() !== '-')
+                                    && !((liveSt?.baseos_ver || '').trim() && (liveSt?.baseos_ver || '').trim() !== '-');
+                                const _prevMode = String(prev?.mode || '').trim();
+                                const _prevModeKnown = _prevMode && _prevMode !== '?' && _prevMode !== '...';
+                                const _prevVerKnown = ((prev?.dnos_ver || '').trim() && (prev?.dnos_ver || '').trim() !== '-')
+                                    || ((prev?.gi_ver || '').trim() && (prev?.gi_ver || '').trim() !== '-');
+                                if (_liveModeBlank && _liveVerBlank && (_prevModeKnown || _prevVerKnown)) {
+                                    // Keep cached row; just stamp a hint so the
+                                    // operator knows the live probe couldn't
+                                    // confirm. The Device Stack badge still
+                                    // shows the cached mode so the row no
+                                    // longer "regresses to dashes".
+                                    wd.deviceStatus[_did] = {
+                                        ...prev,
+                                        _live_probe_empty: true,
+                                        install_status: prev.install_status || 'Live probe unreachable (using cache)'
+                                    };
+                                } else {
+                                    wd.deviceStatus[_did] = { ...prev, ...liveSt };
+                                }
+                            }
                             self.WizardController.render();
                         }
                     }).catch(e => console.warn('[ScalerGUI] live device status failed:', e.message));
@@ -2913,9 +4556,12 @@
                 }
         
                 const deviceContexts = {};
+                const _useOrch = (typeof window !== 'undefined' && window.DeviceState && typeof window.DeviceState.getContext === 'function');
                 for (const d of devices) {
                     try {
-                        deviceContexts[d.id] = await ScalerAPI.getDeviceContext(d.id, false, d.ssh_host || d.ip);
+                        deviceContexts[d.id] = _useOrch
+                            ? await window.DeviceState.getContext(d.id, { live: false, sshHost: d.ssh_host || d.ip })
+                            : await ScalerAPI.getDeviceContext(d.id, false, d.ssh_host || d.ip);
                     } catch (_) {
                         deviceContexts[d.id] = {};
                     }
@@ -2985,11 +4631,14 @@
                             const wd = self.WizardController.data;
                             const ids = wd.selectedDeviceIds || [];
                             const devs = wd.devices || [];
+                            const _useOrch = (typeof window !== 'undefined' && window.DeviceState && typeof window.DeviceState.getContext === 'function');
                             for (const id of ids) {
                                 const d = devs.find(x => x.id === id);
                                 if (d) {
                                     try {
-                                        const c = await ScalerAPI.getDeviceContext(id, true, d.ssh_host || d.ip);
+                                        const c = _useOrch
+                                            ? await window.DeviceState.getContext(id, { live: true, sshHost: d.ssh_host || d.ip, bypassCache: true })
+                                            : await ScalerAPI.getDeviceContext(id, true, d.ssh_host || d.ip);
                                         wd.deviceContexts = wd.deviceContexts || {};
                                         wd.deviceContexts[id] = c;
                                     } catch (_) {}

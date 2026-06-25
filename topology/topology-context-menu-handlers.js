@@ -192,6 +192,40 @@ window.ContextMenuHandlers = {
         
         const menu = document.getElementById('context-menu');
         menu.style.display = 'block';
+
+        // Mode-chip header (2026-04-26): small DNOS/GI/RECOVERY pill at
+        // the top of the menu so the user can SEE the current mode the
+        // moment they right-click a device. The chip is auto-removed on
+        // every show so it doesn't leak across menu invocations.
+        const _existingChip = menu.querySelector('.ctx-mode-chip-row');
+        if (_existingChip) _existingChip.remove();
+        if (obj && obj.type === 'device' && typeof window.DeviceModeGate !== 'undefined') {
+            const _devMode = (obj._deviceMode || 'unknown').toUpperCase();
+            const chipHtml = window.DeviceModeGate.renderBadge(_devMode, { marginLeft: '0' });
+            const row = document.createElement('div');
+            row.className = 'ctx-mode-chip-row';
+            row.style.cssText = 'padding:8px 14px 6px;display:flex;align-items:center;gap:8px;font-size:11px;opacity:0.95;cursor:default;border-bottom:1px solid rgba(127,127,127,0.18);';
+            row.innerHTML = '<span style="opacity:0.7;">Mode:</span>' + chipHtml
+                + '<span class="ctx-mode-redetect" style="margin-left:auto;font-size:10px;cursor:pointer;color:#9b59b6;text-decoration:underline;">re-detect</span>';
+            menu.insertBefore(row, menu.firstChild);
+            row.addEventListener('mousedown', (ev) => ev.stopPropagation());
+            const reLink = row.querySelector('.ctx-mode-redetect');
+            if (reLink) {
+                reLink.addEventListener('click', async (ev) => {
+                    ev.stopPropagation();
+                    reLink.textContent = 'probing...';
+                    try {
+                        const decision = await window.DeviceModeGate.check(obj, 'terminal', { live: true });
+                        const newChip = window.DeviceModeGate.renderBadge(decision.mode, { marginLeft: '0' });
+                        const oldPill = row.querySelector('.device-mode-pill');
+                        if (oldPill) oldPill.outerHTML = newChip;
+                        reLink.textContent = 're-detect';
+                    } catch (_) {
+                        reLink.textContent = 're-detect';
+                    }
+                });
+            }
+        }
         
         // Get menu dimensions after making it visible
         const menuRect = menu.getBoundingClientRect();
@@ -472,18 +506,30 @@ window.ContextMenuHandlers = {
     },
 
     hideContextMenu(editor) {
+        // DEFENSIVE 2026-04-24: the context-menu DOM node can be missing
+        // during teardown (panel close, wheel-scroll race, test harness
+        // tearing down document). A missing node crashed every wheel
+        // event handler with "Cannot read properties of null (reading
+        // 'style')" and then cascaded into the draw loop, so we just
+        // no-op on the style flip and continue to hide sub-popups.
         const menu = document.getElementById('context-menu');
-        menu.style.display = 'none';
+        if (menu && menu.style) {
+            menu.style.display = 'none';
+        }
         editor.contextMenuVisible = false;
-        // Also hide any related popups and submenus if open
-        editor.hideColorPalettePopup();
-        editor.hideWidthSliderPopup();
-        editor.hideStyleOptionsPopup();
-        editor.hideCurveSubmenu();
-        editor.hideCurveModeSubmenu();
-        editor.hideCurveMagnitudePopup();
-        editor.hideLayersSubmenu();
-        editor.hideDeviceStyleSubmenu();
+        // Also hide any related popups and submenus if open. Each of
+        // these is wrapped in its own try/catch because they can also
+        // race with DOM teardown, and we'd rather silently continue
+        // than break the wheel handler.
+        const safe = (fn) => { try { if (typeof fn === 'function') fn(); } catch (_) {} };
+        safe(editor.hideColorPalettePopup && editor.hideColorPalettePopup.bind(editor));
+        safe(editor.hideWidthSliderPopup && editor.hideWidthSliderPopup.bind(editor));
+        safe(editor.hideStyleOptionsPopup && editor.hideStyleOptionsPopup.bind(editor));
+        safe(editor.hideCurveSubmenu && editor.hideCurveSubmenu.bind(editor));
+        safe(editor.hideCurveModeSubmenu && editor.hideCurveModeSubmenu.bind(editor));
+        safe(editor.hideCurveMagnitudePopup && editor.hideCurveMagnitudePopup.bind(editor));
+        safe(editor.hideLayersSubmenu && editor.hideLayersSubmenu.bind(editor));
+        safe(editor.hideDeviceStyleSubmenu && editor.hideDeviceStyleSubmenu.bind(editor));
     },
 
     handleContextCopyStyle(editor) {
@@ -502,6 +548,17 @@ window.ContextMenuHandlers = {
     copyObjectStyle(editor, obj) {
         if (!obj) return;
         
+        // 2026-05-12 [split-color]: capture the split-color halves
+        // when the source device is in split mode so that paste-style
+        // can re-create the same two-tone fill on a target device.
+        // Solid sources don't carry these fields, which means a
+        // solid->target paste keeps the legacy "replace target color
+        // with source color" semantics (and reverts split targets to
+        // solid -- matching the device-editor modal contract).
+        const _sourceIsSplitDevice = obj.type === 'device'
+            && typeof obj.colorLeft === 'string' && obj.colorLeft.trim().length > 0
+            && typeof obj.colorRight === 'string' && obj.colorRight.trim().length > 0;
+
         // Store ALL style properties - we'll apply what's applicable at paste time
         editor.copiedStyle = {
             type: obj.type,
@@ -512,6 +569,13 @@ window.ContextMenuHandlers = {
             visualStyle: obj.visualStyle,
             labelColor: obj.labelColor, // Device label text color
             labelSize: obj.labelSize, // Device label size
+            // 2026-05-12 [split-color]: split halves (device-only,
+            // intentionally undefined on solid sources). Plus a
+            // boolean flag so consumers can branch without re-checking
+            // both fields independently.
+            colorLeft: _sourceIsSplitDevice ? obj.colorLeft : undefined,
+            colorRight: _sourceIsSplitDevice ? obj.colorRight : undefined,
+            isSplit: _sourceIsSplitDevice,
             // Link properties
             style: obj.style,
             width: obj.width,
@@ -646,6 +710,14 @@ window.ContextMenuHandlers = {
             }
             if (editor.copiedStyle.fontWeight !== undefined) obj.fontWeight = editor.copiedStyle.fontWeight;
             if (editor.copiedStyle.fontStyle !== undefined) obj.fontStyle = editor.copiedStyle.fontStyle;
+            // 2026-05-12 [split-color]: text source is never split, so a
+            // paste from a TB onto a previously-split device reverts it
+            // to solid (the new device color we just set). Same contract
+            // as the device editor modal.
+            if (typeof obj.colorLeft === 'string' || typeof obj.colorRight === 'string') {
+                delete obj.colorLeft;
+                delete obj.colorRight;
+            }
             return; // Don't process further
         }
         
@@ -767,6 +839,12 @@ window.ContextMenuHandlers = {
             if (editor.copiedStyle.strokeColor !== undefined) {
                 obj.labelColor = editor.copiedStyle.strokeColor;
             }
+            // 2026-05-12 [split-color]: shape source is never split, so
+            // a paste onto a previously-split device reverts it to solid.
+            if (typeof obj.colorLeft === 'string' || typeof obj.colorRight === 'string') {
+                delete obj.colorLeft;
+                delete obj.colorRight;
+            }
             return;
         }
         
@@ -789,6 +867,43 @@ window.ContextMenuHandlers = {
             
         // Apply type-specific properties based on TARGET type
         if (objType === 'device') {
+            // 2026-05-12 [split-color]: device->device transfer of the
+            // split-color halves. Four cases form a clean truth table:
+            //
+            //   source SOLID + target SOLID  -> drop any split fields
+            //   source SOLID + target SPLIT  -> revert target to solid
+            //                                  (matches device-editor
+            //                                   modal contract that
+            //                                   "editing reverts split")
+            //   source SPLIT + target SOLID  -> promote target to split
+            //                                  using source halves
+            //   source SPLIT + target SPLIT  -> overwrite both halves
+            //
+            // In every case the legacy `obj.color` field (already set
+            // above) is kept in sync as the canonical solid fallback so
+            // any non-split-aware consumer (link end shading, badge
+            // colors, etc.) keeps working.
+            if (editor.copiedStyle.isSplit
+                && typeof editor.copiedStyle.colorLeft === 'string'
+                && typeof editor.copiedStyle.colorRight === 'string') {
+                // Source is split -> apply both halves to target.
+                obj.colorLeft = editor.copiedStyle.colorLeft;
+                obj.colorRight = editor.copiedStyle.colorRight;
+                // Keep `obj.color` aligned with the right half so any
+                // legacy reader sees something consistent; matches the
+                // convention from `swapDeviceColorSides`.
+                obj.color = editor.copiedStyle.colorRight;
+            } else {
+                // Source is solid (or carries no split fields). If the
+                // target was previously split, revert it so the result
+                // is a clean solid device with the source's color. This
+                // matches the device editor modal behaviour where
+                // editing the solid color input collapses split mode.
+                if (typeof obj.colorLeft === 'string' || typeof obj.colorRight === 'string') {
+                    delete obj.colorLeft;
+                    delete obj.colorRight;
+                }
+            }
             // Copy labelColor for device-to-device
             if (editor.copiedStyle.labelColor !== undefined) {
                 obj.labelColor = editor.copiedStyle.labelColor;

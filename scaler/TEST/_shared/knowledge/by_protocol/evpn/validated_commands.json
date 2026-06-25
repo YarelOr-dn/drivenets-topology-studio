@@ -1,0 +1,27 @@
+{
+  "show evpn instance EVPN_SI_VPLS_1 detail": {
+    "alternatives": [],
+    "command": "show evpn instance EVPN_SI_VPLS_1 detail",
+    "feature_tags": [
+      "evpn"
+    ],
+    "last_build": {
+      "branch": "",
+      "commit": "",
+      "device": "PE-1"
+    },
+    "last_seen_iso": "2026-04-30T14:38:42Z",
+    "notes": "",
+    "pass_count": 1,
+    "protocol": "evpn",
+    "seen_builds": [],
+    "seen_devices": [
+      "PE-1"
+    ],
+    "suites_seen": [
+      "evpn_mac_mobility_SW204115"
+    ],
+    "surface": "dnos_cli",
+    "valid": true
+  }
+}

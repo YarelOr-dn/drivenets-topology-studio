@@ -1,0 +1,67 @@
+{
+  "phase_name": "auto_diagnose",
+  "started_at": "2026-04-16T16:53:31.344+00:00",
+  "completed_at": "2026-04-16T16:53:34.205+00:00",
+  "duration_sec": 2.861,
+  "command_count": 7,
+  "commands": [
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 16:52 | no-more",
+      "timestamp": "2026-04-16T16:53:31.344+00:00",
+      "duration_ms": 1503,
+      "phase": "auto_diagnose",
+      "output_length": 3167,
+      "output_preview": "2026-04-14T16:52:04.448168 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 391382:14810985: Sending keepalive with TTL: 60 to redis\n2026-04-14T16:52:14.448210 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 391383:14811064: Sending keepalive with TTL: 60 to redis\n2026-04-14T16:52:24.448256 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 391384:14811146: Sending keep"
+    },
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+      "timestamp": "2026-04-16T16:53:32.848+00:00",
+      "duration_ms": 501,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+      "timestamp": "2026-04-16T16:53:33.349+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 207,
+      "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+    },
+    {
+      "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+      "timestamp": "2026-04-16T16:53:33.600+00:00",
+      "duration_ms": 200,
+      "phase": "auto_diagnose",
+      "output_length": 42,
+      "output_preview": "Number of MAC-Mobility entries in redis: 0"
+    },
+    {
+      "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+      "timestamp": "2026-04-16T16:53:33.801+00:00",
+      "duration_ms": 50,
+      "phase": "auto_diagnose",
+      "output_length": 26,
+      "output_preview": "ERROR: Incomplete command."
+    },
+    {
+      "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-16T16:53:33.851+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 258,
+      "output_preview": "evi_id=1, eth_tag=0, mac=00:de:ad:00:01:01, interface=, dp_index=13624, action_type=New, Type=Add, neighbor_keys_size=1\nevi_id=1, eth_tag=0, mac=00:de:ad:ff:ff:01, interface=, dp_index=13624, action_type=New, Type=Add, neighbor_keys_size=0\nEvpnMacs [size: 2]"
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-16T16:53:34.102+00:00",
+      "duration_ms": 100,
+      "phase": "auto_diagnose",
+      "output_length": 1004,
+      "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 2\n\n| MacAddress   "
+    }
+  ],
+  "parsed_values": {},
+  "anomalies": []
+}

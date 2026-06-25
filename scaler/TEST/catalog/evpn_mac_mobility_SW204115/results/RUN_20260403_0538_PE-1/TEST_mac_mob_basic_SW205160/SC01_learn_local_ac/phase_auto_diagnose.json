@@ -1,0 +1,139 @@
+{
+  "phase_name": "auto_diagnose",
+  "started_at": "2026-04-03T05:41:05.036+00:00",
+  "completed_at": "2026-04-03T05:42:42.331+00:00",
+  "duration_sec": 97.295,
+  "command_count": 16,
+  "commands": [
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 05:38 | include MAC | no-more",
+      "timestamp": "2026-04-03T05:41:05.036+00:00",
+      "duration_ms": 6309,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 05:38 | include EVPN | no-more",
+      "timestamp": "2026-04-03T05:41:11.346+00:00",
+      "duration_ms": 5758,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 05:38 | include withdraw | no-more",
+      "timestamp": "2026-04-03T05:41:17.104+00:00",
+      "duration_ms": 7059,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 05:38 | include announce | no-more",
+      "timestamp": "2026-04-03T05:41:24.163+00:00",
+      "duration_ms": 5507,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 05:38 | include seq | no-more",
+      "timestamp": "2026-04-03T05:41:29.671+00:00",
+      "duration_ms": 3154,
+      "phase": "auto_diagnose",
+      "output_length": 300,
+      "output_preview": "2026-04-03T05:38:00.036559 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2108608:1085470:  input got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 1.1.1.1 remote addr: 5.5.5.5 local port: 34945 remote port: 179) seq:300494026 ack:598929989 flags:FA msgSize:0"
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 05:38 | include duplicate | no-more",
+      "timestamp": "2026-04-03T05:41:32.825+00:00",
+      "duration_ms": 6859,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 05:38 | include suppress | no-more",
+      "timestamp": "2026-04-03T05:41:39.685+00:00",
+      "duration_ms": 7309,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 05:38 | include MAC | no-more",
+      "timestamp": "2026-04-03T05:41:46.994+00:00",
+      "duration_ms": 21327,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 05:38 | include evpn | no-more",
+      "timestamp": "2026-04-03T05:42:08.322+00:00",
+      "duration_ms": 9812,
+      "phase": "auto_diagnose",
+      "output_length": 213,
+      "output_preview": "2026-03-24T23:32:54.619171 +02:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1210:calculatePWforSomePes] [rib-manager:1344:1344] 91105:381762: EVPN: seamless-integration EVPN service 1: Calculating PW for 1 PEs"
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 05:38 | include FIB | no-more",
+      "timestamp": "2026-04-03T05:42:18.135+00:00",
+      "duration_ms": 23031,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+      "timestamp": "2026-04-03T05:42:41.166+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 35,
+      "output_preview": "  ETH TAG: 0\n    MAC table is empty"
+    },
+    {
+      "command": "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+      "timestamp": "2026-04-03T05:42:41.417+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 207,
+      "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+    },
+    {
+      "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+      "timestamp": "2026-04-03T05:42:41.668+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 42,
+      "output_preview": "Number of MAC-Mobility entries in redis: 0"
+    },
+    {
+      "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+      "timestamp": "2026-04-03T05:42:41.919+00:00",
+      "duration_ms": 50,
+      "phase": "auto_diagnose",
+      "output_length": 26,
+      "output_preview": "ERROR: Incomplete command."
+    },
+    {
+      "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-03T05:42:41.969+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 18,
+      "output_preview": "EvpnMacs [size: 0]"
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-03T05:42:42.220+00:00",
+      "duration_ms": 100,
+      "phase": "auto_diagnose",
+      "output_length": 442,
+      "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+    }
+  ],
+  "parsed_values": {},
+  "anomalies": []
+}

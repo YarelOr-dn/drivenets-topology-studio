@@ -1,0 +1,11 @@
+[
+  {
+    "command": "show evpn vpls-pw | no-more",
+    "timestamp": "2026-04-18T20:11:46.603+00:00",
+    "duration_ms": 100,
+    "phase": "trigger",
+    "output_length": 746,
+    "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------",
+    "output_full": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------------+---------------+\n    | 6.6.6.6           | 3                | 1032265         | 2               | 17             | Installed     |\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+  }
+]

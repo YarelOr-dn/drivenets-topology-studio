@@ -103,7 +103,7 @@ const ScalerGUI = {
         panelName: null,
         title: null,
         onComplete: null,
-        
+
         /**
          * Initialize a new wizard
          * @param {Object} config - Wizard configuration
@@ -145,7 +145,7 @@ const ScalerGUI = {
             }
             this.render();
         },
-        
+
         /**
          * Go to next step
          */
@@ -794,29 +794,51 @@ const ScalerGUI = {
         wc.render();
     },
 
+    // Local cache below (`_deviceContexts`) is kept as a convenience
+    // layer for `_applyPendingChanges` and for consumers that mutate the
+    // cached object (e.g. wizards stamping `_fetchedAt`). The real
+    // dedup + TTL + scope isolation lives in `window.DeviceState` --
+    // see `topology-device-state.js`. Routing through the orchestrator
+    // guarantees that two dialogs asking for the same device's context
+    // simultaneously share a single backend fetch, and that a stale
+    // response from a previous topology cannot land on the new canvas.
     async getDeviceContext(deviceId) {
         const cached = this._deviceContexts[deviceId];
         if (cached && (Date.now() - (cached._fetchedAt || 0)) < this._contextCacheTTL) {
             return this._applyPendingChanges(deviceId, cached);
         }
         const resolved = this._resolveDeviceId(deviceId);
-        const ctx = await ScalerAPI.getDeviceContext(deviceId, false, resolved.sshHost);
-        ctx._fetchedAt = Date.now();
-        ctx._canvasLabel = deviceId;
-        ctx._isDnaas = resolved.isDnaas;
-        this._deviceContexts[deviceId] = ctx;
-        return this._applyPendingChanges(deviceId, ctx);
+        let ctx;
+        if (typeof window !== 'undefined' && window.DeviceState && typeof window.DeviceState.getContext === 'function') {
+            ctx = await window.DeviceState.getContext(deviceId, { live: false, sshHost: resolved.sshHost });
+        } else {
+            ctx = await ScalerAPI.getDeviceContext(deviceId, false, resolved.sshHost);
+        }
+        const stamped = Object.assign({}, ctx, {
+            _fetchedAt: Date.now(),
+            _canvasLabel: deviceId,
+            _isDnaas: resolved.isDnaas,
+        });
+        this._deviceContexts[deviceId] = stamped;
+        return this._applyPendingChanges(deviceId, stamped);
     },
 
     async refreshDeviceContextLive(deviceId, onUpdated) {
         try {
             const resolved = this._resolveDeviceId(deviceId);
-            const ctx = await ScalerAPI.getDeviceContext(deviceId, true, resolved.sshHost);
-            ctx._fetchedAt = Date.now();
-            ctx._canvasLabel = deviceId;
-            ctx._isDnaas = resolved.isDnaas;
-            this._deviceContexts[deviceId] = ctx;
-            const enriched = this._applyPendingChanges(deviceId, ctx);
+            let ctx;
+            if (typeof window !== 'undefined' && window.DeviceState && typeof window.DeviceState.getContext === 'function') {
+                ctx = await window.DeviceState.getContext(deviceId, { live: true, sshHost: resolved.sshHost, bypassCache: true });
+            } else {
+                ctx = await ScalerAPI.getDeviceContext(deviceId, true, resolved.sshHost);
+            }
+            const stamped = Object.assign({}, ctx, {
+                _fetchedAt: Date.now(),
+                _canvasLabel: deviceId,
+                _isDnaas: resolved.isDnaas,
+            });
+            this._deviceContexts[deviceId] = stamped;
+            const enriched = this._applyPendingChanges(deviceId, stamped);
             if (onUpdated) onUpdated(enriched);
             return enriched;
         } catch (e) {
@@ -827,6 +849,9 @@ const ScalerGUI = {
 
     invalidateDeviceContext(deviceId) {
         delete this._deviceContexts[deviceId];
+        if (typeof window !== 'undefined' && window.DeviceState && typeof window.DeviceState.invalidateDevice === 'function') {
+            try { window.DeviceState.invalidateDevice(deviceId); } catch (_) {}
+        }
     },
 
     recordWizardChange(deviceId, changeType, details, options = {}) {
@@ -1486,7 +1511,7 @@ const ScalerGUI = {
     // =========================================================================
     // INITIALIZATION
     // =========================================================================
-    
+
     init() {
         console.log('[ScalerGUI] Initializing v2.0...');
         this._loadWizardHistory();
@@ -1510,10 +1535,25 @@ const ScalerGUI = {
 
     _sanitizeWizardSystemType(raw) {
         if (raw == null || raw === '') return '';
-        const s = String(raw).trim();
-        if (!s) return '';
-        if (/family\s*:/i.test(s) || /,\s*/.test(s)) return '';
+        const s0 = String(raw).trim();
+        if (!s0) return '';
+        if (/^(n\/a|null|none|unknown)$/i.test(s0)) return '';
         const known = this._WIZARD_KNOWN_SYS_TYPES;
+        // Try the raw string against the known list first (cheap path for
+        // clean values like "CL-86" / "SA-36CD-S").
+        const upRaw = s0.toUpperCase();
+        for (const k of known) {
+            if (upRaw === k.toUpperCase()) return k;
+        }
+        // DNAAS/inventory noise often looks like "SA-40C8CD, Family: NCR".
+        // Previously we rejected any string with a comma or "Family:"; that
+        // threw away legitimate values at the head. Now: peel off the first
+        // comma-delimited token, drop any "Family:" suffix, and retry.
+        const s = s0
+            .split(',')[0]
+            .replace(/family\s*:.*/i, '')
+            .trim();
+        if (!s) return '';
         const up = s.toUpperCase();
         for (const k of known) {
             if (up === k.toUpperCase()) return k;
@@ -1527,19 +1567,31 @@ const ScalerGUI = {
         return '';
     },
     _setupTopologyChangeListener() {
+        const handleScopeChanged = () => {
+            this._deviceContexts = {};
+            this._wizardBatchInit(null);
+            this._wizardChangeLog = [];
+            // Open wizards are bound to device IDs/context from the prior
+            // topology. Close the Scaler stack with its normal animation so
+            // the next CONFIG open rebuilds from the new canvas/device scope.
+            if (this._isAnyPanelOpen()) {
+                this.closeAllPanels();
+            }
+        };
         const trySubscribe = () => {
             const editor = window.topologyEditor;
             if (editor?.events?.on && !this._topologyListenerSetup) {
                 this._topologyListenerSetup = true;
-                editor.events.on('topology:loaded', () => {
-                    if (this.state.activePanels['device-manager']) {
-                        this.refreshDeviceList();
-                    }
-                });
+                editor.events.on('topology:loaded', handleScopeChanged);
             }
         };
         trySubscribe();
         if (!this._topologyListenerSetup) setTimeout(trySubscribe, 800);
+        if (!this._topologyWindowListenerSetup) {
+            this._topologyWindowListenerSetup = true;
+            window.addEventListener('topology:active-changed', handleScopeChanged);
+            window.addEventListener('topology:auth-logout', handleScopeChanged);
+        }
     },
     
     createPanelContainer() {
@@ -1684,6 +1736,14 @@ const ScalerGUI = {
         this.state.activePanels[name] = panel;
         this.state.activePanel = name;
         
+        // Global single-overlay mutex: opening any Scaler panel auto-
+        // closes the AI drawer, terminal, debugger, BD legend, etc.
+        // See topology-panel-mutex.js. Guarded so this module still
+        // works standalone if the mutex file was removed.
+        if (window.TopoPanelMutex) {
+            try { window.TopoPanelMutex.markOpen('scaler'); } catch (_) {}
+        }
+
         requestAnimationFrame(() => {
             panel.classList.add('scaler-panel-open');
         });
@@ -1699,9 +1759,28 @@ const ScalerGUI = {
             this.state.panelHistory = this.state.panelHistory.filter(h => h.current !== name);
         }
         
+        // Tear down any SSE/WebSocket handle attached to this panel (e.g. push progress
+        // EventSource registered by showProgress()). Without this the EventSource keeps
+        // reconnecting in the background after the user closed the popup and triggers
+        // 502 spam once the underlying job is gone or the bridge restarts.
+        try {
+            if (panel._sseHandle) {
+                if (typeof panel._sseHandle.close === 'function') panel._sseHandle.close();
+                panel._sseHandle = null;
+            }
+            const jid = panel.dataset && panel.dataset.jobId;
+            if (jid && this.state.jobs && this.state.jobs[jid]) {
+                const jh = this.state.jobs[jid];
+                if (jh.ws && jh.ws !== panel && typeof jh.ws.close === 'function') {
+                    try { jh.ws.close(); } catch (_) {}
+                }
+                delete this.state.jobs[jid];
+            }
+        } catch (_) {}
+
         panel.classList.remove('scaler-panel-open');
         panel.classList.add('scaler-panel-closing');
-        
+
         setTimeout(() => {
             panel.remove();
             delete this.state.activePanels[name];
@@ -1712,6 +1791,12 @@ const ScalerGUI = {
             if (Object.keys(this.state.activePanels).length === 0) {
                 const canvas = document.getElementById('topology-canvas');
                 if (canvas) canvas.focus();
+                // Only release the mutex slot once every Scaler panel
+                // is closed -- the Scaler stack is logically ONE slot
+                // from the global mutex's point of view.
+                if (window.TopoPanelMutex) {
+                    try { window.TopoPanelMutex.markClosed('scaler'); } catch (_) {}
+                }
             }
         }, 300);
     },
@@ -1721,6 +1806,16 @@ const ScalerGUI = {
         Object.keys(this.state.activePanels).forEach(name => {
             this.closePanel(name);
         });
+        // Fast path release -- if closeAllPanels() is called while
+        // panels are still mid-animation, closePanel's setTimeout will
+        // also call markClosed('scaler'); both paths are idempotent.
+        if (window.TopoPanelMutex) {
+            try { window.TopoPanelMutex.markClosed('scaler'); } catch (_) {}
+        }
+    },
+
+    _isAnyPanelOpen() {
+        return Object.keys(this.state.activePanels).length > 0;
     },
     
     navigateBack(currentName) {
@@ -2277,3 +2372,14 @@ const ScalerGUI = {
     },
 };
 window.ScalerGUI = ScalerGUI;
+
+// Join the global single-overlay mutex so opening any OTHER big
+// panel (AI drawer, terminal, debugger, ...) auto-closes any open
+// Scaler panel stack. Registered AFTER the assignment to
+// window.ScalerGUI so closers still work even before init().
+if (window.TopoPanelMutex) {
+    window.TopoPanelMutex.register('scaler', {
+        close: function () { ScalerGUI.closeAllPanels(); },
+        isOpen: function () { return ScalerGUI._isAnyPanelOpen(); },
+    });
+}

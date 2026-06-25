@@ -1,0 +1,190 @@
+{
+  "feature": "evpn-loop-prevention",
+  "_description": "Canonical DNOS syntax for EVPN loop-prevention (LP) and local-loop-prevention (LLP). Validated live on PE-4 (CL-86) running dev_v26_2 build 8fd38d35a10a on 2026-04-30. Every command was probed via SSH ?-walk + live execution. See scaler/TEST/_shared/tools/discover_loop_prevention*.py for the discovery scripts.",
+  "epics": ["SW-204115"],
+  "validated_on": {
+    "device": "PE-4",
+    "platform": "CL-86",
+    "build_commit": "8fd38d35a10a",
+    "build_branch": "dev_v26_2",
+    "instance": "EVPN_SI_VPLS_1",
+    "discovery_date": "2026-04-30"
+  },
+
+  "operational_show_commands": [
+    {
+      "command": "show evpn instance <I> loop-prevention interface",
+      "purpose": "Per-EVI shutdown-interface table from loop-prevention",
+      "phase": "verify",
+      "valid": true
+    },
+    {
+      "command": "show evpn instance <I> loop-prevention interface local",
+      "purpose": "Local-only view of the shutdown-interface table",
+      "phase": "verify",
+      "valid": true
+    },
+    {
+      "command": "show evpn instance <I> loop-prevention local",
+      "purpose": "Per-EVI loop-prevention summary (this NCC's view)",
+      "phase": "snapshot",
+      "valid": true
+    },
+    {
+      "command": "show evpn instance <I> loop-prevention mac-table",
+      "purpose": "Per-EVI MAC suppression/move table with cycles + remaining time",
+      "phase": "verify",
+      "valid": true,
+      "fields": ["MAC address", "Moves / Limit", "Status", "Remaining Suppress Time", "Cycles"]
+    },
+    {
+      "command": "show evpn instance <I> loop-prevention mac-table local",
+      "purpose": "Local-only view of the MAC suppression table",
+      "phase": "verify",
+      "valid": true
+    },
+    {
+      "command": "show evpn instance <I> loop-prevention mac-ip-table",
+      "purpose": "Per-EVI MAC-IP suppression table",
+      "phase": "verify",
+      "valid": true,
+      "fields": ["IP address", "Moves / Limit", "Status", "Remaining Suppress Time", "Cycles"]
+    }
+  ],
+
+  "rejected_commands_with_alternatives": [
+    {
+      "rejected": "show evpn local-loop-prevention",
+      "reason": "'local-loop-prevention' is NOT a valid show keyword (it lives only inside the config tree under mac-handling > loop-prevention)",
+      "use_instead": "show evpn instance <I> loop-prevention local"
+    },
+    {
+      "rejected": "show evpn loop-prevention",
+      "reason": "Incomplete -- requires 'instance <I>'",
+      "use_instead": "show evpn instance <I> loop-prevention {interface|local|mac-table|mac-ip-table}"
+    },
+    {
+      "rejected": "show evpn loop-prevention mac-suppression",
+      "reason": "'mac-suppression' is a CLEAR-side verb; not exposed under show evpn loop-prevention",
+      "use_instead": "show evpn instance <I> loop-prevention mac-table"
+    },
+    {
+      "rejected": "show evpn loop-prevention mac-history",
+      "reason": "'mac-history' is a CLEAR-side verb; show side uses mac-table for the move counters",
+      "use_instead": "show evpn instance <I> loop-prevention mac-table"
+    },
+    {
+      "rejected": "show evpn loop-prevention restore-cycles",
+      "reason": "'restore-cycles' exists ONLY as a clear verb; show side reports cycles inside mac-table column",
+      "use_instead": "show evpn instance <I> loop-prevention mac-table  (look at the 'Cycles' column)"
+    }
+  ],
+
+  "clear_commands_validated_via_question_walk": [
+    "clear evpn instance <I> mac-suppression",
+    "clear evpn instance <I> mac-history",
+    "clear evpn instance <I> restore-cycles",
+    "clear evpn instance <I> ip-suppression",
+    "clear evpn instance <I> ip-history",
+    "clear evpn instance <I> ip-restore-cycles",
+    "clear evpn instance <I> ac-suppression",
+    "clear evpn instance <I> ac-history",
+    "clear evpn instance <I> ac-restore-cycles"
+  ],
+  "_clear_note": "These appeared in the `clear evpn instance <I> ?` menu walk on PE-4 dev_v26_2. They are clear-side verbs only -- do NOT try them as `show` commands.",
+
+  "config_tree_per_evi": {
+    "_path": "network-services evpn instance <I> mac-handling",
+    "subkeys_at_mac_handling": [
+      "loop-prevention",
+      "mac-learning",
+      "mac-table-aging-time",
+      "mac-table-limit"
+    ],
+    "loop_prevention": {
+      "_path": "network-services evpn instance <I> mac-handling loop-prevention",
+      "_purpose": "Outer loop-prevention sub-tree for the entire EVI (remote MAC moves)",
+      "subkeys": [
+        "action",
+        "admin-state",
+        "ip-loop-action",
+        "ip-loop-detection-threshold",
+        "ip-loop-detection-window",
+        "local-loop-prevention",
+        "loop-detection-threshold",
+        "loop-detection-window",
+        "mac-reset-restore-cycles-interval",
+        "mac-restore-max-cycles",
+        "mac-restore-timer"
+      ],
+      "timer_keywords": {
+        "mac-restore-timer": "<seconds> -- how long a MAC stays suppressed",
+        "mac-restore-max-cycles": "<int> -- max suppression cycles before harder action",
+        "mac-reset-restore-cycles-interval": "<seconds> -- window after which the cycle counter resets"
+      },
+      "action_keyword_values": {
+        "_default": "suppress",
+        "_valid": ["suppress", "blackhole", "shutdown"],
+        "_invalid_examples": ["freeze", "drop"]
+      }
+    },
+    "local_loop_prevention": {
+      "_path": "network-services evpn instance <I> mac-handling loop-prevention local-loop-prevention",
+      "_purpose": "Inner LLP sub-tree -- LOCAL loop detection on this EVI",
+      "subkeys": [
+        "admin-state",
+        "loop-detection-threshold",
+        "loop-detection-window",
+        "reset-restore-cycles-interval",
+        "restore-max-cycles",
+        "restore-timer"
+      ],
+      "timer_keywords_no_mac_prefix": {
+        "restore-timer": "<seconds> -- LLP equivalent of mac-restore-timer (NO mac- prefix at this level)",
+        "restore-max-cycles": "<int>",
+        "reset-restore-cycles-interval": "<seconds>"
+      }
+    },
+    "_critical_difference": "At the OUTER loop-prevention level the timers are prefixed with 'mac-' (mac-restore-timer, mac-restore-max-cycles, mac-reset-restore-cycles-interval). At the INNER local-loop-prevention level the SAME concepts have NO 'mac-' prefix (restore-timer, restore-max-cycles, reset-restore-cycles-interval). Confluence shows them all as 'mac-restore-*' which is WRONG for the LLP sub-tree."
+  },
+
+  "config_ac_level_NOT_supported_on_this_build": {
+    "_what_we_tested": [
+      "network-services evpn instance <I> interface <AC> mac-handling -> 0 keywords",
+      "network-services evpn instance <I> interface <AC> mac-handling loop-prevention -> 0 keywords",
+      "network-services evpn instance <I> interface <AC> mac-handling local-loop-prevention -> 0 keywords"
+    ],
+    "_meaning": "On dev_v26_2 (build 8fd38d35a10a) the AC-level mac-handling sub-tree is empty. Loop-prevention is per-EVI only. Test recipes must NOT try to set per-AC LLP timers on this build.",
+    "_ac_level_keywords_that_DO_exist": [
+      "apply-groups", "apply-groups-exclude",
+      "df-invert-preference", "e-tree",
+      "sticky-interface", "sticky-mac", "storm-control"
+    ]
+  },
+
+  "syntax_traps_proven_against_device": [
+    "show evpn local-loop-prevention -> REJECTED. 'local-loop-prevention' is config-only, not a show keyword.",
+    "show evpn loop-prevention -> incomplete. Add 'instance <I>'.",
+    "Outer loop-prevention timers: mac-restore-timer / mac-restore-max-cycles / mac-reset-restore-cycles-interval",
+    "Inner local-loop-prevention timers: restore-timer / restore-max-cycles / reset-restore-cycles-interval (NO mac- prefix at LLP level)",
+    "ip-loop-* keywords sit alongside MAC keywords directly under 'loop-prevention' (NOT under a separate ip-loop-prevention sub-tree).",
+    "ip-loop-action exists; plain 'action' is the MAC-side action keyword (suppress|blackhole|shutdown).",
+    "Per-AC mac-handling tree is empty on dev_v26_2 -- LLP is per-EVI only on this build.",
+    "When you see 'mac-suppression' / 'mac-history' / 'restore-cycles' in evpn-mac-mobility.json, those are CLEAR commands, not SHOW commands."
+  ],
+
+  "discovery_provenance": {
+    "scripts": [
+      "scaler/TEST/_shared/tools/discover_loop_prevention.py",
+      "scaler/TEST/_shared/tools/discover_loop_prevention_v2.py",
+      "scaler/TEST/_shared/tools/discover_loop_prevention_v3.py",
+      "scaler/TEST/_shared/tools/discover_loop_prevention_v4.py"
+    ],
+    "method": "SSH via DNOSSession; ?-completion walk + send_command for each candidate; record valid/invalid via lib.cache_store.CacheStore",
+    "shared_cache_files": [
+      "~/SCALER/TEST/_shared/knowledge/by_protocol/evpn/validated_commands.json",
+      "~/SCALER/TEST/_shared/knowledge/by_protocol/evpn/known_invalid.json",
+      "~/SCALER/TEST/_shared/knowledge/by_protocol/evpn/completion_menus.json"
+    ]
+  }
+}

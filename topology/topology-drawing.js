@@ -124,8 +124,12 @@ class DrawingManager {
 
         const ctx = this.ctx;
         const zoom = this.zoom;
-        const panX = this.panOffset.x;
-        const panY = this.panOffset.y;
+        const sharpPan = this.editor && typeof this.editor.getSharpPanOffset === 'function'
+            ? this.editor.getSharpPanOffset()
+            : { x: this.panOffset.x, y: this.panOffset.y };
+        const panX = sharpPan.x;
+        const panY = sharpPan.y;
+        const dpr = Math.max(1, (this.editor && this.editor.dpr) || window.devicePixelRatio || 1);
         const cw = this.editor ? this.editor.canvasW : this.canvas.width;
         const ch = this.editor ? this.editor.canvasH : this.canvas.height;
 
@@ -154,19 +158,24 @@ class DrawingManager {
         if (hLines + vLines > 400) return;
 
         ctx.save();
+        if (this.editor && typeof this.editor.configureCanvasQuality === 'function') {
+            this.editor.configureCanvasQuality(ctx, { smoothing: false });
+        }
+        const snapHairline = (value) => (Math.round(value * dpr) + 0.5) / dpr;
+
         ctx.strokeStyle = this.darkMode
             ? `rgba(255, 255, 255, ${alpha})`
             : `rgba(0, 0, 0, ${alpha})`;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1 / dpr;
 
         ctx.beginPath();
         for (let sx = originX; sx <= cw; sx += screenSpacing) {
-            const px = Math.round(sx) + 0.5;
+            const px = snapHairline(sx);
             ctx.moveTo(px, 0);
             ctx.lineTo(px, ch);
         }
         for (let sy = originY; sy <= ch; sy += screenSpacing) {
-            const py = Math.round(sy) + 0.5;
+            const py = snapHairline(sy);
             ctx.moveTo(0, py);
             ctx.lineTo(cw, py);
         }
@@ -199,11 +208,14 @@ class DrawingManager {
      */
     setupHighQualityRendering() {
         if (!this.ctx) return;
-        
-        this.ctx.imageSmoothingEnabled = true;
-        this.ctx.imageSmoothingQuality = 'high';
-        this.ctx.lineJoin = 'round';
-        this.ctx.lineCap = 'round';
+        if (this.editor && typeof this.editor.configureCanvasQuality === 'function') {
+            this.editor.configureCanvasQuality(this.ctx, { smoothing: true });
+        } else {
+            this.ctx.imageSmoothingEnabled = true;
+            this.ctx.imageSmoothingQuality = 'high';
+            this.ctx.lineJoin = 'round';
+            this.ctx.lineCap = 'round';
+        }
     }
 
     /**
@@ -213,8 +225,11 @@ class DrawingManager {
         if (!this.ctx) return;
         
         this.ctx.save();
-        // Translate to half-pixel boundaries for sharper rendering
-        this.ctx.translate(Math.round(this.panOffset.x) + 0.5, Math.round(this.panOffset.y) + 0.5);
+        // Match DrawModule's sharp pan transform exactly.
+        const sharpPan = this.editor && typeof this.editor.getSharpPanOffset === 'function'
+            ? this.editor.getSharpPanOffset()
+            : { x: Math.round(this.panOffset.x), y: Math.round(this.panOffset.y) };
+        this.ctx.translate(sharpPan.x, sharpPan.y);
         this.ctx.scale(this.zoom, this.zoom);
     }
 

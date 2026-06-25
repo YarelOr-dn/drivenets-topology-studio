@@ -1,0 +1,101 @@
+[
+  {
+    "command": "show evpn mac-table instance PW_TEST_ELAN mac 00:de:ad:ff:ff:01 | no-more",
+    "timestamp": "2026-04-18T20:11:13.258+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 1148,
+    "output_preview": "EVPN    : PW_TEST_ELAN\nEVI ID  : 6\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1010\n      Timestamp: 18-Apr-2026-23:11:12\n        Sticky: False\n        Sequence number: 2\nMAC Mobility\n        Moves per Detection Window: 4\n        Number of Completed Suppression Cycles: 0\n        Suppression: None\n        Traffic Handling: Forward\n        Expected suppression release time: N/A      \n      Mobility History\n        Event                | ",
+    "output_full": "EVPN    : PW_TEST_ELAN\nEVI ID  : 6\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1010\n      Timestamp: 18-Apr-2026-23:11:12\n        Sticky: False\n        Sequence number: 2\nMAC Mobility\n        Moves per Detection Window: 4\n        Number of Completed Suppression Cycles: 0\n        Suppression: None\n        Traffic Handling: Forward\n        Expected suppression release time: N/A      \n      Mobility History\n        Event                | Source                 | Reason               | Date                \n        -------------------------------------------------------------------------------------------\n        PW                   | 6.6.6.6                | #seq 0               | 18-Apr-2026-23:11:10                    \n        Local                | ge400-0/0/5.1010       | #seq 1               | 18-Apr-2026-23:11:10                    \n        PW                   | 6.6.6.6                | #seq 1               | 18-Apr-2026-23:11:12                    \n        Local                | ge400-0/0/5.1010       | #seq 2               | 18-Apr-2026-23:11:12                    "
+  },
+  {
+    "command": "show evpn mac-table detail instance PW_TEST_ELAN | no-more",
+    "timestamp": "2026-04-18T20:11:13.509+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 1148,
+    "output_preview": "EVPN    : PW_TEST_ELAN\nEVI ID  : 6\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1010\n      Timestamp: 18-Apr-2026-23:11:12\n        Sticky: False\n        Sequence number: 2\nMAC Mobility\n        Moves per Detection Window: 4\n        Number of Completed Suppression Cycles: 0\n        Suppression: None\n        Traffic Handling: Forward\n        Expected suppression release time: N/A      \n      Mobility History\n        Event                | ",
+    "output_full": "EVPN    : PW_TEST_ELAN\nEVI ID  : 6\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1010\n      Timestamp: 18-Apr-2026-23:11:12\n        Sticky: False\n        Sequence number: 2\nMAC Mobility\n        Moves per Detection Window: 4\n        Number of Completed Suppression Cycles: 0\n        Suppression: None\n        Traffic Handling: Forward\n        Expected suppression release time: N/A      \n      Mobility History\n        Event                | Source                 | Reason               | Date                \n        -------------------------------------------------------------------------------------------\n        PW                   | 6.6.6.6                | #seq 0               | 18-Apr-2026-23:11:10                    \n        Local                | ge400-0/0/5.1010       | #seq 1               | 18-Apr-2026-23:11:10                    \n        PW                   | 6.6.6.6                | #seq 1               | 18-Apr-2026-23:11:12                    \n        Local                | ge400-0/0/5.1010       | #seq 2               | 18-Apr-2026-23:11:12                    "
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance PW_TEST_ELAN | no-more",
+    "timestamp": "2026-04-18T20:11:13.761+00:00",
+    "duration_ms": 100,
+    "phase": "verify",
+    "output_length": 874,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: PW_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress   ",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: PW_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress              | Interface              | Egress-Encapsulation           | Timestamp              | Flags            |\n+-------------------------+------------------------+--------------------------------+------------------------+------------------+\n| (*)00:de:ad:ff:ff:01    | ge400-0/0/5.1010       |                                | 18-Apr-2026-23:11:12   | L                |"
+  },
+  {
+    "command": "show evpn mac-table instance PW_TEST_ELAN | no-more",
+    "timestamp": "2026-04-18T20:11:13.863+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 735,
+    "output_preview": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: PW_TEST_ELAN\n  EVI ID : 6\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ------------------",
+    "output_full": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: PW_TEST_ELAN\n  EVI ID : 6\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ----------------------------------------------------------------------------------------------------------------------------\n    L>        | 00:de:ad:ff:ff:01    |                               | ge400-0/0/5.1010       |             |                   "
+  },
+  {
+    "command": "show evpn mac-table instance PW_TEST_ELAN mac 00:de:ad:ff:ff:01 | no-more",
+    "timestamp": "2026-04-18T20:11:14.114+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 1148,
+    "output_preview": "EVPN    : PW_TEST_ELAN\nEVI ID  : 6\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1010\n      Timestamp: 18-Apr-2026-23:11:12\n        Sticky: False\n        Sequence number: 2\nMAC Mobility\n        Moves per Detection Window: 4\n        Number of Completed Suppression Cycles: 0\n        Suppression: None\n        Traffic Handling: Forward\n        Expected suppression release time: N/A      \n      Mobility History\n        Event                | ",
+    "output_full": "EVPN    : PW_TEST_ELAN\nEVI ID  : 6\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1010\n      Timestamp: 18-Apr-2026-23:11:12\n        Sticky: False\n        Sequence number: 2\nMAC Mobility\n        Moves per Detection Window: 4\n        Number of Completed Suppression Cycles: 0\n        Suppression: None\n        Traffic Handling: Forward\n        Expected suppression release time: N/A      \n      Mobility History\n        Event                | Source                 | Reason               | Date                \n        -------------------------------------------------------------------------------------------\n        PW                   | 6.6.6.6                | #seq 0               | 18-Apr-2026-23:11:10                    \n        Local                | ge400-0/0/5.1010       | #seq 1               | 18-Apr-2026-23:11:10                    \n        PW                   | 6.6.6.6                | #seq 1               | 18-Apr-2026-23:11:12                    \n        Local                | ge400-0/0/5.1010       | #seq 2               | 18-Apr-2026-23:11:12                    "
+  },
+  {
+    "command": "show evpn mac-table detail instance PW_TEST_ELAN | no-more",
+    "timestamp": "2026-04-18T20:11:14.365+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 1148,
+    "output_preview": "EVPN    : PW_TEST_ELAN\nEVI ID  : 6\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1010\n      Timestamp: 18-Apr-2026-23:11:12\n        Sticky: False\n        Sequence number: 2\nMAC Mobility\n        Moves per Detection Window: 4\n        Number of Completed Suppression Cycles: 0\n        Suppression: None\n        Traffic Handling: Forward\n        Expected suppression release time: N/A      \n      Mobility History\n        Event                | ",
+    "output_full": "EVPN    : PW_TEST_ELAN\nEVI ID  : 6\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1010\n      Timestamp: 18-Apr-2026-23:11:12\n        Sticky: False\n        Sequence number: 2\nMAC Mobility\n        Moves per Detection Window: 4\n        Number of Completed Suppression Cycles: 0\n        Suppression: None\n        Traffic Handling: Forward\n        Expected suppression release time: N/A      \n      Mobility History\n        Event                | Source                 | Reason               | Date                \n        -------------------------------------------------------------------------------------------\n        PW                   | 6.6.6.6                | #seq 0               | 18-Apr-2026-23:11:10                    \n        Local                | ge400-0/0/5.1010       | #seq 1               | 18-Apr-2026-23:11:10                    \n        PW                   | 6.6.6.6                | #seq 1               | 18-Apr-2026-23:11:12                    \n        Local                | ge400-0/0/5.1010       | #seq 2               | 18-Apr-2026-23:11:12                    "
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance PW_TEST_ELAN | no-more",
+    "timestamp": "2026-04-18T20:11:14.615+00:00",
+    "duration_ms": 100,
+    "phase": "verify",
+    "output_length": 874,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: PW_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress   ",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: PW_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress              | Interface              | Egress-Encapsulation           | Timestamp              | Flags            |\n+-------------------------+------------------------+--------------------------------+------------------------+------------------+\n| (*)00:de:ad:ff:ff:01    | ge400-0/0/5.1010       |                                | 18-Apr-2026-23:11:12   | L                |"
+  },
+  {
+    "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance PW_TEST_ELAN | no-more",
+    "timestamp": "2026-04-18T20:11:14.716+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 144,
+    "output_preview": "evi_id=6, eth_tag=0, mac=00:de:ad:ff:ff:01, interface=, dp_index=13631, action_type=MoveLocal, Type=Add, neighbor_keys_size=0\nEvpnMacs [size: 1]",
+    "output_full": "evi_id=6, eth_tag=0, mac=00:de:ad:ff:ff:01, interface=, dp_index=13631, action_type=MoveLocal, Type=Add, neighbor_keys_size=0\nEvpnMacs [size: 1]"
+  },
+  {
+    "command": "show evpn arp-table instance PW_TEST_ELAN | no-more",
+    "timestamp": "2026-04-18T20:11:14.967+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 35,
+    "output_preview": "  ETH TAG: 0\n    ARP table is empty",
+    "output_full": "  ETH TAG: 0\n    ARP table is empty"
+  },
+  {
+    "command": "show dnos-internal routing evpn instance PW_TEST_ELAN mac-table-ghost | no-more",
+    "timestamp": "2026-04-18T20:11:15.217+00:00",
+    "duration_ms": 50,
+    "phase": "verify",
+    "output_length": 26,
+    "output_preview": "ERROR: Incomplete command.",
+    "output_full": "ERROR: Incomplete command."
+  },
+  {
+    "command": "show bgp l2vpn evpn summary | no-more",
+    "timestamp": "2026-04-18T20:11:15.269+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 582,
+    "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 5d05h59m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      12224      12641    0     0       0 2d01h44m   Active          \n\nTotal number of est",
+    "output_full": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 5d05h59m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      12224      12641    0     0       0 2d01h44m   Active          \n\nTotal number of established neighbors with L2vpn EVPN 0/3\n\nTotal number of NSR capable BGP sessions 0"
+  }
+]

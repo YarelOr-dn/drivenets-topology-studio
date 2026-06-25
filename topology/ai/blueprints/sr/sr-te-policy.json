@@ -1,0 +1,285 @@
+{
+  "name": "sr-te-policy",
+  "protocol": "sr",
+  "scale": "medium",
+  "summary": "SR-TE policy-based traffic steering. A low-latency policy pushes an explicit SID-list that routes traffic along the southern path, overriding the IGP best-metric decision.",
+  "tags": [
+    "sr",
+    "sr-te",
+    "traffic-engineering",
+    "binding-sid",
+    "policy"
+  ],
+  "objects": [
+    {
+      "id": "sr",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 960,
+      "y": 540,
+      "width": 1400,
+      "height": 520,
+      "fillColor": "#c0392b",
+      "fillEnabled": true,
+      "fillOpacity": 0.06,
+      "strokeColor": "#c0392b",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 16,
+      "label": "SR-TE (Traffic Engineering)"
+    },
+    {
+      "id": "ingress",
+      "type": "device",
+      "label": "Ingress",
+      "x": 340,
+      "y": 540,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6"
+    },
+    {
+      "id": "p1",
+      "type": "device",
+      "label": "P1",
+      "x": 680,
+      "y": 340,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "p2",
+      "type": "device",
+      "label": "P2",
+      "x": 960,
+      "y": 340,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "p3",
+      "type": "device",
+      "label": "P3",
+      "x": 1240,
+      "y": 340,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "egress",
+      "type": "device",
+      "label": "Egress",
+      "x": 1580,
+      "y": 540,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6"
+    },
+    {
+      "id": "p4",
+      "type": "device",
+      "label": "P4",
+      "x": 680,
+      "y": 740,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "p5",
+      "type": "device",
+      "label": "P5",
+      "x": 960,
+      "y": 740,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "p6",
+      "type": "device",
+      "label": "P6",
+      "x": 1240,
+      "y": 740,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "l_ingress_p1",
+      "type": "link",
+      "device1": "ingress",
+      "device2": "p1",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS SR"
+    },
+    {
+      "id": "l_ingress_p4",
+      "type": "link",
+      "device1": "ingress",
+      "device2": "p4",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS SR"
+    },
+    {
+      "id": "l_p1_p2",
+      "type": "link",
+      "device1": "p1",
+      "device2": "p2",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS SR"
+    },
+    {
+      "id": "l_p2_p3",
+      "type": "link",
+      "device1": "p2",
+      "device2": "p3",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS SR"
+    },
+    {
+      "id": "l_p3_egress",
+      "type": "link",
+      "device1": "p3",
+      "device2": "egress",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS SR"
+    },
+    {
+      "id": "l_p4_p5",
+      "type": "link",
+      "device1": "p4",
+      "device2": "p5",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS SR"
+    },
+    {
+      "id": "l_p5_p6",
+      "type": "link",
+      "device1": "p5",
+      "device2": "p6",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS SR"
+    },
+    {
+      "id": "l_p6_egress",
+      "type": "link",
+      "device1": "p6",
+      "device2": "egress",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS SR"
+    },
+    {
+      "id": "l_p1_p4",
+      "type": "link",
+      "device1": "p1",
+      "device2": "p4",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS SR"
+    },
+    {
+      "id": "l_p3_p6",
+      "type": "link",
+      "device1": "p3",
+      "device2": "p6",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS SR"
+    },
+    {
+      "id": "te_0",
+      "type": "link",
+      "device1": "ingress",
+      "device2": "p4",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "arrow",
+      "width": 5,
+      "label": "SR-TE policy"
+    },
+    {
+      "id": "te_1",
+      "type": "link",
+      "device1": "p4",
+      "device2": "p5",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "arrow",
+      "width": 5,
+      "label": "SR-TE policy"
+    },
+    {
+      "id": "te_2",
+      "type": "link",
+      "device1": "p5",
+      "device2": "p6",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "arrow",
+      "width": 5,
+      "label": "SR-TE policy"
+    },
+    {
+      "id": "te_3",
+      "type": "link",
+      "device1": "p6",
+      "device2": "egress",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "arrow",
+      "width": 5,
+      "label": "SR-TE policy"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "SR-TE Policy (steering via color/binding-SID)",
+      "x": 960,
+      "y": 140,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_policy",
+      "type": "text",
+      "text": "Policy: LOW-LATENCY\nColor 200, Endpoint Egress\nSID-list: < 16006, 16007, 16008 >",
+      "x": 960,
+      "y": 920,
+      "fontSize": 11,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#c0392b",
+      "borderWidth": 1
+    }
+  ]
+}

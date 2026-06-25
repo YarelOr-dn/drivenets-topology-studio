@@ -15,6 +15,19 @@ window.MouseUpHandler = {
         
         // Get mouse position first - needed by multiple code paths
         const pos = editor.getMousePos(e);
+
+        if (editor.currentTool === 'laser') {
+            if (editor._laserPointerActive && e.button === 0) {
+                const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                window.TopologyLaser.appendTrailPoint(editor, pos, now);
+            }
+            editor._laserPointerActive = false;
+            if (window.TopologyLaser.endTrailStroke) {
+                window.TopologyLaser.endTrailStroke(editor);
+            }
+            editor.scheduleDraw ? editor.scheduleDraw() : editor.draw();
+            return;
+        }
         
         // Clear potential CP drag on mouseup (if user didn't move enough to start drag)
         if (editor._potentialCPDrag) {
@@ -86,8 +99,9 @@ window.MouseUpHandler = {
             if (window.XrayPopup && window.XrayPopup.temporaryShow) {
                 window.XrayPopup.temporaryShow();
             }
-            // Object stays selected but toolbar does NOT auto-restore after panning.
-            // User must click the object again to bring toolbar back.
+            if (editor.restoreToolbarAfterCanvasPan) {
+                editor.restoreToolbarAfterCanvasPan();
+            }
             return;
         }
         
@@ -143,12 +157,26 @@ window.MouseUpHandler = {
                         editor.debugger.logInfo(`   Continuous TB mode: ready for next placement`);
                     }
                 } else {
-                    // Normal single placement - exit to base mode and select the text
+                    // Normal single placement - exit to base mode, select
+                    // the new text, and IMMEDIATELY enter inline edit mode
+                    // with the placeholder pre-selected so the user can
+                    // start typing right away. Polish + QA pass 2026-05-12
+                    // -- previously the user had to double-click the new
+                    // box to begin editing, which felt clunky for empty
+                    // boxes that contain only the literal placeholder
+                    // "Text".
                     editor.selectedObject = text;
                     editor.selectedObjects = [text];
                     editor.setMode('base');
+                    editor.draw();
+                    setTimeout(() => {
+                        if (editor.selectedObject === text && !editor._inlineTextEditor) {
+                            editor.showInlineTextEditor(text, null, { selectAll: true });
+                        }
+                    }, 80);
+                    return;
                 }
-                
+
                 editor.draw();
             } else {
                 if (editor.debugger) {
@@ -416,7 +444,7 @@ window.MouseUpHandler = {
         
         // Save state after any operation completes (before clearing flags)
         // This captures the FINAL state after drag/resize/rotate/text operations
-        if (editor.dragging || editor.resizingText || editor.rotatingText || editor.rotatingDevice || editor.resizingDevice || editor.stretchingLink) {
+        if (editor.dragging || editor.resizingText || editor.rotatingText || editor.rotatingDevice || editor.resizingDevice || editor.resizingPacket || editor.stretchingLink) {
             console.log('Saving final state after operation');
             // Don't save immediately if momentum slide is starting (it will save when slide ends)
             if (!(editor.momentum && editor.momentum.activeSlides.size > 0)) {
@@ -424,8 +452,32 @@ window.MouseUpHandler = {
             }
         }
         
+        const _wasRotatingText = editor.rotatingText;
+        const _wasResizingText = editor.resizingText;
+        const _resizedTextObj = (_wasResizingText && editor.selectedObject && editor.selectedObject.type === 'text')
+            ? editor.selectedObject
+            : null;
         editor.rotatingText = false;
         editor.resizingText = false;
+        // Clear bbox-resize-specific state captured in mouse-down
+        // (text-box resize handles, 2026-05-12). Mirrors how shape resize
+        // clears `shapeResizeHandle` + `_shapeResizeStart` further down.
+        editor.textResizeHandle = null;
+        editor._textResizeStart = null;
+        if (_wasRotatingText || _wasResizingText) {
+            editor.updateCursor();
+        }
+        // After a text-box resize, reshow the text selection toolbar (it
+        // was hidden in mouse-down for clean UX while dragging). Match the
+        // shape resize semantics so the toolbar reappears anchored to the
+        // new bbox dimensions.
+        if (_resizedTextObj && editor.showTextSelectionToolbar) {
+            setTimeout(() => {
+                if (editor.selectedObject === _resizedTextObj && !editor.dragging) {
+                    editor.showTextSelectionToolbar(_resizedTextObj);
+                }
+            }, 50);
+        }
         if (editor.rotatingDevice) {
             const dev = editor.rotatingDevice;
             editor.rotatingDevice = null;
@@ -452,7 +504,44 @@ window.MouseUpHandler = {
                 }, 50);
             }
         }
-        
+
+        if (editor.resizingPacket) {
+            const packet = editor.resizingPacket;
+            editor.resizingPacket = null;
+            editor._packetResizeStart = null;
+            editor.scheduleAutoSave();
+            editor.updateCursor();
+            if (editor.selectedObject === packet) {
+                setTimeout(() => {
+                    if (editor.selectedObject === packet && !editor.dragging) {
+                        editor.showPacketSelectionToolbar(packet);
+                    }
+                }, 50);
+            }
+        }
+
+        // Drag-to-reattach: a freestanding packet dropped near a link snaps to it.
+        // Only fires after a real drag (not a select-click) and only when the drop
+        // point is within the snap radius of a wire, so freestanding placement is
+        // still possible everywhere else.
+        if (editor.dragging && !editor.resizingPacket && editor.selectedObject &&
+            editor.selectedObject.type === 'packet' && !editor.selectedObject.linkId &&
+            window.PacketMethods && typeof window.PacketMethods.attachPacketToNearestLink === 'function') {
+            const snappedPacket = editor.selectedObject;
+            const snappedLink = window.PacketMethods.attachPacketToNearestLink(editor, snappedPacket, 70);
+            if (snappedLink) {
+                if (typeof editor.saveState === 'function') editor.saveState();
+                if (typeof editor.scheduleAutoSave === 'function') editor.scheduleAutoSave();
+                editor.scheduleDraw();
+                setTimeout(() => {
+                    if (editor.selectedObject === snappedPacket && !editor.dragging &&
+                        typeof editor.showPacketSelectionToolbar === 'function') {
+                        editor.showPacketSelectionToolbar(snappedPacket);
+                    }
+                }, 50);
+            }
+        }
+
         // Clear shape resize state and reshow toolbar
         if (editor.resizingShape) {
             const shape = editor.resizingShape;
@@ -1650,6 +1739,14 @@ window.MouseUpHandler = {
         // Store pending stretch info before clearing (for link from TP feature)
         const pendingStretchInfo = editor._pendingStretch ? { ...editor._pendingStretch } : null;
         editor._pendingStretchInfo = pendingStretchInfo; // Temporarily store for processing below
+        // Auto-curve sticky side: tear down per-stretch pointer tracking but
+        // KEEP the cached `_autoCurveSide` so the curve stays where the user
+        // put it after release. `endStretch` releases the pointer-lock flag
+        // so subsequent obstacle changes (e.g. user drags the device) can
+        // re-evaluate via the standard pressure-hysteresis path.
+        if (stretchedLink && window.LinkAutoCurveSide) {
+            window.LinkAutoCurveSide.endStretch(stretchedLink);
+        }
         editor.stretchingLink = null;
         editor.stretchingEndpoint = null;
         editor.stretchingConnectionPoint = false; // Clear connection point dragging flag
@@ -1835,8 +1932,10 @@ window.MouseUpHandler = {
         }
         
         // CRITICAL: Set flag that mouse was released after selection
-        // This enables handle operations (resize/rotate) on next click
-        if (editor.selectedObject && (editor.selectedObject.type === 'device' || editor.selectedObject.type === 'text' || editor.selectedObject.type === 'shape') && !editor.dragging) {
+        // This enables handle operations (resize/rotate) on next click.
+        // Packets are included so their stretch handles + collapse chevron
+        // become functional after a click-release, matching device/shape.
+        if (editor.selectedObject && (editor.selectedObject.type === 'device' || editor.selectedObject.type === 'text' || editor.selectedObject.type === 'shape' || editor.selectedObject.type === 'packet') && !editor.dragging) {
             // Mouse released without dragging - this completes the selection
             editor.selectedObject._mouseReleasedAfterSelection = true;
             
@@ -1973,6 +2072,7 @@ window.MouseUpHandler = {
         editor.textDragInitialPos = null; // Clear text drag position
         editor.deviceDragInitialPos = null; // Clear device drag position
         editor.shapeDragInitialPos = null; // Clear shape drag position
+        editor._containerDragChildren = null; // 2026-04-26: clear container snapshot
         editor.dragStartPos = null; // Clear starting position for tap vs drag detection
         editor.lastMousePos = null; // Clear last mouse position
         editor._unboundLinkMoveLogged = false; // Reset UL move log flag

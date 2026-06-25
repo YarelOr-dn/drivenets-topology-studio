@@ -34,7 +34,7 @@
                     <div class="upgrade-devices-container" id="progress-devices-${jobId}"></div>
                     <div class="scaler-progress-steps" id="progress-steps-${jobId}" style="display:none"></div>
                     <div class="scaler-progress-actions">
-                        <button class="scaler-btn scaler-btn-secondary" id="progress-copylog-${jobId}" title="Copy terminal output to clipboard">Copy Log</button>
+                        <button class="scaler-btn scaler-btn-secondary" id="progress-copylog-${jobId}" title="Copy logs from all devices (grouped by device name). Tip: hover a device row to copy just that device's log.">Copy All</button>
                         <button class="scaler-btn scaler-btn-cancel-push" id="progress-cancel-${jobId}" title="Cancel upgrade">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                             Cancel
@@ -132,44 +132,128 @@
                 }
             };
         
-            const _copyLogFromPanel = () => {
-                const lines = [];
-                const container = document.getElementById(`progress-devices-${jobId}`);
-                if (container) {
-                    container.querySelectorAll('.upgrade-device-terminal-content .scaler-terminal-line').forEach(el => {
-                        lines.push(el.textContent);
-                    });
-                }
-                const mainTerm = document.querySelector(`#progress-terminal-${jobId} .scaler-terminal-content`);
-                if (mainTerm) {
-                    mainTerm.querySelectorAll('.scaler-terminal-line').forEach(el => {
-                        lines.push(el.textContent);
-                    });
-                }
-                if (lines.length === 0) lines.push('(no terminal output yet)');
-                const _text = lines.join('\n');
-                const _done = () => {
-                    const btn = document.getElementById(`progress-copylog-${jobId}`);
-                    if (btn) { btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = 'Copy Log'; }, 2000); }
-                };
+            // Clipboard helper -- shared by the top-level "Copy All" button
+            // and the per-device copy buttons rendered inside each
+            // upgrade-device-card header. Accepts a `text` blob and a
+            // `feedback(el)` callback that visually flashes the triggering
+            // button. Uses navigator.clipboard when available, falls back
+            // to the offscreen <textarea> + execCommand('copy') trick for
+            // non-secure contexts and older browsers.
+            const _writeToClipboard = (text, feedback) => {
+                const _done = () => { try { feedback?.(); } catch (_) {} };
                 const _fb = () => {
-                    const ta = document.createElement('textarea');
-                    ta.value = _text;
-                    ta.style.cssText = 'position:fixed;left:-9999px';
-                    document.body.appendChild(ta);
-                    ta.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(ta);
+                    try {
+                        const ta = document.createElement('textarea');
+                        ta.value = text;
+                        ta.style.cssText = 'position:fixed;left:-9999px';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(ta);
+                    } catch (_) {}
                     _done();
                 };
                 if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(_text).then(_done).catch(_fb);
+                    navigator.clipboard.writeText(text).then(_done).catch(_fb);
                 } else {
                     _fb();
                 }
             };
+
+            // "Copy All" -- top-level button. Groups lines by device so
+            // the pasted dump is parseable (before this change the lines
+            // from every card were concatenated without labels, producing
+            // an unreadable interleaved blob when 2+ devices were active).
+            const _copyLogFromPanel = () => {
+                const sections = [];
+                const container = document.getElementById(`progress-devices-${jobId}`);
+                if (container) {
+                    container.querySelectorAll('.upgrade-device-card').forEach(card => {
+                        const did = card.dataset.device || 'unknown';
+                        const cardLines = [];
+                        card.querySelectorAll('.upgrade-device-terminal-content .scaler-terminal-line').forEach(el => {
+                            cardLines.push(el.textContent);
+                        });
+                        if (cardLines.length > 0) {
+                            sections.push(`===== ${did} =====\n${cardLines.join('\n')}`);
+                        }
+                    });
+                }
+                const mainTerm = document.querySelector(`#progress-terminal-${jobId} .scaler-terminal-content`);
+                if (mainTerm) {
+                    const mainLines = [];
+                    mainTerm.querySelectorAll('.scaler-terminal-line').forEach(el => {
+                        mainLines.push(el.textContent);
+                    });
+                    if (mainLines.length > 0) {
+                        sections.push(`===== terminal =====\n${mainLines.join('\n')}`);
+                    }
+                }
+                const _text = sections.length > 0 ? sections.join('\n\n') : '(no terminal output yet)';
+                _writeToClipboard(_text, () => {
+                    const btn = document.getElementById(`progress-copylog-${jobId}`);
+                    if (btn) {
+                        btn.textContent = 'Copied!';
+                        setTimeout(() => { btn.textContent = 'Copy All'; }, 2000);
+                    }
+                });
+            };
             const _liveCopyBtn = document.getElementById(`progress-copylog-${jobId}`);
-            if (_liveCopyBtn) _liveCopyBtn.onclick = _copyLogFromPanel;
+            if (_liveCopyBtn) {
+                // "Copy All" label only makes sense for the multi-device
+                // upgrade panel (which mounts upgrade-devices-container).
+                // The single-device config-push panel keeps its original
+                // "Copy Log" label + straight copy-everything behaviour.
+                const _hasDeviceCards = !!document.getElementById(`progress-devices-${jobId}`);
+                if (_hasDeviceCards) {
+                    _liveCopyBtn.textContent = 'Copy All';
+                    _liveCopyBtn.title = 'Copy logs from all devices (grouped by device name). Tip: hover a device row to copy just that device\u2019s log.';
+                }
+                _liveCopyBtn.onclick = _copyLogFromPanel;
+            }
+
+            // Per-device copy button handler. Installed once via event
+            // delegation on the devices container, so newly-rendered cards
+            // (renderDeviceState creates them on demand) pick it up for
+            // free without needing to re-wire every time.
+            const _copyDeviceCardLog = (card) => {
+                if (!card) return;
+                const did = card.dataset.device || 'device';
+                const termEl = card.querySelector('.upgrade-device-terminal-content');
+                const lines = [];
+                if (termEl) {
+                    termEl.querySelectorAll('.scaler-terminal-line').forEach(el => {
+                        lines.push(el.textContent);
+                    });
+                }
+                const text = lines.length > 0
+                    ? `===== ${did} =====\n${lines.join('\n')}`
+                    : `===== ${did} =====\n(no output yet)`;
+                const btn = card.querySelector('.upgrade-device-copy-btn');
+                _writeToClipboard(text, () => {
+                    if (!btn) return;
+                    btn.classList.add('copied');
+                    const prevTitle = btn.title;
+                    btn.title = 'Copied!';
+                    setTimeout(() => {
+                        btn.classList.remove('copied');
+                        btn.title = prevTitle;
+                    }, 1500);
+                });
+            };
+            const _devicesContainer = document.getElementById(`progress-devices-${jobId}`);
+            if (_devicesContainer && !_devicesContainer._copyDelegationInstalled) {
+                _devicesContainer._copyDelegationInstalled = true;
+                _devicesContainer.addEventListener('click', (e) => {
+                    const copyBtn = e.target.closest('.upgrade-device-copy-btn');
+                    if (!copyBtn) return;
+                    // Don't toggle the card open/closed; just copy.
+                    e.stopPropagation();
+                    e.preventDefault();
+                    const card = copyBtn.closest('.upgrade-device-card');
+                    _copyDeviceCardLog(card);
+                });
+            }
         
             let terminalHasContent = false;
             const _upgradeDeviceSet = new Set(options.upgradeDevices || []);
@@ -194,10 +278,69 @@
                 skipped: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>',
             };
             let _lastExpandedDevice = null;
-        
+
+            // Tracks which devices we've already stamped with the "post-delete
+            // clear host-key" hint so the SSE re-emits don't spam sshConfig
+            // writes or saveState() calls. Reset when a new upgrade job wires
+            // up, but not within a single panel's lifetime.
+            const _postDeleteStamped = new Set();
+
+            // Propagate the pre-delete active NCC identity from the backend
+            // push-job onto the canvas device so the SSH credentials panel
+            // can suggest "Clear host key-check" against the correct NCC the
+            // next time the user opens it. See upgrade.py
+            // `_run_delete_deploy_upgrade` -- it sets
+            // `suggest_clear_host_key=True` on the device_state right before
+            // issuing `request system delete`.
+            const _stampPostDeleteSuggestion = (did, s) => {
+                if (!s || !s.suggest_clear_host_key) return;
+                if (_postDeleteStamped.has(did)) return;
+                const editor = window.topologyEditor || window.editor;
+                if (!editor?.objects) return;
+                const lower = String(did || '').toLowerCase();
+                const device = editor.objects.find(o => {
+                    if (!o || o.type !== 'device') return false;
+                    const ids = [o.label, o.deviceSerial, o.serial, o.deviceId, o.id]
+                        .map(v => (v || '').toString().trim().toLowerCase())
+                        .filter(Boolean);
+                    return ids.includes(lower);
+                });
+                if (!device) return;
+                device.sshConfig = device.sshConfig || {};
+                device.sshConfig._postDeleteClearHostKey = true;
+                device.sshConfig._postDeleteActiveNccVm = s.pre_delete_active_ncc_vm || '';
+                device.sshConfig._postDeleteActiveNccId =
+                    (s.pre_delete_active_ncc_id !== undefined && s.pre_delete_active_ncc_id !== null)
+                        ? Number(s.pre_delete_active_ncc_id) : null;
+                device.sshConfig._postDeleteMgmtIp = s.pre_delete_mgmt_ip || '';
+                device.sshConfig._postDeleteAtIso = s.delete_initiated_at || new Date().toISOString();
+                device.sshConfig._postDeleteJobId = jobId;
+                _postDeleteStamped.add(did);
+                try { editor.saveState?.(); } catch (_) {}
+                try { editor.scheduleAutoSave?.(); } catch (_) {}
+                console.log(
+                    `[Upgrade] post-delete host-key hint stamped on ${did}: ` +
+                    `ncc_id=${device.sshConfig._postDeleteActiveNccId}, ` +
+                    `vm=${device.sshConfig._postDeleteActiveNccVm}`
+                );
+                // If the SSH credentials panel is already open on this device
+                // (operator opened it during the upgrade) re-seed it live so
+                // the banner + auto-checked checkbox appear without a close-
+                // and-reopen round trip.
+                try {
+                    if (typeof window.refreshSSHDialogPostDeleteHint === 'function') {
+                        window.refreshSSHDialogPostDeleteHint(device);
+                    }
+                } catch (_) { /* swallow */ }
+            };
+
             const renderDeviceState = (deviceState) => {
                 const container = document.getElementById(`progress-devices-${jobId}`);
-                if (!container || !deviceState || typeof deviceState !== 'object') return;
+                if (!deviceState || typeof deviceState !== 'object') return;
+                for (const [did, s] of Object.entries(deviceState)) {
+                    _stampPostDeleteSuggestion(did, s);
+                }
+                if (!container) return;
                 for (const [did, s] of Object.entries(deviceState)) {
                     _upgradeDeviceSet.add(did);
                     const escapedDid = CSS.escape(did);
@@ -227,6 +370,9 @@
                                 ${typeTag}
                                 <span class="upgrade-device-config-restored upgrade-device-type-tag upgrade-device-type-tag--restored" title="Configuration restored after deploy" style="display:${s.config_restored ? '' : 'none'}">Config restored</span>
                                 <span class="upgrade-device-phase">${self.escapeHtml(phaseText)}</span>
+                                <button class="upgrade-device-copy-btn" type="button" title="Copy ${self.escapeHtml(did)} log" aria-label="Copy ${self.escapeHtml(did)} log">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                </button>
                                 <svg class="upgrade-device-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                             </div>
                             <div class="upgrade-device-card-bar"><div class="upgrade-device-card-fill"></div></div>
@@ -350,7 +496,7 @@
                     }
                 }
             }
-            const _prePopLineCount = (_initJob && _initJob.terminal_lines) ? _initJob.terminal_lines.length : 0;
+            let _renderedTerminalChunks = (_initJob && _initJob.terminal_lines) ? _initJob.terminal_lines.length : 0;
         
             const ws = ScalerAPI.connectProgress(jobId, {
                 onProgress: (percent, message, timing) => {
@@ -384,6 +530,7 @@
                 },
                 onTerminal: (line) => {
                     if (isUpgrade) {
+                        if ((line || '').trim()) _renderedTerminalChunks += 1;
                         const container = document.getElementById(`progress-devices-${jobId}`);
                         if (!container) return;
                         const sublines = (line || '').split('\n').filter(l => l.trim());
@@ -474,7 +621,7 @@
                         try { localStorage.removeItem('scaler_active_upgrade'); } catch (_) {}
                         const container = document.getElementById(`progress-devices-${jobId}`);
                         if (container) {
-                            const fullLines = result?.terminal_full || [];
+                            const fullLines = (result?.terminal_full || []).slice(_renderedTerminalChunks);
                             if (fullLines.length > 0) {
                                 fullLines.forEach(l => {
                                     const sublines = (l || '').split('\n').filter(s => s.trim());
@@ -499,6 +646,7 @@
                                         term.appendChild(div);
                                     });
                                 });
+                                _renderedTerminalChunks += fullLines.length;
                             }
                             container.querySelectorAll('.upgrade-device-card').forEach(c => {
                                 c.classList.add('expanded');
@@ -848,9 +996,20 @@
                     if (dot) dot.classList.add('error');
                     this.showNotification(`Error: ${message}`, 'error');
                 }
-            }, { terminalOffset: _prePopLineCount });
+            }, { terminalOffset: _renderedTerminalChunks });
         
             this.state.jobs[jobId] = { ws, panel };
+            // Attach the SSE/WS handle to the panel so closePanel() can tear it down.
+            // Without this the EventSource leaks when the user closes the popup, and
+            // continues to reconnect (5x) against /api/config/push/progress/<jobId>;
+            // once the bridge has cleaned the job (or restarts), each reconnect returns
+            // 502 from the serve.py SSE proxy, producing the spam we observed in console.
+            try {
+                if (panel) {
+                    panel._sseHandle = ws;
+                    panel.dataset.jobId = jobId;
+                }
+            } catch (_) {}
             return panel;
         },
         _analyzeCommitError(msg) {

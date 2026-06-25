@@ -9,12 +9,37 @@
         console.error('[scaler-gui-wizards-security.js] ScalerGUI core not loaded');
         return;
     }
+    // OS detection used by the XRAY wizard so Wireshark / pcap defaults
+    // match where the user actually runs the desktop client. Kept on the
+    // closure so we don't pollute window globals.
+    const _xrayDetectOs = () => {
+        const ua = (navigator.userAgent || '').toLowerCase();
+        const platform = (navigator.platform || '').toLowerCase();
+        if (platform.includes('mac') || ua.includes('mac os')) return 'macos';
+        if (platform.includes('win') || ua.includes('windows')) return 'windows';
+        if (platform.includes('linux') || ua.includes('linux')) return 'linux';
+        return 'unknown';
+    };
+    const _xrayOsDefaults = {
+        macos:   { wireshark_path: '/Applications/Wireshark.app/Contents/MacOS/Wireshark',
+                   pcap_directory: '~/Desktop/Packet-captures' },
+        linux:   { wireshark_path: '/usr/bin/wireshark',
+                   pcap_directory: '~/Packet-captures' },
+        windows: { wireshark_path: 'C:\\Program Files\\Wireshark\\Wireshark.exe',
+                   pcap_directory: '%USERPROFILE%\\Documents\\Packet-captures' },
+        unknown: { wireshark_path: '',
+                   pcap_directory: '~/Packet-captures' },
+    };
+
     Object.assign(G, {
         openXraySettings() {
             const content = document.createElement('div');
             content.innerHTML = '<div class="scaler-loading">Loading XRAY config...</div>';
             this.openPanel('xray-settings', 'XRAY Settings', content, { width: '360px' });
         
+            const detectedOs = _xrayDetectOs();
+            const osDefaults = _xrayOsDefaults[detectedOs] || _xrayOsDefaults.unknown;
+
             fetch((typeof ScalerAPI !== 'undefined' && ScalerAPI._api ? ScalerAPI._api('/api/xray/config') : '/api/xray/config')).then(r => r.json()).then(cfg => {
                 const mac = cfg.mac || {};
                 const creds = cfg.credentials || {};
@@ -23,23 +48,29 @@
                 const inputBorder = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)';
                 const inputColor = isDark ? '#e0e6ed' : '#1a1a1a';
         
-                const fieldRow = (label, id, val, type='text') => `
+                const fieldRow = (label, id, val, type='text', placeholder='') => `
                     <div style="margin-bottom: 10px;">
                         <label style="font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.6; display: block; margin-bottom: 3px;">${label}</label>
-                        <input id="${id}" type="${type}" value="${val || ''}" style="width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid ${inputBorder}; background: ${inputBg}; color: ${inputColor}; font-size: 12px; font-family: 'Poppins', sans-serif; box-sizing: border-box;">
+                        <input id="${id}" type="${type}" value="${val || ''}" placeholder="${placeholder}" autocomplete="${type === 'password' ? 'new-password' : 'off'}" data-lpignore="true" data-1p-ignore="true" style="width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid ${inputBorder}; background: ${inputBg}; color: ${inputColor}; font-size: 12px; font-family: 'Poppins', sans-serif; box-sizing: border-box;">
                     </div>`;
         
+                // Pre-fill values: per-user saved values win; otherwise fall
+                // back to OS-aware defaults so the workstation profile is
+                // immediately usable on first open.
+                const wiresharkVal = mac.wireshark_path || osDefaults.wireshark_path;
+                const pcapDirVal   = mac.pcap_directory || osDefaults.pcap_directory;
+                const osLabel = ({macos:'macOS', linux:'Linux', windows:'Windows', unknown:'unknown OS'})[detectedOs];
                 content.innerHTML = `
-                    <div style="font-size: 11px; opacity: 0.6; margin-bottom: 14px;">Configure Mac delivery, device credentials, and Wireshark path for XRAY captures.</div>
+                    <div style="font-size: 11px; opacity: 0.6; margin-bottom: 14px;">Configure workstation delivery, device credentials, and Wireshark path for XRAY captures. Detected OS: <strong>${osLabel}</strong>.</div>
                     <div style="border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 12px; margin-bottom: 12px;">
-                        <h4 style="font-size: 12px; font-weight: 700; margin-bottom: 10px; color: #0066FA;">Mac Configuration</h4>
-                        ${fieldRow('Mac IP (VPN)', 'xray-mac-ip-vpn', mac.ip_vpn)}
-                        ${fieldRow('Mac IP (Office)', 'xray-mac-ip-office', mac.ip_office)}
-                        ${fieldRow('Mac Username', 'xray-mac-user', mac.user)}
-                        ${fieldRow('Mac Password', 'xray-mac-pass', mac.password, 'password')}
-                        ${fieldRow('Wireshark Path', 'xray-wireshark-path', mac.wireshark_path)}
-                        ${fieldRow('pcap Directory', 'xray-pcap-dir', mac.pcap_directory)}
-                        <button id="xray-verify-mac" style="width: 100%; padding: 7px; border-radius: 6px; border: 1px solid #0066FA; background: rgba(0,102,250,0.1); color: #0066FA; cursor: pointer; font-size: 11px; font-weight: 600; font-family: 'Poppins', sans-serif; margin-top: 4px;">Verify Mac Connection</button>
+                        <h4 style="font-size: 12px; font-weight: 700; margin-bottom: 10px; color: #0066FA;">Workstation Configuration</h4>
+                        ${fieldRow('Workstation IP (VPN)', 'xray-mac-ip-vpn', mac.ip_vpn, 'text', '10.x.x.x')}
+                        ${fieldRow('Workstation IP (Office)', 'xray-mac-ip-office', mac.ip_office, 'text', '192.168.x.x')}
+                        ${fieldRow('SSH Username', 'xray-mac-user', mac.user, 'text', 'username')}
+                        ${fieldRow('SSH Password', 'xray-mac-pass', mac.password, 'password', '')}
+                        ${fieldRow('Wireshark Path', 'xray-wireshark-path', wiresharkVal, 'text', osDefaults.wireshark_path)}
+                        ${fieldRow('pcap Directory', 'xray-pcap-dir', pcapDirVal, 'text', osDefaults.pcap_directory)}
+                        <button id="xray-verify-mac" style="width: 100%; padding: 7px; border-radius: 6px; border: 1px solid #0066FA; background: rgba(0,102,250,0.1); color: #0066FA; cursor: pointer; font-size: 11px; font-weight: 600; font-family: 'Poppins', sans-serif; margin-top: 4px;">Verify Workstation Connection</button>
                         <div id="xray-mac-status" style="font-size: 10px; margin-top: 4px; min-height: 14px;"></div>
                     </div>
                     <div style="border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 12px; margin-bottom: 12px;">
@@ -71,6 +102,14 @@
                             device_password: content.querySelector('#xray-dev-pass').value || null,
                             arista_user: content.querySelector('#xray-arista-user').value || null,
                             arista_password: content.querySelector('#xray-arista-pass').value || null
+                        },
+                        // Workstation profile -- backend writes this into the
+                        // per-user xray.json so we can pick OS-correct defaults
+                        // on the next session without re-detecting.
+                        client: {
+                            host_os: detectedOs,
+                            user_agent: navigator.userAgent || '',
+                            last_seen_at: new Date().toISOString()
                         }
                     };
                     const statusEl = content.querySelector('#xray-save-status');
@@ -102,10 +141,21 @@
                     }).then(r => r.json()).then(res => {
                         if (res.reachable) {
                             statusEl.style.color = '#27ae60';
-                            statusEl.textContent = 'Mac reachable — connection verified.';
+                            statusEl.textContent = 'Mac reachable - connection verified.';
                         } else {
                             statusEl.style.color = '#e74c3c';
-                            statusEl.textContent = 'Mac not reachable. Check IP/credentials.';
+                            const causeTitles = {
+                                auth_failed: 'Wrong Mac username or password',
+                                missing_password: 'Mac password missing',
+                                missing_user: 'Mac username missing',
+                                ssh_refused: 'Remote Login is disabled',
+                                ssh_timeout: 'SSH timed out',
+                                network_unreachable: 'Mac network unreachable',
+                                bad_host: 'Invalid Mac IP or host',
+                                missing_sshpass: 'XRAY dependency missing'
+                            };
+                            statusEl.textContent = (causeTitles[res.cause] || 'Mac not reachable')
+                                + '. ' + (res.error || 'Check IP, Remote Login, username, and password.');
                         }
                     }).catch(e => {
                         statusEl.style.color = '#e74c3c';

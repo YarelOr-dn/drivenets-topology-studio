@@ -1,0 +1,146 @@
+[
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include MAC | no-more",
+    "timestamp": "2026-04-03T09:57:15.806+00:00",
+    "duration_ms": 7910,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include EVPN | no-more",
+    "timestamp": "2026-04-03T09:57:23.716+00:00",
+    "duration_ms": 6408,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include withdraw | no-more",
+    "timestamp": "2026-04-03T09:57:30.125+00:00",
+    "duration_ms": 10213,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include announce | no-more",
+    "timestamp": "2026-04-03T09:57:40.339+00:00",
+    "duration_ms": 7760,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include seq | no-more",
+    "timestamp": "2026-04-03T09:57:48.099+00:00",
+    "duration_ms": 5256,
+    "phase": "auto_diagnose",
+    "output_length": 312,
+    "output_preview": "2026-04-03T03:09:55.868043 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2087867:1071922:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 42263) seq:2860757188 ack:132682309 flags:FA msgSize:0",
+    "output_full": "2026-04-03T03:09:55.868043 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2087867:1071922:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 42263) seq:2860757188 ack:132682309 flags:FA msgSize:0"
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include duplicate | no-more",
+    "timestamp": "2026-04-03T09:57:53.356+00:00",
+    "duration_ms": 6808,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include suppress | no-more",
+    "timestamp": "2026-04-03T09:58:00.165+00:00",
+    "duration_ms": 9312,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 09:55 | include MAC | no-more",
+    "timestamp": "2026-04-03T09:58:09.478+00:00",
+    "duration_ms": 19775,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 09:55 | include evpn | no-more",
+    "timestamp": "2026-04-03T09:58:29.253+00:00",
+    "duration_ms": 9713,
+    "phase": "auto_diagnose",
+    "output_length": 18265,
+    "output_preview": "2026-04-03T02:09:55.034588 +03:00 [DEBUG     ] [EvpnBgpProxy.cpp:1127:OnInstallVplsRoute] [rib-manager:1344:1344] 207804:6692484: EVPN: INSTALL VPLS ROUTE: evi-id: 6, site-id: 1, nh(s): NH#1: 6.6.6.6 label-base 16 encap: vpls mtu: 1500 cw: 1 in-fl: 0 out-fl: 0 down: 0 pref: 10 offset: 1 block_size: 8 rd: 443326399789596928\n2026-04-03T02:09:55.034681 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:686:handleDfChanged] [rib-manager:1344:1344] 207805:6692484: EVPN: seamless-integration EVPN on",
+    "output_full": "2026-04-03T02:09:55.034588 +03:00 [DEBUG     ] [EvpnBgpProxy.cpp:1127:OnInstallVplsRoute] [rib-manager:1344:1344] 207804:6692484: EVPN: INSTALL VPLS ROUTE: evi-id: 6, site-id: 1, nh(s): NH#1: 6.6.6.6 label-base 16 encap: vpls mtu: 1500 cw: 1 in-fl: 0 out-fl: 0 down: 0 pref: 10 offset: 1 block_size: 8 rd: 443326399789596928\n2026-04-03T02:09:55.034681 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:686:handleDfChanged] [rib-manager:1344:1344] 207805:6692484: EVPN: seamless-integration EVPN on 6.0: DF changed for remote site ID 1. Calculating PW for candidate PEs result: updated 1, deleted 0, force flush 0\n2026-04-03T02:09:55.034693 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:706:handleDfChanged] [rib-manager:1344:1344] 207806:6692484: EVPN: seamless-integration EVPN on 6.0: DF changed for remote site ID 1. Calculating PW for 1 updated candidate PEs\n2026-04-03T02:09:55.034700 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1210:calculatePWforSomePes] [rib-manager:1344:1344] 207807:6692484: EVPN: seamless-integration EVPN service 6: Calculating PW for 1 PEs\n2026-04-03T02:09:55.034703 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1214:calculatePWforSomePes] [rib-manager:1344:1344] 207808:6692484: EVPN: seamless-integration EVPN service 6: Calculating PW for PE 6.6.6.6\n2026-04-03T02:09:55.034708 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1158:calculatePWforSpecificPE] [rib-manager:1344:1344] 207809:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6 (total site-ids: 2)\n2026-04-03T02:09:55.034714 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:124:getAllLabelsForSite] [rib-manager:1344:1344] 207810:6692484: EVPN: label block DB: lookup for site-id 1 in DB of size 1. setting initial key: (0, 0)\n2026-04-03T02:09:55.034718 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:138:getAllLabelsForSite] [rib-manager:1344:1344] 207811:6692484: EVPN: label block DB: lookup for site-id 1: calculating label for block: (offset 1, block size 8, label base 1032271). calculated label: 1032271\n2026-04-03T02:09:55.034724 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:151:getAllLabelsForSite] [rib-manager:1344:1344] 207812:6692484: EVPN: label block DB: lookup for site-id 1: found 1 valid labels in DB of size 1\n2026-04-03T02:09:55.034730 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1172:calculatePWforSpecificPE] [rib-manager:1344:1344] 207813:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6: found 1 ingress labels for remote site-id 1 (current total: 1)\n2026-04-03T02:09:55.034735 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1089:findEgressDataForRemoteSite] [rib-manager:1344:1344] 207814:6692484: EVPN: seamless-integration EVPN service 6: egress calc: find egress label for remote site 1 (total best paths: 1). Loop local site-ids (total: 1)\n2026-04-03T02:09:55.034741 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1118:findEgressDataForRemoteSite] [rib-manager:1344:1344] 207815:6692484: EVPN: seamless-integration EVPN service 6: egress calc: found best path on index 0 offset 1 block size 8 (cover local site-id 2)\n2026-04-03T02:09:55.034747 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:124:getAllLabelsForSite] [rib-manager:1344:1344] 207816:6692484: EVPN: label block DB: lookup for site-id 3 in DB of size 1. setting initial key: (0, 0)\n2026-04-03T02:09:55.034750 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:138:getAllLabelsForSite] [rib-manager:1344:1344] 207817:6692484: EVPN: label block DB: lookup for site-id 3: calculating label for block: (offset 1, block size 8, label base 1032271). calculated label: 1032273\n2026-04-03T02:09:55.034753 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:151:getAllLabelsForSite] [rib-manager:1344:1344] 207818:6692484: EVPN: label block DB: lookup for site-id 3: found 1 valid labels in DB of size 1\n2026-04-03T02:09:55.034759 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1172:calculatePWforSpecificPE] [rib-manager:1344:1344] 207819:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6: found 1 ingress labels for remote site-id 3 (current total: 2)\n2026-04-03T02:09:55.034765 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1203:calculatePWforSpecificPE] [rib-manager:1344:1344] 207820:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6: Calculated PW (egress-label 17, total ingress-labels 2)\n2026-04-03T02:09:55.034782 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1049:setPwForPe] [rib-manager:1344:1344] 207821:6692484: EVPN: seamless-integration EVPN service 6: setting PW for existing PE 6.6.6.6 (egress-label 17, egress-site-id 2, ingress-labels [1032271(1),1032273(3)], force flush: false). Need update: false\n2026-04-03T02:09:55.034795 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:686:handleDfChanged] [rib-manager:1344:1344] 207822:6692484: EVPN: seamless-integration EVPN on 6.0: DF changed for remote site ID 1. Calculating PW for candidate PEs result: updated 1, deleted 0, force flush 0\n2026-04-03T02:09:55.034800 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:706:handleDfChanged] [rib-manager:1344:1344] 207823:6692484: EVPN: seamless-integration EVPN on 6.0: DF changed for remote site ID 1. Calculating PW for 1 updated candidate PEs\n2026-04-03T02:09:55.034804 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1210:calculatePWforSomePes] [rib-manager:1344:1344] 207824:6692484: EVPN: seamless-integration EVPN service 6: Calculating PW for 1 PEs\n2026-04-03T02:09:55.034808 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1214:calculatePWforSomePes] [rib-manager:1344:1344] 207825:6692484: EVPN: seamless-integration EVPN service 6: Calculating PW for PE 6.6.6.6\n2026-04-03T02:09:55.034811 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1158:calculatePWforSpecificPE] [rib-manager:1344:1344] 207826:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6 (total site-ids: 2)\n2026-04-03T02:09:55.034817 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:124:getAllLabelsForSite] [rib-manager:1344:1344] 207827:6692484: EVPN: label block DB: lookup for site-id 1 in DB of size 1. setting initial key: (0, 0)\n2026-04-03T02:09:55.034820 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:138:getAllLabelsForSite] [rib-manager:1344:1344] 207828:6692484: EVPN: label block DB: lookup for site-id 1: calculating label for block: (offset 1, block size 8, label base 1032271). calculated label: 1032271\n2026-04-03T02:09:55.034823 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:151:getAllLabelsForSite] [rib-manager:1344:1344] 207829:6692484: EVPN: label block DB: lookup for site-id 1: found 1 valid labels in DB of size 1\n2026-04-03T02:09:55.034831 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1172:calculatePWforSpecificPE] [rib-manager:1344:1344] 207830:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6: found 1 ingress labels for remote site-id 1 (current total: 1)\n2026-04-03T02:09:55.034839 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1089:findEgressDataForRemoteSite] [rib-manager:1344:1344] 207831:6692484: EVPN: seamless-integration EVPN service 6: egress calc: find egress label for remote site 1 (total best paths: 1). Loop local site-ids (total: 1)\n2026-04-03T02:09:55.034844 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1118:findEgressDataForRemoteSite] [rib-manager:1344:1344] 207832:6692484: EVPN: seamless-integration EVPN service 6: egress calc: found best path on index 0 offset 1 block size 8 (cover local site-id 2)\n2026-04-03T02:09:55.034850 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:124:getAllLabelsForSite] [rib-manager:1344:1344] 207833:6692484: EVPN: label block DB: lookup for site-id 3 in DB of size 1. setting initial key: (0, 0)\n2026-04-03T02:09:55.034853 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:138:getAllLabelsForSite] [rib-manager:1344:1344] 207834:6692484: EVPN: label block DB: lookup for site-id 3: calculating label for block: (offset 1, block size 8, label base 1032271). calculated label: 1032273\n2026-04-03T02:09:55.034856 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:151:getAllLabelsForSite] [rib-manager:1344:1344] 207835:6692484: EVPN: label block DB: lookup for site-id 3: found 1 valid labels in DB of size 1\n2026-04-03T02:09:55.034873 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1172:calculatePWforSpecificPE] [rib-manager:1344:1344] 207836:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6: found 1 ingress labels for remote site-id 3 (current total: 2)\n2026-04-03T02:09:55.034880 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1203:calculatePWforSpecificPE] [rib-manager:1344:1344] 207837:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6: Calculated PW (egress-label 17, total ingress-labels 2)\n2026-04-03T02:09:55.034887 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1049:setPwForPe] [rib-manager:1344:1344] 207838:6692484: EVPN: seamless-integration EVPN service 6: setting PW for existing PE 6.6.6.6 (egress-label 17, egress-site-id 2, ingress-labels [1032271(1),1032273(3)], force flush: false). Need update: false\n2026-04-03T02:09:55.034930 +03:00 [DEBUG     ] [EvpnBgpProxy.cpp:1127:OnInstallVplsRoute] [rib-manager:1344:1344] 207839:6692484: EVPN: INSTALL VPLS ROUTE: evi-id: 6, site-id: 3, nh(s): NH#1: 6.6.6.6 label-base 16 encap: vpls mtu: 1500 cw: 1 in-fl: 0 out-fl: 0 down: 0 pref: 10 offset: 1 block_size: 8 rd: 443329711259910400\n2026-04-03T02:09:55.034947 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:686:handleDfChanged] [rib-manager:1344:1344] 207840:6692484: EVPN: seamless-integration EVPN on 6.0: DF changed for remote site ID 3. Calculating PW for candidate PEs result: updated 1, deleted 0, force flush 0\n2026-04-03T02:09:55.034950 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:706:handleDfChanged] [rib-manager:1344:1344] 207841:6692484: EVPN: seamless-integration EVPN on 6.0: DF changed for remote site ID 3. Calculating PW for 1 updated candidate PEs\n2026-04-03T02:09:55.034954 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1210:calculatePWforSomePes] [rib-manager:1344:1344] 207842:6692484: EVPN: seamless-integration EVPN service 6: Calculating PW for 1 PEs\n2026-04-03T02:09:55.034959 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1214:calculatePWforSomePes] [rib-manager:1344:1344] 207843:6692484: EVPN: seamless-integration EVPN service 6: Calculating PW for PE 6.6.6.6\n2026-04-03T02:09:55.034961 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1158:calculatePWforSpecificPE] [rib-manager:1344:1344] 207844:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6 (total site-ids: 2)\n2026-04-03T02:09:55.034963 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:124:getAllLabelsForSite] [rib-manager:1344:1344] 207845:6692484: EVPN: label block DB: lookup for site-id 1 in DB of size 1. setting initial key: (0, 0)\n2026-04-03T02:09:55.034964 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:138:getAllLabelsForSite] [rib-manager:1344:1344] 207846:6692484: EVPN: label block DB: lookup for site-id 1: calculating label for block: (offset 1, block size 8, label base 1032271). calculated label: 1032271\n2026-04-03T02:09:55.034968 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:151:getAllLabelsForSite] [rib-manager:1344:1344] 207847:6692484: EVPN: label block DB: lookup for site-id 1: found 1 valid labels in DB of size 1\n2026-04-03T02:09:55.034973 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1172:calculatePWforSpecificPE] [rib-manager:1344:1344] 207848:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6: found 1 ingress labels for remote site-id 1 (current total: 1)\n2026-04-03T02:09:55.034976 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1089:findEgressDataForRemoteSite] [rib-manager:1344:1344] 207849:6692484: EVPN: seamless-integration EVPN service 6: egress calc: find egress label for remote site 1 (total best paths: 1). Loop local site-ids (total: 1)\n2026-04-03T02:09:55.034979 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1118:findEgressDataForRemoteSite] [rib-manager:1344:1344] 207850:6692484: EVPN: seamless-integration EVPN service 6: egress calc: found best path on index 0 offset 1 block size 8 (cover local site-id 2)\n2026-04-03T02:09:55.034992 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:124:getAllLabelsForSite] [rib-manager:1344:1344] 207851:6692484: EVPN: label block DB: lookup for site-id 3 in DB of size 1. setting initial key: (0, 0)\n2026-04-03T02:09:55.034996 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:138:getAllLabelsForSite] [rib-manager:1344:1344] 207852:6692484: EVPN: label block DB: lookup for site-id 3: calculating label for block: (offset 1, block size 8, label base 1032271). calculated label: 1032273\n2026-04-03T02:09:55.034998 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:151:getAllLabelsForSite] [rib-manager:1344:1344] 207853:6692484: EVPN: label block DB: lookup for site-id 3: found 1 valid labels in DB of size 1\n2026-04-03T02:09:55.035000 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1172:calculatePWforSpecificPE] [rib-manager:1344:1344] 207854:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6: found 1 ingress labels for remote site-id 3 (current total: 2)\n2026-04-03T02:09:55.035004 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1203:calculatePWforSpecificPE] [rib-manager:1344:1344] 207855:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6: Calculated PW (egress-label 17, total ingress-labels 2)\n2026-04-03T02:09:55.035019 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1049:setPwForPe] [rib-manager:1344:1344] 207856:6692484: EVPN: seamless-integration EVPN service 6: setting PW for existing PE 6.6.6.6 (egress-label 17, egress-site-id 2, ingress-labels [1032271(1),1032273(3)], force flush: false). Need update: false\n2026-04-03T02:09:55.035026 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:686:handleDfChanged] [rib-manager:1344:1344] 207857:6692484: EVPN: seamless-integration EVPN on 6.0: DF changed for remote site ID 3. Calculating PW for candidate PEs result: updated 1, deleted 0, force flush 0\n2026-04-03T02:09:55.035031 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:706:handleDfChanged] [rib-manager:1344:1344] 207858:6692484: EVPN: seamless-integration EVPN on 6.0: DF changed for remote site ID 3. Calculating PW for 1 updated candidate PEs\n2026-04-03T02:09:55.035033 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1210:calculatePWforSomePes] [rib-manager:1344:1344] 207859:6692484: EVPN: seamless-integration EVPN service 6: Calculating PW for 1 PEs\n2026-04-03T02:09:55.035035 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1214:calculatePWforSomePes] [rib-manager:1344:1344] 207860:6692484: EVPN: seamless-integration EVPN service 6: Calculating PW for PE 6.6.6.6\n2026-04-03T02:09:55.035037 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1158:calculatePWforSpecificPE] [rib-manager:1344:1344] 207861:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6 (total site-ids: 2)\n2026-04-03T02:09:55.035046 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:124:getAllLabelsForSite] [rib-manager:1344:1344] 207862:6692484: EVPN: label block DB: lookup for site-id 1 in DB of size 1. setting initial key: (0, 0)\n2026-04-03T02:09:55.035048 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:138:getAllLabelsForSite] [rib-manager:1344:1344] 207863:6692484: EVPN: label block DB: lookup for site-id 1: calculating label for block: (offset 1, block size 8, label base 1032271). calculated label: 1032271\n2026-04-03T02:09:55.035050 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:151:getAllLabelsForSite] [rib-manager:1344:1344] 207864:6692484: EVPN: label block DB: lookup for site-id 1: found 1 valid labels in DB of size 1\n2026-04-03T02:09:55.035056 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1172:calculatePWforSpecificPE] [rib-manager:1344:1344] 207865:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6: found 1 ingress labels for remote site-id 1 (current total: 1)\n2026-04-03T02:09:55.035059 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1089:findEgressDataForRemoteSite] [rib-manager:1344:1344] 207866:6692484: EVPN: seamless-integration EVPN service 6: egress calc: find egress label for remote site 1 (total best paths: 1). Loop local site-ids (total: 1)\n2026-04-03T02:09:55.035064 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1118:findEgressDataForRemoteSite] [rib-manager:1344:1344] 207867:6692484: EVPN: seamless-integration EVPN service 6: egress calc: found best path on index 0 offset 1 block size 8 (cover local site-id 2)\n2026-04-03T02:09:55.035071 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:124:getAllLabelsForSite] [rib-manager:1344:1344] 207868:6692484: EVPN: label block DB: lookup for site-id 3 in DB of size 1. setting initial key: (0, 0)\n2026-04-03T02:09:55.035073 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:138:getAllLabelsForSite] [rib-manager:1344:1344] 207869:6692484: EVPN: label block DB: lookup for site-id 3: calculating label for block: (offset 1, block size 8, label base 1032271). calculated label: 1032273\n2026-04-03T02:09:55.035074 +03:00 [DEBUG     ] [EvpnLabelBlockDB.cpp:151:getAllLabelsForSite] [rib-manager:1344:1344] 207870:6692484: EVPN: label block DB: lookup for site-id 3: found 1 valid labels in DB of size 1\n2026-04-03T02:09:55.035076 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1172:calculatePWforSpecificPE] [rib-manager:1344:1344] 207871:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6: found 1 ingress labels for remote site-id 3 (current total: 2)\n2026-04-03T02:09:55.035079 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1203:calculatePWforSpecificPE] [rib-manager:1344:1344] 207872:6692484: EVPN: seamless-integration EVPN service 6: calc PW for PE 6.6.6.6: Calculated PW (egress-label 17, total ingress-labels 2)\n2026-04-03T02:09:55.035089 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:1049:setPwForPe] [rib-manager:1344:1344] 207873:6692484: EVPN: seamless-integration EVPN service 6: setting PW for existing PE 6.6.6.6 (egress-label 17, egress-site-id 2, ingress-labels [1032271(1),1032273(3)], force flush: false). Need update: false"
+  },
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 09:55 | include FIB | no-more",
+    "timestamp": "2026-04-03T09:58:38.967+00:00",
+    "duration_ms": 20376,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+    "timestamp": "2026-04-03T09:58:59.343+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 35,
+    "output_preview": "  ETH TAG: 0\n    MAC table is empty",
+    "output_full": "  ETH TAG: 0\n    MAC table is empty"
+  },
+  {
+    "command": "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+    "timestamp": "2026-04-03T09:58:59.594+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 207,
+    "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------",
+    "output_full": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+  },
+  {
+    "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+    "timestamp": "2026-04-03T09:58:59.844+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 42,
+    "output_preview": "Number of MAC-Mobility entries in redis: 0",
+    "output_full": "Number of MAC-Mobility entries in redis: 0"
+  },
+  {
+    "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+    "timestamp": "2026-04-03T09:59:00.095+00:00",
+    "duration_ms": 100,
+    "phase": "auto_diagnose",
+    "output_length": 26,
+    "output_preview": "ERROR: Incomplete command.",
+    "output_full": "ERROR: Incomplete command."
+  },
+  {
+    "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:59:00.195+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 18,
+    "output_preview": "EvpnMacs [size: 0]",
+    "output_full": "EvpnMacs [size: 0]"
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:59:00.446+00:00",
+    "duration_ms": 100,
+    "phase": "auto_diagnose",
+    "output_length": 442,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+  }
+]

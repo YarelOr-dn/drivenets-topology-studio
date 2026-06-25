@@ -1,0 +1,97 @@
+{
+  "<root>": {
+    "keywords": [
+      "clear",
+      "cmd",
+      "configure",
+      "exit",
+      "quit",
+      "request",
+      "run",
+      "set",
+      "show",
+      "unset"
+    ],
+    "last_build": {
+      "branch": "",
+      "commit": "",
+      "device": ""
+    },
+    "last_device": "",
+    "last_seen_iso": "2026-04-30T14:38:42Z",
+    "suites_seen": [
+      "evpn_mac_mobility_SW204115"
+    ]
+  },
+  "show": {
+    "keywords": [
+      "access-lists",
+      "arp",
+      "as-path-list",
+      "bfd",
+      "bgp",
+      "bridge-domain",
+      "cli",
+      "community-list",
+      "config",
+      "debugging",
+      "dnos-internal",
+      "ethernet-segments",
+      "evpn",
+      "evpn-vpws",
+      "evpn-vpws-fxc",
+      "extcommunity-list",
+      "file",
+      "flowspec",
+      "flowspec-local-policies",
+      "golden-config",
+      "high-availability",
+      "igmp",
+      "interfaces",
+      "isis",
+      "lacp",
+      "large-community-list",
+      "ldp",
+      "lldp",
+      "mgmt",
+      "mpls",
+      "msdp",
+      "multicast",
+      "ndp",
+      "network-services",
+      "ospf",
+      "ospfv3",
+      "pim",
+      "policy",
+      "prefix-list",
+      "priority-flow-control",
+      "qos",
+      "qppb",
+      "rib-manager",
+      "rollback",
+      "route",
+      "rpki",
+      "rsvp",
+      "seamless-bfd",
+      "segment-routing",
+      "segment-routing-srv6",
+      "services",
+      "srv6",
+      "system",
+      "tracking-policies",
+      "vpws",
+      "vrrp",
+      "vxlan"
+    ],
+    "last_build": {
+      "branch": "",
+      "commit": "",
+      "device": ""
+    },
+    "last_device": "",
+    "last_seen_iso": "2026-04-30T14:38:42Z",
+    "suites_seen": [
+      "evpn_mac_mobility_SW204115"
+    ]
+  }
+}

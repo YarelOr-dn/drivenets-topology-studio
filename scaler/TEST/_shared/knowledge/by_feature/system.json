@@ -1,0 +1,10 @@
+{
+  "commands": {
+    "show system | no-more": {
+      "last_seen_iso": "2026-04-30T14:38:42Z",
+      "protocol": "system",
+      "valid": true
+    }
+  },
+  "feature": "system"
+}

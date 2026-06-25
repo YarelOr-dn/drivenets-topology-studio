@@ -1,0 +1,14 @@
+{
+  "data": {
+    "iteration": 1,
+    "missing_pe4": [],
+    "missing_rr": [],
+    "pe4_installed": 0,
+    "pe4_seen": 200,
+    "rr_installed": 0,
+    "rr_seen": 200
+  },
+  "detail": "all PWs visible",
+  "ok": true,
+  "phase": "verify_pw_establishment"
+}

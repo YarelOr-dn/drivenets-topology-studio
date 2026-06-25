@@ -1,0 +1,273 @@
+{
+  "id": "TEST_mac_mob_evpn_evpn_G1",
+  "name": "MAC Mobility | Remote EVPN <-> Remote EVPN | Sequence Number Wins",
+  "type": "functional",
+  "recipe_type": "move_matrix",
+  "feature": "evpn-mac-mobility",
+  "source": "gap-analysis:G1 from SW-204115 reference table row 7",
+  "jira_key": "SW-204115",
+  "parent_category": "SW-204115",
+  "status": "wired",
+  "status_note": "G1 wired 2026-04-21 via Block 3 spirent_evpn_seq_race handler. Three scenarios dispatch to the same handler which calls spirent_inject_evpn_mac_route twice (simulating PE-A then PE-B) with different seq + next-hop values. SC03 additionally calls spirent_withdraw_evpn_mac_route to verify fallback-to-loser behavior. Single Spirent BGP peer simulates both remote PEs via differentiated next-hops.",
+  "created": "2026-03-23",
+  "updated": "2026-04-21",
+  "wired": "2026-04-21",
+  "gap_rationale": "The reference table in SW-204115 defines Row 7: EVPN->EVPN (remote-to-remote). When a MAC already known from Remote PE-A via RT-2 is now advertised by Remote PE-B with a higher sequence number, the local PE must accept the new RT-2 and update forwarding. No RT-2 is advertised by the local PE (it does not own the MAC). No suppression applies. No local loop count.",
+  "linked_user_stories": [
+    "SW-192019",
+    "SW-191944"
+  ],
+  "device_requirements": {
+    "type": "any",
+    "features": [
+      "evpn",
+      "bgp-l2vpn-evpn",
+      "seamless-integration"
+    ],
+    "min_ncp_count": 1,
+    "remote_pe_count": 2,
+    "notes": "Single Spirent BGP peer simulates 2 remote PEs via different next-hop IPs in RT-2 (not different labels -- that would require dual Spirent sessions). Live-validated approach 2026-04-21."
+  },
+  "prerequisites": [
+    {
+      "id": "bgp_evpn",
+      "check": "bgp_l2vpn_evpn_established",
+      "fix_via": "Manual BGP L2VPN EVPN config",
+      "check_command": "show bgp l2vpn evpn summary | no-more",
+      "pass_criteria": "At least 1 neighbor ESTABLISHED",
+      "fix_config": "config_generator.config_blocks.bgp_l2vpn_evpn_neighbor"
+    },
+    {
+      "id": "evpn_instance",
+      "check": "evpn_instance_exists",
+      "fix_via": "config_generator + validate_config",
+      "check_command": "show evpn summary | no-more",
+      "pass_criteria": "Instance {evpn_name} present in output",
+      "fix_config": "config_generator.config_blocks.evpn_vpls_si_full"
+    },
+    {
+      "id": "spirent_evpn_peer",
+      "check": "spirent_bgp_evpn_peer_established",
+      "fix_via": "/SPIRENT bgp RR-SA-2 with l2vpn-evpn AFI",
+      "check_command": "show bgp l2vpn evpn summary | no-more",
+      "pass_criteria": "Spirent peer (via RR-SA-2) ESTABLISHED with l2vpn-evpn",
+      "fix_config": "spirent_setup_evpn_rr_peer()",
+      "note": "Single Spirent peer simulates multiple remote PEs via different next-hop IPs in RT-2"
+    }
+  ],
+  "config_before_test": {
+    "description": "No special config on DUT beyond base EVPN-VPLS SI. Spirent BGP EVPN peer injects RT-2 updates with different next-hop IPs (simulating PE-A/PE-B) and sequence numbers.",
+    "spirent_note": "Single Spirent BGP peer sends competing RT-2 updates: (1) MAC X with seq=0 nh=<pe_a_ip>, then (2) MAC X with seq=1 nh=<pe_b_ip>. DUT should switch forwarding to pe_b_ip."
+  },
+  "show_commands_validated": {
+    "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more": "Single MAC lookup - check source PE changes",
+    "show evpn mac-table detail instance {evpn_name} | no-more": "Detailed MAC (detail BEFORE instance per DNOS 26.2 order)",
+    "show bgp l2vpn evpn summary | no-more": "BGP L2VPN EVPN session health",
+    "show bgp l2vpn evpn route-type 2 | no-more": "All RT-2 routes for sequence comparison",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more": "Ghost MAC detection",
+    "show evpn mac summary | no-more": "Mobility counter should NOT increment"
+  },
+  "scenarios": [
+    {
+      "id": "SC01_higher_seq_wins",
+      "name": "Remote PE-B advertises same MAC with higher seq than PE-A; forwarding switches",
+      "what_happens": "PE-A sends RT-2 for MAC X with seq=0 nh=pe_a_ip. PE-B sends RT-2 for MAC X with seq=1 nh=pe_b_ip. Local PE must prefer PE-B (higher seq wins per RFC 7432 section 15.1).",
+      "what_cannot_happen": "Local PE must NOT advertise its own RT-2 (it does not own the MAC locally). No suppression. No local loop counter increment.",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+            "show bgp l2vpn evpn route-type 2 | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "inject_rt2_seq0_then_seq1",
+          "method": "spirent_evpn_rr_peer",
+          "params": {
+            "mac": "{test_mac}",
+            "seq1": 0,
+            "seq2": 1,
+            "nh1": "{pe_a_ip}",
+            "nh2": "{pe_b_ip}"
+          },
+          "note": "Handler: spirent_evpn_seq_race -> two spirent_inject_evpn_mac_route calls with different seq + next-hop."
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more",
+            "show evpn mac summary | no-more"
+          ],
+          "expect": {
+            "mac_source_changed_to_pe_b": true,
+            "forwarding_nexthop_is_pe_b": true,
+            "no_local_rt2_advertised": true,
+            "suppression_not_triggered": true,
+            "local_loop_count_unchanged": true,
+            "internal_move_count_unchanged": true,
+            "check_mac_flags": true,
+            "forbidden_flags": [
+              "F",
+              "D"
+            ],
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC02_equal_seq_lower_ip_loses",
+      "name": "Equal seq from two PEs; higher IP wins (RFC 7432 tiebreaker)",
+      "what_happens": "When two remote PEs advertise the same MAC with the same sequence number, RFC 7432 says the PE with the higher IP address wins. Verify this tiebreaker.",
+      "what_cannot_happen": "Local PE must not generate any RT-2 of its own. No suppression.",
+      "phases": {
+        "trigger": {
+          "action": "inject_rt2_same_seq_two_labels",
+          "method": "spirent_evpn_rr_peer",
+          "params": {
+            "mac": "{test_mac}",
+            "seq1": 0,
+            "seq2": 0,
+            "nh1": "{pe_a_ip}",
+            "nh2": "{pe_b_ip}"
+          },
+          "note": "Same seq, higher next-hop IP should win per RFC 7432."
+        },
+        "verify": {
+          "expect": {
+            "higher_ip_pe_wins": true,
+            "no_local_rt2_advertised": true,
+            "check_mac_flags": true,
+            "forbidden_flags": [
+              "F",
+              "D"
+            ],
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC03_pe_a_withdraws_fallback",
+      "name": "PE-A (winner) withdraws; PE-B (older, lower seq) takes over as only path",
+      "what_happens": "PE-A sends RT-2 with higher seq (wins). PE-B sends RT-2 with lower seq (loses). Then PE-A withdraws. PE-B must become the installed path because it is the only remaining advertisement.",
+      "what_cannot_happen": "MAC should not become unreachable. No ghost MAC.",
+      "phases": {
+        "trigger": {
+          "action": "inject_two_then_withdraw_winner",
+          "method": "spirent_evpn_rr_peer",
+          "params": {
+            "mac": "{test_mac}",
+            "seq1": 1,
+            "seq2": 0,
+            "nh1": "{pe_a_ip}",
+            "nh2": "{pe_b_ip}"
+          },
+          "note": "Handler: spirent_evpn_seq_race -- inject PE-A (winner, seq=1), inject PE-B (loser, seq=0), then withdraw PE-A. PE-B becomes installed path."
+        },
+        "verify": {
+          "expect": {
+            "mac_reachable_via_pe_b": true,
+            "no_ghost_mac": true,
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    }
+  ],
+  "runtime_parameters": {
+    "evpn_name": {
+      "resolve": "runtime",
+      "from": "show evpn summary"
+    },
+    "test_mac": {
+      "resolve": "static",
+      "value": "00:aa:bb:cc:dd:01"
+    },
+    "pe_a_ip": {
+      "resolve": "static",
+      "value": "17.17.17.2",
+      "notes": "Spirent BGP peer LDP loopback simulating PE-A. Must be MPLS-reachable on DUT."
+    },
+    "pe_b_ip": {
+      "resolve": "static",
+      "value": "17.17.17.3",
+      "notes": "Second next-hop used by handler to simulate PE-B. Does not require a second Spirent session -- same peer, different nh value."
+    }
+  },
+  "verdict": {
+    "layers": 8,
+    "stop_on_fail": false
+  },
+  "counter_commands": [
+    {
+      "label": "mac_count",
+      "command": "show evpn mac summary | no-more",
+      "parser": "first_integer"
+    },
+    {
+      "label": "ghost_mac_count",
+      "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+      "parser": "line_count"
+    },
+    {
+      "label": "mobility_counter",
+      "command": "show evpn mac summary | no-more",
+      "parser": "key_value"
+    }
+  ],
+  "counter_expectations": [
+    {
+      "label": "mac_count",
+      "rule": "no_decrease"
+    },
+    {
+      "label": "ghost_mac_count",
+      "rule": "zero"
+    },
+    {
+      "label": "mobility_counter",
+      "rule": "no_change",
+      "description": "Remote-to-remote move must NOT increment local mobility counter"
+    }
+  ],
+  "event_expectations": [
+    {
+      "event": "BGP_NOTIFICATION",
+      "expect": "absent"
+    },
+    {
+      "event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED",
+      "expect": "absent",
+      "description": "No suppression on remote-to-remote"
+    }
+  ],
+  "health_checks": {
+    "processes": [
+      "routing:bgpd",
+      "routing:fibmgrd",
+      "routing:rib_manager",
+      "neighbour_manager"
+    ],
+    "check_crashes": true,
+    "check_alarms": true
+  },
+  "cleanup_commands": [],
+  "config_baseline": {
+    "sections": [
+      "network-services evpn",
+      "protocols bgp {asn}"
+    ],
+    "full_config": false,
+    "ignore_patterns": [
+      "last-modified",
+      "commit-id"
+    ]
+  },
+  "config_generator_ref": "config_generator.json -> per_test_config_requirements.evpn_evpn"
+}

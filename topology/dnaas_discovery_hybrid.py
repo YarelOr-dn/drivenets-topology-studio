@@ -211,8 +211,12 @@ class DnaasDiscoveryHybrid:
                 continue
             
             try:
-                with open(operational_file, 'r') as f:
-                    data = json.load(f)
+                try:
+                    from routes._ops_writer import read_ops as _r
+                    data = _r(operational_file)
+                except Exception:
+                    with open(operational_file, 'r') as f:
+                        data = json.load(f)
                 
                 hostname = data.get('hostname', device_dir.name)
                 device = Device(
@@ -505,8 +509,12 @@ class DnaasDiscoveryHybrid:
                     op_file = device_dir / 'operational.json'
                     if op_file.exists():
                         try:
-                            with open(op_file, 'r') as f:
-                                op_data = json.load(f)
+                            try:
+                                from routes._ops_writer import read_ops as _r
+                                op_data = _r(op_file)
+                            except Exception:
+                                with open(op_file, 'r') as f:
+                                    op_data = json.load(f)
                             serial = op_data.get('serial_number', '')
                             if serial and (serial.lower() == label_lower or label_lower == serial.lower()):
                                 # Found by serial! Use the directory name as hostname

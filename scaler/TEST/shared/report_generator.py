@@ -17,6 +17,21 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+def _status_mark(status: Any) -> str:
+    """Render a normalized verdict without turning SKIP/WARN into FAIL."""
+
+    value = str(status or "").upper()
+    if value == "PASS":
+        return "[PASS]"
+    if value == "FAIL":
+        return "[FAIL]"
+    if value == "SKIP":
+        return "[SKIP]"
+    if value in {"WARN", "WARNING"}:
+        return "[WARN]"
+    return f"[{value or 'UNKNOWN'}]"
+
+
 def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
@@ -114,7 +129,7 @@ def _verdict_summary(lines: List[str], r: FullReport) -> None:
     lines.append("| # | Scenario | Verdict | Duration |")
     lines.append("|---|----------|---------|----------|")
     for i, s in enumerate(r.scenarios, 1):
-        verdict_mark = "[PASS]" if s.verdict == "PASS" else "[FAIL]" if s.verdict == "FAIL" else "[SKIP]"
+        verdict_mark = _status_mark(s.verdict)
         lines.append(f"| {i} | {s.scenario_name or s.scenario_id} | {verdict_mark} | {s.duration_sec:.1f}s |")
 
     passed = sum(1 for s in r.scenarios if s.verdict == "PASS")
@@ -139,7 +154,7 @@ def _scenario_details(lines: List[str], r: FullReport) -> None:
             lines.append("**Layer Verdicts:**")
             lines.append("")
             for layer, v in s.layer_verdicts.items():
-                mark = "[PASS]" if v == "PASS" else "[FAIL]"
+                mark = _status_mark(v)
                 lines.append(f"- {layer}: {mark}")
             lines.append("")
 

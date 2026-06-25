@@ -1,0 +1,9 @@
+{"detail": "", "phase": "setup", "result_dir": "/home/dn/drivenets-topology-studio/scaler/TEST/catalog/pw_scale_200_mobility_ha_SW204115/tests/pw_scale_mac_mobility_ha/results/RUN_assessment_20260504_1417_PE4_RRSA2/TEST_pw_scale_mac_mobility_ha_SW204115", "service_count": 200, "status": "running", "step": "initialized", "stream_count": 2, "timestamp": "2026-05-04T11:29:59+0000", "traffic_strategy": "modifier"}
+{"detail": "", "expected_traffic_count": 400, "phase": "prerequisite_gate", "service_count": 200, "status": "running", "step": "start", "timestamp": "2026-05-04T11:29:59+0000"}
+{"detail": "YOR_CL_PE-4: 7 commands", "device": "YOR_CL_PE-4", "phase": "prerequisite_gate", "status": "running", "step": "live_checks_start", "timestamp": "2026-05-04T11:29:59+0000"}
+{"detail": "YOR_CL_PE-4", "device": "YOR_CL_PE-4", "phase": "prerequisite_gate", "status": "running", "step": "live_checks_done", "timestamp": "2026-05-04T11:30:03+0000"}
+{"detail": "RR-SA-2: 5 commands", "device": "RR-SA-2", "phase": "prerequisite_gate", "status": "running", "step": "live_checks_start", "timestamp": "2026-05-04T11:30:03+0000"}
+{"detail": "RR-SA-2", "device": "RR-SA-2", "phase": "prerequisite_gate", "status": "running", "step": "live_checks_done", "timestamp": "2026-05-04T11:30:05+0000"}
+{"detail": "", "phase": "prerequisite_gate", "status": "running", "step": "analyze_live_state", "timestamp": "2026-05-04T11:30:05+0000"}
+{"collision_count": 400, "detail": "", "phase": "prerequisite_gate", "status": "running", "step": "collision_scan_done", "timestamp": "2026-05-04T11:30:05+0000"}
+{"detail": "", "failures": 0, "phase": "prerequisite_gate", "status": "pass", "step": "done", "timestamp": "2026-05-04T11:30:05+0000", "warnings": 1}

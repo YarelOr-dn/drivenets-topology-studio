@@ -939,16 +939,32 @@ class DeviceUpgrader:
     
     def upgrade_stack(self, stack: StackInfo,
                       progress_callback: Callable[[str, int], None] = None) -> Tuple[bool, str]:
-        """Perform full stack upgrade.
-        
+        """Perform full IN-PLACE stack upgrade (DNOS mode, no reboot to GI).
+
         1. Load all components to target-stack
         2. Start installation
         3. Wait for completion
-        
+
+        This is the IN-PLACE path only. For major version jumps / branch
+        switches that require a wipe, the CANONICAL delete+deploy flow is:
+
+            request system delete  ->  reboot into GI
+            ->  load the 3 tarballs (DNOS, GI, BaseOS) IN GI
+            ->  request system deploy
+
+        Images are NEVER loaded before `request system delete` (delete wipes
+        the DNOS target stack). The delete+deploy orchestration (with the
+        GI reconnect + post-load verify-before-deploy gate) lives in the
+        callers that own a reconnect channel: `routes/upgrade.py`
+        ::_run_delete_deploy_upgrade (GUI) and the interactive_scale.py
+        wizard (CLI). Use `delete_dnos()` + `deploy_from_gi()` here only in
+        that delete -> load -> deploy order; do not call `load_stack()`
+        before `delete_dnos()`.
+
         Args:
             stack: StackInfo with component URLs
             progress_callback: Optional callback(message, percent)
-            
+
         Returns:
             Tuple of (success, message)
         """

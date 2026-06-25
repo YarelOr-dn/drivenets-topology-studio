@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from .mac_parsers import (
@@ -31,7 +32,6 @@ from .mac_parsers import (
     parse_forwarding_table_flags,
     parse_ghost_macs,
     parse_loop_prevention_mac_table,
-    parse_mac_mobility_redis_count,
     parse_mac_suppress,
 )
 
@@ -116,6 +116,71 @@ class TraceAnalysis:
         }
 
 
+_trace_cache: Dict[str, str] = {}
+
+
+def _drop_stale_trace_lines(output: str) -> str:
+    """Keep HH:MM trace greps from matching old rotated/stale trace days."""
+    if not output:
+        return output
+    today = datetime.now(timezone.utc).date()
+    # Device traces are usually local time and may be one date ahead of UTC
+    # near midnight. Older dates are stale rotated lines from the HH:MM grep.
+    allowed_dates = {today.isoformat(), (today + timedelta(days=1)).isoformat()}
+    dated_seen = False
+    kept: List[str] = []
+    for line in output.splitlines():
+        match = re.search(r"\b(20\d{2}-\d{2}-\d{2})T", line)
+        if not match:
+            kept.append(line)
+            continue
+        dated_seen = True
+        if match.group(1) in allowed_dates:
+            kept.append(line)
+    if dated_seen and not kept:
+        return ""
+    return "\n".join(kept)
+
+
+def _get_trace_lines(
+    device: str,
+    trace_file: str,
+    timestamp_hhmm: str,
+    run_show: RunShowFn,
+    ncp_id: str = "0",
+) -> str:
+    """Fetch trace lines for a file+timestamp, caching to avoid repeated scans."""
+    cache_key = f"{device}:{trace_file}:{timestamp_hhmm}"
+    if cache_key in _trace_cache:
+        return _trace_cache[cache_key]
+
+    if trace_file.startswith("ncp"):
+        cmd = (
+            f"show file ncp {ncp_id} traces datapath/wb_agent.evpn "
+            f"| include {timestamp_hhmm} | no-more"
+        )
+    else:
+        full_path = f"routing_engine/{trace_file}"
+        cmd = f"show file traces {full_path} | include {timestamp_hhmm} | no-more"
+
+    try:
+        output = run_show(device, cmd)
+    except (OSError, IOError, ConnectionError, TimeoutError, RuntimeError) as exc:
+        # Trace fetch is best-effort: unreachable device or torn-down SSH
+        # session must not abort verdict aggregation.  Anything other than
+        # an environmental failure (e.g. AttributeError) is a real bug and
+        # is intentionally allowed to propagate.
+        output = f"[trace-fetch-failed] {exc.__class__.__name__}: {exc}"
+    output = _drop_stale_trace_lines(output)
+    _trace_cache[cache_key] = output
+    return output
+
+
+def clear_trace_cache() -> None:
+    """Reset the per-scenario trace cache."""
+    _trace_cache.clear()
+
+
 def analyze_failure(
     device: str,
     timestamp_hhmm: str,
@@ -126,43 +191,33 @@ def analyze_failure(
     """
     Run targeted trace greps based on which verdict layer failed.
 
-    Returns a TraceAnalysis with diagnosis and suggested next steps.
+    Fetches each trace file ONCE (cached), then matches keywords in Python.
     """
     analysis = TraceAnalysis(device=device, timestamp_hhmm=timestamp_hhmm)
 
     keywords_to_check = _select_keywords(failed_layer)
 
     for trace_file, keywords in keywords_to_check.items():
+        all_lines = _get_trace_lines(device, trace_file, timestamp_hhmm, run_show, ncp_id)
+        if not all_lines or not all_lines.strip():
+            continue
+
+        cached_lines = [
+            ln.strip() for ln in all_lines.strip().splitlines()
+            if ln.strip() and not ln.strip().startswith("--")
+        ]
+
         for kw in keywords:
-            full_path = f"routing_engine/{trace_file}"
-            if trace_file.startswith("ncp"):
-                cmd = (
-                    f"show file ncp {ncp_id} traces datapath/wb_agent.evpn "
-                    f"| include {timestamp_hhmm} | include {kw} | no-more"
+            matched = [ln for ln in cached_lines if kw in ln][:10]
+            if matched:
+                hit = TraceHit(
+                    trace_file=trace_file,
+                    keyword=kw,
+                    lines=matched,
+                    count=len(matched),
                 )
-            else:
-                cmd = (
-                    f"show file traces {full_path} "
-                    f"| include {timestamp_hhmm} | include {kw} | no-more"
-                )
-            try:
-                output = run_show(device, cmd)
-                if output and output.strip() and len(output.strip()) > 5:
-                    lines = [
-                        l.strip() for l in output.strip().splitlines()
-                        if l.strip() and not l.strip().startswith("--")
-                    ][:10]
-                    if lines:
-                        hit = TraceHit(
-                            trace_file=trace_file,
-                            keyword=kw,
-                            lines=lines,
-                            count=len(lines),
-                        )
-                        analysis.hits.append(hit)
-                        _check_for_errors(hit, analysis)
-            except Exception:
-                pass
+                analysis.hits.append(hit)
+                _check_for_errors(hit, analysis)
 
     _build_diagnosis(analysis, failed_layer)
     return analysis
@@ -173,27 +228,27 @@ def quick_error_scan(
     timestamp_hhmm: str,
     run_show: RunShowFn,
 ) -> TraceAnalysis:
-    """Fast scan for ERROR/CRASH/NOTIFICATION across all trace files."""
+    """Fast scan for ERROR/CRASH/NOTIFICATION across all trace files.
+
+    Uses cached trace output (one fetch per file) instead of per-keyword scans.
+    """
     analysis = TraceAnalysis(device=device, timestamp_hhmm=timestamp_hhmm)
 
     error_keywords = ["ERROR", "CRASH", "NOTIFICATION", "core dump"]
     trace_files = ["bgpd_traces", "fibmgrd_traces", "rib-manager_traces"]
 
     for tf in trace_files:
+        all_lines = _get_trace_lines(device, tf, timestamp_hhmm, run_show)
+        if not all_lines or not all_lines.strip():
+            continue
         for ek in error_keywords:
-            cmd = (
-                f"show file traces routing_engine/{tf} "
-                f"| include {timestamp_hhmm} | include {ek} | no-more"
-            )
-            try:
-                output = run_show(device, cmd)
-                if output and output.strip() and ek in output.upper():
-                    lines = [l.strip() for l in output.strip().splitlines() if l.strip()][:5]
-                    if lines:
-                        analysis.errors_found.append(f"{tf}: {ek} -- {lines[0][:200]}")
-                        analysis.hits.append(TraceHit(tf, ek, lines, len(lines)))
-            except Exception:
-                pass
+            matched = [
+                ln.strip() for ln in all_lines.strip().splitlines()
+                if ln.strip() and ek.upper() in ln.upper()
+            ][:5]
+            if matched:
+                analysis.errors_found.append(f"{tf}: {ek} -- {matched[0][:200]}")
+                analysis.hits.append(TraceHit(tf, ek, matched, len(matched)))
 
     if analysis.errors_found:
         analysis.diagnosis = (
@@ -207,51 +262,11 @@ def quick_error_scan(
     return analysis
 
 
-def analyze_mac_move_traces(
-    device: str,
-    timestamp_hhmm: str,
-    test_mac: str,
-    run_show: RunShowFn,
-) -> TraceAnalysis:
-    """
-    Targeted analysis for MAC move: grep bgpd for the specific MAC.
-    Looks for RT-2 updates, sequence numbers, duplicate detection.
-    """
-    analysis = TraceAnalysis(device=device, timestamp_hhmm=timestamp_hhmm)
-
-    mac_short = test_mac.replace(":", "").lower()
-    mac_patterns = [test_mac, mac_short[-6:]]
-
-    for pattern in mac_patterns:
-        cmd = (
-            f"show file traces routing_engine/bgpd_traces "
-            f"| include {timestamp_hhmm} | include {pattern} | no-more"
-        )
-        try:
-            output = run_show(device, cmd)
-            if output and output.strip():
-                lines = [l.strip() for l in output.strip().splitlines() if l.strip()][:10]
-                if lines:
-                    analysis.hits.append(TraceHit("bgpd_traces", f"MAC={pattern}", lines, len(lines)))
-        except Exception:
-            pass
-
-    for kw in ["duplicate", "suppress", "frozen", "seq"]:
-        cmd = (
-            f"show file traces routing_engine/bgpd_traces "
-            f"| include {timestamp_hhmm} | include {kw} | no-more"
-        )
-        try:
-            output = run_show(device, cmd)
-            if output and output.strip() and kw.lower() in output.lower():
-                lines = [l.strip() for l in output.strip().splitlines() if l.strip()][:5]
-                if lines:
-                    analysis.hits.append(TraceHit("bgpd_traces", kw, lines, len(lines)))
-        except Exception:
-            pass
-
-    _build_mac_move_diagnosis(analysis, test_mac)
-    return analysis
+# NOTE: previous helper `analyze_mac_move_traces` (and its private
+# `_build_mac_move_diagnosis` companion) was removed in PR7d (2026-04-14).
+# No call site dispatched it; per-MAC trace analysis now happens via
+# `analyze_failure` (which already understands the MAC mobility layer keys)
+# and the orchestrator's `auto_investigate` path.
 
 
 # ---------------------------------------------------------------------------
@@ -319,34 +334,8 @@ def _build_diagnosis(analysis: TraceAnalysis, failed_layer: str) -> None:
         )
         analysis.suggested_action = (
             "Reproduce the failure for fresh traces. "
-            "Check trace buffer size: show file traces routing_engine/bgpd_traces | tail 5"
+            "Check trace buffer size: show file traces routing_engine/bgpd_traces | trailing 5"
         )
-
-
-def _build_mac_move_diagnosis(analysis: TraceAnalysis, test_mac: str) -> None:
-    has_duplicate = any(h.keyword == "duplicate" for h in analysis.hits)
-    has_suppress = any(h.keyword in ("suppress", "frozen") for h in analysis.hits)
-    has_seq = any(h.keyword == "seq" for h in analysis.hits)
-
-    parts = []
-    if has_duplicate:
-        parts.append("Duplicate MAC detection triggered")
-    if has_suppress:
-        parts.append("MAC suppression/freeze active")
-    if has_seq:
-        parts.append("Sequence number events found")
-
-    if parts:
-        analysis.diagnosis = f"MAC {test_mac}: " + "; ".join(parts) + "."
-    elif analysis.hits:
-        analysis.diagnosis = f"MAC {test_mac}: trace activity found but no duplicate/suppress keywords."
-    else:
-        analysis.diagnosis = f"MAC {test_mac}: no trace activity. MAC may not have been learned."
-
-    if has_suppress and not has_duplicate:
-        analysis.suggested_action = "Check suppression config thresholds (move count, window)."
-    elif not analysis.hits:
-        analysis.suggested_action = "Verify traffic is reaching the AC. Use /SPIRENT stats to check TX/RX."
 
 
 # ---------------------------------------------------------------------------
@@ -409,8 +398,8 @@ def collect_deep_evidence(
     cmds = {
         "suppress": f"show evpn mac-table instance {evpn_name} suppress | no-more",
         "loop_prevention": f"show evpn instance {evpn_name} loop-prevention mac-table | no-more",
-        "mobility_counter": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
-        "ghost_macs": f"show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more",
+        "mac_summary": "show evpn mac summary | no-more",
+        "ghost_macs": f"show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
         "fib_local": f"show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more",
         "fwd_table": f"show evpn forwarding-table mac-address-table instance {evpn_name} | no-more",
     }
@@ -419,15 +408,12 @@ def collect_deep_evidence(
         try:
             output = run_show(device, cmd)
             evidence.raw_outputs[key] = output
-        except Exception:
-            evidence.raw_outputs[key] = ""
+        except (OSError, IOError, ConnectionError, TimeoutError, RuntimeError) as exc:
+            evidence.raw_outputs[key] = f"[show-failed] {exc.__class__.__name__}: {exc}"
 
     evidence.suppressed_macs = parse_mac_suppress(evidence.raw_outputs.get("suppress", ""))
     evidence.loop_prevention_state = parse_loop_prevention_mac_table(
         evidence.raw_outputs.get("loop_prevention", "")
-    )
-    evidence.mobility_counter = parse_mac_mobility_redis_count(
-        evidence.raw_outputs.get("mobility_counter", "")
     )
     evidence.ghost_macs = parse_ghost_macs(evidence.raw_outputs.get("ghost_macs", ""))
     evidence.fib_state = parse_fib_evpn_mac(evidence.raw_outputs.get("fib_local", ""))
@@ -443,9 +429,9 @@ def collect_deep_evidence(
 # ---------------------------------------------------------------------------
 
 _EVPN_DEBUG_CMDS = [
-    "debug evpn mac-mobility",
-    "debug evpn mac-learning",
-    "debug evpn mac-table",
+    # DNOS CLI docs do not expose the legacy "debug evpn mac-*" commands,
+    # and live runs reject them as Unknown word. Keep trace collection read-only
+    # unless a documented debug command is added and validated.
 ]
 
 _DEBUG_SAFETY_TIMEOUT_SEC = 60
@@ -470,8 +456,10 @@ def enable_debug_traces(
             output = run_show(device, cmd)
             if "error" not in output.lower() and "unknown" not in output.lower():
                 enabled.append(cmd)
-        except Exception:
-            pass
+        except (OSError, IOError, ConnectionError, TimeoutError, RuntimeError):
+            # Debug toggle failure is non-fatal: just skip the flag and
+            # continue trying the rest.
+            continue
 
     return enabled
 
@@ -486,8 +474,10 @@ def disable_debug_traces(
         no_cmd = cmd.replace("debug ", "no debug ", 1)
         try:
             run_show(device, no_cmd)
-        except Exception:
-            pass
+        except (OSError, IOError, ConnectionError, TimeoutError, RuntimeError):
+            # Best-effort cleanup -- if the device is gone we cannot disable
+            # the flag, but the next test connect will reset session state.
+            continue
 
 
 def collect_debug_traces_window(
@@ -497,7 +487,14 @@ def collect_debug_traces_window(
     wait_sec: int = 10,
     ncp_id: str = "0",
 ) -> List[str]:
-    """Wait for debug output to accumulate, then collect trace snippets."""
+    """Wait for debug output to accumulate, then collect trace snippets.
+
+    NOTE: this is one of the rare cases where a fixed `time.sleep` is correct:
+    we are deliberately allowing the device to write `wait_sec` seconds worth
+    of new trace entries after a triggering event (e.g. MAC inject, BGP flap)
+    so the snapshot we collect captures the action's effects. There is no
+    event to poll for -- we are sampling a continuous stream.
+    """
     time.sleep(wait_sec)
     collected: List[str] = []
 
@@ -508,19 +505,21 @@ def collect_debug_traces_window(
                 f"show file traces routing_engine/{trace_file} | tail 50 | no-more",
             )
             if output.strip():
-                collected.append(f"--- {trace_file} (last 50 lines) ---\n{output.strip()}")
-        except Exception:
-            pass
+                collected.append(f"--- {trace_file} (tail 50 lines) ---\n{output.strip()}")
+        except (OSError, IOError, ConnectionError, TimeoutError, RuntimeError) as exc:
+            collected.append(f"--- {trace_file} (FETCH-FAILED) ---\n"
+                             f"{exc.__class__.__name__}: {exc}")
 
     try:
         ncp_output = run_show(
             device,
-            f"show file ncp {ncp_id} traces datapath/wb_agent.evpn | tail 30 | no-more",
+            f"show file ncp {ncp_id} traces datapath/wb_agent.evpn | trailing 30 | no-more",
         )
         if ncp_output.strip():
-            collected.append(f"--- ncp_{ncp_id}/wb_agent.evpn (last 30 lines) ---\n{ncp_output.strip()}")
-    except Exception:
-        pass
+            collected.append(f"--- ncp_{ncp_id}/wb_agent.evpn (trailing 30 lines) ---\n{ncp_output.strip()}")
+    except (OSError, IOError, ConnectionError, TimeoutError, RuntimeError) as exc:
+        collected.append(f"--- ncp_{ncp_id}/wb_agent.evpn (FETCH-FAILED) ---\n"
+                         f"{exc.__class__.__name__}: {exc}")
 
     return collected
 
@@ -542,7 +541,7 @@ def auto_investigate(
     skips the discovery phase and goes straight to targeted investigation.
     """
     parts = [f"/debug-dnos {device} --"]
-    parts.append(f"EVPN MAC mobility test failure.")
+    parts.append("EVPN MAC mobility test failure.")
     parts.append(f"Test: {test_context.get('test_id', 'unknown')}.")
 
     if failed_layers:

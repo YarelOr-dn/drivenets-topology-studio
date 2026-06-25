@@ -50,7 +50,7 @@ class FileManager {
     initSession() {
         try {
             const previousSession = localStorage.getItem(this.sessionKey);
-            
+
             // Preserve previous session's closedCleanly BEFORE overwriting
             this.previousSessionClosedCleanly = false;
             if (previousSession) {
@@ -61,7 +61,7 @@ class FileManager {
                     console.log('[FileManager] Previous session may have crashed:', prev.id);
                 }
             }
-            
+
             // Store current session (overwrites previous)
             const sessionData = {
                 id: this.sessionId,
@@ -70,12 +70,12 @@ class FileManager {
                 url: window.location.href
             };
             localStorage.setItem(this.sessionKey, JSON.stringify(sessionData));
-            
+
             // Mark session as closed when window closes
             window.addEventListener('beforeunload', () => {
                 this.markSessionClosed();
             });
-            
+
         } catch (e) {
             console.warn('[FileManager] Session init failed:', e);
         }
@@ -93,6 +93,20 @@ class FileManager {
         } catch (e) {
             // Ignore errors during unload
         }
+    }
+
+    sanitizeObjectsForPersistence(objects) {
+        if (!Array.isArray(objects)) return [];
+        return objects.map((obj) => {
+            if (!obj || typeof obj !== 'object') return obj;
+            const copy = { ...obj };
+            if (copy._hiddenByGroup) {
+                delete copy._hiddenByGroup;
+                if (copy._hidden === true) delete copy._hidden;
+            }
+            delete copy._xrayCaptureActive;
+            return copy;
+        });
     }
     
     /**
@@ -135,8 +149,10 @@ class FileManager {
         if (this.autoSaveTimer) {
             clearTimeout(this.autoSaveTimer);
         }
+        const generation = this.editor?._topologyGeneration || 0;
         
         this.autoSaveTimer = setTimeout(() => {
+            if (generation !== (this.editor?._topologyGeneration || 0)) return;
             this.autoSave();
         }, this.autoSaveDelay);
     }
@@ -183,12 +199,13 @@ class FileManager {
                 sessionId: this.sessionId,
                 timestamp: Date.now(),
                 timestampISO: new Date().toISOString(),
-                objects: this.editor.objects,
+                objects: this.sanitizeObjectsForPersistence(this.editor.objects),
                 counters: {
                     device: this.editor.deviceIdCounter,
                     link: this.editor.linkIdCounter,
                     text: this.editor.textIdCounter,
-                    shape: this.editor.shapeIdCounter || 0
+                    shape: this.editor.shapeIdCounter || 0,
+                    packet: this.editor.packetIdCounter || 0
                 },
                 deviceCounters: this.editor.deviceCounters,
                 viewport: {
@@ -197,7 +214,11 @@ class FileManager {
                     zoom: this.editor.zoomLevel
                 },
                 currentFile: this.editor.currentFileName || null,
-                historyIndex: this.editor.historyIndex || 0
+                historyIndex: this.editor.historyIndex || 0,
+                topologySession: {
+                    generation: this.editor._topologyGeneration || 0,
+                    identity: this.editor._activeTopologyIdentity || null
+                }
             };
             
             localStorage.setItem(this.recoveryKey, JSON.stringify(recoveryData));
@@ -214,7 +235,34 @@ class FileManager {
     }
     
     /**
-     * Check for recovery data and prompt user if found
+     * Check for recovery data and prompt user if found.
+     *
+     * History note (2026-04-22): The prompt fired on almost every
+     * refresh because the "did we already restore this?" check only
+     * compared recovery-data against `topology_current`, which is
+     * ONLY written by the explicit "Quick Save" command. The normal
+     * path (auto-save -> auto-load) writes to `topology_autosave_v2`
+     * AND re-hydrates `editor.objects`. So after a clean refresh the
+     * canvas already showed the same 8 objects the recovery snapshot
+     * had, and the prompt asked "Recover?" for content that was
+     * already on screen.
+     *
+     * New logic:
+     *   1. Previous session clean-closed -> skip (unchanged).
+     *   2. Recovery is byte-identical to ANY of:
+     *        - `topology_current` (Quick Save target)
+     *        - `topology_autosave_v2` (debounced auto-save)
+     *        - the LIVE `editor.objects` (what's on screen RIGHT NOW
+     *          after the auto-loader ran)
+     *      -> skip. We only prompt when there's genuinely LOST work.
+     *   3. Recovery is smaller than live canvas (subset) -> skip;
+     *      whatever is on screen is strictly newer.
+     *   4. Suppress-for-session flag `topology_suppress_recovery_until`
+     *      -> skip if timestamp is in the future.
+     *
+     * Everything else stays the same: <24h old, from a different
+     * session, has content, show the modal.
+     *
      * @returns {Promise<boolean>} True if recovery was offered/performed
      */
     async checkForRecovery() {
@@ -226,32 +274,93 @@ class FileManager {
             
             const data = JSON.parse(recoveryData);
             
-            // Use the preserved flag from initSession (reads BEFORE overwrite)
+            // (1) Previous session closed cleanly -> nothing to recover.
             if (this.previousSessionClosedCleanly) {
                 data.sessionId = this.sessionId;
                 localStorage.setItem(this.recoveryKey, JSON.stringify(data));
                 return false;
             }
             
-            // Compare recovery data against the last saved topology
-            // If they match, there's nothing new to recover
-            const savedTopology = localStorage.getItem('topology_current');
-            if (savedTopology && data.objects) {
+            // (4) User asked us to shut up for a while (e.g. they
+            // clicked "Start Fresh" last time and don't want the
+            // dialog reappearing on every quick refresh).
+            try {
+                const suppressUntil = parseInt(
+                    localStorage.getItem('topology_suppress_recovery_until') || '0', 10
+                );
+                if (suppressUntil && Date.now() < suppressUntil) {
+                    return false;
+                }
+            } catch (_) {}
+
+            // Canonicalize an object list the way saveRecoveryPoint does
+            // (strip transient fields so cosmetic deltas from
+            // auto-layout / selection state don't defeat equality).
+            const canon = (arr) => {
+                if (!Array.isArray(arr)) return '';
                 try {
-                    const saved = JSON.parse(savedTopology);
-                    const savedObjects = saved.objects || [];
-                    if (savedObjects.length === data.objects.length &&
-                        JSON.stringify(savedObjects) === JSON.stringify(data.objects)) {
-                        data.sessionId = this.sessionId;
-                        localStorage.setItem(this.recoveryKey, JSON.stringify(data));
-                        return false;
-                    }
-                } catch (_) { /* comparison failed, proceed with recovery check */ }
+                    return JSON.stringify(arr.map(o => {
+                        if (!o || typeof o !== 'object') return o;
+                        const c = Object.assign({}, o);
+                        // These are runtime UI state, not content.
+                        delete c.selected;
+                        delete c.hovered;
+                        delete c.dragging;
+                        delete c._tempHighlight;
+                        delete c._xrayCaptureActive;
+                        return c;
+                    }));
+                } catch (_) { return ''; }
+            };
+            const recoveryCanon = canon(data.objects);
+            const recoveryCount = (data.objects || []).length;
+
+            // (2a) Compare to topology_current (Quick Save target).
+            const samplesToCheck = [];
+            try {
+                const cur = localStorage.getItem('topology_current');
+                if (cur) samplesToCheck.push(JSON.parse(cur).objects || []);
+            } catch (_) {}
+            // (2b) Compare to topology_autosave_v2 (debounced auto-save --
+            // this is what the editor actually loaded on boot).
+            try {
+                const asv2 = localStorage.getItem(this.autoSaveKey);
+                if (asv2) samplesToCheck.push(JSON.parse(asv2).objects || []);
+            } catch (_) {}
+            // (2c) Compare to the LIVE canvas. This is the real
+            // anti-false-positive: if whatever we'd "recover" is
+            // already on the screen, we stay quiet.
+            if (this.editor && Array.isArray(this.editor.objects)) {
+                samplesToCheck.push(this.editor.objects);
+            }
+
+            for (const sample of samplesToCheck) {
+                if (canon(sample) === recoveryCanon) {
+                    data.sessionId = this.sessionId;
+                    localStorage.setItem(this.recoveryKey, JSON.stringify(data));
+                    console.log('[FileManager] Recovery check skipped -- snapshot already on canvas');
+                    return false;
+                }
+            }
+
+            // (3) Recovery is smaller than what's on screen -> the live
+            // state is newer, so don't offer to regress. We still show
+            // the dialog if live is empty (user may have hit delete-all
+            // by accident and reloaded).
+            const liveCount = (this.editor && this.editor.objects) ? this.editor.objects.length : 0;
+            if (liveCount > 0 && recoveryCount <= liveCount) {
+                console.log(
+                    '[FileManager] Recovery check skipped -- live canvas has '
+                    + liveCount + ' objects vs recovery has ' + recoveryCount
+                );
+                data.sessionId = this.sessionId;
+                localStorage.setItem(this.recoveryKey, JSON.stringify(data));
+                return false;
             }
             
             const isFromDifferentSession = data.sessionId !== this.sessionId;
             const isRecent = (Date.now() - data.timestamp) < (24 * 60 * 60 * 1000);
-            const hasContent = data.objects && data.objects.length > 0;
+            const hasContent = recoveryCount > 0;
             
             if (isFromDifferentSession && isRecent && hasContent) {
                 this.recoveryData = data;
@@ -355,6 +464,15 @@ class FileManager {
             document.getElementById('recovery-discard').addEventListener('click', () => {
                 modal.remove();
                 this.clearRecoveryData();
+                // Suppress the prompt for 10 minutes so a quick refresh
+                // right after "Start Fresh" doesn't replay the same
+                // modal from stale data that hasn't been fully wiped.
+                try {
+                    localStorage.setItem(
+                        'topology_suppress_recovery_until',
+                        String(Date.now() + 10 * 60 * 1000)
+                    );
+                } catch (_) {}
                 resolve(false);
             });
         });
@@ -367,7 +485,8 @@ class FileManager {
     performRecovery(data) {
         try {
             // Restore objects
-            this.editor.objects = data.objects;
+            this.editor.objects = this.sanitizeObjectsForPersistence(data.objects);
+            this.editor._xrayCapturing = null;
             
             // Restore counters
             if (data.counters) {
@@ -376,6 +495,9 @@ class FileManager {
                 this.editor.textIdCounter = data.counters.text || 0;
                 if (data.counters.shape !== undefined) {
                     this.editor.shapeIdCounter = data.counters.shape;
+                }
+                if (data.counters.packet !== undefined) {
+                    this.editor.packetIdCounter = data.counters.packet;
                 }
             }
             
@@ -394,6 +516,9 @@ class FileManager {
             // Restore file name
             if (data.currentFile) {
                 this.editor.currentFileName = data.currentFile;
+            }
+            if (this.editor.groups && typeof this.editor.groups.validate === 'function') {
+                this.editor.groups.validate();
             }
             
             // Redraw
@@ -454,7 +579,7 @@ class FileManager {
      */
     saveToLocalStorage(key) {
         const data = {
-            objects: this.editor.objects,
+            objects: this.sanitizeObjectsForPersistence(this.editor.objects),
             deviceIdCounter: this.editor.deviceIdCounter,
             linkIdCounter: this.editor.linkIdCounter,
             textIdCounter: this.editor.textIdCounter,
@@ -496,12 +621,13 @@ class FileManager {
             const data = {
                 version: '2.0',
                 exported: new Date().toISOString(),
-                objects: this.editor.objects,
+                objects: this.sanitizeObjectsForPersistence(this.editor.objects),
                 counters: {
                     device: this.editor.deviceIdCounter,
                     link: this.editor.linkIdCounter,
                     text: this.editor.textIdCounter,
-                    shape: this.editor.shapeIdCounter || 0
+                    shape: this.editor.shapeIdCounter || 0,
+                    packet: this.editor.packetIdCounter || 0
                 },
                 deviceCounters: this.editor.deviceCounters,
                 viewport: {
@@ -540,13 +666,17 @@ class FileManager {
             const data = JSON.parse(text);
             
             if (data.objects && Array.isArray(data.objects)) {
-                this.editor.objects = data.objects;
+                this.editor.objects = this.sanitizeObjectsForPersistence(data.objects);
+                this.editor._xrayCapturing = null;
                 if (data.counters) {
                     this.editor.deviceIdCounter = data.counters.device || 0;
                     this.editor.linkIdCounter = data.counters.link || 0;
                     this.editor.textIdCounter = data.counters.text || 0;
                     if (data.counters.shape !== undefined) {
                         this.editor.shapeIdCounter = data.counters.shape;
+                    }
+                    if (data.counters.packet !== undefined) {
+                        this.editor.packetIdCounter = data.counters.packet;
                     }
                 }
                 if (data.deviceCounters) {
@@ -556,6 +686,9 @@ class FileManager {
                     this.editor.offsetX = data.viewport.offsetX || 0;
                     this.editor.offsetY = data.viewport.offsetY || 0;
                     this.editor.zoomLevel = data.viewport.zoom || 1;
+                }
+                if (this.editor.groups && typeof this.editor.groups.validate === 'function') {
+                    this.editor.groups.validate();
                 }
                 this.editor.draw();
                 this.editor.saveState();

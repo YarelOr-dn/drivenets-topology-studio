@@ -1,0 +1,76 @@
+{
+  "test_id": "TEST_mac_mob_basic_SW205160",
+  "device": "PE-1",
+  "overall": "FAIL",
+  "total_elapsed_sec": 6.85,
+  "scenarios": [
+    {
+      "scenario_id": "SC01_learn_local_ac",
+      "scenario_name": "Learn MAC from local AC; expect Type-2 advertised",
+      "overall": "FAIL",
+      "convergence_sec": null,
+      "trigger_timestamp": "",
+      "debug_hint": "",
+      "layers": [
+        {
+          "layer": "preflight_bgp",
+          "status": "FAIL",
+          "detail": "No EVPN peers ESTABLISHED (3 configured, all down)",
+          "evidence": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 1d03h10m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11819      12172    0     0       0 1d00h48m   Active          \n\nTotal number of est",
+          "elapsed_sec": 0.0
+        }
+      ]
+    },
+    {
+      "scenario_id": "SC02_learn_remote_evpn",
+      "scenario_name": "Learn MAC from remote EVPN RT-2",
+      "overall": "FAIL",
+      "convergence_sec": null,
+      "trigger_timestamp": "",
+      "debug_hint": "",
+      "layers": [
+        {
+          "layer": "preflight_bgp",
+          "status": "FAIL",
+          "detail": "No EVPN peers ESTABLISHED (3 configured, all down)",
+          "evidence": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 1d03h10m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11819      12172    0     0       0 1d00h48m   Active          \n\nTotal number of est",
+          "elapsed_sec": 0.0
+        }
+      ]
+    },
+    {
+      "scenario_id": "SC03_learn_vpls_pw",
+      "scenario_name": "Learn MAC from VPLS PW (dynamic)",
+      "overall": "FAIL",
+      "convergence_sec": null,
+      "trigger_timestamp": "",
+      "debug_hint": "",
+      "layers": [
+        {
+          "layer": "preflight_bgp",
+          "status": "FAIL",
+          "detail": "No EVPN peers ESTABLISHED (3 configured, all down)",
+          "evidence": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 1d03h10m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11819      12172    0     0       0 1d00h48m   Active          \n\nTotal number of est",
+          "elapsed_sec": 0.0
+        }
+      ]
+    },
+    {
+      "scenario_id": "SC04_table_counts",
+      "scenario_name": "Verify MAC table counts and forwarding continuity",
+      "overall": "FAIL",
+      "convergence_sec": null,
+      "trigger_timestamp": "",
+      "debug_hint": "",
+      "layers": [
+        {
+          "layer": "preflight_bgp",
+          "status": "FAIL",
+          "detail": "No EVPN peers ESTABLISHED (3 configured, all down)",
+          "evidence": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 1d03h10m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11819      12172    0     0       0 1d00h48m   Active          \n\nTotal number of est",
+          "elapsed_sec": 0.0
+        }
+      ]
+    }
+  ]
+}

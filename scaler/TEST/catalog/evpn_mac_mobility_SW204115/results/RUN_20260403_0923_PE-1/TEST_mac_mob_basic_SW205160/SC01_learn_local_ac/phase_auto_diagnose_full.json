@@ -1,0 +1,146 @@
+[
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:23 | include MAC | no-more",
+    "timestamp": "2026-04-03T09:26:07.472+00:00",
+    "duration_ms": 8962,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:23 | include EVPN | no-more",
+    "timestamp": "2026-04-03T09:26:16.434+00:00",
+    "duration_ms": 9512,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:23 | include withdraw | no-more",
+    "timestamp": "2026-04-03T09:26:25.947+00:00",
+    "duration_ms": 8161,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:23 | include announce | no-more",
+    "timestamp": "2026-04-03T09:26:34.108+00:00",
+    "duration_ms": 10363,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:23 | include seq | no-more",
+    "timestamp": "2026-04-03T09:26:44.472+00:00",
+    "duration_ms": 5106,
+    "phase": "auto_diagnose",
+    "output_length": 918,
+    "output_preview": "2026-04-03T02:09:23.500584 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2079295:1066353:  input got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 1.1.1.1 remote addr: 5.5.5.5 local port: 44121 remote port: 179) seq:2994748412 ack:818272167 flags:FA msgSize:0\n2026-04-03T08:09:23.437992 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2129733:1099429:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0",
+    "output_full": "2026-04-03T02:09:23.500584 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2079295:1066353:  input got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 1.1.1.1 remote addr: 5.5.5.5 local port: 44121 remote port: 179) seq:2994748412 ack:818272167 flags:FA msgSize:0\n2026-04-03T08:09:23.437992 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2129733:1099429:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 45361) seq:3221955269 ack:1903422340 flags:FA msgSize:0\n2026-04-03T09:23:42.117653 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2140533:1106240:  input got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 1.1.1.1 remote addr: 5.5.5.5 local port: 45627 remote port: 179) seq:1452271771 ack:2087755608 flags:FA msgSize:0"
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:23 | include duplicate | no-more",
+    "timestamp": "2026-04-03T09:26:49.579+00:00",
+    "duration_ms": 9513,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:23 | include suppress | no-more",
+    "timestamp": "2026-04-03T09:26:59.092+00:00",
+    "duration_ms": 7360,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 09:23 | include MAC | no-more",
+    "timestamp": "2026-04-03T09:27:06.453+00:00",
+    "duration_ms": 10367,
+    "phase": "auto_diagnose",
+    "output_length": 1478,
+    "output_preview": "2026-03-29T09:23:50.392871 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 149322:3425080: vty[??]@# show evpn instance HA_TEST_ELAN mac-table suppress\n2026-03-29T09:23:50.393902 +03:00 [INFO      ] [EvpnServiceVtysh.cpp:223:l2_evpn_show_mac_async_iteration] [rib-manager:1344:1344] 149323:3425080: finish\n2026-03-29T09:23:50.658102 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 149326:3425086: vty[??]@# show loop-prevention evpn instance HA_TES",
+    "output_full": "2026-03-29T09:23:50.392871 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 149322:3425080: vty[??]@# show evpn instance HA_TEST_ELAN mac-table suppress\n2026-03-29T09:23:50.393902 +03:00 [INFO      ] [EvpnServiceVtysh.cpp:223:l2_evpn_show_mac_async_iteration] [rib-manager:1344:1344] 149323:3425080: finish\n2026-03-29T09:23:50.658102 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 149326:3425086: vty[??]@# show loop-prevention evpn instance HA_TEST_ELAN mac-table\n2026-03-29T09:23:50.659027 +03:00 [INFO      ] [EvpnServiceVtysh.cpp:223:l2_evpn_show_mac_async_iteration] [rib-manager:1344:1344] 149327:3425086: finish\n2026-03-29T09:23:50.909378 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 149330:3425092: vty[??]@# show evpn mac-mobility-redis-count\n2026-03-29T09:23:54.447824 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 149335:3425130: vty[??]@# show evpn instance HA_TEST_ELAN mac-table\n2026-03-29T09:23:54.449093 +03:00 [INFO      ] [EvpnServiceVtysh.cpp:223:l2_evpn_show_mac_async_iteration] [rib-manager:1344:1344] 149336:3425130: finish\n2026-03-29T09:23:59.941654 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 149340:3425175: vty[??]@# show evpn instance HA_TEST_ELAN mac-table\n2026-03-29T09:23:59.942661 +03:00 [INFO      ] [EvpnServiceVtysh.cpp:223:l2_evpn_show_mac_async_iteration] [rib-manager:1344:1344] 149341:3425175: finish"
+  },
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 09:23 | include evpn | no-more",
+    "timestamp": "2026-04-03T09:27:16.820+00:00",
+    "duration_ms": 10414,
+    "phase": "auto_diagnose",
+    "output_length": 5448,
+    "output_preview": "2026-03-23T17:24:13.133704 +02:00 [DEBUG     ] [EvpnServiceEvpn.cpp:114:~EvpnServiceEvpn] [rib-manager:1344:1344] 126109:2344870: EVPN: Deleting evpn-service 2 __SYNTAX_TEST__\n2026-03-24T10:29:58.328499 +02:00 [DEBUG     ] [MultihomingZebra.cpp:40:zebra_multihoming_interface_update] [rib-manager:1344:1344] 33809:2319: EVPN: Multihoming manager: Interface status changed: ge400-0/0/4.103s ifp 0x7fc3db206c70, laser state on: 1, is up: 1\n2026-03-24T10:29:58.336406 +02:00 [DEBUG     ] [MultihomingMan",
+    "output_full": "2026-03-23T17:24:13.133704 +02:00 [DEBUG     ] [EvpnServiceEvpn.cpp:114:~EvpnServiceEvpn] [rib-manager:1344:1344] 126109:2344870: EVPN: Deleting evpn-service 2 __SYNTAX_TEST__\n2026-03-24T10:29:58.328499 +02:00 [DEBUG     ] [MultihomingZebra.cpp:40:zebra_multihoming_interface_update] [rib-manager:1344:1344] 33809:2319: EVPN: Multihoming manager: Interface status changed: ge400-0/0/4.103s ifp 0x7fc3db206c70, laser state on: 1, is up: 1\n2026-03-24T10:29:58.336406 +02:00 [DEBUG     ] [MultihomingManager.cpp:538:interfaceStatusChanged] [rib-manager:1344:1344] 34309:2323: EVPN: Multihoming manager: Interface status changed: ge400-0/0/4.103s, is up: 1\n2026-03-24T10:29:58.347021 +02:00 [DEBUG     ] [MultihomingManager.cpp:467:isIfpOperational] [rib-manager:1344:1344] 35109:2327: EVPN: Multihoming manager: Interface ge400-0/0/4.156 ifp 0x7fc3db215970 exist. ifp is_operative: 1\n2026-03-24T10:29:58.352346 +02:00 [DEBUG     ] [MultihomingManager.cpp:467:isIfpOperational] [rib-manager:1344:1344] 35609:2333: EVPN: Multihoming manager: Interface ge400-0/0/4.159 ifp 0x7fc3db215df0 exist. ifp is_operative: 1\n2026-03-24T10:29:58.359599 +02:00 [DEBUG     ] [MultihomingZebra.cpp:40:zebra_multihoming_interface_update] [rib-manager:1344:1344] 36109:2336: EVPN: Multihoming manager: Interface status changed: ge400-0/0/4.162 ifp 0x7fc3db216270, laser state on: 1, is up: 1\n2026-03-24T10:29:58.368045 +02:00 [DEBUG     ] [EvpnServiceManager.cpp:1077:isInterfaceLaserStateOn] [rib-manager:1344:1344] 36709:2340: EVPN: EVPN Service Manager: Interface ge400-0/0/4.166 does not exist. Considering it as laser state ON\n2026-03-24T10:29:58.377998 +02:00 [DEBUG     ] [EvpnServiceManager.cpp:1077:isInterfaceLaserStateOn] [rib-manager:1344:1344] 37209:2345: EVPN: EVPN Service Manager: Interface ge400-0/0/4.169 does not exist. Considering it as laser state ON\n2026-03-24T10:29:58.400118 +02:00 [DEBUG     ] [EvpnServiceManager.cpp:1077:isInterfaceLaserStateOn] [rib-manager:1344:1344] 38509:2353: EVPN: EVPN Service Manager: Interface ge400-0/0/4.177 does not exist. Considering it as laser state ON\n2026-03-24T10:29:58.463153 +02:00 [DEBUG     ] [EvpnServiceManager.cpp:1077:isInterfaceLaserStateOn] [rib-manager:1344:1344] 42109:2375: EVPN: EVPN Service Manager: Interface ge400-0/0/4.103s does not exist. Considering it as laser state ON\n2026-03-24T10:29:58.471937 +02:00 [DEBUG     ] [EvpnServiceManager.cpp:1077:isInterfaceLaserStateOn] [rib-manager:1344:1344] 42609:2380: EVPN: EVPN Service Manager: Interface ge400-0/0/4.103s does not exist. Considering it as laser state ON\n2026-03-24T10:29:58.487217 +02:00 [DEBUG     ] [MultihomingManager.cpp:467:isIfpOperational] [rib-manager:1344:1344] 43609:2389: EVPN: Multihoming manager: Interface ge400-0/0/4.103s ifp 0x7fc3db206c70 exist. ifp is_operative: 1\n2026-03-24T10:29:58.517196 +02:00 [DEBUG     ] [MultihomingManager.cpp:538:interfaceStatusChanged] [rib-manager:1344:1344] 45409:2398: EVPN: Multihoming manager: Interface status changed: ge400-0/0/4.218, is up: 1\n2026-03-29T09:23:50.392871 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 149322:3425080: vty[??]@# show evpn instance HA_TEST_ELAN mac-table suppress\n2026-03-29T09:23:50.393902 +03:00 [INFO      ] [EvpnServiceVtysh.cpp:223:l2_evpn_show_mac_async_iteration] [rib-manager:1344:1344] 149323:3425080: finish\n2026-03-29T09:23:50.658102 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 149326:3425086: vty[??]@# show loop-prevention evpn instance HA_TEST_ELAN mac-table\n2026-03-29T09:23:50.659027 +03:00 [INFO      ] [EvpnServiceVtysh.cpp:223:l2_evpn_show_mac_async_iteration] [rib-manager:1344:1344] 149327:3425086: finish\n2026-03-29T09:23:50.909378 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 149330:3425092: vty[??]@# show evpn mac-mobility-redis-count\n2026-03-29T09:23:54.447824 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 149335:3425130: vty[??]@# show evpn instance HA_TEST_ELAN mac-table\n2026-03-29T09:23:54.449093 +03:00 [INFO      ] [EvpnServiceVtysh.cpp:223:l2_evpn_show_mac_async_iteration] [rib-manager:1344:1344] 149336:3425130: finish\n2026-03-29T09:23:59.941654 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 149340:3425175: vty[??]@# show evpn instance HA_TEST_ELAN mac-table\n2026-03-29T09:23:59.942661 +03:00 [INFO      ] [EvpnServiceVtysh.cpp:223:l2_evpn_show_mac_async_iteration] [rib-manager:1344:1344] 149341:3425175: finish\n2026-04-01T09:23:53.457114 +03:00 [DEBUG     ] [EvpnServiceManager.cpp:1077:isInterfaceLaserStateOn] [rib-manager:1344:1344] 184774:5510455: EVPN: EVPN Service Manager: Interface ge400-0/0/4.14 does not exist. Considering it as laser state ON\n2026-04-01T09:23:53.457119 +03:00 [DEBUG     ] [MultihomingManager.cpp:467:isIfpOperational] [rib-manager:1344:1344] 184775:5510455: EVPN: Multihoming manager: Interface ge400-0/0/4.14 ifp 0x7fc3db2016f0 exist. ifp is_operative: 1\n2026-04-01T09:23:53.457124 +03:00 [DEBUG     ] [MultihomingZebra.cpp:40:zebra_multihoming_interface_update] [rib-manager:1344:1344] 184776:5510455: EVPN: Multihoming manager: Interface status changed: ge400-0/0/4.14 ifp 0x7fc3db2016f0, laser state on: 1, is up: 1\n2026-04-01T09:23:53.457127 +03:00 [DEBUG     ] [MultihomingManager.cpp:538:interfaceStatusChanged] [rib-manager:1344:1344] 184777:5510455: EVPN: Multihoming manager: Interface status changed: ge400-0/0/4.14, is up: 1"
+  },
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 09:23 | include FIB | no-more",
+    "timestamp": "2026-04-03T09:27:27.235+00:00",
+    "duration_ms": 10964,
+    "phase": "auto_diagnose",
+    "output_length": 226,
+    "output_preview": "2026-03-23T18:09:07.789367 +02:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 126909:2366379: vty[??]@(config)# start-transaction 11 bgpd rib-manager ospfd ospf6d ldpd isisd pimd rsvpd oamd fibmgrd vrrpd",
+    "output_full": "2026-03-23T18:09:07.789367 +02:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 126909:2366379: vty[??]@(config)# start-transaction 11 bgpd rib-manager ospfd ospf6d ldpd isisd pimd rsvpd oamd fibmgrd vrrpd"
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+    "timestamp": "2026-04-03T09:27:38.199+00:00",
+    "duration_ms": 501,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+    "timestamp": "2026-04-03T09:27:38.701+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 207,
+    "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------",
+    "output_full": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+  },
+  {
+    "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+    "timestamp": "2026-04-03T09:27:38.952+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 42,
+    "output_preview": "Number of MAC-Mobility entries in redis: 0",
+    "output_full": "Number of MAC-Mobility entries in redis: 0"
+  },
+  {
+    "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+    "timestamp": "2026-04-03T09:27:39.202+00:00",
+    "duration_ms": 50,
+    "phase": "auto_diagnose",
+    "output_length": 26,
+    "output_preview": "ERROR: Incomplete command.",
+    "output_full": "ERROR: Incomplete command."
+  },
+  {
+    "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:27:39.253+00:00",
+    "duration_ms": 300,
+    "phase": "auto_diagnose",
+    "output_length": 138,
+    "output_preview": "evi_id=1, eth_tag=0, mac=00:de:ad:00:01:01, interface=, dp_index=13624, action_type=New, Type=Add, neighbor_keys_size=0\nEvpnMacs [size: 1]",
+    "output_full": "evi_id=1, eth_tag=0, mac=00:de:ad:00:01:01, interface=, dp_index=13624, action_type=New, Type=Add, neighbor_keys_size=0\nEvpnMacs [size: 1]"
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:27:39.553+00:00",
+    "duration_ms": 100,
+    "phase": "auto_diagnose",
+    "output_length": 874,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress   ",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress              | Interface              | Egress-Encapsulation           | Timestamp              | Flags            |\n+-------------------------+------------------------+--------------------------------+------------------------+------------------+\n| (*)00:de:ad:00:01:01    | ge400-0/0/5.1000       |                                | 03-Apr-2026-12:23:10   | L                |"
+  }
+]

@@ -1,0 +1,336 @@
+{
+  "id": "TEST_mac_mob_scale_64k_G3",
+  "name": "MAC Mobility | 64K MACs Bulk Learn/Move | Scale Stress",
+  "type": "scale",
+  "recipe_type": "bulk_learn",
+  "feature": "evpn-mac-mobility",
+  "source": "gap-analysis:G3 from SW-204115 meeting notes: '64k macs moved at the same time. can be delay of around 5 seconds'",
+  "jira_key": "SW-204115",
+  "parent_category": "SW-204115",
+  "status": "wired",
+  "status_note": "G3 wired 2026-04-21 via Block 3 spirent_bulk_learn_assert handler. The handler uses the new --count parameter added to spirent_inject_evpn_mac_route (2026-04-21) to inject N RT-2 routes from a base MAC in a single Spirent API call, avoiding N round-trips. SC01 = bulk learn, SC02 = bulk move (re-inject with different next-hop + higher seq), SC03 = rapid flap (call handler 3 times with alternating next-hops). Cross-layer check is disabled via bulk_learn recipe profile -- iterating 64K MAC entries would balloon the verdict engine.",
+  "created": "2026-03-23",
+  "updated": "2026-04-21",
+  "wired": "2026-04-21",
+  "gap_rationale": "SW-204115 meeting notes explicitly discuss 64K MAC simultaneous move with an expected ~5 second delay. No existing test covers this scale scenario. This is critical for validating system behavior under bulk mobility stress, including FIB programming latency, BGP RT-2 storm handling, and suppression threshold behavior.",
+  "linked_user_stories": [
+    "SW-192019",
+    "SW-191944"
+  ],
+  "device_requirements": {
+    "type": "cluster",
+    "features": [
+      "evpn",
+      "bgp-l2vpn-evpn",
+      "seamless-integration"
+    ],
+    "min_ncp_count": 1,
+    "notes": "Cluster device preferred for realistic scale. Spirent strongly recommended for 64K MAC generation."
+  },
+  "prerequisites": [
+    {
+      "id": "bgp_evpn",
+      "check": "bgp_l2vpn_evpn_established",
+      "fix_via": "Manual BGP config",
+      "check_command": "show bgp l2vpn evpn summary | no-more",
+      "pass_criteria": "At least 1 neighbor ESTABLISHED",
+      "fix_config": "config_generator.config_blocks.bgp_l2vpn_evpn_neighbor"
+    },
+    {
+      "check": "bgp_l2vpn_vpls_established",
+      "description": "l2vpn-vpls BGP session ESTABLISHED (required for SI VPLS label exchange)",
+      "command": "show bgp l2vpn vpls summary | no-more",
+      "pass_pattern": "ESTABLISHED",
+      "fix_via": "config_blocks.bgp_l2vpn_vpls_neighbor"
+    },
+    {
+      "id": "evpn_instance",
+      "check": "evpn_instance_exists",
+      "fix_via": "config_generator",
+      "check_command": "show evpn summary | no-more",
+      "pass_criteria": "Instance {evpn_name} present in output",
+      "fix_config": "config_generator.config_blocks.evpn_vpls_si_full"
+    },
+    {
+      "id": "spirent",
+      "check": "spirent_connected",
+      "fix_via": "/SPIRENT setup",
+      "check_command": "manual: /SPIRENT status",
+      "pass_criteria": "Spirent connected to AC interfaces",
+      "fix_config": "manual: /SPIRENT setup"
+    },
+    {
+      "id": "two_ac",
+      "check": "two_attachment_circuits",
+      "fix_via": "Second AC on bridge-domain",
+      "check_command": "show config network-services evpn instance {evpn_name} | no-more",
+      "pass_criteria": "Two 'ac' entries listed",
+      "fix_config": "config_generator.config_blocks.add_second_ac"
+    },
+    {
+      "id": "suppression_cfg",
+      "check": "mac_mobility_suppression",
+      "fix_via": "loop-prevention admin-state enabled",
+      "check_command": "show config network-services evpn instance {evpn_name} mac-handling | no-more",
+      "pass_criteria": "loop-prevention admin-state enabled",
+      "fix_config": "config_generator.config_blocks.enable_loop_prevention"
+    }
+  ],
+  "config_before_test": {
+    "description": "Base EVPN-VPLS SI with two ACs. Spirent connected to both ACs. Spirent generates 64K unique source MACs on AC1, then moves all 64K to AC2 simultaneously.",
+    "spirent_requirements": {
+      "mac_count": 65536,
+      "mac_pattern": "sequential from 00:10:00:00:00:01",
+      "ports": 2,
+      "trigger": "stop_ac1_start_ac2_simultaneously"
+    },
+    "suppression_note": "Ensure suppression thresholds are set high enough (>64K) to avoid false positives, OR test with default thresholds to observe expected suppression behavior under scale."
+  },
+  "show_commands_validated": {
+    "show evpn mac-table instance {evpn_name} | no-more": "Full MAC table (may be large)",
+    "show evpn mac summary | no-more": "Global MAC count summary",
+    "show evpn mac-table detail instance {evpn_name} | no-more": "Sequence numbers on all MACs",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding entries",
+    "show evpn mac summary | no-more": "Mobility counter (expect 64K increment)",
+    "show system npu-resources ncp {ncp_id} | no-more": "NPU MAC table utilization",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more": "Ghost MAC detection"
+  },
+  "scenarios": [
+    {
+      "id": "SC01_bulk_learn_64k",
+      "name": "Learn 64K MACs on AC1 via Spirent; verify all learned",
+      "what_happens": "Spirent sends 64K unique source MACs on AC1. DUT must learn all 64K, program NCP forwarding table, and advertise 64K RT-2 routes to BGP peers.",
+      "what_cannot_happen": "MAC table overflow. NPU resource exhaustion. BGP session reset.",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac summary | no-more",
+            "show system npu-resources ncp {ncp_id} | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "spirent_send_64k_macs_ac1",
+          "method": "spirent",
+          "timeout_sec": 60,
+          "params": {
+            "base_mac": "00:10:00:00:00:01",
+            "count": 65536,
+            "seq": 0,
+            "next_hop": "17.17.17.2"
+          },
+          "note": "Handler: spirent_bulk_learn_assert -> single RT-2 inject with --count 65536."
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac summary | no-more",
+            "show system npu-resources ncp {ncp_id} | no-more"
+          ],
+          "expect": {
+            "mac_count_ge": 65536,
+            "npu_not_exhausted": true,
+            "bgp_session_stable": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC02_bulk_move_64k_ac1_to_ac2",
+      "name": "Move all 64K MACs from AC1 to AC2 simultaneously; measure delay",
+      "what_happens": "Spirent stops sending on AC1, starts sending same 64K MACs on AC2. DUT must: (1) detect 64K MAC moves, (2) update all MAC table entries, (3) update all RT-2 routes, (4) reprogram NCP forwarding. Expected completion: ~5 seconds per meeting notes.",
+      "what_cannot_happen": "System crash. bgpd restart. Permanent blackhole. Forwarding stuck in old state after 30 seconds.",
+      "timing_requirements": {
+        "expected_delay_sec": 5,
+        "max_acceptable_delay_sec": 30,
+        "measure_start": "spirent_switch_timestamp",
+        "measure_end": "all_forwarding_entries_updated"
+      },
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac summary | no-more",
+            "show evpn mac-table instance {evpn_name} | count"
+          ],
+          "timestamp": true
+        },
+        "trigger": {
+          "action": "spirent_move_64k_ac1_to_ac2",
+          "method": "spirent",
+          "record_timestamp": true,
+          "params": {
+            "base_mac": "00:10:00:00:00:01",
+            "count": 65536,
+            "seq": 1,
+            "next_hop": "17.17.17.3"
+          },
+          "note": "Handler: spirent_bulk_learn_assert -> re-inject 64K routes with higher seq + different next-hop to simulate move from PE-A to PE-B."
+        },
+        "poll_convergence": {
+          "timeout_sec": 60,
+          "poll_interval_sec": 2,
+          "show_commands": [
+            "show evpn mac summary | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} | count"
+          ],
+          "convergence_criteria": "all MACs show AC2 as source"
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac summary | no-more",
+            "show evpn mac summary | no-more",
+            "show system npu-resources ncp {ncp_id} | no-more"
+          ],
+          "expect": {
+            "all_macs_on_ac2": true,
+            "convergence_time_sec_lte": 30,
+            "convergence_time_warning_sec_gt": 5,
+            "mobility_counter_increased_by_64k": true,
+            "no_ghost_macs": true,
+            "bgp_session_stable": true,
+            "no_process_crashes": true,
+            "check_mac_flags": true,
+            "forbidden_flags": [
+              "F",
+              "D"
+            ],
+            "check_forwarding": true
+          }
+        }
+      }
+    },
+    {
+      "id": "SC03_suppression_at_scale",
+      "name": "Rapid bulk flap at 64K scale; suppression behavior",
+      "what_happens": "After SC02, rapidly flap 64K MACs back and forth (AC2->AC1->AC2) 3 times in quick succession. Suppression should trigger. Verify system stability under extreme suppression load.",
+      "what_cannot_happen": "System hang. Memory exhaustion. Process crash.",
+      "phases": {
+        "trigger": {
+          "action": "rapid_64k_flap_3_times",
+          "method": "spirent",
+          "params": {
+            "base_mac": "00:10:00:00:00:01",
+            "count": 65536,
+            "seq": 2,
+            "next_hop": "17.17.17.2"
+          },
+          "note": "Handler: spirent_bulk_learn_assert -> single flap cycle (back to PE-A, seq=2). SC03 runs after SC02 so this is flap #3 overall."
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} suppress | no-more",
+            "show evpn mac summary | no-more",
+            "show bgp l2vpn evpn summary | no-more"
+          ],
+          "expect": {
+            "suppression_triggered": true,
+            "system_stable": true,
+            "bgp_session_stable": true,
+            "no_process_crashes": true,
+            "check_ghost_macs": true
+          }
+        }
+      }
+    }
+  ],
+  "runtime_parameters": {
+    "evpn_name": {
+      "resolve": "runtime"
+    },
+    "ncp_id": {
+      "resolve": "runtime",
+      "from": "show system"
+    }
+  },
+  "verdict": {
+    "layers": 10,
+    "stop_on_fail": true
+  },
+  "counter_commands": [
+    {
+      "label": "mac_count",
+      "command": "show evpn mac summary | no-more",
+      "parser": "first_integer"
+    },
+    {
+      "label": "npu_mac_util",
+      "command": "show system npu-resources ncp {ncp_id} | no-more",
+      "parser": "percentage"
+    },
+    {
+      "label": "ghost_mac_count",
+      "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+      "parser": "line_count"
+    },
+    {
+      "label": "mobility_counter",
+      "command": "show evpn mac summary | no-more",
+      "parser": "key_value"
+    }
+  ],
+  "counter_expectations": [
+    {
+      "label": "mac_count",
+      "rule": "ge",
+      "value": 65536
+    },
+    {
+      "label": "npu_mac_util",
+      "rule": "lt",
+      "value": 95,
+      "description": "NPU MAC table must not be near exhaustion"
+    },
+    {
+      "label": "ghost_mac_count",
+      "rule": "zero"
+    },
+    {
+      "label": "mobility_counter",
+      "rule": "increase"
+    }
+  ],
+  "event_expectations": [
+    {
+      "event": "BGP_NOTIFICATION",
+      "expect": "absent"
+    },
+    {
+      "event": "SYSTEM_PROCESS_RESTART",
+      "expect": "absent",
+      "description": "No crashes under scale"
+    },
+    {
+      "event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED",
+      "expect": "present",
+      "description": "Expected during SC03 rapid flap"
+    }
+  ],
+  "health_checks": {
+    "processes": [
+      "routing:bgpd",
+      "routing:fibmgrd",
+      "routing:rib_manager",
+      "neighbour_manager",
+      "wb_agent"
+    ],
+    "check_crashes": true,
+    "check_alarms": true,
+    "check_memory": true,
+    "check_cpu": true
+  },
+  "cleanup_commands": [
+    "no debug evpn mac-mobility",
+    "unset logging terminal"
+  ],
+  "config_baseline": {
+    "sections": [
+      "network-services evpn",
+      "protocols bgp {asn}"
+    ],
+    "full_config": false,
+    "ignore_patterns": [
+      "last-modified",
+      "commit-id"
+    ]
+  },
+  "config_generator_ref": "config_generator.json -> per_test_config_requirements.scale_64k"
+}

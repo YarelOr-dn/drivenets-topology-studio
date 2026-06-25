@@ -246,8 +246,9 @@ window.MinimapModule = {
                 if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
                     editor.panOffset.x += dx * lerpFactor;
                     editor.panOffset.y += dy * lerpFactor;
-                    editor.draw();
-                    editor.updateHud();
+                    // Pure viewport translation; skip per-object recalc and coalesce via rAF.
+                    editor._viewportOnly = true;
+                    editor.scheduleDraw();
                     editor.updateScrollbars();
                 }
             }
@@ -327,7 +328,10 @@ window.MinimapModule = {
         editor.panOffset.x += (editor.minimap.targetPan.x - editor.panOffset.x) * instantFactor;
         editor.panOffset.y += (editor.minimap.targetPan.y - editor.panOffset.y) * instantFactor;
         
-        editor.draw();
+        // Coalesced viewport-only redraw so initial minimap click feels instantaneous
+        // without forcing per-object recalc.
+        editor._viewportOnly = true;
+        editor.scheduleDraw();
         editor.updateHud();
         editor.updateScrollbars();
     },

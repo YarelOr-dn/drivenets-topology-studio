@@ -1,0 +1,19 @@
+{
+  "phase_name": "snapshot",
+  "started_at": "2026-04-19T15:46:58.524+00:00",
+  "completed_at": "2026-04-19T15:46:58.624+00:00",
+  "duration_sec": 0.1,
+  "command_count": 1,
+  "commands": [
+    {
+      "command": "show config network-services evpn instance {si_instance_name} | no-more",
+      "timestamp": "2026-04-19T15:46:58.524+00:00",
+      "duration_ms": 100,
+      "phase": "snapshot",
+      "output_length": 119,
+      "output_preview": "---------------------------------------------------------------------------^\nERROR: Unknown word: '{si_instance_name}'."
+    }
+  ],
+  "parsed_values": {},
+  "anomalies": []
+}

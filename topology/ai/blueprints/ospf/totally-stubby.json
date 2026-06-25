@@ -1,0 +1,207 @@
+{
+  "name": "totally-stubby",
+  "protocol": "ospf",
+  "scale": "small",
+  "summary": "OSPF totally stubby area. The ABR blocks both Type-3 and Type-5 LSAs into the stub; internal routers rely on a single 0.0.0.0/0 default.",
+  "tags": [
+    "ospf",
+    "totally-stubby",
+    "area-10",
+    "abr",
+    "default-route"
+  ],
+  "objects": [
+    {
+      "id": "a0",
+      "type": "shape",
+      "shapeType": "ellipse",
+      "x": 600,
+      "y": 540,
+      "width": 520,
+      "height": 620,
+      "fillColor": "#95a5a6",
+      "fillEnabled": true,
+      "fillOpacity": 0.1,
+      "strokeColor": "#95a5a6",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "label": "Area 0"
+    },
+    {
+      "id": "a10",
+      "type": "shape",
+      "shapeType": "ellipse",
+      "x": 1400,
+      "y": 540,
+      "width": 520,
+      "height": 620,
+      "fillColor": "#e67e22",
+      "fillEnabled": true,
+      "fillOpacity": 0.1,
+      "strokeColor": "#e67e22",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "label": "Area 10 (Totally Stubby)"
+    },
+    {
+      "id": "bb1",
+      "type": "device",
+      "label": "BB-1",
+      "x": 420,
+      "y": 400,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "bb2",
+      "type": "device",
+      "label": "BB-2",
+      "x": 420,
+      "y": 680,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "abr",
+      "type": "device",
+      "label": "ABR",
+      "x": 900,
+      "y": 540,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#e67e22",
+      "radius": 50
+    },
+    {
+      "id": "r1",
+      "type": "device",
+      "label": "R1-stub",
+      "x": 1240,
+      "y": 400,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "r2",
+      "type": "device",
+      "label": "R2-stub",
+      "x": 1240,
+      "y": 680,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "r3",
+      "type": "device",
+      "label": "R3-stub",
+      "x": 1580,
+      "y": 540,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "l_bb1_bb2",
+      "type": "link",
+      "device1": "bb1",
+      "device2": "bb2",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "a0"
+    },
+    {
+      "id": "l_bb1_abr",
+      "type": "link",
+      "device1": "bb1",
+      "device2": "abr",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "a0"
+    },
+    {
+      "id": "l_bb2_abr",
+      "type": "link",
+      "device1": "bb2",
+      "device2": "abr",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "a0"
+    },
+    {
+      "id": "l_abr_r1",
+      "type": "link",
+      "device1": "abr",
+      "device2": "r1",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "a10"
+    },
+    {
+      "id": "l_abr_r2",
+      "type": "link",
+      "device1": "abr",
+      "device2": "r2",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "a10"
+    },
+    {
+      "id": "l_r1_r3",
+      "type": "link",
+      "device1": "r1",
+      "device2": "r3",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "a10"
+    },
+    {
+      "id": "l_r2_r3",
+      "type": "link",
+      "device1": "r2",
+      "device2": "r3",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "a10"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "OSPF Totally Stubby Area",
+      "x": 1000,
+      "y": 140,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_stubby",
+      "type": "text",
+      "text": "Totally Stubby: inter-area LSAs and\nexternal LSAs (Type-5) blocked.\nDefault route (0.0.0.0/0) injected\nby the ABR.",
+      "x": 1400,
+      "y": 920,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#334155",
+      "borderWidth": 1
+    }
+  ]
+}

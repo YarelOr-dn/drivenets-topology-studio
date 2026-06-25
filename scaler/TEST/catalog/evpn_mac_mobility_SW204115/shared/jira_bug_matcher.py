@@ -16,9 +16,8 @@ Typical flow:
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 JiraSearchFn = Callable[[str, str, int], str]
 

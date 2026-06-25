@@ -1,0 +1,358 @@
+{
+  "id": "TEST_mac_mob_sticky_modes_G6",
+  "name": "MAC Mobility | Sticky Interface + Sticky MAC Modes",
+  "type": "functional",
+  "feature": "evpn-mac-mobility",
+  "source": "jira:SW-204115 / SW-194578",
+  "jira_key": "SW-194578",
+  "parent_category": "SW-204115",
+  "created": "2026-03-28",
+  "notes": "Tests sticky-interface and sticky-mac config on ACs. SC01-SC02: AC<->EVPN (SI-compatible). SC03-SC06: PW interactions (require non-SI mode with active PW data plane).",
+
+  "reference_from_jira": {
+    "sw_194578": "EVPN(ELAN)-VPLS: MAC Move and Sticky MAC Handling",
+    "sticky_interface": "All MACs on that AC become sticky. RT-2 advertised with sticky (Bs>) flag.",
+    "sticky_mac": "Specific MAC on AC becomes sticky via 'sticky-mac <addr>'. RT-2 with sticky flag.",
+    "sticky_vs_non_sticky_move": "Sticky AC ignores non-sticky remote move attempts. Higher seq sticky wins.",
+    "sticky_vs_pw": "Sticky AC ignores PW-learned MAC move. PW->sticky AC: prefer sticky, re-advertise RT-2."
+  },
+
+  "device_requirements": {"type": "any", "features": ["evpn", "sticky-mac"], "min_ncp_count": 1},
+
+  "show_commands_validated": {
+    "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more": "SHOW_COMMANDS -- Single MAC lookup with flags",
+    "show evpn mac-table detail instance {evpn_name} | no-more": "Detailed MAC entries with mobility seq, sticky flag",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding state and flags",
+    "show config network-services evpn instance {evpn_name} | flatten | no-more": "EVPN config with sticky settings",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more": "Ghost MAC detection",
+    "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
+  },
+
+  "invalid_commands": {
+    "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use: show evpn mac-table instance {name}",
+    "show interfaces brief": "DOES NOT EXIST. Use: show interfaces description"
+  },
+
+  "config_commands": {
+    "enable_sticky_interface": [
+      "config",
+      "network-services evpn instance {evpn_name} interface {ac_interface} sticky-interface enabled",
+      "commit"
+    ],
+    "disable_sticky_interface": [
+      "config",
+      "no network-services evpn instance {evpn_name} interface {ac_interface} sticky-interface",
+      "commit"
+    ],
+    "add_sticky_mac": [
+      "config",
+      "network-services evpn instance {evpn_name} interface {ac_interface} sticky-mac {test_mac}",
+      "commit"
+    ],
+    "remove_sticky_mac": [
+      "config",
+      "no network-services evpn instance {evpn_name} interface {ac_interface} sticky-mac {test_mac}",
+      "commit"
+    ]
+  },
+
+  "scenarios": [
+    {
+      "id": "SC01_sticky_interface_local_vs_remote_evpn",
+      "name": "Sticky interface AC: remote EVPN RT-2 cannot override",
+      "infra_required": "si_mode",
+      "spirent_method": "Spirent L2 learns MAC on AC (sticky-interface enabled), then Spirent BGP injects RT-2 with same MAC. DUT must keep local sticky and IGNORE remote.",
+      "phases": {
+        "setup": {
+          "config": "enable_sticky_interface",
+          "spirent": [
+            {"action": "create_l2_device", "vlan": "{ac_vlan}", "mac": "{test_mac}"},
+            {"action": "protocol_start", "purpose": "Learn MAC on sticky AC"},
+            {"action": "wait", "seconds": 5}
+          ]
+        },
+        "snapshot": {"show_commands": [
+          "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+          "show evpn mac-table detail instance {evpn_name} | no-more"
+        ]},
+        "trigger": {
+          "action": "spirent_inject_evpn_rt2",
+          "mac": "{test_mac}",
+          "seq": 10,
+          "sticky": false,
+          "detail": "Non-sticky remote EVPN RT-2 tries to override sticky local"
+        },
+        "verify": {
+          "expect": {
+            "move_ignored": true,
+            "mac_still_local": true,
+            "mac_flag_contains": "Bs>",
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        },
+        "cleanup": {
+          "config": "disable_sticky_interface",
+          "spirent": [{"action": "protocol_stop"}, {"action": "remove_device"}]
+        }
+      }
+    },
+    {
+      "id": "SC02_both_sticky_higher_seq_wins",
+      "name": "Both sticky: local sticky AC vs remote sticky EVPN; higher seq wins",
+      "infra_required": "si_mode",
+      "spirent_method": "Local MAC learned on sticky AC (seq=0). Remote sticky RT-2 injected with higher seq. Per RFC 7432, higher seq sticky wins.",
+      "phases": {
+        "setup": {
+          "config": "enable_sticky_interface",
+          "spirent": [
+            {"action": "create_l2_device", "vlan": "{ac_vlan}", "mac": "{test_mac}"},
+            {"action": "protocol_start", "purpose": "Learn MAC on sticky AC (seq 0)"},
+            {"action": "wait", "seconds": 5}
+          ]
+        },
+        "trigger": {
+          "action": "spirent_inject_evpn_rt2",
+          "mac": "{test_mac}",
+          "seq": 100,
+          "sticky": true,
+          "detail": "Remote sticky RT-2 with seq=100 vs local sticky seq=0"
+        },
+        "verify": {
+          "expect": {
+            "higher_seq_wins": true,
+            "mac_moved_to_remote": true,
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": true
+          }
+        },
+        "cleanup": {
+          "config": "disable_sticky_interface",
+          "spirent": [{"action": "protocol_stop"}, {"action": "remove_device"}]
+        }
+      }
+    },
+    {
+      "id": "SC03_sticky_ac_vs_pw_move",
+      "name": "Sticky local AC: PW-learned MAC cannot override sticky",
+      "infra_required": "spirent_vpls_cp",
+      "spirent_role": "Spirent L2 learns MAC on sticky AC (protocol-start). Then Spirent sends same MAC via vpls-stream (MPLS PW). Sticky AC should win.",
+      "phases": {
+        "setup": {
+          "config": "enable_sticky_interface on {pw_test_evpn_name}",
+          "spirent": [
+            {"action": "create_l2_device", "vlan": "{ac_vlan}", "mac": "{test_mac}"},
+            {"action": "protocol_start", "purpose": "Learn MAC on sticky AC"}
+          ]
+        },
+        "trigger": {
+          "action": "spirent_create_vpls_stream",
+          "method": "vpls-stream via MPLS-labeled PW",
+          "args": {"mpls_label": "{pw_ingress_label}", "inner_src_mac": "{test_mac}"},
+          "detail": "Send same MAC via MPLS PW (Spirent VPLS peer). DUT should ignore the PW move."
+        },
+        "verify": {
+          "show_commands": ["show evpn mac-table instance {pw_test_evpn_name} mac {test_mac} | no-more"],
+          "expect": {
+            "move_ignored": true,
+            "mac_still_local_sticky": true,
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        },
+        "cleanup": {"config": "disable_sticky_interface"}
+      },
+      "prerequisites": [
+        {
+          "id": "spirent_vpls_peer",
+          "check": "bgp_vpls_session",
+          "check_command": "show bgp l2vpn vpls summary | no-more",
+          "expect": "Established",
+          "fix_via": "spirent_tool.py bgp-peer --negotiate-afi l2vpn-vpls"
+        },
+        {
+          "id": "pw_active_not_bni",
+          "check": "vpls_pw_forwarding",
+          "check_command": "show evpn vpls-pw | no-more",
+          "pass_criteria": "PW active on non-SI instance"
+        },
+        {
+          "id": "pw_ingress_label",
+          "check": "ingress_label_available",
+          "extract": "pw_ingress_label"
+        }
+      ]
+    },
+    {
+      "id": "SC04_pw_to_sticky_ac",
+      "name": "PW-learned MAC moves to sticky AC: sticky wins, RT-2 re-advertised",
+      "infra_required": "spirent_vpls_cp",
+      "spirent_role": "Spirent sends MAC via vpls-stream (MPLS PW) first. Then MAC learned on sticky AC via protocol-start. Sticky AC wins.",
+      "phases": {
+        "trigger": {
+          "action": "learn_on_pw_then_configure_sticky",
+          "sticky": true,
+          "step1": {"method": "spirent_create_vpls_stream", "args": {"mpls_label": "{pw_ingress_label}", "inner_src_mac": "{test_mac}"}, "then": "start, wait 5s, stop, remove"},
+          "step2_config": "enable_sticky_interface on {pw_test_evpn_name}",
+          "step3": {"method": "spirent_create_mac_block", "args": {"vlan": "{ac_vlan}", "mac": "{test_mac}"}, "then": "protocol_start, wait 8s"}
+        },
+        "verify": {
+          "show_commands": ["show evpn mac-table instance {pw_test_evpn_name} mac {test_mac} | no-more"],
+          "expect": {
+            "prefer_sticky_ac": true,
+            "advertise_rt2": true,
+            "mac_flag_contains": "Bs>",
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true
+          }
+        },
+        "cleanup": {"config": "disable_sticky_interface"}
+      },
+      "prerequisites": [
+        {
+          "id": "spirent_vpls_peer",
+          "check": "bgp_vpls_session",
+          "check_command": "show bgp l2vpn vpls summary | no-more",
+          "expect": "Established"
+        },
+        {
+          "id": "pw_active_not_bni",
+          "check": "vpls_pw_forwarding",
+          "check_command": "show evpn vpls-pw | no-more"
+        },
+        {
+          "id": "pw_ingress_label",
+          "check": "ingress_label_available",
+          "extract": "pw_ingress_label"
+        }
+      ]
+    },
+    {
+      "id": "SC05_sticky_mac_specific_addr",
+      "name": "Sticky-mac (per-MAC config): specific MAC becomes sticky on AC",
+      "infra_required": "si_mode",
+      "spirent_method": "Configure sticky-mac for specific MAC. Spirent learns that MAC on AC. Verify RT-2 has sticky flag. Then remote EVPN RT-2 tries override -- should be ignored.",
+      "phases": {
+        "setup": {
+          "config": "add_sticky_mac",
+          "spirent": [
+            {"action": "create_l2_device", "vlan": "{ac_vlan}", "mac": "{test_mac}"},
+            {"action": "protocol_start"},
+            {"action": "wait", "seconds": 5}
+          ]
+        },
+        "trigger": {
+          "action": "spirent_inject_evpn_rt2",
+          "mac": "{test_mac}",
+          "seq": 5,
+          "sticky": false,
+          "detail": "Non-sticky remote RT-2 tries to override per-MAC sticky"
+        },
+        "verify": {
+          "expect": {
+            "move_ignored": true,
+            "mac_still_local_sticky": true,
+            "check_mac_flags": true,
+            "check_forwarding": true
+          }
+        },
+        "cleanup": {
+          "config": "remove_sticky_mac"
+        }
+      }
+    },
+    {
+      "id": "SC06_sticky_mac_vs_pw",
+      "name": "Per-MAC sticky on AC vs PW-learned: sticky wins over PW",
+      "infra_required": "spirent_vpls_cp",
+      "spirent_role": "Configure sticky-mac on AC. Spirent sends same MAC via vpls-stream (MPLS PW). Sticky-mac should win over PW.",
+      "phases": {
+        "setup": {"config": "add_sticky_mac on {pw_test_evpn_name}"},
+        "trigger": {
+          "action": "spirent_create_vpls_stream",
+          "args": {"mpls_label": "{pw_ingress_label}", "inner_src_mac": "{test_mac}"},
+          "detail": "PW traffic with same MAC that is configured as sticky-mac on local AC"
+        },
+        "verify": {
+          "show_commands": ["show evpn mac-table instance {pw_test_evpn_name} mac {test_mac} | no-more"],
+          "expect": {
+            "move_ignored": true,
+            "mac_still_local_sticky": true,
+            "check_mac_flags": true,
+            "check_forwarding": true
+          }
+        },
+        "cleanup": {"config": "remove_sticky_mac"}
+      },
+      "prerequisites": [
+        {
+          "id": "spirent_vpls_peer",
+          "check": "bgp_vpls_session",
+          "check_command": "show bgp l2vpn vpls summary | no-more",
+          "expect": "Established"
+        },
+        {
+          "id": "pw_active_not_bni",
+          "check": "vpls_pw_forwarding",
+          "check_command": "show evpn vpls-pw | no-more"
+        },
+        {
+          "id": "pw_ingress_label",
+          "check": "ingress_label_available",
+          "extract": "pw_ingress_label"
+        }
+      ]
+    }
+  ],
+
+  "runtime_parameters": {
+    "evpn_name": {"resolve": "runtime"},
+    "pw_test_evpn_name": {"default": "PW_TEST_ELAN", "description": "Non-SI EVPN instance for PW scenarios (SC03, SC04, SC06)"},
+    "test_mac": {"resolve": "runtime", "default": "00:DE:AD:00:01:01"},
+    "ac_interface": {"resolve": "runtime", "description": "AC interface for sticky config (e.g. ge400-0/0/5.1000)"},
+    "ac_vlan": {"resolve": "runtime", "description": "VLAN for Spirent L2 traffic to this AC"},
+    "pw_ingress_label": {"resolve": "from_show_command", "source": "show evpn vpls-pw | no-more", "filter_instance": "{pw_test_evpn_name}", "description": "MPLS PW ingress label for Spirent vpls-stream (SC03, SC04, SC06)"},
+    "vpls_rd": {"resolve": "from_router_id", "format": "{router_id}:9990"},
+    "vpls_rt": {"default": "9990:9990"},
+    "vpls_ve_id": {"default": 1},
+    "asn": {"resolve": "from_device"}
+  },
+
+  "verdict": {"layers": 8, "stop_on_fail": false},
+
+  "counter_commands": [
+    {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+  ],
+  "counter_expectations": [
+    {"label": "mac_count", "rule": "no_decrease", "description": "MAC count must not drop"},
+    {"label": "ghost_mac_count", "rule": "zero", "description": "No ghost MACs after scenario"}
+  ],
+
+  "event_expectations": [
+    {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "No BGP notifications"},
+    {"event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED", "expect": "absent", "description": "No suppression on normal sticky operations"}
+  ],
+
+  "health_checks": {
+    "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager", "neighbour_manager"],
+    "check_crashes": true,
+    "check_alarms": true
+  },
+
+  "cleanup_commands": [
+    "no debug evpn mac-mobility",
+    "unset logging terminal"
+  ],
+
+  "config_baseline": {
+    "sections": ["network-services evpn", "protocols bgp {asn}"],
+    "full_config": false,
+    "ignore_patterns": ["last-modified", "commit-id"]
+  }
+}

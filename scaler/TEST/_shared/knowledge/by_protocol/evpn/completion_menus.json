@@ -1,0 +1,36 @@
+{
+  "show evpn": {
+    "keywords": [
+      "arp-table",
+      "counters",
+      "database",
+      "detail",
+      "e-tree",
+      "ethernet-segments-info",
+      "forwarding-table",
+      "inclusive-multicast-table",
+      "instance",
+      "irb",
+      "irb-summary",
+      "loop-prevention",
+      "mac",
+      "mac-ip-table",
+      "mac-table",
+      "ndp-table",
+      "storm-control",
+      "summary",
+      "vpls-pw",
+      "vxlan"
+    ],
+    "last_build": {
+      "branch": "",
+      "commit": "",
+      "device": ""
+    },
+    "last_device": "",
+    "last_seen_iso": "2026-04-30T14:38:42Z",
+    "suites_seen": [
+      "evpn_mac_mobility_SW204115"
+    ]
+  }
+}

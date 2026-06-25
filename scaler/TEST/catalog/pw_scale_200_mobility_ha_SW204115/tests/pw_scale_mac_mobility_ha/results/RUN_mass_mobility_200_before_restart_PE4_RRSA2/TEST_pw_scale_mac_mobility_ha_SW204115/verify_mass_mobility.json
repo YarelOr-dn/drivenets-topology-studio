@@ -1,0 +1,12 @@
+{
+  "data": {
+    "failed_services": 0,
+    "iteration": 4,
+    "moved_services": 200,
+    "sample_failures": [],
+    "total_services": 200
+  },
+  "detail": "all service MACs moved to opposite DUT",
+  "ok": true,
+  "phase": "verify_mass_mobility"
+}

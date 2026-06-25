@@ -1,0 +1,47 @@
+{
+  "show evpn local-loop-prevention": {
+    "alternatives": [
+      "arp-table",
+      "counters",
+      "database",
+      "detail",
+      "e-tree",
+      "ethernet-segments-info",
+      "forwarding-table",
+      "inclusive-multicast-table",
+      "instance",
+      "irb",
+      "irb-summary",
+      "loop-prevention",
+      "mac",
+      "mac-ip-table",
+      "mac-table",
+      "ndp-table",
+      "storm-control",
+      "summary",
+      "vpls-pw",
+      "vxlan"
+    ],
+    "command": "show evpn local-loop-prevention",
+    "feature_tags": [
+      "evpn",
+      "loop-prevention"
+    ],
+    "last_build": {
+      "branch": "",
+      "commit": "",
+      "device": ""
+    },
+    "last_seen_iso": "2026-04-30T14:38:42Z",
+    "notes": "ERROR: ",
+    "pass_count": 0,
+    "protocol": "evpn",
+    "seen_builds": [],
+    "seen_devices": [],
+    "suites_seen": [
+      "evpn_mac_mobility_SW204115"
+    ],
+    "surface": "dnos_cli",
+    "valid": false
+  }
+}

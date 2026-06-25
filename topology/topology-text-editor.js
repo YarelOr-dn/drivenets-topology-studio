@@ -15,6 +15,21 @@ window.TextEditorModule = {
     // Store live preview handlers
     _livePreviewHandlers: {},
 
+    /**
+     * Commit user-entered text without treating an empty string as deletion.
+     * Deleting a TB is handled only by explicit canvas delete actions.
+     */
+    _setTextValue: function(textObj, value) {
+        if (!textObj || textObj.type !== 'text') return;
+        const nextValue = value == null ? '' : String(value);
+        textObj.text = nextValue;
+        if (nextValue === '') {
+            textObj._textCleared = true;
+        } else if (textObj._textCleared) {
+            delete textObj._textCleared;
+        }
+    },
+
     // =========================================================================
     // MODAL TEXT EDITOR
     // =========================================================================
@@ -157,7 +172,7 @@ window.TextEditorModule = {
         // Create new handlers
         this._livePreviewHandlers.text = (e) => {
             if (editor.editingText) {
-                editor.editingText.text = e.target.value;
+                this._setTextValue(editor.editingText, e.target.value);
                 editor.draw();
             }
         };
@@ -279,26 +294,96 @@ window.TextEditorModule = {
     // =========================================================================
 
     /**
-     * Show inline text editor overlay
-     * @param {Object} editor - TopologyEditor instance
-     * @param {Object} textObj - Text object to edit
-     * @param {Event} event - Triggering event
+     * Show inline text editor overlay.
+     *
+     * Visual continuity contract -- the overlay's text glyphs must land on
+     * the SAME screen pixels the canvas painted them on, with the same
+     * font, weight, style, line-height, padding and content-area width.
+     * Any mismatch causes a "jump" when entering/exiting edit mode.
+     *
+     * Canvas paint reference (topology-canvas-drawing.js drawText):
+     *   ctx.font          = "<style> <weight> <size>px <family>"
+     *   ctx.textAlign     = 'center'
+     *   ctx.textBaseline  = 'middle'
+     *   lineHeight        = fontSize * 1.3
+     *   glyph block       = (w x h) centered on (text.x, text.y)
+     *   background block  = (w + 2*P) x (h + 2*P) centered on (text.x, text.y)
+     *                       where P = text.backgroundPadding ?? 8
+     *
+     * Overlay model (matches canvas exactly):
+     *   - position centered on (text.x, text.y) screen coords (translate -50%)
+     *   - padding = P * editor.zoom  (mirrors background block margin)
+     *   - inner content area = (w * editor.zoom) -- wraps at same column
+     *   - line-height = 1.3 (matches canvas)
+     *   - border = 0; visible blue ring is a box-shadow OUTSIDE the content
+     *     so it never consumes layout space (no wrap shift)
+     *   - letter-spacing = 0 explicit (browser default; canvas implicit)
+     *   - box-sizing: border-box so width/height include padding
+     *
+     * Polish + QA pass 2026-05-12.
+     *
+     * @param {Object} editor   - TopologyEditor instance
+     * @param {Object} textObj  - Text object to edit
+     * @param {Event}  event    - Triggering event (currently unused)
+     * @param {Object} [options]
+     * @param {boolean} [options.selectAll] - true: select all text on focus
+     *        (typing replaces). false: caret at end (typing appends). When
+     *        omitted, defaults to true for empty / placeholder "Text" boxes
+     *        and false for boxes with real user content.
      */
-    showInline: function(editor, textObj, event) {
+    showInline: function(editor, textObj, event, options) {
         if (!textObj || textObj.type !== 'text') return;
-        
+        const opts = options || {};
+
         textObj._editing = true;
         this.hideInline(editor);
         editor.editingText = textObj;
-        
+
+        // Snapshot original text so hideInline only saves a state when
+        // the user actually changed something. Avoids spurious undo
+        // entries when the user just opens-and-closes the editor.
+        editor._inlineEditorOriginalText = textObj.text == null ? '' : String(textObj.text);
+
         const rect = editor.canvas.getBoundingClientRect();
         const screenX = rect.left + textObj.x * editor.zoom + editor.panOffset.x;
         const screenY = rect.top + textObj.y * editor.zoom + editor.panOffset.y;
-        
-        const scaledFontSize = (textObj.fontSize || 14) * editor.zoom;
+
+        const requestedFontSize = Number(textObj.fontSize) || 14;
+        const scaledFontSize = requestedFontSize * editor.zoom;
         const fontFamily = textObj.fontFamily || 'Arial, sans-serif';
-        const fontWeight = textObj.bold ? 'bold' : 'normal';
-        const fontStyle = textObj.italic ? 'italic' : 'normal';
+        // Canonical fontWeight/fontStyle fields win over the legacy
+        // textObj.bold / textObj.italic booleans (kept as a fallback so
+        // older saved sections still edit correctly).
+        const fontWeight = textObj.fontWeight
+            || (textObj.bold ? 'bold' : 'normal');
+        const fontStyle = textObj.fontStyle
+            || (textObj.italic ? 'italic' : 'normal');
+
+        // Mirror the canvas's background padding exactly. Default is 8 world
+        // units (4 for link-attached labels). Persist as paddingPx in screen
+        // space for the textarea CSS.
+        const paddingWorld = Number.isFinite(textObj.backgroundPadding)
+            ? textObj.backgroundPadding
+            : (textObj.linkId && textObj._onLinkLine === true ? 4 : 8);
+        const paddingPx = Math.max(0, paddingWorld * editor.zoom);
+
+        // Width model: when the user has edge-stretched the box, lock the
+        // outer width so wrapping mirrors what drawText will paint after
+        // commit. Inner content area = text.width * zoom; outer = inner +
+        // 2*paddingPx. With box-sizing: border-box the textarea's `width`
+        // CSS prop is the OUTER value.
+        const hasManualWidth = Number.isFinite(textObj.width) && textObj.width > 0;
+        const innerWidthPx = hasManualWidth ? Math.max(40, textObj.width * editor.zoom) : null;
+        const lockedOuterWidth = innerWidthPx != null ? (innerWidthPx + 2 * paddingPx) : null;
+
+        // Height model: when `_heightLocked === true` the user explicitly
+        // dragged a vertical edge or corner -- honour `text.height` and let
+        // the textarea scroll past it (the renderer clips with ellipsis on
+        // the next paint). For auto-grow boxes we let the height grow
+        // naturally via autoResize().
+        const hasLockedHeight = textObj._heightLocked === true && Number.isFinite(textObj.height);
+        const innerHeightPx = hasLockedHeight ? Math.max(24, textObj.height * editor.zoom) : null;
+        const lockedOuterHeight = innerHeightPx != null ? (innerHeightPx + 2 * paddingPx) : null;
 
         let bgColor = 'transparent';
         if (textObj.showBackground !== false) {
@@ -316,6 +401,7 @@ window.TextEditorModule = {
 
         const textInput = document.createElement('textarea');
         textInput.value = textObj.text || '';
+        textInput.dataset.inlineTextEditor = '1';
         textInput.style.cssText = `
             position: fixed;
             left: ${screenX}px;
@@ -324,91 +410,169 @@ window.TextEditorModule = {
             font-family: ${fontFamily};
             font-weight: ${fontWeight};
             font-style: ${fontStyle};
-            line-height: 1.35;
+            line-height: 1.3;
+            letter-spacing: 0;
             color: ${textObj.color || '#333333'};
             background: ${bgColor};
-            border: 2px solid #3498db;
+            border: 0;
             border-radius: 4px;
-            padding: 4px 8px;
+            padding: ${paddingPx}px;
+            margin: 0;
             outline: none;
+            box-shadow: 0 0 0 2px #3498db, 0 4px 16px rgba(52, 152, 219, 0.25);
             transform: translate(-50%, -50%) rotate(${textObj.rotation || 0}deg);
             transform-origin: center center;
-            min-width: 60px;
-            min-height: ${Math.round(scaledFontSize * 1.6)}px;
+            min-width: ${Math.max(40, scaledFontSize * 2)}px;
+            min-height: ${Math.max(scaledFontSize * 1.3 + 2 * paddingPx, scaledFontSize + 12)}px;
             resize: none;
-            overflow: hidden;
+            overflow: ${hasLockedHeight ? 'auto' : 'hidden'};
             z-index: 10000;
             text-align: ${textObj.textAlign || 'center'};
             box-sizing: border-box;
             white-space: pre-wrap;
             word-wrap: break-word;
+            overflow-wrap: break-word;
+            word-break: normal;
             caret-color: #3498db;
         `;
 
         document.body.appendChild(textInput);
         editor._inlineTextEditor = textInput;
 
-        // Auto-resize textarea to fit content
+        // Auto-resize textarea outer dimensions so the inner content area
+        // stays equal to the canvas glyph block. Two regimes:
+        //
+        //  - Manual width AND locked height: clamp BOTH dimensions; the
+        //    textarea scrolls internally if content overflows (matches
+        //    the renderer's clip-with-ellipsis behaviour, just live).
+        //
+        //  - Manual width only: lock outer width, grow outer height to fit
+        //    wrapped lines.
+        //
+        //  - Auto-grow (no width set): outer width grows to longest line,
+        //    outer height grows to N lines. Mirrors the legacy un-stretched
+        //    text-box behaviour.
         const autoResize = () => {
             textInput.style.height = 'auto';
-            textInput.style.width = 'auto';
+            const measureMaxWidth = innerWidthPx || 500;
             const measure = document.createElement('div');
             measure.style.cssText = `
-                position: absolute; visibility: hidden; white-space: pre-wrap;
-                word-wrap: break-word; font-size: ${scaledFontSize}px;
-                font-family: ${fontFamily}; font-weight: ${fontWeight};
-                font-style: ${fontStyle}; line-height: 1.35;
-                padding: 4px 8px; box-sizing: border-box; max-width: 500px;
+                position: absolute; visibility: hidden;
+                top: -10000px; left: -10000px;
+                white-space: pre-wrap;
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+                word-break: normal;
+                font-size: ${scaledFontSize}px;
+                font-family: ${fontFamily};
+                font-weight: ${fontWeight};
+                font-style: ${fontStyle};
+                line-height: 1.3;
+                letter-spacing: 0;
+                padding: 0;
+                box-sizing: border-box;
+                max-width: ${measureMaxWidth}px;
+                ${innerWidthPx ? `width: ${innerWidthPx}px;` : ''}
             `;
+            // Trailing zero-width space ensures empty lines / trailing
+            // newline are measured (the textarea's own caret needs the row).
             measure.textContent = (textInput.value || ' ') + '\u200b';
             document.body.appendChild(measure);
-            const w = Math.max(60, measure.offsetWidth + 4);
-            const h = Math.max(Math.round(scaledFontSize * 1.6), measure.offsetHeight + 4);
+            const measuredInnerW = innerWidthPx || Math.max(40, measure.offsetWidth);
+            const measuredInnerH = Math.max(
+                Math.ceil(scaledFontSize * 1.3),
+                measure.offsetHeight
+            );
             document.body.removeChild(measure);
-            textInput.style.width = `${w}px`;
-            textInput.style.height = `${h}px`;
+
+            const outerW = measuredInnerW + 2 * paddingPx;
+            const outerH = hasLockedHeight
+                ? lockedOuterHeight
+                : (measuredInnerH + 2 * paddingPx);
+
+            textInput.style.width = `${outerW}px`;
+            textInput.style.height = `${outerH}px`;
         };
 
         autoResize();
 
+        // Decide select-all vs caret-at-end. Empty boxes and placeholder
+        // "Text" boxes auto-select-all so the first keystroke replaces the
+        // dummy content. Existing user content keeps the caret at the end
+        // (less surprising than full select on every double-click).
+        const initialValue = textObj.text == null ? '' : String(textObj.text);
+        const isPlaceholder = initialValue === '' || initialValue === 'Text';
+        const shouldSelectAll = (opts.selectAll === true)
+            || (opts.selectAll !== false && isPlaceholder);
+
+        // Focus + caret placement: setTimeout(0) instead of (10) -- the
+        // browser still completes layout before the focus runs, but the
+        // visible "no caret yet" gap shrinks. The 10ms delay used to be a
+        // workaround for a race that's no longer relevant after the
+        // mousedown click-outside arming was moved behind a 100ms guard.
         setTimeout(() => {
             textInput.focus();
-            textInput.select();
-        }, 10);
-        
+            if (shouldSelectAll) {
+                textInput.select();
+            } else {
+                const len = textInput.value.length;
+                try { textInput.setSelectionRange(len, len); } catch (_) { /* noop */ }
+            }
+        }, 0);
+
         textInput.addEventListener('input', () => {
             if (editor.editingText) {
-                editor.editingText.text = textInput.value;
+                this._setTextValue(editor.editingText, textInput.value);
                 autoResize();
-                editor.draw();
+                // RAF-coalesce paints during typing. Burst keystrokes used
+                // to fire one synchronous editor.draw() per char, which
+                // monopolised the main thread on long passages and made
+                // the auto-grow re-flow look "chunky". scheduleDraw() folds
+                // every pending paint into one per RAF; the textarea
+                // itself updates instantly via the browser's native input
+                // handling, so users still see their characters with
+                // zero perceptible latency. Smoothness pass 2026-05-12.
+                if (editor.scheduleDraw) editor.scheduleDraw();
+                else editor.draw();
             }
         });
-        
+
         // Handle keyboard
         textInput.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 e.preventDefault();
                 this.hideInline(editor);
             } else if (e.key === 'Enter' && e.shiftKey) {
-                // Allow shift+enter for newlines
+                // Allow shift+enter for newlines (default textarea behaviour).
             } else if (e.key === 'Enter') {
                 e.preventDefault();
                 this.hideInline(editor);
             }
+            // All other keys (arrows, Backspace, Delete, Cmd-A, Cmd-Z, etc.)
+            // are handled natively by the textarea. The global keyboard
+            // shortcut handler in topology-keyboard.js already gates on
+            // _isEditableShortcutTarget, so canvas-level shortcuts (Delete
+            // selected element, Cmd-Z canvas undo, arrow-pan, etc.) cannot
+            // fire while the textarea has focus.
         });
-        
-        // Click outside handler
+
+        // Click outside handler -- commit on any document mousedown whose
+        // target is not the textarea itself (canvas background, another
+        // canvas object, sidebar, etc.). Armed after a 100ms guard so the
+        // mousedown that opened the editor doesn't immediately close it.
         editor._inlineEditorClickOutside = (e) => {
             if (editor._inlineTextEditor && e.target !== editor._inlineTextEditor) {
                 this.hideInline(editor);
             }
         };
-        
+
         setTimeout(() => {
             document.addEventListener('mousedown', editor._inlineEditorClickOutside);
         }, 100);
-        
-        // Safety fallback
+
+        // Safety fallback -- if the textarea got removed externally without
+        // hideInline being called (ought never happen, but guard anyway),
+        // restore the text visibility on the next tick.
         editor._inlineEditorFallback = setTimeout(() => {
             if (textObj._editing && !document.body.contains(editor._inlineTextEditor)) {
                 console.warn('Inline editor disappeared unexpectedly, restoring text visibility');
@@ -421,26 +585,71 @@ window.TextEditorModule = {
     },
 
     /**
-     * Update inline editor position when canvas pans/zooms
+     * Update inline editor position when canvas pans/zooms.
+     *
+     * Refreshes ALL canonical paint props (font, color, background,
+     * padding, line-height) so the overlay continues to match the canvas
+     * exactly even if the user changed style via toolbar mid-edit. Polish
+     * + QA pass 2026-05-12 -- previously only left/top/font-size/rotation
+     * were refreshed, which caused style drift on color/background changes
+     * during edit.
+     *
      * @param {Object} editor - TopologyEditor instance
      */
     updateInlinePosition: function(editor) {
         if (!editor._inlineTextEditor || !editor.editingText) return;
-        
+
         const textObj = editor.editingText;
+        const el = editor._inlineTextEditor;
         const rect = editor.canvas.getBoundingClientRect();
         const screenX = rect.left + textObj.x * editor.zoom + editor.panOffset.x;
         const screenY = rect.top + textObj.y * editor.zoom + editor.panOffset.y;
-        const scaledFontSize = (textObj.fontSize || 14) * editor.zoom;
-        
-        editor._inlineTextEditor.style.left = `${screenX}px`;
-        editor._inlineTextEditor.style.top = `${screenY}px`;
-        editor._inlineTextEditor.style.fontSize = `${scaledFontSize}px`;
-        editor._inlineTextEditor.style.transform = `translate(-50%, -50%) rotate(${textObj.rotation || 0}deg)`;
+        const requestedFontSize = Number(textObj.fontSize) || 14;
+        const scaledFontSize = requestedFontSize * editor.zoom;
+        const fontFamily = textObj.fontFamily || 'Arial, sans-serif';
+        const fontWeight = textObj.fontWeight || (textObj.bold ? 'bold' : 'normal');
+        const fontStyle = textObj.fontStyle || (textObj.italic ? 'italic' : 'normal');
+        const paddingWorld = Number.isFinite(textObj.backgroundPadding)
+            ? textObj.backgroundPadding
+            : (textObj.linkId && textObj._onLinkLine === true ? 4 : 8);
+        const paddingPx = Math.max(0, paddingWorld * editor.zoom);
+
+        let bgColor = 'transparent';
+        if (textObj.showBackground !== false) {
+            const raw = textObj.backgroundColor || (editor.darkMode ? '#1a1a1a' : '#f5f5f5');
+            const opacity = textObj.backgroundOpacity != null ? textObj.backgroundOpacity : 1;
+            if (opacity < 1 && raw.startsWith('#') && raw.length >= 7) {
+                const r = parseInt(raw.slice(1, 3), 16);
+                const g = parseInt(raw.slice(3, 5), 16);
+                const b = parseInt(raw.slice(5, 7), 16);
+                bgColor = `rgba(${r},${g},${b},${opacity})`;
+            } else {
+                bgColor = raw;
+            }
+        }
+
+        el.style.left = `${screenX}px`;
+        el.style.top = `${screenY}px`;
+        el.style.fontSize = `${scaledFontSize}px`;
+        el.style.fontFamily = fontFamily;
+        el.style.fontWeight = fontWeight;
+        el.style.fontStyle = fontStyle;
+        el.style.color = textObj.color || '#333333';
+        el.style.background = bgColor;
+        el.style.padding = `${paddingPx}px`;
+        el.style.lineHeight = '1.3';
+        el.style.transform = `translate(-50%, -50%) rotate(${textObj.rotation || 0}deg)`;
     },
 
     /**
-     * Hide inline text editor
+     * Hide inline text editor.
+     *
+     * Polish + QA pass 2026-05-12: only saves a state when the text
+     * actually changed (snapshot taken in showInline). Marks the textObj
+     * `_mouseReleasedAfterSelection = true` so the very next mouse-down on
+     * a resize handle starts the resize directly instead of needing a
+     * second click cycle to "arm" the handle hit-test.
+     *
      * @param {Object} editor - TopologyEditor instance
      */
     hideInline: function(editor) {
@@ -449,24 +658,45 @@ window.TextEditorModule = {
             clearTimeout(editor._inlineEditorFallback);
             editor._inlineEditorFallback = null;
         }
-        
+
         if (editor._inlineTextEditor) {
             editor._inlineTextEditor.remove();
             editor._inlineTextEditor = null;
         }
-        
+
         if (editor._inlineEditorClickOutside) {
             document.removeEventListener('mousedown', editor._inlineEditorClickOutside);
             editor._inlineEditorClickOutside = null;
         }
-        
-        if (editor.editingText) {
-            editor.editingText._editing = false;
-            editor.saveState();
+
+        const textObj = editor.editingText;
+        if (textObj) {
+            textObj._editing = false;
+            // Arm the resize-handle hit-test so the next mouse-down on a
+            // dot or edge-zone band starts the resize without needing a
+            // second click. The flag is consumed by topology-mouse-down.js
+            // resize gate.
+            textObj._mouseReleasedAfterSelection = true;
+
+            const originalText = editor._inlineEditorOriginalText;
+            const currentText = textObj.text == null ? '' : String(textObj.text);
+            if (typeof originalText === 'string' && originalText !== currentText) {
+                editor.saveState();
+                if (editor.scheduleAutoSave) editor.scheduleAutoSave();
+            }
         }
-        
+        editor._inlineEditorOriginalText = null;
+
         editor.editingText = null;
-        editor.draw();
+        // RAF-coalesce the commit paint so the textarea-removal frame
+        // and the canvas re-render happen in the SAME RAF tick. With a
+        // synchronous editor.draw() the browser sometimes painted the
+        // canvas (without the text overlay) on one frame and removed
+        // the textarea on the next, causing a 16 ms visual gap. Using
+        // requestDraw avoids that two-frame split. Smoothness pass
+        // 2026-05-12.
+        if (editor.requestDraw) editor.requestDraw();
+        else editor.draw();
     },
 
     // =========================================================================

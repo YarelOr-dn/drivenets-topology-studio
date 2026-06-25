@@ -155,3 +155,21 @@ Auto-resolves device OOB IP from SCALER DB. SSHes to device shell, inspects INPU
 BgpTrius DROP rules on port 179, checks if ACCEPT rules for server IP exist. With `--fix`,
 inserts ACCEPT rules at position 3 (before DROP). Reports JSON with root cause, fix commands,
 and post-fix TCP state. Rules are ephemeral -- re-run after NCC restart/reboot.
+
+## Watchdog must not kill non-daemon "exabgp" processes (2026-06-16)
+
+`session.kill_orphan_exabgp_processes()` previously killed ANY `ps aux` line containing
+`exabgp` (except spared PIDs). The `user-exabgp-mcp` MCP server runs as
+`python3 -m user_exabgp_mcp.server` -- its command line contains "exabgp", so the watchdog
+cron (every 30s) SIGKILLed it ~every cycle, causing a 368x systemd restart loop.
+
+Fix: `kill_orphan_exabgp_processes()` now skips a `NON_DAEMON_MARKERS` allowlist
+(`user_exabgp_mcp`, `_mcp.server`, `mcp_common`, `bgp_watchdog`, `bgp_tool.py`, `session.py`,
+editors, `grep`, etc.) and never kills its own PID. It still kills real orphan ExaBGP daemons
+(FortiGate storm protection unchanged). When adding any new process whose command line mentions
+"exabgp" but is NOT the daemon, add its marker to `NON_DAEMON_MARKERS`.
+
+Infra durability (all local MCPs): systemd drop-ins at
+`~/.config/systemd/user/<svc>.service.d/10-durability.conf` set `Restart=always` +
+`StartLimitIntervalSec=0` so a local MCP always recovers and systemd never permanently
+gives up after a fast crash burst.

@@ -11,7 +11,7 @@ Rules from SW-204115:
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 def detect_irb_conflict(evpn_config_text: str) -> bool:

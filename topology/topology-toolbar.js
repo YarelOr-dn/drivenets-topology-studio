@@ -18,6 +18,9 @@
 class ToolbarManager {
     constructor(editor) {
         this.editor = editor;
+        this._quickAccessOutsideHandler = null;
+        window.toolbarManager = this;
+        this.setupToolRail();
     }
 
     // ========== SETUP ==========
@@ -27,6 +30,7 @@ class ToolbarManager {
      * Called once during initialization
      */
     setup() {
+        this.setupToolRail();
         this.setupToolButtons();
         this.setupDeviceStyleButtons();
         this.setupLinkStyleButtons();
@@ -53,6 +57,193 @@ class ToolbarManager {
     }
 
     // ========== TOOL BUTTONS ==========
+
+    setupToolRail() {
+        if (this._toolRailSetupDone) return;
+        const rail = document.querySelector('#left-toolbar .tool-rail');
+        if (!rail) return;
+        this._toolRailSetupDone = true;
+
+        rail.querySelectorAll('.tool-rail-button[data-tool]').forEach(btn => {
+            btn.setAttribute('aria-expanded', 'false');
+            btn.addEventListener('click', (event) => {
+                event.preventDefault();
+                this.activateTool(btn.dataset.tool, { source: 'pointer' });
+            });
+        });
+    }
+
+    getToolSidePanel() {
+        return document.querySelector('#left-toolbar .tool-side-panel');
+    }
+
+    closeToolPanel() {
+        const panel = this.getToolSidePanel();
+        this._clearQuickAccessDismiss();
+        if (panel) {
+            panel.dataset.tool = '';
+            panel.classList.remove('quick-access');
+            delete panel.dataset.quickAccess;
+            panel.style.left = '';
+            panel.style.top = '';
+            panel.style.maxHeight = '';
+        }
+        document.querySelectorAll('#left-toolbar .tool-rail-button').forEach(btn => {
+            btn.classList.remove('active');
+            btn.setAttribute('aria-expanded', 'false');
+        });
+        this.updateButtonStates();
+    }
+
+    activateTool(toolId, options = {}) {
+        if (!toolId) return;
+
+        const panel = this.getToolSidePanel();
+        const wasActive = panel && panel.dataset.tool === toolId;
+        const quickAccess = !!options.quickAccess;
+
+        const isQuickAccessPanel = panel && panel.classList.contains('quick-access');
+        if (wasActive && toolId !== 'text' && !(isQuickAccessPanel && !quickAccess)) {
+            this.closeToolPanel();
+            if (toolId !== 'settings') {
+                this.editor.setMode('base');
+            }
+            return;
+        }
+
+        if (panel) {
+            panel.dataset.tool = toolId;
+            if (quickAccess) {
+                panel.classList.add('quick-access');
+                panel.dataset.quickAccess = 'true';
+            } else {
+                panel.classList.remove('quick-access');
+                delete panel.dataset.quickAccess;
+                panel.style.left = '';
+                panel.style.top = '';
+                panel.style.maxHeight = '';
+                this._clearQuickAccessDismiss();
+            }
+        }
+
+        document.querySelectorAll('#left-toolbar .tool-rail-button').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tool === toolId);
+            btn.setAttribute('aria-expanded', btn.dataset.tool === toolId ? 'true' : 'false');
+        });
+
+        if (toolId === 'select') {
+            this.editor.setMode('base');
+        } else if (toolId === 'link') {
+            if (this.editor.currentTool !== 'link') {
+                this.editor.toggleTool('link');
+            }
+        } else if (toolId === 'device') {
+            this.editor.setMode('base');
+        } else if (toolId === 'shape') {
+            this.editor.setMode('shape');
+        } else if (toolId === 'text') {
+            if (this.editor.enterTextPlacementMode) {
+                this.editor.enterTextPlacementMode();
+            } else {
+                this.editor.setMode('text');
+            }
+        } else if (toolId === 'laser') {
+            this.editor.setMode('laser');
+        }
+
+        if (quickAccess && panel) {
+            if (typeof this.editor.hideAllSelectionToolbars === 'function') {
+                this.editor.hideAllSelectionToolbars();
+            }
+            this._positionQuickAccessPanel(panel);
+            this._bindQuickAccessDismiss(panel);
+        }
+
+        this.updateButtonStates();
+    }
+
+    _getQuickAccessAnchor() {
+        const canvas = this.editor.canvas || document.getElementById('topology-canvas');
+        const rect = canvas ? canvas.getBoundingClientRect() : null;
+        if (!rect) {
+            return { x: window.innerWidth / 2, y: window.innerHeight / 2, bounds: null };
+        }
+
+        const pointer = this.editor.lastMouseScreen;
+        const hasCanvasPointer = pointer
+            && Number.isFinite(pointer.x)
+            && Number.isFinite(pointer.y)
+            && pointer.x >= 0
+            && pointer.y >= 0
+            && pointer.x <= rect.width
+            && pointer.y <= rect.height;
+
+        return {
+            x: hasCanvasPointer ? rect.left + pointer.x : rect.left + rect.width / 2,
+            y: hasCanvasPointer ? rect.top + pointer.y : rect.top + rect.height / 2,
+            bounds: rect
+        };
+    }
+
+    _positionQuickAccessPanel(panel) {
+        const anchor = this._getQuickAccessAnchor();
+        const margin = 12;
+        const gap = 14;
+        const rect = panel.getBoundingClientRect();
+        const width = rect.width || 328;
+        const height = rect.height || Math.min(window.innerHeight - margin * 2, 520);
+        const bounds = anchor.bounds || {
+            left: margin,
+            top: margin,
+            right: window.innerWidth - margin,
+            bottom: window.innerHeight - margin
+        };
+
+        const minLeft = Math.max(margin, bounds.left + margin);
+        const maxRight = Math.min(window.innerWidth - margin, bounds.right - margin);
+        const minTop = Math.max(margin, bounds.top + margin);
+        const maxBottom = Math.min(window.innerHeight - margin, bounds.bottom - margin);
+        let left = anchor.x + gap;
+        let top = anchor.y + gap;
+
+        if (left + width > maxRight) {
+            left = anchor.x - width - gap;
+        }
+        if (top + height > maxBottom) {
+            top = anchor.y - height - gap;
+        }
+
+        left = Math.min(Math.max(left, minLeft), Math.max(minLeft, maxRight - width));
+        top = Math.min(Math.max(top, minTop), Math.max(minTop, maxBottom - Math.min(height, maxBottom - minTop)));
+
+        panel.style.left = `${Math.round(left)}px`;
+        panel.style.top = `${Math.round(top)}px`;
+        panel.style.maxHeight = `${Math.max(220, Math.round(maxBottom - top))}px`;
+    }
+
+    _bindQuickAccessDismiss(panel) {
+        this._clearQuickAccessDismiss();
+        const handler = (event) => {
+            const rail = document.querySelector('#left-toolbar .tool-rail');
+            if (panel.contains(event.target) || (rail && rail.contains(event.target))) {
+                return;
+            }
+            this.closeToolPanel();
+        };
+        this._quickAccessOutsideHandler = handler;
+        setTimeout(() => {
+            if (this._quickAccessOutsideHandler !== handler) return;
+            document.addEventListener('pointerdown', handler, true);
+            document.addEventListener('mousedown', handler, true);
+        }, 0);
+    }
+
+    _clearQuickAccessDismiss() {
+        if (!this._quickAccessOutsideHandler) return;
+        document.removeEventListener('pointerdown', this._quickAccessOutsideHandler, true);
+        document.removeEventListener('mousedown', this._quickAccessOutsideHandler, true);
+        this._quickAccessOutsideHandler = null;
+    }
 
     setupToolButtons() {
         this.safeAddListener('btn-base', 'click', () => this.editor.setMode('base'));
@@ -215,6 +406,16 @@ class ToolbarManager {
             if (btn) {
                 btn.classList.toggle('active', currentTool === tool);
             }
+        });
+
+        const panelTool = this.getToolSidePanel()?.dataset.tool || '';
+        document.querySelectorAll('#left-toolbar .tool-rail-button[data-tool]').forEach(btn => {
+            const tool = btn.dataset.tool;
+            const shouldBeActive = panelTool
+                ? tool === panelTool
+                : currentTool === tool || (tool === 'select' && currentTool === 'select');
+            btn.classList.toggle('active', !!shouldBeActive);
+            btn.setAttribute('aria-expanded', panelTool && tool === panelTool ? 'true' : 'false');
         });
     }
 }

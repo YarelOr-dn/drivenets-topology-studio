@@ -1,0 +1,146 @@
+[
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:46 | include MAC | no-more",
+    "timestamp": "2026-04-03T09:48:54.584+00:00",
+    "duration_ms": 11114,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:46 | include EVPN | no-more",
+    "timestamp": "2026-04-03T09:49:05.699+00:00",
+    "duration_ms": 7710,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:46 | include withdraw | no-more",
+    "timestamp": "2026-04-03T09:49:13.409+00:00",
+    "duration_ms": 9261,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:46 | include announce | no-more",
+    "timestamp": "2026-04-03T09:49:22.671+00:00",
+    "duration_ms": 7409,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:46 | include seq | no-more",
+    "timestamp": "2026-04-03T09:49:30.081+00:00",
+    "duration_ms": 4255,
+    "phase": "auto_diagnose",
+    "output_length": 3757,
+    "output_preview": "2026-04-03T03:09:46.802288 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2087802:1071895:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 42645) seq:4176617101 ack:3303742363 flags:FA msgSize:0\n2026-04-03T09:46:06.971193 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2143675:1108260:  input got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local add",
+    "output_full": "2026-04-03T03:09:46.802288 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2087802:1071895:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 42645) seq:4176617101 ack:3303742363 flags:FA msgSize:0\n2026-04-03T09:46:06.971193 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2143675:1108260:  input got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 33664) seq:3443328178 ack:178377856 flags:FA msgSize:0\n2026-04-03T09:46:11.044365 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2143692:1108271:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 35011) seq:615699294 ack:3253052491 flags:FA msgSize:0\n2026-04-03T09:46:11.084798 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2143697:1108278:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 45305) seq:2005526835 ack:722998241 flags:FA msgSize:0\n2026-04-03T09:46:12.124951 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2143702:1108286:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 43357) seq:1388360519 ack:1174959664 flags:FA msgSize:0\n2026-04-03T09:46:14.161473 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2143707:1108294:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 38891) seq:49374210 ack:4285661420 flags:FA msgSize:0\n2026-04-03T09:46:17.196119 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2143719:1108302:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 36477) seq:783898283 ack:60198475 flags:FA msgSize:0\n2026-04-03T09:46:21.229260 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2143737:1108314:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 46669) seq:2155454571 ack:4287040758 flags:FA msgSize:0\n2026-04-03T09:46:26.269460 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2143743:1108323:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 36845) seq:1863419418 ack:1670198746 flags:FA msgSize:0\n2026-04-03T09:46:33.304417 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2143767:1108345:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 37187) seq:3510360000 ack:1238652101 flags:FA msgSize:0\n2026-04-03T09:46:42.344990 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2143782:1108359:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 38105) seq:3019049670 ack:2212796196 flags:FA msgSize:0\n2026-04-03T09:46:53.384261 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2143807:1108377:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 42437) seq:985756602 ack:4294026308 flags:FA msgSize:0"
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:46 | include duplicate | no-more",
+    "timestamp": "2026-04-03T09:49:34.337+00:00",
+    "duration_ms": 10063,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:46 | include suppress | no-more",
+    "timestamp": "2026-04-03T09:49:44.400+00:00",
+    "duration_ms": 9212,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 09:46 | include MAC | no-more",
+    "timestamp": "2026-04-03T09:49:53.613+00:00",
+    "duration_ms": 20932,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 09:46 | include evpn | no-more",
+    "timestamp": "2026-04-03T09:50:14.546+00:00",
+    "duration_ms": 21177,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 09:46 | include FIB | no-more",
+    "timestamp": "2026-04-03T09:50:35.724+00:00",
+    "duration_ms": 19779,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+    "timestamp": "2026-04-03T09:50:55.504+00:00",
+    "duration_ms": 501,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+    "timestamp": "2026-04-03T09:50:56.005+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 207,
+    "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------",
+    "output_full": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+  },
+  {
+    "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+    "timestamp": "2026-04-03T09:50:56.256+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 42,
+    "output_preview": "Number of MAC-Mobility entries in redis: 0",
+    "output_full": "Number of MAC-Mobility entries in redis: 0"
+  },
+  {
+    "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+    "timestamp": "2026-04-03T09:50:56.507+00:00",
+    "duration_ms": 50,
+    "phase": "auto_diagnose",
+    "output_length": 26,
+    "output_preview": "ERROR: Incomplete command.",
+    "output_full": "ERROR: Incomplete command."
+  },
+  {
+    "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:50:56.557+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 138,
+    "output_preview": "evi_id=1, eth_tag=0, mac=00:de:ad:00:01:01, interface=, dp_index=13624, action_type=New, Type=Add, neighbor_keys_size=0\nEvpnMacs [size: 1]",
+    "output_full": "evi_id=1, eth_tag=0, mac=00:de:ad:00:01:01, interface=, dp_index=13624, action_type=New, Type=Add, neighbor_keys_size=0\nEvpnMacs [size: 1]"
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:50:56.808+00:00",
+    "duration_ms": 100,
+    "phase": "auto_diagnose",
+    "output_length": 874,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress   ",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress              | Interface              | Egress-Encapsulation           | Timestamp              | Flags            |\n+-------------------------+------------------------+--------------------------------+------------------------+------------------+\n| (*)00:de:ad:00:01:01    | ge400-0/0/5.1000       |                                | 03-Apr-2026-12:46:32   | L                |"
+  }
+]

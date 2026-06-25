@@ -48,7 +48,7 @@ function toggleToolbarSection(sectionElement, forceState = null) {
     if (sectionElement.classList.contains('fixed-section')) {
         return;
     }
-    
+
     const isCurrentlyExpanded = sectionElement.classList.contains('expanded');
     
     // Determine the new state
@@ -58,14 +58,14 @@ function toggleToolbarSection(sectionElement, forceState = null) {
     } else {
         shouldExpand = !isCurrentlyExpanded;
     }
-    
+
     // Toggle the clicked section (no accordion - multiple can be open)
     if (shouldExpand) {
         sectionElement.classList.add('expanded');
     } else {
         sectionElement.classList.remove('expanded');
     }
-    
+
     // Save the state to localStorage
     const sectionName = sectionElement.getAttribute('data-section');
     if (sectionName) {
@@ -84,7 +84,7 @@ function initToolbarSections() {
     try {
         const state = JSON.parse(localStorage.getItem('toolbarSectionState') || '{}');
         const collapsibleSections = document.querySelectorAll('.toolbar-section[data-section]:not(.fixed-section)');
-        
+
         collapsibleSections.forEach(section => {
             const sectionName = section.getAttribute('data-section');
             // Use saved state, or default to expanded for 'device' and 'tools'
@@ -202,7 +202,11 @@ function activateToolSection(toolName, sectionElement) {
             if (indicator) indicator.style.display = 'inline-block';
         }
     } else if (toolName === 'text') {
-        topology.toggleTool('text');
+        if (topology.enterTextPlacementMode) {
+            topology.enterTextPlacementMode();
+        } else {
+            topology.setMode('text');
+        }
         if (!wasActive) {
             sectionElement.classList.add('tool-active');
             const indicator = document.getElementById('text-mode-indicator');
@@ -220,7 +224,7 @@ function initNestedSubsections() {
     try {
         const state = JSON.parse(localStorage.getItem('nestedSubsectionState') || '{}');
         const subsections = document.querySelectorAll('.nested-subsection[data-subsection]');
-        
+
         // Group subsections by parent container
         const parentGroups = new Map();
         subsections.forEach(subsection => {
@@ -389,6 +393,11 @@ class TopologyEditor {
         this._discoveryAbortController = null; // AbortController for cancelling discovery
         this.textPlacementPending = null; // Track pending text placement (like devices)
         this.continuousTextPlacement = false; // Continuous TB placement mode (Place TBs button)
+        this._laserPointerActive = false; // Laser draws only while the pointer is held down
+        const savedLaserColor = localStorage.getItem('laserPointerColor');
+        this._laserColor = /^#[0-9a-fA-F]{6}$/.test(savedLaserColor || '') ? savedLaserColor : '#00B4D8';
+        const savedLaserFadeMs = parseInt(localStorage.getItem('laserPointerFadeMs'), 10);
+        this._laserFadeMs = Number.isFinite(savedLaserFadeMs) && savedLaserFadeMs >= 250 && savedLaserFadeMs <= 3000 ? savedLaserFadeMs : 850;
         this.editingText = null; // Text being edited in advanced editor
         this.lastPinchDistance = null; // For pinch zoom detection
         this.pinching = false; // Track if pinch gesture is active
@@ -444,13 +453,27 @@ class TopologyEditor {
         // DO NOT hardcode '#666' or '#ffffff' without the darkMode check!
         // =========================================================================
         
-        // Load recent colors with error handling
+        // Load recent colors with error handling.
+        // 2026-05-12 [recent-colors polish]: cap is now 8 (was 4), and
+        // we additionally load a per-user "pinned" list that floats
+        // above the MRU list and is never evicted. localStorage keys
+        // are auto-prefixed with the username by topology-auth.js's
+        // _patchLocalStorage(), so these persist per-user without any
+        // user_store path plumbing.
         try {
             this.recentColors = JSON.parse(localStorage.getItem('recentColors') || '[]');
         } catch (e) {
             console.warn('Failed to parse recentColors:', e);
             this.recentColors = [];
         }
+        try {
+            this.pinnedColors = JSON.parse(localStorage.getItem('pinnedColors') || '[]');
+        } catch (e) {
+            console.warn('Failed to parse pinnedColors:', e);
+            this.pinnedColors = [];
+        }
+        this.recentColorsCap = 8;
+        this.pinnedColorsCap = 8;
         this.lastTapTime = 0; // Track last tap/click time for double-tap detection
         this._lastTapDevice = null; // Track last device tapped for double-tap detection
         
@@ -459,6 +482,12 @@ class TopologyEditor {
         // =========================================================================
         this.placingShape = null; // Current shape type being placed
         this.shapeIdCounter = 0; // Counter for shape IDs
+        // =========================================================================
+        // PACKET PROPERTIES (May 2026)
+        // =========================================================================
+        // Layered packet/frame chips that float above link midpoints to explain
+        // scenarios layer by layer. Counter is bumped by createPacket / load.
+        this.packetIdCounter = 0;
         this.currentShapeType = 'rectangle'; // Default shape type
         this.shapeFillColor = '#3498db'; // Default fill color
         this.shapeFillOpacity = 0.5; // Default fill opacity (0-1 ratio)
@@ -479,7 +508,7 @@ class TopologyEditor {
         this.lastBackgroundClickTime = 0; // Track background clicks for fast double-click UL placement
         this.fastDoubleClickDelay = 250; // Fast double-click must be < 250ms to place UL (prevents accidents)
         this.resumeModeAfterMarquee = null; // Store mode to return to after marquee selection
-        this.showLinkTypeLabels = false; // Debug view: Show link type labels (QL/UL/BUL) above each link
+        this.showLinkTypeLabels = false; // Labels toggle: link type labels plus auto-generated interface TBs
         this.showLinkAttachments = true; // Global toggle: Show/hide text objects attached to links
         this.textAlwaysFaceUser = false; // Global toggle: Force all text boxes to stay at 0° rotation (readable)
         this.hoveredLink = null; // Track link under cursor for hover highlight
@@ -837,6 +866,9 @@ class TopologyEditor {
         
         // Auto-save debouncing
         this.autoSaveTimer = null;
+        this._topologyGeneration = 0;
+        this._topologyLoadSeq = 0;
+        this._activeTopologyIdentity = null;
         
         // Slider update optimization
         this.sliderUpdatePending = false;
@@ -1130,6 +1162,14 @@ class TopologyEditor {
             
             // Restore BD Panel if it was visible before refresh
             this.restoreBDPanelIfNeeded();
+
+            // Restore Groups Panel if it was visible before refresh
+            // (per-user state, key: groups_panel_state_<username>).
+            try {
+                if (window.GroupsPanel && typeof window.GroupsPanel.restoreIfNeeded === 'function') {
+                    window.GroupsPanel.restoreIfNeeded(this);
+                }
+            } catch (_) {}
             
             // Sync slide distance control visibility with momentum state
             const slideControl = document.getElementById('slide-distance-control');
@@ -1325,6 +1365,7 @@ class TopologyEditor {
     setupCanvas() {
         this.resizeCanvas();
         window.addEventListener('resize', () => this.resizeCanvas());
+        this._watchCanvasDpr();
         
         // ResizeObserver catches layout changes from toolbar collapse/expand
         const container = this.canvas.parentElement;
@@ -1336,21 +1377,223 @@ class TopologyEditor {
         }
     }
     
+    _getEffectiveDpr() {
+        const raw = window.devicePixelRatio || 1;
+        if (!Number.isFinite(raw) || raw <= 0) return 1;
+        // Cap DPR to avoid huge backing stores on extreme browser zoom while
+        // still rendering crisp on retina/HiDPI/4K displays. Bumped from
+        // 3 -> 4 -> 6 across iterations so that:
+        //   * 4K screens at native DPR (some Linux/Win configs report 3-4)
+        //     get the full pixel density they paid for;
+        //   * Retina + browser-zoom-200% (DPR=4) still gets headroom;
+        //   * Extreme browser-zoom (DPR=5+) stops at 6 to keep memory sane.
+        // Adaptive backoff: if the canvas at DPR=6 would blow past ~80M
+        // backing pixels (~320MB at 4 bytes each) we step DPR down so we
+        // never OOM a low-RAM machine. The backoff only triggers on
+        // ultra-large viewports + ultra-high DPR -- rare in practice.
+        const HARD_CAP = 6;
+        const MAX_BACKING_PIXELS = 80_000_000;
+        const baseCap = Math.max(1, Math.min(HARD_CAP, raw));
+        const canvas = this.canvas;
+        if (canvas && canvas.parentElement) {
+            const rect = canvas.parentElement.getBoundingClientRect
+                ? canvas.parentElement.getBoundingClientRect()
+                : null;
+            const w = (rect && rect.width) || canvas.parentElement.clientWidth || 0;
+            const h = (rect && rect.height) || canvas.parentElement.clientHeight || 0;
+            if (w > 0 && h > 0) {
+                const safeDpr = Math.sqrt(MAX_BACKING_PIXELS / (w * h));
+                return Math.max(1, Math.min(baseCap, safeDpr));
+            }
+        }
+        return baseCap;
+    }
+
+    _watchCanvasDpr() {
+        if (this._canvasDprWatcherInstalled || typeof window.matchMedia !== 'function') return;
+        this._canvasDprWatcherInstalled = true;
+
+        const armWatcher = () => {
+            const dpr = window.devicePixelRatio || 1;
+            let mql;
+            try {
+                mql = window.matchMedia(`(resolution: ${dpr}dppx)`);
+            } catch (_) {
+                return;
+            }
+            const onChange = () => {
+                this.resizeCanvas();
+                armWatcher();
+            };
+            if (mql.addEventListener) {
+                mql.addEventListener('change', onChange, { once: true });
+            } else if (mql.addListener) {
+                const legacyOnChange = () => {
+                    mql.removeListener(legacyOnChange);
+                    onChange();
+                };
+                mql.addListener(legacyOnChange);
+            }
+        };
+
+        armWatcher();
+    }
+
+    getSharpPanOffset() {
+        const dpr = this.dpr || this._getEffectiveDpr?.() || window.devicePixelRatio || 1;
+        const snap = (value) => Math.round((Number(value) || 0) * dpr) / dpr;
+        return {
+            x: snap(this.panOffset.x),
+            y: snap(this.panOffset.y)
+        };
+    }
+
+    configureCanvasQuality(ctx, opts = {}) {
+        if (!ctx) return;
+        const smoothing = opts.smoothing !== false;
+        ctx.imageSmoothingEnabled = smoothing;
+        if (smoothing && 'imageSmoothingQuality' in ctx) {
+            ctx.imageSmoothingQuality = opts.smoothingQuality || 'high';
+        }
+        ctx.lineJoin = opts.lineJoin || 'round';
+        ctx.lineCap = opts.lineCap || 'round';
+        ctx.miterLimit = opts.miterLimit || 2;
+        if ('textRendering' in ctx) {
+            ctx.textRendering = opts.textRendering || 'geometricPrecision';
+        }
+        // Force deterministic glyph metrics. If the parent CSS or any
+        // earlier ctx state had nudged kerning/spacing the browser would
+        // re-shape glyphs at sub-pixel positions and the result blurs at
+        // small sizes. Resetting these every frame guarantees that
+        // ctx.measureText and the rasterizer agree on glyph advances.
+        if ('letterSpacing' in ctx) {
+            ctx.letterSpacing = opts.letterSpacing || '0px';
+        }
+        if ('wordSpacing' in ctx) {
+            ctx.wordSpacing = opts.wordSpacing || '0px';
+        }
+        if ('fontKerning' in ctx) {
+            ctx.fontKerning = opts.fontKerning || 'normal';
+        }
+    }
+
+    /**
+     * Soft-floor helper for USER-PLACED world content (Text Boxes, attached
+     * labels). Returns the world fontSize to render at the current zoom.
+     *
+     * Design rules:
+     *   - At zoom levels where the natural rendered size is comfortable
+     *     (>= COMFORT_PX on screen), proportions are preserved exactly --
+     *     return worldSize unchanged. Most user interaction lives here.
+     *   - Below the comfort threshold, gently inflate so a TB never collapses
+     *     to <2 screen px from afar; cap at MAX_INFLATION (1.4x) so growth
+     *     is bounded and the canvas never looks "explodey" at extreme zoom.
+     *   - NO per-frame DPR rounding. An earlier version snapped the rendered
+     *     size to whole physical pixels for crisper rasterization, but
+     *     `Math.round` produces a non-monotonic stair-step as zoom changes,
+     *     which read as visible "wobble" / jitter during animated pan/zoom.
+     *     Sharpness now relies on the canvas DPR backing store
+     *     (capped at 6 in _getEffectiveDpr), browser font hinting, and the
+     *     high-DPI TB preraster pass in CanvasDrawing.drawText.
+     */
+    getDprSnappedFontSize(worldSize) {
+        const COMFORT_PX = 7;
+        const MAX_INFLATION = 1.4;
+        const size = Number(worldSize) || 14;
+        const zoom = Number(this.zoom) || 1;
+        const naturalScreen = size * zoom;
+        if (naturalScreen >= COMFORT_PX) return size;
+        const safeZoom = Math.max(zoom, 0.05);
+        const targetWorld = COMFORT_PX / safeZoom;
+        return Math.min(targetWorld, size * MAX_INFLATION);
+    }
+
+    /**
+     * Soft-floor helper for SYSTEM annotations (device names, link labels,
+     * TP/MP markers, angle meter, rotation indicator). Same shape as
+     * getDprSnappedFontSize but with a higher inflation ceiling (2.0x) and
+     * caller-supplied minScreenPx as the comfort target -- system labels
+     * MUST stay readable at moderate zoom-out, while user-placed TBs are
+     * tuned tighter so proportions read as faithful.
+     *
+     *   - Above the comfort screen size, return worldSize unchanged
+     *     (proportions exactly preserved at typical zoom).
+     *   - Below it, smoothly inflate up to MAX_INFLATION x worldSize.
+     *   - Beyond the cap, world size is locked and the label resumes scaling
+     *     with the canvas (gets small) -- never explodes.
+     *   - No DPR snapping; smooth zoom animation.
+     */
+    getScreenStableFontSize(worldSize, minScreenPx = 11) {
+        const MAX_INFLATION = 2.0;
+        const size = Number(worldSize) || minScreenPx;
+        const zoom = Number(this.zoom) || 1;
+        const naturalScreen = size * zoom;
+        if (naturalScreen >= minScreenPx) return size;
+        const safeZoom = Math.max(zoom, 0.05);
+        const targetWorld = minScreenPx / safeZoom;
+        return Math.min(targetWorld, size * MAX_INFLATION);
+    }
+
+    /**
+     * Same soft-floor pattern for stroke widths -- device borders and link
+     * strokes inflate gently below the comfort screen-px target, capped at
+     * MAX_INFLATION (1.8x) so 1px lines stay visible at low zoom without
+     * borders becoming bizarre at extreme zoom-out.
+     */
+    getScreenStableStrokeWidth(worldWidth, minScreenPx = 1.25) {
+        const MAX_INFLATION = 1.8;
+        const width = Number(worldWidth) || minScreenPx;
+        const zoom = Number(this.zoom) || 1;
+        const naturalScreen = width * zoom;
+        if (naturalScreen >= minScreenPx) return width;
+        const safeZoom = Math.max(zoom, 0.05);
+        const targetWorld = minScreenPx / safeZoom;
+        return Math.min(targetWorld, width * MAX_INFLATION);
+    }
+
+    /**
+     * Fast object lookup by id using the per-frame Map populated at draw start.
+     * Falls back to a linear scan when called outside of a draw frame.
+     * Use this in hot paths instead of `this.objects.find(o => o.id === id)`.
+     */
+    getObjectById(id) {
+        if (id === undefined || id === null) return null;
+        if (this._frameIdMap && this._frameIdMap.has(id)) {
+            return this._frameIdMap.get(id);
+        }
+        for (let i = 0, len = this.objects.length; i < len; i++) {
+            if (this.objects[i].id === id) return this.objects[i];
+        }
+        return null;
+    }
+
     resizeCanvas() {
         const container = this.canvas.parentElement;
-        const dpr = window.devicePixelRatio || 1;
+        if (!container) return;
+        const rect = container.getBoundingClientRect ? container.getBoundingClientRect() : null;
+        const cssW = Math.max(1, (rect && rect.width) || container.clientWidth || 1);
+        const cssH = Math.max(1, (rect && rect.height) || container.clientHeight || 1);
+        const dpr = this._getEffectiveDpr();
+        const backingW = Math.max(1, Math.round(cssW * dpr));
+        const backingH = Math.max(1, Math.round(cssH * dpr));
         this.dpr = dpr;
-        const w = container.clientWidth;
-        const h = container.clientHeight;
-        this.canvas.width = Math.round(w * dpr);
-        this.canvas.height = Math.round(h * dpr);
-        this.canvas.style.width = w + 'px';
-        this.canvas.style.height = h + 'px';
+        this._canvasCssWidth = cssW;
+        this._canvasCssHeight = cssH;
+        if (this.canvas.width !== backingW) this.canvas.width = backingW;
+        if (this.canvas.height !== backingH) this.canvas.height = backingH;
+        // Use the exact fractional CSS box size. Integer clientWidth/clientHeight
+        // can leave the browser resampling the canvas bitmap on grid layouts.
+        this.canvas.style.width = cssW + 'px';
+        this.canvas.style.height = cssH + 'px';
+        // Invalidate cached canvas rects so mouse/wheel/pinch handlers re-read on next event.
+        this._mmRect = null; this._mmRectTs = 0;
+        this._wheelRect = null; this._wheelRectTs = 0;
+        this._pinchRect = null; this._pinchRectTs = 0;
         this.draw();
     }
 
-    get canvasW() { return this.canvas.width / (this.dpr || 1); }
-    get canvasH() { return this.canvas.height / (this.dpr || 1); }
+    get canvasW() { return this._canvasCssWidth || (this.canvas.width / (this.dpr || 1)); }
+    get canvasH() { return this._canvasCssHeight || (this.canvas.height / (this.dpr || 1)); }
     
     // SMOOTH MOVEMENT: Linear interpolation for smooth position updates
     lerp(current, target, factor = 0.15) {
@@ -1630,8 +1873,12 @@ class TopologyEditor {
         // CRITICAL FIX: Account for the half-pixel offset added in draw()
         // Drawing does: translate(round(pan) + 0.5, round(pan) + 0.5)
         // So we need to subtract that 0.5 offset here
-        const adjustedPanX = Math.round(this.panOffset.x) + 0.5;
-        const adjustedPanY = Math.round(this.panOffset.y) + 0.5;
+        const sharpPan = this.getSharpPanOffset ? this.getSharpPanOffset() : {
+            x: Math.round(this.panOffset.x) + 0.5,
+            y: Math.round(this.panOffset.y) + 0.5
+        };
+        const adjustedPanX = sharpPan.x;
+        const adjustedPanY = sharpPan.y;
         
         // Transform: subtract adjusted pan offset, then divide by zoom
         const worldX = (screenX - adjustedPanX) / this.zoom;
@@ -1657,8 +1904,12 @@ class TopologyEditor {
         const rect = this.canvas.getBoundingClientRect();
         
         // Account for the half-pixel offset added in draw()
-        const adjustedPanX = Math.round(this.panOffset.x) + 0.5;
-        const adjustedPanY = Math.round(this.panOffset.y) + 0.5;
+        const sharpPan = this.getSharpPanOffset ? this.getSharpPanOffset() : {
+            x: Math.round(this.panOffset.x) + 0.5,
+            y: Math.round(this.panOffset.y) + 0.5
+        };
+        const adjustedPanX = sharpPan.x;
+        const adjustedPanY = sharpPan.y;
         
         // Transform: multiply by zoom, then add pan offset (logical pixels)
         const canvasX = worldPos.x * this.zoom + adjustedPanX;
@@ -1697,10 +1948,14 @@ class TopologyEditor {
         const screenX = touch.clientX - rect.left;
         const screenY = touch.clientY - rect.top;
         
-        // FIXED: Correct inverse of drawing transform
+        // Correct inverse of the sharp drawing transform used by draw().
+        const sharpPan = this.getSharpPanOffset ? this.getSharpPanOffset() : {
+            x: Math.round(this.panOffset.x) + 0.5,
+            y: Math.round(this.panOffset.y) + 0.5
+        };
         return {
-            x: (screenX - this.panOffset.x) / this.zoom,
-            y: (screenY - this.panOffset.y) / this.zoom
+            x: (screenX - sharpPan.x) / this.zoom,
+            y: (screenY - sharpPan.y) / this.zoom
         };
     }
     
@@ -2022,6 +2277,10 @@ class TopologyEditor {
                     this.showLinkSelectionToolbar(this.selectedObject);
                 } else if (this.selectedObject.type === 'text') {
                     this.showTextSelectionToolbar(this.selectedObject);
+                } else if (this.selectedObject.type === 'packet') {
+                    // Reposition the packet popup against the new viewport so
+                    // it stays anchored to the chip after zoom/pan settles.
+                    this.showPacketSelectionToolbar(this.selectedObject);
                 }
             }
         }, 150);
@@ -2191,9 +2450,15 @@ class TopologyEditor {
         );
         
         for (const textObj of attachedTexts) {
-            // Calculate text dimensions
+            // Calculate text dimensions. Match CanvasDrawing.drawText: DPR-snapped
+            // font (proportions preserved) so the t-space gap on the link tracks
+            // the rendered TB exactly at any zoom.
             this.ctx.save();
-            this.ctx.font = `${textObj.fontSize}px Arial`;
+            const requestedFontSize = Number(textObj.fontSize) || 14;
+            const renderedFontSize = this.getDprSnappedFontSize
+                ? this.getDprSnappedFontSize(requestedFontSize)
+                : requestedFontSize;
+            this.ctx.font = `${renderedFontSize}px Arial`;
             const metrics = this.ctx.measureText(textObj.text || 'Text');
             const textWidth = metrics.width;
             this.ctx.restore();
@@ -2483,9 +2748,10 @@ class TopologyEditor {
     }
     
     // Center the view on all devices in the topology
-    centerOnDevices() {
+    centerOnDevices(options = {}) {
         // Find all devices
-        const devices = this.objects.filter(obj => obj.type === 'device');
+        const includeHidden = options.includeHidden === true;
+        const devices = this.objects.filter(obj => obj.type === 'device' && (includeHidden || !(obj._hidden || obj.hidden)));
         
         if (devices.length === 0) {
             if (this.debugger) {
@@ -2500,7 +2766,7 @@ class TopologyEditor {
         for (const device of devices) {
             const x = device.x || 0;
             const y = device.y || 0;
-            const size = device.size || 60;
+            const size = device.radius || device.size || 60;
             
             minX = Math.min(minX, x - size);
             minY = Math.min(minY, y - size);
@@ -2525,15 +2791,18 @@ class TopologyEditor {
         // Optionally fit to view if topology is larger than canvas
         const boundsWidth = maxX - minX;
         const boundsHeight = maxY - minY;
-        const padding = 100; // Extra padding around devices
-        
+        const padding = Number(options.padding) || 100; // Extra padding around devices
+
         const scaleX = (this.canvasW - padding * 2) / boundsWidth;
         const scaleY = (this.canvasH - padding * 2) / boundsHeight;
-        const fitZoom = Math.min(scaleX, scaleY, 1.5); // Cap at 1.5x zoom
-        
-        // Only adjust zoom if topology doesn't fit at current zoom
-        if (fitZoom < this.zoom && fitZoom > 0.05) {
-            this.zoom = Math.max(0.05, fitZoom);
+        const maxZoom = Number(options.maxZoom) || 1.5;
+        const minZoom = Number(options.minZoom) || 0.05;
+        const fitZoom = Math.min(scaleX, scaleY, maxZoom); // Cap zoom
+
+        // Normal loads only zoom out when needed. Generated/readable loads can
+        // also zoom in so small topologies do not render as blurry thumbnails.
+        if (fitZoom > minZoom && (fitZoom < this.zoom || options.fitSmall === true)) {
+            this.zoom = Math.max(minZoom, fitZoom);
             // Recalculate pan after zoom change using correct formula
             this.panOffset.x = canvasCenterX - (centerX * this.zoom);
             this.panOffset.y = canvasCenterY - (centerY * this.zoom);
@@ -2575,8 +2844,10 @@ class TopologyEditor {
             this.canvas.style.cursor = 'crosshair';
         } else if (this.currentTool === 'link') {
             this.canvas.style.cursor = 'crosshair';
-        } else if (this.currentTool === 'text' && this.textPlacementPending) {
+        } else if (this.currentTool === 'text') {
             this.canvas.style.cursor = 'text';
+        } else if (this.currentTool === 'laser') {
+            this.canvas.style.cursor = 'crosshair';
         } else {
             this.canvas.style.cursor = 'default';
         }
@@ -3203,12 +3474,23 @@ class TopologyEditor {
         // Set text tool active
         this.currentTool = 'text';
         this.currentMode = 'text';
+        this.continuousTextPlacement = true;
         this.canvas.style.cursor = 'text';
         
         // Update button states - with null checks
         document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
         const btnText = document.getElementById('btn-text');
         if (btnText) btnText.classList.add('active');
+        const placeTbsBtn = document.getElementById('btn-place-tbs');
+        const placeTbsStatus = document.getElementById('place-tbs-status');
+        if (placeTbsBtn) {
+            placeTbsBtn.classList.add('active');
+        }
+        if (placeTbsStatus) {
+            placeTbsStatus.textContent = 'ON';
+            placeTbsStatus.style.background = 'rgba(74, 222, 128, 0.5)';
+            placeTbsStatus.style.color = '#fff';
+        }
         
         // Update text section header to show active state
         const textSection = document.querySelector('.toolbar-section[data-section="text"]');
@@ -3227,6 +3509,9 @@ class TopologyEditor {
         }
         
         this.updateModeIndicator();
+        if (this.toolbarMgr && this.toolbarMgr.updateButtonStates) {
+            this.toolbarMgr.updateButtonStates();
+        }
         
         if (this.debugger) {
             this.debugger.logSuccess('Text placement mode - click to place text boxes');
@@ -3254,26 +3539,10 @@ class TopologyEditor {
      * Mode ends when: button is toggled off, user clicks an existing object, or right-clicks
      */
     toggleContinuousTextPlacement() {
-        this.continuousTextPlacement = !this.continuousTextPlacement;
-        
-        const btn = document.getElementById('btn-place-tbs');
-        const statusSpan = document.getElementById('place-tbs-status');
-        
-        if (this.continuousTextPlacement) {
-            // Enable continuous text placement mode
-            this.setMode('text'); // Enter text mode
-            
-            if (btn) {
-                btn.classList.add('active');
-            }
-            if (statusSpan) {
-                statusSpan.textContent = 'ON';
-                statusSpan.style.background = 'rgba(74, 222, 128, 0.5)';
-                statusSpan.style.color = '#fff';
-            }
-            
+        if (!this.continuousTextPlacement) {
+            this.enterTextPlacementMode();
             if (this.debugger) {
-                this.debugger.logSuccess('📝 Continuous TB placement ON - Click grid to place, right-click or select object to exit');
+                this.debugger.logSuccess('[TEXT] Continuous TB placement ON - click grid to place, right-click or select object to exit');
             }
         } else {
             // Disable continuous text placement mode
@@ -3307,7 +3576,7 @@ class TopologyEditor {
         this.setMode('base');
         
         if (this.debugger) {
-            this.debugger.logInfo('📝 Continuous TB placement OFF');
+            this.debugger.logInfo('[TEXT] Continuous TB placement OFF');
         }
     }
     
@@ -3348,6 +3617,51 @@ class TopologyEditor {
             return window.ShapeDrawing.drawShape(this, shape);
         }
     }
+
+    // -----------------------------------------------------------------
+    // PACKET WRAPPERS (May 2026)
+    // -----------------------------------------------------------------
+    // Thin facade so the rest of the codebase (toolbars, context menus,
+    // keyboard handlers, file ops) can call editor.createPacket(...) /
+    // editor.drawPacket(...) without knowing about the PacketMethods
+    // module layout. Same delegation pattern shapes use above.
+    createPacket(x, y, options) {
+        if (window.PacketMethods && typeof window.PacketMethods.createPacket === 'function') {
+            return window.PacketMethods.createPacket(this, x, y, options);
+        }
+        return null;
+    }
+
+    drawPacket(packet) {
+        if (window.PacketMethods && typeof window.PacketMethods.drawPacket === 'function') {
+            return window.PacketMethods.drawPacket(this, packet);
+        }
+    }
+
+    updatePacketPosition(packet) {
+        if (window.PacketMethods && typeof window.PacketMethods.updatePacketPosition === 'function') {
+            return window.PacketMethods.updatePacketPosition(this, packet);
+        }
+    }
+
+    findPacketAt(x, y) {
+        if (window.PacketMethods && typeof window.PacketMethods.findPacketAt === 'function') {
+            return window.PacketMethods.findPacketAt(this, x, y);
+        }
+        return null;
+    }
+
+    showPacketSelectionToolbar(packet) {
+        if (window.PacketPopup && typeof window.PacketPopup.show === 'function') {
+            window.PacketPopup.show(this, packet);
+        }
+    }
+
+    hidePacketSelectionToolbar() {
+        if (window.PacketPopup && typeof window.PacketPopup.close === 'function') {
+            window.PacketPopup.close(this);
+        }
+    }
     
     drawShapeSelectionHandles(shape) {
         if (window.ShapeDrawing) {
@@ -3372,7 +3686,32 @@ class TopologyEditor {
             return window.ShapeMethods.findShapeResizeHandle(this, shape, x, y);
         }
     }
-    
+
+    // Container shape helpers (2026-04-26): a shape with `containerMode: true`
+    // drags every object whose centre falls inside it as a single unit. The
+    // AI generator sets this on AS / area / VRF / tenant grouping shapes
+    // so the user can reorganise the diagram per-AS without losing per-
+    // device click handles.
+    getContainerChildren(shape) {
+        if (window.ShapeMethods) {
+            return window.ShapeMethods.getContainerChildren(this, shape);
+        }
+        return [];
+    }
+
+    applyContainerDelta(children, dx, dy) {
+        if (window.ShapeMethods) {
+            return window.ShapeMethods.applyContainerDelta(children, dx, dy);
+        }
+    }
+
+    isPointInsideShape(shape, px, py) {
+        if (window.ShapeMethods) {
+            return window.ShapeMethods.isPointInsideShape(shape, px, py);
+        }
+        return false;
+    }
+
     updateSelectedShapeStyle() {
         if (this.selectedObject && this.selectedObject.type === 'shape') {
             this.selectedObject.fillColor = this.shapeFillColor;
@@ -5110,9 +5449,16 @@ class TopologyEditor {
         this.objects.forEach(obj => {
             // NOTE: Locked objects ARE selected via marquee, but they won't move when dragged
             // This allows bulk operations (color, delete, etc.) on locked objects
-            
+
+            // Hidden-object isolation: marquee/rubberband selection must
+            // skip hidden objects entirely. Otherwise a user dragging a
+            // selection rectangle ends up "grabbing" invisible links and
+            // devices that they have no way to deselect short of toggling
+            // the panel back on.
+            if (obj._hidden) return;
+
             let intersects = false;
-            
+
             if (obj.type === 'device') {
                 // Check if device circle overlaps with rectangle (any pixel overlap counts)
                 const closestX = Math.max(rect.x - tolerance, Math.min(obj.x, rect.x + rect.width + tolerance));
@@ -5259,6 +5605,27 @@ class TopologyEditor {
                               shapeLeft > rectRight + tolerance || 
                               shapeBottom < rect.y - tolerance || 
                               shapeTop > rectBottom + tolerance);
+            } else if (obj.type === 'packet') {
+                // Packet chip: bounding-box overlap (same idea as shapes) so a
+                // marquee / multi-select (MS) rectangle picks up packet boxes.
+                // Use the live bounds (collapsed state, visible-layer count,
+                // manual stretch width) so the hitbox matches what is drawn.
+                let pw = obj.width || 110;
+                let ph = obj._renderedHeight || 40;
+                if (window.PacketMethods && typeof window.PacketMethods.getPacketBounds === 'function') {
+                    const pb = window.PacketMethods.getPacketBounds(this, obj);
+                    if (pb) { pw = pb.w; ph = pb.h; }
+                }
+                const pLeft = obj.x - pw / 2;
+                const pRight = obj.x + pw / 2;
+                const pTop = obj.y - ph / 2;
+                const pBottom = obj.y + ph / 2;
+                const rectRight2 = rect.x + rect.width;
+                const rectBottom2 = rect.y + rect.height;
+                intersects = !(pRight < rect.x - tolerance ||
+                              pLeft > rectRight2 + tolerance ||
+                              pBottom < rect.y - tolerance ||
+                              pTop > rectBottom2 + tolerance);
             }
             
             if (intersects) {
@@ -5786,9 +6153,9 @@ class TopologyEditor {
     // ==================== INLINE TEXT EDITOR ====================
     // Delegated to TextEditorModule
     
-    showInlineTextEditor(textObj, event) {
+    showInlineTextEditor(textObj, event, options) {
         if (window.TextEditorModule) {
-            return window.TextEditorModule.showInline(this, textObj, event);
+            return window.TextEditorModule.showInline(this, textObj, event, options);
         }
     }
     
@@ -6012,7 +6379,19 @@ class TopologyEditor {
             window.showTextFontSelector(this, textObj);
         }
     }
-    
+
+    /**
+     * Show a font-size selector popup for text objects (2026-05-12).
+     * Delegated to topology-text-popups.js. The selector closes the
+     * usability gap where the floating toolbar exposed font FAMILY but
+     * not font SIZE -- the size control was hidden in the left sidebar.
+     */
+    showTextSizeSelector(textObj) {
+        if (typeof window.showTextSizeSelector === 'function') {
+            window.showTextSizeSelector(this, textObj);
+        }
+    }
+
     /**
      * Show background color palette for text objects
      * Delegated to topology-text-popups.js
@@ -7921,6 +8300,26 @@ class TopologyEditor {
         // Explicitly set mode and clear states
         this.currentMode = mode;
         this.currentTool = mode === 'base' ? 'select' : mode;
+        if (mode !== 'text') {
+            this.textPlacementPending = null;
+            if (this.continuousTextPlacement) {
+                this.continuousTextPlacement = false;
+                const placeTbsBtn = document.getElementById('btn-place-tbs');
+                const placeTbsStatus = document.getElementById('place-tbs-status');
+                if (placeTbsBtn) placeTbsBtn.classList.remove('active');
+                if (placeTbsStatus) {
+                    placeTbsStatus.textContent = 'OFF';
+                    placeTbsStatus.style.background = 'rgba(100, 100, 100, 0.4)';
+                    placeTbsStatus.style.color = 'rgba(255, 255, 255, 0.6)';
+                }
+            }
+        }
+        if (mode !== 'laser') {
+            this._laserPointerActive = false;
+            if (oldMode === 'laser') {
+                this._laserTrail = [];
+            }
+        }
         
         if (this.debugger && oldMode !== mode) {
             this.debugger.logStateChange('Mode', oldMode || 'none', mode.toUpperCase());
@@ -7938,6 +8337,13 @@ class TopologyEditor {
             this.hideAllSelectionToolbars();
             // Also hide inline text editor if open
             this.hideInlineTextEditor();
+        } else if (mode === 'laser') {
+            this.linking = false;
+            this.linkStart = null;
+            this.placingDevice = null;
+            this.multiSelectMode = false;
+            this._laserPointerActive = false;
+            if (!Array.isArray(this._laserTrail)) this._laserTrail = [];
         }
         
         // Update all button states - use safe access pattern
@@ -7957,6 +8363,10 @@ class TopologyEditor {
         
         this.updateModeIndicator();
         this.updatePropertiesPanel();
+        this.updateCursor();
+        if (this.toolbarMgr && this.toolbarMgr.updateButtonStates) {
+            this.toolbarMgr.updateButtonStates();
+        }
         this.draw();
     }
     
@@ -7989,6 +8399,11 @@ class TopologyEditor {
             modeIndicator.style.background = '#FF5E1F'; // Orange
             modeIndicator.style.color = 'white';
             modeIndicator.style.borderLeft = '4px solid #CC4A16';
+        } else if (this.currentMode === 'laser') {
+            modeText.textContent = 'LASER MODE';
+            modeIndicator.style.background = '#00B4D8';
+            modeIndicator.style.color = 'white';
+            modeIndicator.style.borderLeft = '4px solid #0066FA';
         }
         
         // Brief highlight animation on mode change
@@ -8275,6 +8690,7 @@ class TopologyEditor {
         // Calculate current link positions (they should already be updated)
         let linkStart = link.start;
         let linkEnd = link.end;
+        let visualPathAlreadyOffset = false;
         
         // DEFENSIVE: Ensure link has valid start/end positions
         if (!linkStart || !linkEnd || 
@@ -8285,20 +8701,85 @@ class TopologyEditor {
             return; // Don't update text position if link data is invalid
         }
         
-        // For device links, recalculate positions if needed
-        if (link.type === 'link' && link.device1 && link.device2) {
+        // For device links, prefer the exact path from drawLink(). That path
+        // already includes shape-aware connection points and dynamic parallel
+        // link offsets, so attached interface labels stay on the visible cable.
+        if (link.type === 'link' && link.device1 && link.device2 && link._renderedEndpoints) {
+            const r = link._renderedEndpoints;
+            const anchors = link._renderedEndpointAnchors;
+            const device1 = this.objects.find(o => o.id === link.device1);
+            const device2 = this.objects.find(o => o.id === link.device2);
+            const anchorsMatchCurrentDevices = !!(anchors && device1 && device2 &&
+                Math.abs((anchors.device1X || 0) - device1.x) < 0.001 &&
+                Math.abs((anchors.device1Y || 0) - device1.y) < 0.001 &&
+                Math.abs((anchors.device2X || 0) - device2.x) < 0.001 &&
+                Math.abs((anchors.device2Y || 0) - device2.y) < 0.001);
+            if (anchorsMatchCurrentDevices && [r.startX, r.startY, r.endX, r.endY].every(v => typeof v === 'number' && isFinite(v))) {
+                linkStart = { x: r.startX, y: r.startY };
+                linkEnd = { x: r.endX, y: r.endY };
+                visualPathAlreadyOffset = true;
+            }
+        }
+
+        // First-frame fallback before drawLink() has stored _renderedEndpoints.
+        // Mirror the same shape-aware endpoint + parallel offset logic used by
+        // topology-link-drawing.js instead of falling back to center/radius math.
+        if (!visualPathAlreadyOffset && link.type === 'link' && link.device1 && link.device2) {
             const device1 = this.objects.find(o => o.id === link.device1);
             const device2 = this.objects.find(o => o.id === link.device2);
             if (device1 && device2) {
-                const straightAngle = Math.atan2(device2.y - device1.y, device2.x - device1.x);
-                linkStart = {
-                    x: device1.x + Math.cos(straightAngle) * device1.radius,
-                    y: device1.y + Math.sin(straightAngle) * device1.radius
-                };
-                linkEnd = {
-                    x: device2.x - Math.cos(straightAngle) * device2.radius,
-                    y: device2.y - Math.sin(straightAngle) * device2.radius
-                };
+                const angle = Math.atan2(device2.y - device1.y, device2.x - device1.x);
+                const baseStart = this.getLinkConnectionPoint
+                    ? this.getLinkConnectionPoint(device1, angle)
+                    : {
+                        x: device1.x + Math.cos(angle) * (device1.radius || 30),
+                        y: device1.y + Math.sin(angle) * (device1.radius || 30)
+                    };
+                const baseEnd = this.getLinkConnectionPoint
+                    ? this.getLinkConnectionPoint(device2, angle + Math.PI)
+                    : {
+                        x: device2.x - Math.cos(angle) * (device2.radius || 30),
+                        y: device2.y - Math.sin(angle) * (device2.radius || 30)
+                    };
+                const connectedLinks = this.objects.filter(obj => {
+                    if (obj.type === 'link' && obj.device1 && obj.device2) {
+                        return (obj.device1 === device1.id && obj.device2 === device2.id) ||
+                            (obj.device1 === device2.id && obj.device2 === device1.id);
+                    }
+                    if (obj.type === 'unbound' && obj.device1 && obj.device2) {
+                        return (obj.device1 === device1.id && obj.device2 === device2.id) ||
+                            (obj.device1 === device2.id && obj.device2 === device1.id);
+                    }
+                    if (obj.type === 'unbound' && (obj.mergedWith || obj.mergedInto) && this.getBULEndpointDevices) {
+                        const endpoints = this.getBULEndpointDevices(obj);
+                        if (!endpoints.hasEndpoints) return false;
+                        return (endpoints.device1 === device1.id && endpoints.device2 === device2.id) ||
+                            (endpoints.device1 === device2.id && endpoints.device2 === device1.id);
+                    }
+                    return false;
+                }).sort((a, b) => (parseInt(String(a.id || '').split('_')[1]) || 0) - (parseInt(String(b.id || '').split('_')[1]) || 0));
+                const visualIndex = Math.max(0, connectedLinks.findIndex(l => l.id === link.id));
+                const sortedIds = [link.device1, link.device2].sort();
+                const isNormalDirection = link.device1 === sortedIds[0];
+                const offsetMagnitude = visualIndex > 0 ? Math.ceil(visualIndex / 2) * 20 : 0;
+                const offsetDirection = visualIndex > 0 ? ((visualIndex % 2 === 1) ? 1 : -1) : 0;
+                let visualPerpAngle = angle + Math.PI / 2;
+                if (!isNormalDirection) visualPerpAngle += Math.PI;
+                const offsetX = Math.cos(visualPerpAngle) * offsetMagnitude * offsetDirection;
+                const offsetY = Math.sin(visualPerpAngle) * offsetMagnitude * offsetDirection;
+                const targetStartX = baseStart.x + offsetX;
+                const targetStartY = baseStart.y + offsetY;
+                const targetEndX = baseEnd.x + offsetX;
+                const targetEndY = baseEnd.y + offsetY;
+                const startDirAngle = Math.atan2(targetStartY - device1.y, targetStartX - device1.x);
+                const endDirAngle = Math.atan2(targetEndY - device2.y, targetEndX - device2.x);
+                linkStart = this.getLinkConnectionPoint
+                    ? this.getLinkConnectionPoint(device1, startDirAngle)
+                    : { x: targetStartX, y: targetStartY };
+                linkEnd = this.getLinkConnectionPoint
+                    ? this.getLinkConnectionPoint(device2, endDirAngle)
+                    : { x: targetEndX, y: targetEndY };
+                visualPathAlreadyOffset = true;
             }
         }
         
@@ -8431,7 +8912,7 @@ class TopologyEditor {
         const linkIndex = link.linkIndex || 0;
         let linkOffsetAmount = 0;
         let linkDirection = 0;
-        if (linkIndex > 0) {
+        if (!visualPathAlreadyOffset && linkIndex > 0) {
             const magnitude = Math.ceil(linkIndex / 2) * 20;
             linkDirection = (linkIndex % 2 === 1) ? 1 : -1; // Odd = Right (+), Even = Left (-)
             linkOffsetAmount = magnitude * linkDirection;
@@ -8659,8 +9140,10 @@ class TopologyEditor {
         if (link && link.device2) connectedDeviceIds.push(link.device2);
         
         for (const obj of this.objects) {
-            if (obj.type === 'device' && !connectedDeviceIds.includes(obj.id)) {
-                // Check if device is near the link path
+            if (obj.type === 'device' && !obj._hidden && !connectedDeviceIds.includes(obj.id)) {
+                // Hidden-object isolation: a hidden device must not act
+                // as an obstacle for curve magnetic repulsion. Otherwise
+                // links bend around invisible nodes.
                 const dx = obj.x - startX;
                 const dy = obj.y - startY;
                 
@@ -8696,8 +9179,10 @@ class TopologyEditor {
         if (link && link.device2) connectedDeviceIds.push(link.device2);
         
         for (const obj of this.objects) {
-            if (obj.type === 'device' && !connectedDeviceIds.includes(obj.id)) {
-                // Check if device is near the link path
+            if (obj.type === 'device' && !obj._hidden && !connectedDeviceIds.includes(obj.id)) {
+                // Hidden-object isolation: a hidden device must not act
+                // as an obstacle for curve magnetic repulsion. Otherwise
+                // links bend around invisible nodes.
                 const dx = obj.x - startX;
                 const dy = obj.y - startY;
                 
@@ -8825,6 +9310,40 @@ class TopologyEditor {
         // Hide any other floating popups
         const adjacentTextMenu = document.getElementById('adjacent-text-menu');
         if (adjacentTextMenu) adjacentTextMenu.remove();
+    }
+
+    beginCanvasPanInteraction() {
+        if (!this._toolbarHiddenForPan) {
+            this._toolbarHiddenForPan = {
+                selectedObject: this.selectedObject || null,
+                selectedObjectId: this.selectedObject?.id || null
+            };
+        }
+        if (window.XrayPopup && window.XrayPopup.temporaryHide) {
+            window.XrayPopup.temporaryHide();
+        }
+        this.hideAllPopups();
+    }
+
+    restoreToolbarAfterCanvasPan() {
+        const state = this._toolbarHiddenForPan;
+        this._toolbarHiddenForPan = null;
+        const selected = this.selectedObject || state?.selectedObject;
+        if (!selected || this.panning || this.dragging) return;
+        window.setTimeout(() => {
+            if (this.panning || this.dragging) return;
+            const current = this.selectedObject || selected;
+            if (!current || (state?.selectedObjectId && current.id !== state.selectedObjectId)) return;
+            if (current.type === 'device') {
+                this.showDeviceSelectionToolbar(current);
+            } else if (current.type === 'link' || current.type === 'unbound') {
+                this.showLinkSelectionToolbar(current);
+            } else if (current.type === 'text') {
+                this.showTextSelectionToolbar(current);
+            } else if (current.type === 'shape') {
+                this.showShapeSelectionToolbar(current);
+            }
+        }, 0);
     }
     
     handleContextSize() {
@@ -9806,12 +10325,17 @@ class TopologyEditor {
     
     // Check if a text box overlaps with a link (for snap detection during drag)
     checkTextLinkOverlap(textObj) {
-        // Get text bounding box
+        // Get text bounding box matching the renderer's DPR-snapped font so
+        // snap-to-link triggers based on the actual visible TB area.
         this.ctx.save();
-        this.ctx.font = `${textObj.fontSize}px Arial`;
+        const requestedFontSize = Number(textObj.fontSize) || 14;
+        const renderedFontSize = this.getDprSnappedFontSize
+            ? this.getDprSnappedFontSize(requestedFontSize)
+            : requestedFontSize;
+        this.ctx.font = `${renderedFontSize}px Arial`;
         const metrics = this.ctx.measureText(textObj.text || 'Text');
         const w = metrics.width;
-        const h = parseInt(textObj.fontSize);
+        const h = parseInt(renderedFontSize);
         this.ctx.restore();
         
         const padding = 8;
@@ -9879,7 +10403,33 @@ class TopologyEditor {
             color: colorPickerVal ? colorPickerVal.value : '#4CAF50',
             label: label,
             locked: false,
-            visualStyle: this.defaultDeviceStyle || 'circle'
+            visualStyle: this.defaultDeviceStyle || 'circle',
+            sshConfig: window.TopologyDeviceDefaults
+                ? window.TopologyDeviceDefaults.createCanvasSshConfig()
+                : { user: 'dnroot', password: 'dnroot' },
+            ...(window.TopologyDeviceDefaults && window.TopologyDeviceDefaults.createCanvasLldpFields
+                ? window.TopologyDeviceDefaults.createCanvasLldpFields()
+                : {
+                    _lldpData: {
+                        neighbors: [],
+                        lldp_neighbors: [],
+                        source: 'canvas-placeholder',
+                        placeholder: true,
+                        message: 'No LLDP neighbors discovered or configured yet.'
+                    },
+                    lldpDiscoveryComplete: false,
+                    lldpEnabled: false
+                }),
+            ...(window.TopologyDeviceDefaults && window.TopologyDeviceDefaults.createCanvasMetadataFields
+                ? window.TopologyDeviceDefaults.createCanvasMetadataFields()
+                : {
+                    _metadataDiscovered: false,
+                    _stackData: null,
+                    _gitCommit: null,
+                    _gitCommitFetchedAt: null,
+                    _deviceMode: '',
+                    _modeRawState: ''
+                })
         };
         
         this.objects.push(device);
@@ -9888,6 +10438,15 @@ class TopologyEditor {
         this.setTool('select');
         this.updatePropertiesPanel();
         this.draw();
+        try { this._syncCanvasWatchers(); } catch (_) { /* ignore */ }
+        try {
+            if (window.TopologySync && window.TopologySync.recordOp) {
+                window.TopologySync.recordOp('device.added', {
+                    device_id: device.id, label: device.label,
+                    device_type: device.deviceType,
+                });
+            }
+        } catch (_) { /* swallow */ }
     }
     
     createLink(device1, device2) {
@@ -9931,6 +10490,15 @@ class TopologyEditor {
             const d2Label = device2.label || 'Device';
             this.debugger.logSuccess(`Link created: ${d1Label} → ${d2Label}`);
         }
+        try {
+            if (window.TopologySync && window.TopologySync.recordOp) {
+                window.TopologySync.recordOp('link.added', {
+                    link_id: link.id,
+                    device1: device1.label || device1.id,
+                    device2: device2.label || device2.id,
+                });
+            }
+        } catch (_) { /* swallow */ }
         
         this.draw();
     }
@@ -10367,66 +10935,321 @@ class TopologyEditor {
         return null;
     }
     
-    // Track recently used colors (last 4)
+    // Track recently used colors (MRU, default cap = this.recentColorsCap, 2026-05-12 = 8).
+    // Pinned colors live in `this.pinnedColors` and are NOT mirrored into
+    // the MRU list, so the union {pinned, recent} is what the picker
+    // surfaces. A color that gets pinned is removed from the MRU list to
+    // avoid duplicates -- see togglePinnedColor() below.
     addRecentColor(color) {
         if (!color || typeof color !== 'string') return;
-        
-        // Remove if already in list
-        this.recentColors = this.recentColors.filter(c => c.toLowerCase() !== color.toLowerCase());
-        
-        // Add to front
-        this.recentColors.unshift(color);
-        
-        // Keep only 4 colors
-        if (this.recentColors.length > 4) {
-            this.recentColors = this.recentColors.slice(0, 4);
+        const norm = (typeof this._normalizeHex === 'function' ? this._normalizeHex(color) : null) || color;
+
+        // Don't track in MRU if the color is already pinned -- pinned
+        // colors are always visible at the top of the picker, so adding
+        // them to the MRU list as well would create duplicate swatches.
+        if (Array.isArray(this.pinnedColors) &&
+            this.pinnedColors.some(c => c.toLowerCase() === norm.toLowerCase())) {
+            this.updateRecentColorsUI();
+            return;
         }
-        
-        // Save to localStorage
-        localStorage.setItem('recentColors', JSON.stringify(this.recentColors));
-        
-        // Update UI
+
+        // Dedupe (case-insensitive) and move to front (MRU).
+        this.recentColors = this.recentColors.filter(c => c.toLowerCase() !== norm.toLowerCase());
+        this.recentColors.unshift(norm);
+
+        const cap = Math.max(1, this.recentColorsCap || 8);
+        if (this.recentColors.length > cap) {
+            this.recentColors = this.recentColors.slice(0, cap);
+        }
+
+        try { localStorage.setItem('recentColors', JSON.stringify(this.recentColors)); }
+        catch (_) { /* private browsing / quota -- non-fatal */ }
+
         this.updateRecentColorsUI();
     }
+
+    // Remove a color from the MRU list. Used by the right-click context
+    // menu in the color picker ("Remove from recents").
+    removeRecentColor(color) {
+        if (!color || typeof color !== 'string') return;
+        const before = this.recentColors.length;
+        this.recentColors = this.recentColors.filter(c => c.toLowerCase() !== color.toLowerCase());
+        if (this.recentColors.length === before) return;
+        try { localStorage.setItem('recentColors', JSON.stringify(this.recentColors)); }
+        catch (_) { /* non-fatal */ }
+        this.updateRecentColorsUI();
+    }
+
+    // Pin/unpin a color. Pinned colors are always shown at the top of
+    // the recent-colors strip and never evicted by MRU rotation.
+    togglePinnedColor(color) {
+        if (!color || typeof color !== 'string') return;
+        const norm = (typeof this._normalizeHex === 'function' ? this._normalizeHex(color) : null) || color;
+        if (!Array.isArray(this.pinnedColors)) this.pinnedColors = [];
+        const idx = this.pinnedColors.findIndex(c => c.toLowerCase() === norm.toLowerCase());
+        if (idx >= 0) {
+            // Unpin: remove from pinned, but DON'T re-insert into MRU --
+            // the user explicitly unpinned, they can re-add to MRU by
+            // applying the color again.
+            this.pinnedColors.splice(idx, 1);
+        } else {
+            const cap = Math.max(1, this.pinnedColorsCap || 8);
+            // Pinning a color removes it from the MRU list so the
+            // picker doesn't show duplicate swatches.
+            this.recentColors = this.recentColors.filter(c => c.toLowerCase() !== norm.toLowerCase());
+            this.pinnedColors.unshift(norm);
+            if (this.pinnedColors.length > cap) {
+                this.pinnedColors = this.pinnedColors.slice(0, cap);
+            }
+            try { localStorage.setItem('recentColors', JSON.stringify(this.recentColors)); }
+            catch (_) { /* non-fatal */ }
+        }
+        try { localStorage.setItem('pinnedColors', JSON.stringify(this.pinnedColors)); }
+        catch (_) { /* non-fatal */ }
+        this.updateRecentColorsUI();
+    }
+
+    isColorPinned(color) {
+        if (!color || typeof color !== 'string' || !Array.isArray(this.pinnedColors)) return false;
+        return this.pinnedColors.some(c => c.toLowerCase() === color.toLowerCase());
+    }
+
+    // 2026-05-12 [split-color]: apply a color to one half (left | right) of
+    // a device. Migrates a previously-solid device into split mode the
+    // first time either side is set: copies device.color into the OTHER
+    // side so the user sees a clean A | B split instead of one
+    // accidentally-unset half. Maintains a single source-of-truth in
+    // device.color (= the chosen side's color) so legacy serialisers
+    // and any code that only knows about `color` still see a sane value.
+    applyColorToObjectSide(obj, side, color) {
+        if (!obj || obj.type !== 'device' || !color) return;
+        if (side !== 'left' && side !== 'right') return;
+        this.saveState();
+
+        const wasSplit = (typeof obj.colorLeft === 'string') && (typeof obj.colorRight === 'string');
+        if (!wasSplit) {
+            // Seed both halves from the legacy `color` so flipping into
+            // split mode mid-edit doesn't blank the unset half.
+            const seed = (typeof obj.color === 'string' && obj.color.trim().length > 0) ? obj.color : '#3498db';
+            obj.colorLeft = seed;
+            obj.colorRight = seed;
+        }
+        if (side === 'left') obj.colorLeft = color;
+        else obj.colorRight = color;
+        // Keep `color` in sync with the most recently edited side so
+        // any legacy reader still gets a meaningful value.
+        obj.color = color;
+        this.addRecentColor(color);
+        this.draw();
+    }
+
+    // 2026-05-12 [split-color]: switch a device between solid and split
+    // mode. Going Solid -> Split copies the current color into both
+    // halves. Going Split -> Solid keeps the side the user selected
+    // (`keepSide`, default 'left') as the new solid color and drops
+    // the other half. Idempotent.
+    setDeviceColorMode(device, mode, opts) {
+        if (!device || device.type !== 'device') return;
+        opts = opts || {};
+        const keepSide = opts.keepSide === 'right' ? 'right' : 'left';
+        this.saveState();
+        if (mode === 'split') {
+            const seed = (typeof device.color === 'string' && device.color.trim().length > 0)
+                ? device.color : '#3498db';
+            if (typeof device.colorLeft !== 'string' || !device.colorLeft.trim()) device.colorLeft = seed;
+            if (typeof device.colorRight !== 'string' || !device.colorRight.trim()) device.colorRight = seed;
+        } else {
+            const keepColor = (keepSide === 'right' ? device.colorRight : device.colorLeft) || device.color;
+            device.color = keepColor;
+            delete device.colorLeft;
+            delete device.colorRight;
+        }
+        this.draw();
+    }
+
+    // 2026-05-12 [split-color]: swap the two halves of a device.
+    swapDeviceColorSides(device) {
+        if (!device || device.type !== 'device') return;
+        if (typeof device.colorLeft !== 'string' || typeof device.colorRight !== 'string') return;
+        this.saveState();
+        const tmp = device.colorLeft;
+        device.colorLeft = device.colorRight;
+        device.colorRight = tmp;
+        // Keep `color` aligned with the right side after the swap so
+        // legacy readers see something consistent. Picking left or
+        // right here is arbitrary; we pick right because the "primary"
+        // color in many UI contexts is the most recently edited side
+        // and swapping is itself an edit.
+        device.color = device.colorRight;
+        this.draw();
+    }
+
+    // 2026-05-12 [split-color]: compute the suggested neighbour color
+    // for one side of a device. Returns { color, confidence, alts }
+    // where confidence is a fraction in [0, 1] of neighbours on that
+    // side that share the suggested color. Caller should only surface
+    // suggestions whose confidence >= 0.5 (strong dominant winner)
+    // unless they explicitly want the hint-chip flavour.
+    //
+    // Algorithm (see DEVELOPMENT_GUIDELINES.md > Split-color suggestion):
+    //   1. For each link L attached to this device D:
+    //        - Resolve the anchor point on D's edge (L.start if D is
+    //          device1, L.end if device2). For unrouted/free anchors,
+    //          fall back to the neighbour device's centre x.
+    //        - Bucket the neighbour into 'left' or 'right' based on
+    //          (anchor.x vs device.x). Anchors exactly at the centre
+    //          are skipped (no clear side).
+    //   2. For each neighbour N in the requested side's bucket:
+    //        - If N is split, use the side of N that FACES D:
+    //              if N.x > D.x  -> N.colorLeft  (N's left faces D)
+    //              if N.x < D.x  -> N.colorRight (N's right faces D)
+    //          Otherwise use N's solid `color`.
+    //   3. Tally case-insensitive hex counts; return the highest
+    //      with its confidence. Ties are broken by first-seen order
+    //      (stable, deterministic).
+    getNeighborColorSuggestion(device, side) {
+        if (!device || device.type !== 'device') return null;
+        if (side !== 'left' && side !== 'right') return null;
+        const objs = this.objects || [];
+        const tallyOrder = [];
+        const tally = {};
+
+        for (let i = 0; i < objs.length; i++) {
+            const link = objs[i];
+            if (!link || (link.type !== 'link' && link.type !== 'unbound')) continue;
+            const d1 = link.device1, d2 = link.device2;
+            let neighborId = null;
+            let anchor = null;
+            if (d1 === device.id) {
+                neighborId = d2;
+                anchor = link.start || null;
+            } else if (d2 === device.id) {
+                neighborId = d1;
+                anchor = link.end || null;
+            } else {
+                continue;
+            }
+            if (!neighborId) continue; // free endpoint -- skip
+            const neighbor = objs.find(o => o && o.id === neighborId && o.type === 'device');
+            if (!neighbor) continue;
+
+            const anchorX = (anchor && typeof anchor.x === 'number') ? anchor.x : neighbor.x;
+            if (typeof anchorX !== 'number') continue;
+            const dx = anchorX - device.x;
+            if (dx === 0) continue; // ambiguous -- skip
+            const linkSide = dx > 0 ? 'right' : 'left';
+            if (linkSide !== side) continue;
+
+            // Figure out the neighbour's facing color.
+            let nColor = null;
+            const nSplit = (typeof neighbor.colorLeft === 'string') && (typeof neighbor.colorRight === 'string');
+            if (nSplit) {
+                // N's facing side is the OPPOSITE of N's position
+                // relative to D.
+                if (neighbor.x > device.x) nColor = neighbor.colorLeft;
+                else if (neighbor.x < device.x) nColor = neighbor.colorRight;
+                else nColor = neighbor.colorLeft; // co-located -- pick left arbitrarily
+            } else {
+                nColor = neighbor.color;
+            }
+            if (typeof nColor !== 'string' || !nColor.trim()) continue;
+            const key = nColor.toLowerCase();
+            if (!(key in tally)) {
+                tally[key] = { color: nColor, count: 0 };
+                tallyOrder.push(key);
+            }
+            tally[key].count++;
+        }
+
+        let total = 0;
+        for (const k of tallyOrder) total += tally[k].count;
+        if (total === 0) return null;
+
+        // Find the highest-count entry (stable order = first-seen wins on tie).
+        let bestKey = null;
+        for (const k of tallyOrder) {
+            if (bestKey === null || tally[k].count > tally[bestKey].count) bestKey = k;
+        }
+        const bestCount = tally[bestKey].count;
+        const confidence = bestCount / total;
+
+        // Build the alt list: every non-best color ordered by count desc,
+        // up to 2 entries. Useful for hint-chips when no >=50% winner.
+        const alts = tallyOrder
+            .filter(k => k !== bestKey)
+            .sort((a, b) => tally[b].count - tally[a].count)
+            .slice(0, 2)
+            .map(k => ({ color: tally[k].color, count: tally[k].count, confidence: tally[k].count / total }));
+
+        return {
+            color: tally[bestKey].color,
+            count: bestCount,
+            total: total,
+            confidence: confidence,
+            alts: alts,
+        };
+    }
     
-    // Update recent colors display in all editor modals
+    // Update recent colors display in all editor modals.
+    // 2026-05-12 [recent-colors polish]: now also surfaces pinned
+    // colors at the front. Pinned colors get a small dot marker so
+    // the user can visually distinguish "always there" from "MRU".
     updateRecentColorsUI() {
         const containers = [
             'link-recent-colors',
             'device-recent-colors',
             'text-recent-colors'
         ];
-        
+
+        const pinned = Array.isArray(this.pinnedColors) ? this.pinnedColors : [];
+        const recent = Array.isArray(this.recentColors) ? this.recentColors : [];
+        const combined = pinned.concat(recent);
+
         containers.forEach(containerId => {
             const container = document.getElementById(containerId);
             if (!container) return;
-            
+
             container.innerHTML = '';
-            
-            // Show placeholder if no recent colors
-            if (this.recentColors.length === 0) {
+
+            if (combined.length === 0) {
                 const placeholder = document.createElement('span');
                 placeholder.style.cssText = 'color: #666; font-size: 10px; font-style: italic;';
                 placeholder.textContent = 'Use colors to see history...';
                 container.appendChild(placeholder);
                 return;
             }
-            
-            this.recentColors.forEach(color => {
+
+            combined.forEach(color => {
+                const isPinned = pinned.some(c => c.toLowerCase() === color.toLowerCase());
                 const swatch = document.createElement('div');
-                swatch.className = 'recent-color-swatch';
+                swatch.className = 'recent-color-swatch' + (isPinned ? ' is-pinned' : '');
+                swatch.setAttribute('role', 'button');
+                swatch.setAttribute('tabindex', '0');
                 swatch.style.cssText = `
                     width: 28px;
                     height: 28px;
-                    border-radius: 4px;
+                    border-radius: 6px;
                     background: ${color};
                     cursor: pointer;
                     border: 2px solid rgba(255,255,255,0.3);
                     transition: transform 0.1s, border-color 0.1s;
+                    position: relative;
                 `;
-                swatch.title = `Click to use ${color}`;
+                swatch.title = isPinned ? `Pinned color ${color}` : `Click to use ${color}`;
                 swatch.dataset.color = color;
-                
+
+                if (isPinned) {
+                    const dot = document.createElement('span');
+                    dot.style.cssText = `
+                        position: absolute; top: -3px; right: -3px;
+                        width: 8px; height: 8px; border-radius: 50%;
+                        background: var(--dn-orange, #FF5E1F);
+                        box-shadow: 0 0 0 1.5px rgba(0,0,0,0.6);
+                        pointer-events: none;
+                    `;
+                    swatch.appendChild(dot);
+                }
+
                 swatch.addEventListener('mouseenter', () => {
                     swatch.style.transform = 'scale(1.1)';
                     swatch.style.borderColor = 'rgba(255,255,255,0.8)';
@@ -10435,23 +11258,40 @@ class TopologyEditor {
                     swatch.style.transform = 'scale(1)';
                     swatch.style.borderColor = 'rgba(255,255,255,0.3)';
                 });
-                
-                swatch.addEventListener('click', () => {
-                    // Apply color based on which modal is open
-                    // updateLinkEditorProperty and updateDeviceEditorProperty already call addRecentColor
+
+                const apply = () => {
                     if (containerId === 'link-recent-colors' && this.editingLink) {
                         this.updateLinkEditorProperty('color', color);
-                        document.getElementById('editor-link-color').value = color;
+                        const el = document.getElementById('editor-link-color');
+                        if (el) el.value = color;
                     } else if (containerId === 'device-recent-colors' && this.editingDevice) {
                         this.updateDeviceEditorProperty('color', color);
-                        document.getElementById('editor-device-color').value = color;
+                        const el = document.getElementById('editor-device-color');
+                        if (el) el.value = color;
                     } else if (containerId === 'text-recent-colors' && this.editingText) {
                         this.editingText.color = color;
-                        document.getElementById('editor-text-color').value = color;
+                        const el = document.getElementById('editor-text-color');
+                        if (el) el.value = color;
                         this.draw();
                     }
+                };
+
+                swatch.addEventListener('click', apply);
+                swatch.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        apply();
+                    }
                 });
-                
+                // Right-click context menu: pin/unpin or remove from MRU.
+                swatch.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (window.ColorPopups && typeof window.ColorPopups.showSwatchContextMenu === 'function') {
+                        window.ColorPopups.showSwatchContextMenu(this, color, e.clientX, e.clientY);
+                    }
+                });
+
                 container.appendChild(swatch);
             });
         });
@@ -10544,6 +11384,16 @@ class TopologyEditor {
             }
         });
         
+        try {
+            if (window.MonitoredCache && typeof window.MonitoredCache.detachOnDelete === 'function') {
+                objectsToDelete.forEach(obj => {
+                    if (obj && obj.type === 'device' && obj._monitorRegistered) {
+                        window.MonitoredCache.detachOnDelete(obj);
+                    }
+                });
+            }
+        } catch (_) {}
+
         // Clear selection
         this.selectedObject = null;
         this.selectedObjects = [];
@@ -10551,6 +11401,19 @@ class TopologyEditor {
         if (this.debugger) {
             this.debugger.logSuccess(`🗑️ Deleted ${objectsToDelete.length} object(s)`);
         }
+        try {
+            if (window.TopologySync && window.TopologySync.recordOp) {
+                const removed = objectsToDelete.map(o => ({
+                    id: o && o.id,
+                    type: o && o.type,
+                    label: (o && (o.label || o.text)) || '',
+                }));
+                window.TopologySync.recordOp('objects.deleted', {
+                    count: removed.length,
+                    removed: removed.slice(0, 20),
+                });
+            }
+        } catch (_) { /* swallow */ }
         
         this.draw();
         this.updatePropertiesPanel();
@@ -10711,7 +11574,18 @@ class TopologyEditor {
             (this.multiSelectMode && this.selectedObjects.length === 0)) {
             return;
         }
-        
+
+        const objectsBeforeDelete = Array.isArray(this.objects) ? this.objects.length : 0;
+        const objectsSelectedForDelete = (this.selectedObjects && this.selectedObjects.length > 0)
+            ? [...this.selectedObjects]
+            : (this.selectedObject ? [this.selectedObject] : []);
+        this._intentionalObjectCountDrop = {
+            reason: 'deleteSelected',
+            before: objectsBeforeDelete,
+            selected: objectsSelectedForDelete.length,
+            expiresAt: Date.now() + 5000
+        };
+
         // BUGFIX: Hide ALL selection toolbars immediately when deleting
         this.hideAllSelectionToolbars();
         
@@ -10803,22 +11677,23 @@ class TopologyEditor {
             // Recalculate device counters after deletion for proper numbering
             this.updateDeviceCounters();
             this.draw();
+            try { this._syncCanvasWatchers(); } catch (_) { /* ignore */ }
         } else if (this.selectedObject) {
             const index = this.objects.indexOf(this.selectedObject);
             if (index > -1) {
                 // ENHANCED: Handle UL deletion in BUL chains
-                if (this.selectedObject.type === 'unbound' && (this.selectedObject.mergedWith || this.selectedObject.mergedInto)) {
-                    this.handleULDeletionInBUL(this.selectedObject);
+                const objectToDelete = this.selectedObject;
+                if (objectToDelete.type === 'unbound' && (objectToDelete.mergedWith || objectToDelete.mergedInto)) {
+                    this.handleULDeletionInBUL(objectToDelete);
                 }
                 
-                // Also remove links connected to this device
-                if (this.selectedObject.type === 'device') {
-                    this.objects = this.objects.filter(obj => 
-                        !(obj.type === 'unbound' && (obj.device1 === this.selectedObject.id || obj.device2 === this.selectedObject.id))
-                    );
-                }
-                
-                this.objects.splice(index, 1);
+                this.objects = this.objects.filter(obj => {
+                    if (obj.id === objectToDelete.id) return false;
+                    if (objectToDelete.type === 'device') {
+                        return !(obj.type === 'unbound' && (obj.device1 === objectToDelete.id || obj.device2 === objectToDelete.id));
+                    }
+                    return true;
+                });
                 
                 // GROUP CLEANUP: Validate groups after single object deletion
                 if (this.groups) this.groups.validate();
@@ -10828,8 +11703,13 @@ class TopologyEditor {
                 // Recalculate device counters after deletion for proper numbering
                 this.updateDeviceCounters();
                 this.draw();
+                try { this._syncCanvasWatchers(); } catch (_) { /* ignore */ }
             }
         }
+
+        // `saveState()` snapshots the pre-delete state for undo. Schedule an
+        // explicit post-delete autosave so refresh reloads the canvas as drawn.
+        this.scheduleAutoSave();
     }
     
     saveState() {
@@ -10854,42 +11734,7 @@ class TopologyEditor {
         
         try {
             
-            // Create deep copy of current state, stripping transient monitor/display flags
-            const objsCopy = JSON.parse(JSON.stringify(this.objects));
-            for (const obj of objsCopy) {
-                if ((obj.type === 'link' || obj.type === 'unbound') && obj._hidden) {
-                    delete obj._hidden;
-                }
-                delete obj._badgeWorlds;
-                delete obj._hostnameMismatch;
-                delete obj._mismatchDismissed;
-                delete obj._identity;
-                delete obj._configHostname;
-                delete obj._stackData;
-                delete obj._stackCachedAt;
-                delete obj._lldpData;
-                delete obj._lldpCompletedAt;
-                delete obj._gitCommit;
-                delete obj._gitCommitFetchedAt;
-                delete obj._gitCommitFailed;
-                delete obj._renaming;
-                delete obj._activeConfigJob;
-                delete obj._activeUpgradeJob;
-                delete obj._upgradeFailedJob;
-                delete obj._upgradeInProgress;
-                delete obj._mismatchRefreshPending;
-                delete obj._sshReachable;
-                delete obj._sshReachableAt;
-                delete obj._deviceMode;
-                delete obj._createdAt;
-            }
-            const state = {
-                objects: objsCopy,
-                deviceIdCounter: this.deviceIdCounter,
-                linkIdCounter: this.linkIdCounter,
-                textIdCounter: this.textIdCounter,
-                deviceCounters: { ...this.deviceCounters }
-            };
+            const state = this._createHistorySnapshot();
             
             // Remove any future history if we're not at the end
             if (this.historyIndex < this.history.length - 1) {
@@ -10920,6 +11765,15 @@ class TopologyEditor {
     
     restoreState(state) {
         if (!state) return;
+        if (state.topologyGeneration !== undefined && state.topologyGeneration !== (this._topologyGeneration || 0)) {
+            console.warn('[History] Ignored stale topology history state');
+            return;
+        }
+        if (state.topologyKey && this._activeTopologyIdentity?.key
+                && state.topologyKey !== this._activeTopologyIdentity.key) {
+            console.warn('[History] Ignored history state for another topology');
+            return;
+        }
         
         // Hide all toolbars before restoring — object sizes/positions change
         this.hideAllSelectionToolbars();
@@ -10930,9 +11784,16 @@ class TopologyEditor {
         
         this.objects = JSON.parse(JSON.stringify(state.objects));
         for (const obj of this.objects) {
+            if (obj._hiddenByGroup) {
+                delete obj._hiddenByGroup;
+                if (obj._hidden === true) delete obj._hidden;
+            }
             if ((obj.type === 'link' || obj.type === 'unbound') && obj._hidden) {
                 delete obj._hidden;
             }
+        }
+        if (this.groups && typeof this.groups.applyVisibility === 'function') {
+            this.groups.applyVisibility();
         }
         this.deviceIdCounter = state.deviceIdCounter;
         this.linkIdCounter = state.linkIdCounter;
@@ -10942,6 +11803,22 @@ class TopologyEditor {
         this.selectedObject = null;
         this.selectedObjects = [];
         this.updatePropertiesPanel();
+
+        // Force-invalidate the minimap cache here -- the offscreen render
+        // is keyed by a content hash + bounds key, but undo/redo can swap
+        // the entire objects array in a single tick. Without an explicit
+        // invalidation the minimap can keep showing the post-delete snapshot
+        // (the cached canvas) even though the main canvas already shows the
+        // restored objects. The redraw below also schedules a render, but
+        // dropping the hash here guarantees the next render rebuilds the
+        // base layer from scratch instead of reusing the stale cache.
+        try {
+            if (window.MinimapRender && typeof window.MinimapRender.invalidateCache === 'function') {
+                window.MinimapRender.invalidateCache();
+            }
+            if (this.minimap) delete this.minimap._cachedBase;
+        } catch (_) { /* swallow */ }
+
         this.requestDraw();
         
         // Restore initializing flag
@@ -11027,13 +11904,21 @@ class TopologyEditor {
         const redoBtn = document.getElementById('btn-redo');
         
         if (!undoBtn || !redoBtn) {
-            console.warn('Undo/Redo buttons not found in DOM');
+            // Bug fix (2026-04-26): warn at most once -- this fires very
+            // early (before the toolbar paints) and used to spam.
+            if (!this._warnedMissingUndoRedo) {
+                this._warnedMissingUndoRedo = true;
+                console.warn('Undo/Redo buttons not found in DOM');
+            }
             return;
         }
         
         // Ensure history exists
         if (!this.history || this.history.length === 0) {
-            console.warn('History is empty, disabling undo/redo');
+            if (!this._warnedEmptyHistory) {
+                this._warnedEmptyHistory = true;
+                console.warn('History is empty, disabling undo/redo');
+            }
             undoBtn.disabled = true;
             redoBtn.disabled = true;
             undoBtn.style.opacity = '0.5';
@@ -11054,8 +11939,16 @@ class TopologyEditor {
         
         undoBtn.style.opacity = canUndo ? '1' : '0.5';
         redoBtn.style.opacity = canRedo ? '1' : '0.5';
-        
-        console.log('updateUndoRedoButtons - canUndo:', canUndo, 'canRedo:', canRedo, 'index:', this.historyIndex, 'length:', this.history.length);
+
+        // Bug fix (2026-04-26): only log when the visible state actually
+        // changes. The previous always-on log fired 30+ times per drag
+        // and made the console useless during normal use.
+        const stateKey = `${canUndo ? 1 : 0}|${canRedo ? 1 : 0}|${this.historyIndex}|${this.history.length}`;
+        if (this._lastUndoRedoLogKey !== stateKey) {
+            this._lastUndoRedoLogKey = stateKey;
+            console.debug('updateUndoRedoButtons - canUndo:', canUndo, 'canRedo:', canRedo,
+                'index:', this.historyIndex, 'length:', this.history.length);
+        }
     }
     
     updateStepCounter() {
@@ -11075,6 +11968,15 @@ class TopologyEditor {
         const wasLight = !this.darkMode;
         this.darkMode = !this.darkMode;
         const body = document.body;
+        const skinV2 = !!(body && body.classList && body.classList.contains('ui-skin-v2'));
+        if (skinV2) {
+            body.classList.add('theme-transitioning');
+            if (this._themeTransitionTimer) clearTimeout(this._themeTransitionTimer);
+            this._themeTransitionTimer = setTimeout(() => {
+                body.classList.remove('theme-transitioning');
+                this._themeTransitionTimer = null;
+            }, 460);
+        }
         
         if (this.darkMode) {
             body.classList.add('dark-mode');
@@ -11156,16 +12058,31 @@ class TopologyEditor {
         this.requestDraw();
         this.scheduleAutoSave();
         
-        this._updateBDPanelTheme();
-        if (window.MinimapRender) window.MinimapRender.invalidateCache();
-        // If topologies dropdown is open, smoothly transition inline styles in-place
-        // and flag for full re-render next time it's toggled open
-        const topoDropdown = document.getElementById('topologies-dropdown-menu');
-        if (topoDropdown && topoDropdown.style.display !== 'none' && window.FileOps && window.FileOps._updateDropdownTheme) {
-            window.FileOps._updateDropdownTheme(this);
-            this._topoDropdownThemeDirty = true;
-        } else if (window.FileOps && window.FileOps._renderCustomSectionsInDropdown) {
-            window.FileOps._renderCustomSectionsInDropdown(this);
+        const afterThemePaint = () => {
+            this._updateBDPanelTheme();
+            if (window.MinimapRender) window.MinimapRender.invalidateCache();
+            if (window.FileOps && typeof window.FileOps._refreshManageSectionsForTheme === 'function') {
+                window.FileOps._refreshManageSectionsForTheme(this);
+            }
+            if (window.NotificationManager && typeof window.NotificationManager.restyleOpenCenter === 'function') {
+                window.NotificationManager.restyleOpenCenter();
+            }
+            // If Topologies is open, let the existing DOM repaint through CSS
+            // variables and clear stale inline paint. If it is closed, do not
+            // rebuild it during the theme frame; the next open renders fresh.
+            const topoDropdown = document.getElementById('topologies-dropdown-menu');
+            const topoOpen = topoDropdown && topoDropdown.style.display !== 'none';
+            if (topoOpen && window.FileOps && window.FileOps._updateDropdownTheme) {
+                window.FileOps._updateDropdownTheme(this);
+                this._topoDropdownThemeDirty = true;
+            } else {
+                this._topoDropdownThemeDirty = true;
+            }
+        };
+        if (skinV2 && typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => requestAnimationFrame(afterThemePaint));
+        } else {
+            afterThemePaint();
         }
     }
     
@@ -11343,6 +12260,7 @@ class TopologyEditor {
     
     scheduleAutoSave() {
         if (this.initializing) return;
+        const generation = this._topologyGeneration || 0;
         // Debounce auto-save for better performance during rapid changes
         // Clear any pending auto-save
         if (this.autoSaveTimer) {
@@ -11351,7 +12269,8 @@ class TopologyEditor {
         
         // Schedule auto-save with minimal delay (100ms feels instant but batches rapid changes)
         this.autoSaveTimer = setTimeout(() => {
-            this.autoSave();
+            if (generation !== (this._topologyGeneration || 0)) return;
+            this.autoSave({ generation });
             this.autoSaveTimer = null;
             if (window.MinimapRender) window.MinimapRender.invalidateCache();
             this.renderMinimap();
@@ -11551,7 +12470,7 @@ class TopologyEditor {
         }
     }
     
-    // Add color to synchronized last used colors (max 4 colors)
+    // Add color to synchronized last used colors (max 8 colors)
     addToLastUsedColors(color) {
         if (!color || color === 'transparent') return;
         
@@ -11564,9 +12483,9 @@ class TopologyEditor {
         // Add to front
         this.lastUsedColors.unshift(normalizedColor);
         
-        // Keep only 4 colors
-        if (this.lastUsedColors.length > 4) {
-            this.lastUsedColors = this.lastUsedColors.slice(0, 4);
+        // Keep only 8 colors
+        if (this.lastUsedColors.length > 8) {
+            this.lastUsedColors = this.lastUsedColors.slice(0, 8);
         }
         
         // Save to localStorage
@@ -11581,7 +12500,8 @@ class TopologyEditor {
         // Get all last used color containers
         const containers = [
             document.getElementById('unified-last-used-colors'),
-            document.getElementById('link-last-used-colors')
+            document.getElementById('link-last-used-colors'),
+            document.getElementById('laser-last-used-colors')
         ].filter(Boolean);
         
         containers.forEach(container => {
@@ -11733,9 +12653,13 @@ class TopologyEditor {
         }
     }
     
-    autoSave() {
+    autoSave(opts = {}) {
         if (this.initializing) return;
-        if (!Array.isArray(this.objects) || this.objects.length === 0) {
+        if (opts.generation !== undefined && opts.generation !== (this._topologyGeneration || 0)) {
+            console.warn('[AutoSave] Skipped stale topology generation');
+            return;
+        }
+        if (!Array.isArray(this.objects) || (this.objects.length === 0 && !opts.allowEmpty)) {
             console.warn('[AutoSave] Skipped: empty topology');
             return;
         }
@@ -11745,7 +12669,15 @@ class TopologyEditor {
         // while dialog open, etc.) and prevents the corrupted state from being
         // persisted. The user can still undo and the previous save survives.
         const prevCount = this._lastSavedObjectCount || 0;
-        if (prevCount >= 5 && this.objects.length < Math.ceil(prevCount * 0.3)) {
+        const dropIntent = this._intentionalObjectCountDrop || null;
+        const intentionalDropActive = !!(
+            opts.force ||
+            (dropIntent &&
+                dropIntent.expiresAt > Date.now() &&
+                dropIntent.before === prevCount &&
+                this.objects.length <= prevCount)
+        );
+        if (prevCount >= 5 && this.objects.length < Math.ceil(prevCount * 0.3) && !intentionalDropActive) {
             console.warn(`[AutoSave] BLOCKED: object count dropped from ${prevCount} to ${this.objects.length} (>70% loss). Previous save preserved.`);
             return;
         }
@@ -11776,6 +12708,7 @@ class TopologyEditor {
                     delete copy._sshReachable;
                     delete copy._sshReachableAt;
                     delete copy._deviceMode;
+                    delete copy._xrayCaptureActive;
                     delete copy._createdAt;
                     if ((copy.type === 'link' || copy.type === 'unbound') && copy._hidden) {
                         delete copy._hidden;
@@ -11787,6 +12720,7 @@ class TopologyEditor {
                     linkIdCounter: this.linkIdCounter,
                     textIdCounter: this.textIdCounter,
                     shapeIdCounter: this.shapeIdCounter,
+                    packetIdCounter: this.packetIdCounter || 0,
                     deviceCounters: this.deviceCounters,
                     linkCurveMode: this.linkCurveMode,
                     globalCurveMode: this.globalCurveMode,
@@ -11798,7 +12732,11 @@ class TopologyEditor {
                     movableDevices: this.movableDevices,
                     magneticFieldStrength: this.magneticFieldStrength,
                     gridZoomEnabled: this.gridZoomEnabled,
-                    showAngleMeter: this.showAngleMeter
+                    showAngleMeter: this.showAngleMeter,
+                    topologySession: {
+                        generation: this._topologyGeneration || 0,
+                        identity: this._activeTopologyIdentity || null,
+                    }
                 },
                 timestamp: Date.now()
             };
@@ -11815,6 +12753,16 @@ class TopologyEditor {
             
             localStorage.setItem('topology_autosave', jsonData);
             this._lastSavedObjectCount = this.objects.length;
+            if (dropIntent && intentionalDropActive) {
+                this._intentionalObjectCountDrop = null;
+            }
+            if (window.FileOps && typeof window.FileOps._schedulePersistentAutoSave === 'function') {
+                window.FileOps._schedulePersistentAutoSave(this, {
+                    source: 'editor-autosave',
+                    allowEmpty: !!opts.allowEmpty,
+                    force: !!opts.force,
+                });
+            }
         } catch (error) {
             console.error('[AutoSave] Failed:', error);
         }
@@ -11863,6 +12811,9 @@ class TopologyEditor {
                     if ((obj.type === 'link' || obj.type === 'unbound') && !obj.originType) {
                         obj.originType = obj.type === 'link' ? 'QL' : 'UL';
                         obj.createdAt = Date.now() - (parseInt(obj.id.split('_')[1]) || 0) * 100; // Estimate
+                    }
+                    if (obj.type === 'link' || obj.type === 'unbound') {
+                        delete obj._xrayCaptureActive;
                     }
                     // CLEAR STALE LLDP RUNNING STATE on page refresh
                     // LLDP operations don't persist across page loads
@@ -11927,6 +12878,7 @@ class TopologyEditor {
                 this.linkIdCounter = data.metadata?.linkIdCounter || 0;
                 this.textIdCounter = data.metadata?.textIdCounter || 0;
                 this.shapeIdCounter = data.metadata?.shapeIdCounter || 0;  // CRITICAL FIX: Restore shape ID counter
+                this.packetIdCounter = data.metadata?.packetIdCounter || 0; // Restore packet counter
                 this.deviceCounters = data.metadata?.deviceCounters || { router: 0, switch: 0 };
                 
                 // CRITICAL FIX: If shapeIdCounter wasn't saved before, calculate from existing shapes
@@ -11940,6 +12892,18 @@ class TopologyEditor {
                         }));
                         this.shapeIdCounter = maxShapeNum + 1;
                         console.log(`[loadAutoSave] Calculated shapeIdCounter from existing shapes: ${this.shapeIdCounter}`);
+                    }
+                }
+                // Mirror for packets: handle older saves without packetIdCounter
+                // by scanning the existing packet IDs.
+                if (!data.metadata?.packetIdCounter && this.objects.length > 0) {
+                    const packets = this.objects.filter(o => o.type === 'packet');
+                    if (packets.length > 0) {
+                        const maxPacketNum = Math.max(...packets.map(p => {
+                            const match = p.id?.match(/packet_(\d+)/);
+                            return match ? parseInt(match[1], 10) : -1;
+                        }));
+                        this.packetIdCounter = maxPacketNum + 1;
                     }
                 }
 
@@ -12148,20 +13112,12 @@ class TopologyEditor {
                     }
                 }
                 
-                // Restore link type labels setting
+                // Restore canvas labels setting
                 if (data.metadata?.showLinkTypeLabels !== undefined) {
-                    this.showLinkTypeLabels = data.metadata.showLinkTypeLabels;
-                    const btn = document.getElementById('btn-link-type-labels');
-                    const statusText = btn?.querySelector('.status-text');
-                    if (btn) {
-                        if (this.showLinkTypeLabels) {
-                            btn.classList.add('active');
-                            if (statusText) statusText.textContent = 'Labels: ON';
-                        } else {
-                            btn.classList.remove('active');
-                            if (statusText) statusText.textContent = 'Labels: OFF';
-                        }
-                    }
+                    this.showLinkTypeLabels = !!data.metadata.showLinkTypeLabels;
+                }
+                if (typeof window.syncLinkLabelsToolbarButton === 'function') {
+                    window.syncLinkLabelsToolbarButton(this);
                 }
 
                 console.log('=== LOAD AUTO-SAVE COMPLETE ===');
@@ -12176,6 +13132,193 @@ class TopologyEditor {
             console.error('Failed to load auto-save:', error);
             console.error('Error details:', error.stack);
             // Don't alert - just continue with empty canvas
+        }
+    }
+
+    _normalizeTopologyIdentity(identity = {}) {
+        const value = identity || {};
+        const name = String(value.name || value.filename || '').replace(/\.json$/i, '');
+        const sectionId = String(value.sectionId || value.section_id || value.domain_id || '').trim();
+        const topologyId = String(value.topologyId || value.topology_id || value.id || '').trim();
+        const domain = String(value.domain || value.domainName || value.domain_name || '').trim();
+        const shared = value.shared || null;
+        const keyParts = [
+            topologyId || name || 'anonymous',
+            sectionId || domain || '',
+            shared && (shared.owner || shared.ownerDisplay || shared.permission) || '',
+        ];
+        return {
+            key: keyParts.join('|'),
+            name,
+            filename: String(value.filename || '').trim(),
+            domain,
+            sectionId,
+            topologyId,
+            shared,
+        };
+    }
+
+    beginTopologySwitch(identity = {}) {
+        const normalized = this._normalizeTopologyIdentity(identity);
+        const token = ++this._topologyLoadSeq;
+        this._previousTopologyGeneration = this._topologyGeneration || 0;
+        this._previousTopologyIdentity = this._activeTopologyIdentity || null;
+        this._topologyGeneration = token;
+        this._activeTopologyIdentity = normalized;
+        this.hideAllSelectionToolbars?.();
+        this._cancelTopologySessionWork();
+        return token;
+    }
+
+    isTopologySwitchCurrent(token) {
+        return token === undefined || token === null || token === (this._topologyGeneration || 0);
+    }
+
+    cancelTopologySwitch(token) {
+        if (!this.isTopologySwitchCurrent(token)) return;
+        this._topologyGeneration = this._previousTopologyGeneration || 0;
+        this._activeTopologyIdentity = this._previousTopologyIdentity || null;
+        this._previousTopologyGeneration = 0;
+        this._previousTopologyIdentity = null;
+        if (Array.isArray(this.objects) && this.objects.length > 0) {
+            this.resetHistoryForTopologyLoad('cancelled topology load');
+        }
+    }
+
+    _cancelTopologySessionWork() {
+        if (this.autoSaveTimer) {
+            clearTimeout(this.autoSaveTimer);
+            this.autoSaveTimer = null;
+        }
+        if (this.files && this.files.autoSaveTimer) {
+            clearTimeout(this.files.autoSaveTimer);
+            this.files.autoSaveTimer = null;
+        }
+        if (this.magneticFieldSaveTimer) {
+            clearTimeout(this.magneticFieldSaveTimer);
+            this.magneticFieldSaveTimer = null;
+        }
+        if (this._autoSaveTimeout) {
+            clearTimeout(this._autoSaveTimeout);
+            this._autoSaveTimeout = null;
+        }
+        if (this._panSaveTimeout) {
+            clearTimeout(this._panSaveTimeout);
+            this._panSaveTimeout = null;
+        }
+        if (this._wheelIdleTimer) {
+            clearTimeout(this._wheelIdleTimer);
+            this._wheelIdleTimer = null;
+        }
+        if (this.momentum) {
+            try { this.momentum.stopAll?.(); } catch (_) {}
+            try { this.momentum.reset?.(); } catch (_) {}
+        }
+        if (this._lldpAnimTimer) {
+            clearInterval(this._lldpAnimTimer);
+            this._lldpAnimTimer = null;
+        }
+        try {
+            if (window.LldpDialog && typeof window.LldpDialog.cleanupForTopologySwitch === 'function') {
+                window.LldpDialog.cleanupForTopologySwitch(this);
+            }
+        } catch (_) {}
+    }
+
+    _resetTransientStateForTopologyLoad() {
+        this.hideAllSelectionToolbars?.();
+        this.selectedObject = null;
+        this.selectedObjects = [];
+        this.dragging = false;
+        this.draggingCurveHandle = null;
+        this.draggingAttachedText = null;
+        this.draggingBULChain = null;
+        this.draggingScrollbar = null;
+        this.selectionRectangle = null;
+        this.selectionRectStart = null;
+        this.multiSelectMode = false;
+        this.linking = false;
+        this.linkStart = null;
+        this.placingDevice = null;
+        this.placementPending = null;
+        this.textPlacementPending = null;
+        this.editingLink = null;
+        this.editingText = null;
+        this.resizingDevice = false;
+        this.rotatingDevice = false;
+        this.resizingText = false;
+        this.rotatingText = false;
+        this.resizingShape = null;
+        this.rotatingShape = null;
+        this.stretchingLink = null;
+        this._linkFromTP = null;
+        this._detachLink = null;
+        this._potentialCPDrag = null;
+        this._xrayCapturing = null;
+        for (const obj of this.objects || []) {
+            if (obj && (obj.type === 'link' || obj.type === 'unbound')) {
+                delete obj._xrayCaptureActive;
+            }
+        }
+        this.contextMenuVisible = false;
+        try { this.hideContextMenu?.(); } catch (_) {}
+        try { this.updatePropertiesPanel?.(); } catch (_) {}
+    }
+
+    _createHistorySnapshot() {
+        const objsCopy = JSON.parse(JSON.stringify(this.objects || []));
+        for (const obj of objsCopy) {
+            if (obj._hiddenByGroup) {
+                delete obj._hiddenByGroup;
+                if (obj._hidden === true) delete obj._hidden;
+            }
+            if ((obj.type === 'link' || obj.type === 'unbound') && obj._hidden) {
+                delete obj._hidden;
+            }
+            delete obj._badgeWorlds;
+            delete obj._hostnameMismatch;
+            delete obj._mismatchDismissed;
+            delete obj._identity;
+            delete obj._configHostname;
+            delete obj._stackData;
+            delete obj._stackCachedAt;
+            delete obj._lldpData;
+            delete obj._lldpCompletedAt;
+            delete obj._gitCommit;
+            delete obj._gitCommitFetchedAt;
+            delete obj._gitCommitFailed;
+            delete obj._renaming;
+            delete obj._activeConfigJob;
+            delete obj._activeUpgradeJob;
+            delete obj._upgradeFailedJob;
+            delete obj._upgradeInProgress;
+            delete obj._mismatchRefreshPending;
+            delete obj._sshReachable;
+            delete obj._sshReachableAt;
+            delete obj._deviceMode;
+            delete obj._xrayCaptureActive;
+            delete obj._createdAt;
+        }
+        return {
+            objects: objsCopy,
+            deviceIdCounter: this.deviceIdCounter,
+            linkIdCounter: this.linkIdCounter,
+            textIdCounter: this.textIdCounter,
+            deviceCounters: { ...this.deviceCounters },
+            topologyGeneration: this._topologyGeneration || 0,
+            topologyKey: this._activeTopologyIdentity?.key || '',
+        };
+    }
+
+    resetHistoryForTopologyLoad(reason = 'topology-load') {
+        const state = this._createHistorySnapshot();
+        this.history = [state];
+        this.historyIndex = 0;
+        this._lastSaveStateTime = 0;
+        this.updateUndoRedoButtons();
+        this.updateStepCounter();
+        if (this.debugger) {
+            this.debugger.logInfo(`History reset for ${reason}`);
         }
     }
     
@@ -12201,9 +13344,43 @@ class TopologyEditor {
     }
     
     // Load topology from data object
-    loadTopologyFromData(data, opts) {
+    loadTopologyFromData(data, opts = {}) {
+        const loadToken = opts.loadToken || this.beginTopologySwitch({
+            name: opts.name || data?.metadata?.name || '',
+            filename: opts.filename || '',
+            domain: opts.domain || '',
+            sectionId: opts.sectionId || opts.section_id || '',
+            topologyId: opts.topologyId || opts.topology_id || data?.metadata?.topologyId || data?.metadata?.id || '',
+            shared: opts.shared || null,
+        });
+        if (!this.isTopologySwitchCurrent(loadToken)) {
+            console.warn('[loadTopology] Ignored stale topology load');
+            return false;
+        }
+        this._activeTopologyIdentity = this._normalizeTopologyIdentity({
+            ...(this._activeTopologyIdentity || {}),
+            name: opts.name || this._activeTopologyIdentity?.name || data?.metadata?.name || '',
+            filename: opts.filename || this._activeTopologyIdentity?.filename || '',
+            domain: opts.domain || this._activeTopologyIdentity?.domain || '',
+            sectionId: opts.sectionId || opts.section_id || this._activeTopologyIdentity?.sectionId || '',
+            topologyId: opts.topologyId || opts.topology_id || data?.metadata?.topologyId || data?.metadata?.id || this._activeTopologyIdentity?.topologyId || '',
+            shared: opts.shared || this._activeTopologyIdentity?.shared || null,
+        });
+        // Broadcast that the CURRENT topology is about to be replaced
+        // so subscribers (DeviceMonitor, DeviceState orchestrator, any
+        // open dialog) can cancel in-flight SSH fetches and drop per-
+        // device caches keyed on the previous composite scope. Without
+        // this, a slow response lands on the new canvas object that
+        // happens to share a label with a device in the old topology.
+        try {
+            window.dispatchEvent(new CustomEvent('topology:unloaded', {
+                detail: { reason: 'loadTopologyFromData' },
+            }));
+        } catch (_) {}
+        this._cancelTopologySessionWork();
         this._clearBDState();
-        this._loadDomain = opts?.domain || null;
+        this._resetTransientStateForTopologyLoad();
+        this._loadDomain = opts.domain || null;
 
         const wasPoolEnabled = localStorage.getItem('ssh_pool_enabled') === 'true';
         if (typeof ScalerAPI !== 'undefined' && ScalerAPI.toggleSSHPool) {
@@ -12212,7 +13389,24 @@ class TopologyEditor {
             });
         }
 
-        this.objects = data.objects || [];
+        this.objects = Array.isArray(data.objects)
+            ? JSON.parse(JSON.stringify(data.objects))
+            : [];
+        this._xrayCapturing = null;
+
+        // Re-baseline the auto-save 70%-loss guard to the NEW topology
+        // size. Without this, loading a smaller topology (e.g. a 3-node
+        // AI-generated "Two_Routers" on top of a 15-node canvas) makes
+        // `autoSave()` refuse to write because it thinks the user just
+        // mass-deleted 80% of the canvas -- so `topology_autosave` keeps
+        // the OLD content while `topo_active` (the pill) gets updated
+        // to the new topology's name. Result: after a browser refresh
+        // the pill and the canvas disagree, which reads as "a different
+        // topology is displayed but the pill still shows the one I
+        // loaded". The guard still fires for accidental deletions
+        // performed AFTER this point because subsequent edits compare
+        // against the new baseline we set here.
+        this._lastSavedObjectCount = this.objects.length;
         
         // Add missing properties for compatibility
         this.objects.forEach((obj, index) => {
@@ -12230,6 +13424,9 @@ class TopologyEditor {
             }
             if ((obj.type === 'link' || obj.type === 'unbound') && !obj.style) {
                 obj.style = 'solid';
+            }
+            if (obj.type === 'link' || obj.type === 'unbound') {
+                delete obj._xrayCaptureActive;
             }
         });
 
@@ -12255,7 +13452,7 @@ class TopologyEditor {
                     obj.end = d2 ? { x: d2.x, y: d2.y } : (d1 ? { x: d1.x + 150, y: d1.y } : { x: 350, y: 200 });
                 }
             }
-            if ((obj.type === 'link' || obj.type === 'unbound') && obj._hidden === true) {
+            if ((obj.type === 'link' || obj.type === 'unbound') && obj._hidden === true && !obj._generatedTopologyObject) {
                 delete obj._hidden;
             }
         });
@@ -12277,17 +13474,83 @@ class TopologyEditor {
         if (window.CurveModeManager) {
             window.CurveModeManager.updateUI(this);
         }
-        
-        this.selectedObject = null;
-        this.selectedObjects = [];
+        if (data.metadata?.showLinkTypeLabels !== undefined) {
+            this.showLinkTypeLabels = !!data.metadata.showLinkTypeLabels;
+        }
+        if (typeof window.syncLinkLabelsToolbarButton === 'function') {
+            window.syncLinkLabelsToolbarButton(this);
+        }
         
         this.draw();
-        this.saveState();
+        this.resetHistoryForTopologyLoad('topology load');
+        this.autoSave({ generation: loadToken, force: true });
 
         this._detectAndRestoreBDState(data.metadata);
 
         this.events?.emit('topology:loaded', {});
-        setTimeout(() => this.centerOnDevices(), 50);
+        // Also fire a DOM-level event so cross-module listeners (e.g.
+        // DeviceMonitor, DeviceState orchestrator) can invalidate per-
+        // topology caches and cancel in-flight fetches from the old
+        // canvas. Without this, a slow SSH from the previous topology
+        // could land on the new canvas and paint stale mode/stack.
+        try {
+            const topoMeta = (data && data.metadata) || {};
+            window.dispatchEvent(new CustomEvent('topology:loaded', {
+                detail: {
+                    topologyId: topoMeta.topologyId || topoMeta.id || opts.topologyId || '',
+                    name: topoMeta.name || '',
+                    domain: opts.domain || null,
+                    generation: loadToken,
+                },
+            }));
+        } catch (evtErr) {
+            console.warn('[loadTopology] topology:loaded dispatch failed', evtErr);
+        }
+        // Tell the per-user event bus which devices this canvas now watches.
+        // Uses _syncCanvasWatchers so every call site shares the same filter
+        // logic (device labels only, trimmed, de-duped by the module).
+        try {
+            const topoId = (data && data.metadata && (data.metadata.topologyId || data.metadata.id))
+                || opts.topologyId || '';
+            this._syncCanvasWatchers({ topologyId: topoId });
+        } catch (watchErr) {
+            console.warn('[loadTopology] watcher registration failed', watchErr);
+        }
+        const isGeneratedTopology = !!(data && data.metadata && (
+            data.metadata.generator
+            || data.metadata.generatedProtocolGroups
+            || data.metadata.generatedPlacement
+        ));
+        setTimeout(() => {
+            if (!this.isTopologySwitchCurrent(loadToken)) return;
+            if (isGeneratedTopology) {
+                this.centerOnDevices({ fitSmall: true, maxZoom: 1.4, minZoom: 0.78, padding: 110 });
+            } else {
+                this.centerOnDevices();
+            }
+        }, 50);
+        return true;
+    }
+
+    /**
+     * Push the current canvas device-label set to the per-user event bus.
+     * Call from any code that mutates `this.objects` so the bridge keeps
+     * the watcher table in sync with this tab's canvas. Safe to call
+     * frequently -- TopologyEvents debounces the HTTP flush.
+     */
+    _syncCanvasWatchers(opts) {
+        if (!window.TopologyEvents || typeof window.TopologyEvents.setWatchedDevices !== 'function') {
+            return;
+        }
+        const labels = (this.objects || [])
+            .filter(o => o && o.type === 'device')
+            .map(o => (o.label || '').trim())
+            .filter(Boolean);
+        try {
+            window.TopologyEvents.setWatchedDevices(labels, opts || {});
+        } catch (err) {
+            console.warn('[_syncCanvasWatchers] failed', err);
+        }
     }
 
     _clearBDState() {
@@ -12314,7 +13577,22 @@ class TopologyEditor {
             this._reconstructBDMetadataFromCanvas();
         }
 
-        if (this._multiBDMetadata?.bridge_domains?.length > 0) {
+        // Bug fix (2026-04-26): respect user-closed state of the BD legend.
+        // Only auto-open if the saved state explicitly recorded `visible:true`.
+        // Otherwise just light up the BD-hierarchy badge so the user can open
+        // it from the toolbar when they actually want it.
+        let savedVisible = false;
+        try {
+            const raw = localStorage.getItem('bd_panel_state');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                savedVisible = parsed && parsed.visible === true;
+            }
+        } catch (_) {}
+
+        if (savedVisible
+            && this._multiBDMetadata?.bridge_domains?.length > 0
+            && !document.getElementById('bd-legend-panel')) {
             this.showBDLegend(this._multiBDMetadata.bridge_domains);
         }
         this.updateBDHierarchyButton();
@@ -12968,8 +14246,17 @@ window.addEventListener('DOMContentLoaded', () => {
         window.BDLegend.inject(editor);
     }
     
-    // Auto-create built-in sections (Bugs, DNAAS) then load all into dropdown
-    window.FileOps._ensureBugsSection().catch(() => {}).then(() => editor.loadCustomSections());
+    // Built-in sections (Bugs, AI) are injected per-user by the backend via
+    // BUILTIN_SECTIONS in serve.py, so the frontend no longer needs to
+    // "ensure" them. The previous call to _ensureBugsSection() had a
+    // serious side effect: it POSTed to /api/migrate-bug-topologies which
+    // auto-copied every file in the shared ~/SCALER/FLOWSPEC_VPN/
+    // bug_evidence/ folder into the CALLING user's __bugs section. That
+    // made every user see the same BUGS list (yarel's historical bug
+    // evidence), violating per-user isolation. Now we just load the
+    // already-scoped sections; the __bugs domain starts empty for each
+    // new user and only fills from their own /api/bugs/from-jira calls.
+    editor.loadCustomSections();
     
     console.log('Topology Editor initialized.');
     console.log('Commands: checkAutoSave() | recoverTopology() | checkHistory() | syncToggles() | checkModes()');
@@ -12998,6 +14285,9 @@ window.addEventListener('DOMContentLoaded', () => {
             
             // Close DNAAS and Network Mapper panels if opening Topologies
             if (!isVisible) {
+                if (typeof editor.hideAllSelectionToolbars === 'function') {
+                    editor.hideAllSelectionToolbars();
+                }
                 const dp = document.getElementById('dnaas-panel');
                 const db = document.getElementById('btn-dnaas');
                 if (dp && dp.style.display === 'block') {
@@ -13023,8 +14313,36 @@ window.addEventListener('DOMContentLoaded', () => {
                 editor._topoDropdownThemeDirty = false;
                 const rect = btnTopologies.getBoundingClientRect();
                 topologiesDropdown.style.position = 'fixed';
-                topologiesDropdown.style.left = rect.left + 'px';
+                const clampedLeft = (window.FileOps && typeof window.FileOps._clampDropdownLeft === 'function')
+                    ? window.FileOps._clampDropdownLeft(rect.left)
+                    : rect.left;
+                topologiesDropdown.style.left = clampedLeft + 'px';
                 topologiesDropdown.style.top = (rect.bottom + 4) + 'px';
+
+                // First-open sizing: the dropdown mostly shows collapsed
+                // domain titles at this point, but remembered-open domains
+                // may already have rendered rows from a previous session.
+                // Re-fit so the dropdown doesn't stay at its tiny 300px
+                // min-width when actual content demands more.
+                if (window.FileOps && window.FileOps._fitDropdownToContent) {
+                    requestAnimationFrame(() => window.FileOps._fitDropdownToContent());
+                }
+
+                // Kick a background sharing refresh so the shared-in
+                // virtual rows and "shared" badges stay in sync with
+                // what the user sees in the share drawer -- without
+                // blocking the dropdown open. The listener on
+                // `topology-domains:changed` takes care of re-render.
+                if (window.TopologyDomains && window.TopologyDomains.fetchDomains) {
+                    window.TopologyDomains.fetchDomains().catch(() => {});
+                }
+                if (window.FileOps && window.FileOps._refreshSharingCache) {
+                    window.FileOps._refreshSharingCache(true).then(() => {
+                        if (topologiesDropdown.style.display === 'block') {
+                            window.FileOps._renderCustomSectionsInDropdown(editor);
+                        }
+                    }).catch(() => {});
+                }
             }
         });
         console.log('✓ Topologies button wired');
@@ -13052,7 +14370,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // Wire up clear button
     if (btnClearTop) {
         btnClearTop.addEventListener('click', () => {
-            editor.confirmNewTopology();
+            editor.clearCanvas();
         });
         console.log('✓ Clear button wired');
     }

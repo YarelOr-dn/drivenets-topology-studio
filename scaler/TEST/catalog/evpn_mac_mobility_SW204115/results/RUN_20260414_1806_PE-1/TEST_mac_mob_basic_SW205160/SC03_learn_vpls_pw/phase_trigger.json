@@ -1,0 +1,157 @@
+{
+  "phase_name": "trigger",
+  "started_at": "2026-04-14T18:10:08.078+00:00",
+  "completed_at": "2026-04-14T18:11:53.921+00:00",
+  "duration_sec": 105.843,
+  "command_count": 18,
+  "commands": [
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:10:18.121+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:10:23.225+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:10:28.329+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 414,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:10:33.433+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:10:38.537+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:10:43.641+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:10:48.745+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:10:53.849+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:10:58.953+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:11:04.057+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:11:09.161+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:11:14.265+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:11:19.369+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:11:24.474+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:11:29.577+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:11:34.681+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:11:39.785+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    },
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-14T18:11:44.889+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    }
+  ],
+  "parsed_values": {
+    "trigger_duration_sec": 105.843
+  },
+  "anomalies": []
+}

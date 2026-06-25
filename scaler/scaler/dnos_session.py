@@ -294,6 +294,23 @@ class DNOSSession:
         self._client = None
         self._connect()
 
+    # Command prefixes that MUST NOT receive an auto-appended `| no-more` pipe.
+    # These are either (a) configuration-mode commands (config/commit/etc.) that
+    # don't produce paginated output, or (b) operational commands like `clear`,
+    # `request`, `run` that DNOS rejects when piped (ERROR: Unknown word).
+    # Discovered live on PE-1 (DNOS 26.2.0): `clear evpn instance X mac-suppression | no-more`
+    # yields "Unknown word: 'mac-suppression'"; the same command without `| no-more`
+    # succeeds silently. 2026-04-20 validation run on PE-1 (100.64.4.200).
+    _CFG_PREFIXES = (
+        "config", "commit", "rollback", "abort", "top", "end", "exit",
+        "no ", "set ", "unset ", "delete ", "protocols ", "interfaces ", "network-services ",
+        "routing-options ", "routing-policy ", "system ", "admin-state ",
+        "remote-as ", "address-family ", "send-community ", "soft-reconfiguration ",
+        "update-source ", "vlan-", "l2-service ", "evi ", "seamless-integration",
+        "mac-handling ", "local-loop-prevention ", "loop-prevention ",
+        "clear ", "request ", "run ",
+    )
+
     def send_command(
         self,
         command: str,
@@ -303,7 +320,9 @@ class DNOSSession:
         reconnect_interval: float = 5.0,
     ) -> str:
         """Send a command and return output when the prompt reappears."""
-        if auto_no_more and "| no-more" not in command:
+        cmd_lower = command.strip().lower()
+        skip_no_more = any(cmd_lower.startswith(p) for p in self._CFG_PREFIXES)
+        if auto_no_more and not skip_no_more and "| no-more" not in command:
             command = f"{command} | no-more"
 
         for attempt in range(reconnect_attempts + 1):
@@ -378,10 +397,19 @@ class DNOSSession:
         finally:
             self.send_command("end", auto_no_more=False)
 
-    def commit(self, check_only: bool = False) -> tuple[bool, str]:
-        """Run ``commit`` or ``commit check`` from configuration mode."""
+    def commit(self, check_only: bool = False, timeout: Optional[int] = None) -> tuple[bool, str]:
+        """Run ``commit`` or ``commit check`` from configuration mode.
+
+        ``timeout`` (seconds) is forwarded to the underlying ``send_command`` so a
+        large or slow commit is not cut off at the default command timeout, which
+        would otherwise look like a failed commit and trigger an unnecessary
+        rollback. When ``None`` the session default applies.
+        """
         cmd = "commit check" if check_only else "commit"
-        out = self.send_command(cmd, auto_no_more=False)
+        kwargs = {"auto_no_more": False}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        out = self.send_command(cmd, **kwargs)
         ok = "[SSH ERROR]" not in out and "error" not in out.lower()
         return ok, out
 

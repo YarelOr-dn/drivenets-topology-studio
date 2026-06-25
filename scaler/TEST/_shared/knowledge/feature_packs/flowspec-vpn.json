@@ -1,0 +1,41 @@
+{
+  "feature": "flowspec-vpn",
+  "_description": "Starter pack for FlowSpec / FlowSpec-VPN tests. Covers SAFI 133 (ipv4 flowspec), SAFI 134 (flowspec-vpn), redirect-ip / redirect-vrf actions, and TCAM / NCP datapath validation.",
+  "epics": ["SW-181332"],
+  "show_commands": [
+    {"command": "show bgp ipv4 flowspec summary", "phase": "snapshot",
+     "purpose": "Per-AFI BGP state for FlowSpec."},
+    {"command": "show bgp ipv4 flowspec-vpn summary", "phase": "snapshot",
+     "purpose": "FlowSpec-VPN session state (SAFI 134)."},
+    {"command": "show flowspec ncp 0", "phase": "verify",
+     "purpose": "All FlowSpec rules installed in NCP TCAM."},
+    {"command": "show flowspec-local-policies ncp 0", "phase": "verify",
+     "purpose": "Local FlowSpec policies vs BGP-injected ones."},
+    {"command": "show system npu-resources resource-type flowspec", "phase": "snapshot",
+     "purpose": "TCAM capacity (used vs total)."},
+    {"command": "show dnos-internal routing rib-manager database flowspec", "phase": "verify",
+     "purpose": "Zebra FlowSpec tracking table (between bgpd and fib-manager)."},
+    {"command": "show flowspec db", "phase": "verify",
+     "purpose": "vtysh FlowSpec DB (per-VRF supported via 'vrf <name>')."}
+  ],
+  "trace_layers": [
+    {"layer": "bgpd", "commands": [
+      "show file traces routing_engine/bgpd_traces | include 'announce_flowspec'",
+      "show file traces routing_engine/bgpd_traces | include 'withdraw_flowspec'"
+    ]},
+    {"layer": "fib-manager", "commands": [
+      "show file traces routing_engine/fibmgrd_traces | include 'FLOWSPEC_RULE_ADD'",
+      "show file traces routing_engine/fibmgrd_traces | include 'is_flowspec'"
+    ]},
+    {"layer": "ncp-wb_agent", "commands": [
+      "show file ncp 0 traces datapath/wb_agent.flowspec | include 'AddRuleInternal'",
+      "show file ncp 0 traces datapath/wb_agent.flowspec | include 'redirect'"
+    ]}
+  ],
+  "by_design_behaviors": [
+    "RT-Redirect + Redirect-IP both in rule -> only RT-Redirect applied (SW-206876).",
+    "Drop (rate=0) + RT-Redirect -> entire rule rejected as unsupported (SW-48486).",
+    "Redirect-IP NH via MPLS tunnel -> redirect skipped, NH shown N/A (SW-41148, draft-02).",
+    "Multiple VRFs match redirect RT -> first VRF alphabetically wins (SW-61695)."
+  ]
+}

@@ -272,7 +272,17 @@ function showTextSelectionToolbar(editor, textObj) {
     toolbar.appendChild(createButton('text', 'Font', () => {
         editor.showTextFontSelector(textObj);
     }));
-    
+
+    // Size control (2026-05-12 dots+edge-zone polish pass).
+    // The floating text toolbar previously only exposed font FAMILY (the
+    // "Font" button above) -- there was no way to change font SIZE without
+    // either cycling via keyboard or hunting through the left sidebar's
+    // Default Text panel. The selected text-box context now gets its own
+    // size selector, mirroring showTextFontSelector's popover style.
+    toolbar.appendChild(createButton('text-size', 'Size', () => {
+        editor.showTextSizeSelector(textObj);
+    }));
+
     toolbar.appendChild(createButton('palette', 'Color', () => {
         editor.showTextColorPalette(textObj);
     }));
@@ -375,6 +385,21 @@ function showTextSelectionToolbar(editor, textObj) {
         }));
     }
     
+    // Group button -- open the canonical floating Groups panel.
+    if (window.GroupsPanel) {
+        const _textGroupBtn = createButton('group', 'Groups', () => {
+            try {
+                window.GroupsPanel.toggle(editor);
+            } catch (err) {
+                console.error('[text-toolbar] Failed to toggle Groups panel:', err);
+                if (editor.showToast) editor.showToast('Groups panel failed to open. Check console.', 'error');
+            }
+        });
+        _textGroupBtn.setAttribute('aria-label', 'Open Groups panel');
+        _textGroupBtn.setAttribute('title', 'Groups panel');
+        toolbar.appendChild(_textGroupBtn);
+    }
+
     toolbar.appendChild(createSeparator());
     
     // Group 4: Delete

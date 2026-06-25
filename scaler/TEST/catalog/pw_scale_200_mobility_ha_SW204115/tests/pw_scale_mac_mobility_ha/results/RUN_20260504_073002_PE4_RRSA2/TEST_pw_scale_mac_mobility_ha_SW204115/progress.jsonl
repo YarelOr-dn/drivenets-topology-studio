@@ -1,0 +1,5 @@
+{"detail": "", "phase": "setup", "result_dir": "/home/dn/drivenets-topology-studio/scaler/TEST/catalog/pw_scale_200_mobility_ha_SW204115/tests/pw_scale_mac_mobility_ha/results/RUN_20260504_073002_PE4_RRSA2/TEST_pw_scale_mac_mobility_ha_SW204115", "service_count": 200, "status": "running", "step": "initialized", "stream_count": 2, "timestamp": "2026-05-04T07:30:02+0000", "traffic_strategy": "modifier"}
+{"completed": 0, "detail": "running 400 DNAAS preflight checks", "phase": "dnaas_preflight_ready", "status": "running", "step": "start", "timestamp": "2026-05-04T07:30:02+0000", "total": 400}
+{"completed": 0, "detail": "batch 1/50", "phase": "dnaas_preflight_ready", "status": "running", "step": "dnaas_batch_start", "timestamp": "2026-05-04T07:30:02+0000", "total": 400}
+{"completed": 1, "detail": "", "failures": 1, "phase": "dnaas_preflight_ready", "status": "running", "step": "dnaas_check", "timestamp": "2026-05-04T07:31:08+0000", "total": 400}
+{"completed": 8, "detail": "batch 2/50", "phase": "dnaas_preflight_ready", "status": "running", "step": "dnaas_batch_start", "timestamp": "2026-05-04T07:38:20+0000", "total": 400}

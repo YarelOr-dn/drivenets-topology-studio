@@ -1,0 +1,164 @@
+{
+  "test_id": "TEST_mac_mob_basic_SW205160",
+  "test_name": "MAC Mobility | Basic Learning",
+  "device": "PE-1",
+  "image_version": "",
+  "started_at": "2026-04-16T16:24:33+00:00",
+  "completed_at": "2026-04-16T16:24:33+00:00",
+  "overall_verdict": "FAIL",
+  "scenario_count": 4,
+  "scenarios": [
+    {
+      "id": "SC01_learn_local_ac",
+      "name": "Learn MAC from local AC; expect Type-2 advertised",
+      "verdict": "PASS",
+      "duration_sec": 3.32,
+      "layer_verdicts": {
+        "trigger": "PASS",
+        "control_plane": "PASS",
+        "mac_flags": "PASS",
+        "forwarding": "PASS",
+        "ghost_macs": "PASS",
+        "rt2_advertised": "PASS",
+        "cross_layer": "PASS",
+        "bgp_session": "PASS",
+        "traces": "SKIP",
+        "timing": "PASS"
+      },
+      "counter_diff": null,
+      "event_audit": null,
+      "health_check": null,
+      "cross_layer": null,
+      "poll_data": null,
+      "errors": []
+    },
+    {
+      "id": "SC02_learn_remote_evpn",
+      "name": "Learn MAC from remote EVPN RT-2",
+      "verdict": "FAIL",
+      "duration_sec": 44.54,
+      "layer_verdicts": {
+        "trigger": "PASS",
+        "control_plane": "FAIL",
+        "mac_flags": "FAIL",
+        "forwarding": "FAIL",
+        "ghost_macs": "PASS",
+        "cross_layer_mac_existence": "FAIL",
+        "bgp_session": "PASS",
+        "traces": "PASS",
+        "timing": "PASS"
+      },
+      "counter_diff": null,
+      "event_audit": null,
+      "health_check": null,
+      "cross_layer": null,
+      "poll_data": null,
+      "errors": []
+    },
+    {
+      "id": "SC03_learn_vpls_pw",
+      "name": "Learn MAC from VPLS PW (dynamic)",
+      "verdict": "FAIL",
+      "duration_sec": 27.53,
+      "layer_verdicts": {
+        "trigger": "PASS",
+        "control_plane": "FAIL",
+        "mac_flags": "FAIL",
+        "forwarding": "FAIL",
+        "ghost_macs": "PASS",
+        "cross_layer_mac_existence": "FAIL",
+        "bgp_session": "WARN",
+        "traces": "PASS",
+        "timing": "PASS"
+      },
+      "counter_diff": null,
+      "event_audit": null,
+      "health_check": null,
+      "cross_layer": null,
+      "poll_data": null,
+      "errors": []
+    },
+    {
+      "id": "SC04_table_counts",
+      "name": "Verify MAC table counts and forwarding continuity",
+      "verdict": "WARN",
+      "duration_sec": 0.41,
+      "layer_verdicts": {
+        "scale": "PASS",
+        "mac_flags": "PASS",
+        "forwarding": "PASS",
+        "ghost_macs": "PASS",
+        "cross_layer": "PASS",
+        "bgp_session": "WARN",
+        "traces": "SKIP",
+        "timing": "PASS"
+      },
+      "counter_diff": null,
+      "event_audit": null,
+      "health_check": null,
+      "cross_layer": null,
+      "poll_data": null,
+      "errors": []
+    }
+  ],
+  "config_baseline": {
+    "before_label": "before_test",
+    "after_label": "after_test",
+    "clean": false,
+    "debris_detected": true,
+    "debris_summary": "Changes in: network-services evpn: +1 -1",
+    "diffs": [
+      {
+        "section": "network-services evpn",
+        "has_changes": true,
+        "added_count": 1,
+        "removed_count": 1,
+        "added_lines": [
+          "# YOR_PE-1 config-start [16-Apr-2026 19:24:33 UTC+03:00 (Israel)]"
+        ],
+        "removed_lines": [
+          "# YOR_PE-1 config-start [16-Apr-2026 19:19:54 UTC+03:00 (Israel)]"
+        ],
+        "unified_diff": "--- network-services evpn (before)\n+++ network-services evpn (after)\n@@ -1,4 +1,4 @@\n-# YOR_PE-1 config-start [16-Apr-2026 19:19:54 UTC+03:00 (Israel)]\n+# YOR_PE-1 config-start [16-Apr-2026 19:24:33 UTC+03:00 (Israel)]\n network-services\n   evpn\n     instance HA_TEST_ELAN"
+      },
+      {
+        "section": "protocols bgp",
+        "has_changes": false,
+        "added_count": 0,
+        "removed_count": 0,
+        "added_lines": [],
+        "removed_lines": [],
+        "unified_diff": ""
+      }
+    ]
+  },
+  "regression": {
+    "current_run": "TEST_mac_mob_basic_SW205160",
+    "baseline_run": "none",
+    "baseline_loaded": false,
+    "has_regressions": false,
+    "regression_count": 0,
+    "improvement_count": 0,
+    "items": []
+  },
+  "cleanup": {
+    "cleanup_successful": true,
+    "config_debris_found": false,
+    "errors": [],
+    "actions": [
+      {
+        "command": "no debug evpn mac-mobility",
+        "device": "PE-1",
+        "executed": true,
+        "error": "-----------------------------------^\nERROR: Unknown word: 'debug'."
+      },
+      {
+        "command": "no set logging terminal",
+        "device": "PE-1",
+        "executed": true,
+        "error": "ERROR: Unknown word."
+      }
+    ]
+  },
+  "learning_updates": []
+}

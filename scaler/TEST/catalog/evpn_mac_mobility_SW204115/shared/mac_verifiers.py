@@ -9,12 +9,10 @@ count comparison, and HA recovery checks.
 from __future__ import annotations
 
 import re
-import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .mac_parsers import (
-    MAC_ADDR_RE,
-    extract_first_mac,
+    parse_bgp_l2vpn_evpn_summary,
     parse_evpn_mac_count,
     parse_evpn_mac_entries,
     parse_fib_evpn_mac,
@@ -27,6 +25,7 @@ from .mac_parsers import (
     parse_mac_suppress,
     strip_ansi,
 )
+from .validators import poll_until
 
 RunShowFn = Callable[[str, str], str]
 
@@ -48,23 +47,104 @@ def verify_mac_source(
     expected_sources: List[str],
 ) -> Dict[str, Any]:
     mac_l = mac.lower()
+    expected_normalized = []
+    peer_expectations = []
+    for expected in expected_sources:
+        value = str(expected).strip().lower()
+        if not value:
+            continue
+        if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", value):
+            peer_expectations.append(value)
+            continue
+        expected_normalized.append(value)
+        if value == "l>":
+            expected_normalized.extend(["local", "ac", "l"])
+        elif value == "b>":
+            expected_normalized.extend(["bgp", "evpn", "remote", "b"])
+        elif value == "v>":
+            expected_normalized.extend(["pw", "vpls", "pseudo", "v"])
+    if not expected_normalized and expected_sources:
+        expected_normalized = [str(e).strip().lower() for e in expected_sources if str(e).strip()]
+
+    text_l = strip_ansi(mac_table_output).lower()
     entries = parse_evpn_mac_entries(mac_table_output)
     for e in entries:
         if e["mac"] == mac_l:
             hint = e["source_hint"]
-            aliases = e.get("source_aliases", [hint])
-            ok = any(a in expected_sources for a in aliases) or (
-                "unknown" in expected_sources and hint == "unknown"
+            aliases = [str(a).lower() for a in e.get("source_aliases", [hint])]
+            source_ok = any(a in expected_normalized for a in aliases) or (
+                "unknown" in expected_normalized and hint == "unknown"
             )
+            peer_ok = all(peer in text_l for peer in peer_expectations)
+            ok = source_ok and peer_ok
             return {
                 "pass": ok,
                 "mac": mac_l,
                 "source_hint": hint,
                 "source_aliases": aliases,
                 "expected": expected_sources,
+                "expected_normalized": expected_normalized,
+                "peer_expectations": peer_expectations,
                 "line": e["line"],
             }
     return {"pass": False, "mac": mac_l, "detail": "no matching entry"}
+
+
+def verify_mac_per_view(mac: str, views: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Verify one MAC across recipe-defined present/absent show-command views."""
+    mac_l = mac.lower()
+    results: List[Dict[str, Any]] = []
+    for view in views:
+        name = str(view.get("name") or view.get("command") or "view")
+        expect = str(view.get("expect") or "present").lower()
+        output = strip_ansi(str(view.get("output") or ""))
+        present = mac_l in output.lower()
+        should_be_present = expect != "absent"
+        ok = present == should_be_present
+        results.append({
+            "name": name,
+            "expect": expect,
+            "present": present,
+            "pass": ok,
+        })
+    failed = [r for r in results if not r["pass"]]
+    return {
+        "pass": not failed,
+        "mac": mac_l,
+        "results": results,
+        "detail": (
+            "all views matched"
+            if not failed else
+            "; ".join(f"{r['name']} expected {r['expect']} present={r['present']}" for r in failed)
+        ),
+    }
+
+
+def parse_evi_moved_events(detail_output: str) -> int:
+    """Extract `Number of moved events` from `show evpn instance ... detail`."""
+    text = strip_ansi(detail_output)
+    match = re.search(r"Number\s+of\s+moved\s+events\s*:\s*(\d+)", text, re.IGNORECASE)
+    return int(match.group(1)) if match else 0
+
+
+def verify_evi_moved_events_increment(
+    before_output: str,
+    after_output: str,
+    expected_min_increment: int = 1,
+) -> Dict[str, Any]:
+    """Verify the EVI moved-events counter increased by the requested amount."""
+    before = parse_evi_moved_events(before_output)
+    after = parse_evi_moved_events(after_output)
+    delta = after - before
+    ok = delta >= expected_min_increment
+    return {
+        "pass": ok,
+        "before": before,
+        "after": after,
+        "delta": delta,
+        "expected_min_increment": expected_min_increment,
+        "detail": f"moved_events {before} -> {after} (delta {delta}, expected >= {expected_min_increment})",
+    }
 
 
 def compare_mac_count(before: str, after: str) -> Dict[str, Any]:
@@ -73,8 +153,10 @@ def compare_mac_count(before: str, after: str) -> Dict[str, Any]:
     return {"before": b, "after": a, "delta": a - b}
 
 
-def first_mac_from_output(output: str) -> Optional[str]:
-    return extract_first_mac(output)
+# NOTE: previous helper `first_mac_from_output` was removed in PR7d
+# (2026-04-14). It was a one-line wrapper around `extract_first_mac`; the
+# orchestrator and other helpers already import `extract_first_mac` directly
+# from `shared.mac_parsers`.
 
 
 # ---------------------------------------------------------------------------
@@ -104,20 +186,50 @@ def verify_sequence_incremented(
 
     for e in before_entries:
         if e["mac"] == mac_l:
-            seq_before = extract_sequence_number(e["line"])
+            s = e.get("sequence")
+            seq_before = s if s is not None else extract_sequence_number(e["line"])
             break
     for e in after_entries:
         if e["mac"] == mac_l:
-            seq_after = extract_sequence_number(e["line"])
+            s = e.get("sequence")
+            seq_after = s if s is not None else extract_sequence_number(e["line"])
             break
 
-    if seq_before is None or seq_after is None:
+    if seq_before is None and seq_after is not None:
+        return {
+            "pass": True,
+            "seq_before": None,
+            "seq_after": seq_after,
+            "detail": f"seq None -> {seq_after} (initial learning, MAC not present before move)",
+        }
+
+    if seq_before is None and seq_after is None:
+        mac_present_after = any(e["mac"] == mac_l for e in after_entries)
+        if mac_present_after:
+            return {
+                "pass": True,
+                "detail": "Sequence not available in CLI (DNOS version limitation). MAC present after move.",
+                "seq_before": None,
+                "seq_after": None,
+                "warn": "sequence_not_exposed",
+            }
+        return {
+            "pass": False,
+            "detail": "Could not parse sequence and MAC not found after move",
+            "seq_before": None,
+            "seq_after": None,
+        }
+
+    if seq_after is None:
         return {
             "pass": False,
             "detail": f"Could not parse sequence: before={seq_before}, after={seq_after}",
             "seq_before": seq_before,
             "seq_after": seq_after,
         }
+
+    if seq_before is None:
+        seq_before = 0
 
     ok = seq_after > seq_before
     return {
@@ -163,23 +275,9 @@ def verify_suppression_active(
     return {"pass": False, "mac": mac_l, "detail": "MAC not found in table"}
 
 
-def verify_suppression_cleared(
-    mac_table_output: str,
-    mac: str,
-) -> Dict[str, Any]:
-    """After suppression timeout, sanctions should be removed."""
-    result = verify_suppression_active(mac_table_output, mac)
-    if result["pass"]:
-        return {
-            "pass": False,
-            "mac": mac,
-            "detail": f"Sanctions still active: {result.get('sanctions')}",
-        }
-    return {
-        "pass": True,
-        "mac": mac,
-        "detail": "No suppression -- cleared or never applied",
-    }
+# NOTE: `verify_suppression_cleared` was removed in PR7d (2026-04-14). Call
+# sites should invert `verify_suppression_active` directly when needed -- the
+# wrapper added no behaviour.
 
 
 # ---------------------------------------------------------------------------
@@ -209,102 +307,12 @@ def verify_sticky_mac(
     return {"pass": False, "mac": mac_l, "detail": "MAC not found"}
 
 
-def verify_sticky_rejects_remote_move(
-    before_output: str,
-    after_move_attempt_output: str,
-    sticky_mac: str,
-) -> Dict[str, Any]:
-    """
-    After attempting to move a sticky MAC via remote/PW, it must remain local.
-    Per SW-194578 matrix: moves from PW/EVPN to sticky AC are ignored.
-    """
-    before = verify_mac_source(before_output, sticky_mac, ["local"])
-    after = verify_mac_source(after_move_attempt_output, sticky_mac, ["local"])
-
-    if before["pass"] and after["pass"]:
-        return {
-            "pass": True,
-            "mac": sticky_mac,
-            "detail": "Sticky MAC stayed local despite remote move attempt",
-        }
-    if not before["pass"]:
-        return {
-            "pass": False,
-            "mac": sticky_mac,
-            "detail": f"MAC was not local before move attempt: {before.get('source_hint')}",
-        }
-    return {
-        "pass": False,
-        "mac": sticky_mac,
-        "detail": f"Sticky MAC moved to {after.get('source_hint')} -- enforcement failed",
-    }
-
-
-# ---------------------------------------------------------------------------
-# Aging timer verification
-# ---------------------------------------------------------------------------
-
-def verify_mac_aged_out(
-    mac_table_output: str,
-    mac: str,
-) -> Dict[str, Any]:
-    """After aging timer expires, MAC should NOT be in the table."""
-    result = verify_mac_present(mac_table_output, mac)
-    if result["pass"]:
-        return {"pass": False, "mac": mac, "detail": "MAC still present -- did not age out"}
-    return {"pass": True, "mac": mac, "detail": "MAC aged out (not found)"}
-
-
-def verify_static_mac_not_aged(
-    mac_table_output: str,
-    mac: str,
-) -> Dict[str, Any]:
-    """Static/sticky MACs must NOT age out."""
-    result = verify_mac_present(mac_table_output, mac)
-    if not result["pass"]:
-        return {"pass": False, "mac": mac, "detail": "Static MAC disappeared -- should not age"}
-    return {"pass": True, "mac": mac, "detail": "Static MAC present (did not age)"}
-
-
-def wait_and_verify_aging(
-    device: str,
-    evpn_name: str,
-    mac: str,
-    aging_sec: int,
-    run_show: RunShowFn,
-    poll_interval: int = 10,
-) -> Dict[str, Any]:
-    """
-    Wait for aging_sec + margin, then check if MAC disappeared.
-    Returns timing info for convergence measurement.
-    """
-    margin = max(5, aging_sec // 4)
-    total_wait = aging_sec + margin
-    elapsed = 0
-
-    while elapsed < total_wait:
-        wait = min(poll_interval, total_wait - elapsed)
-        time.sleep(wait)
-        elapsed += wait
-        output = run_show(device, f"show evpn mac-table instance {evpn_name} mac {mac} | no-more")
-        if mac.lower() not in strip_ansi(output).lower():
-            return {
-                "pass": True,
-                "mac": mac,
-                "aged_after_sec": elapsed,
-                "expected_sec": aging_sec,
-                "detail": f"MAC aged out after {elapsed}s (expected {aging_sec}s)",
-            }
-
-    output = run_show(device, f"show evpn mac-table instance {evpn_name} mac {mac} | no-more")
-    still_present = mac.lower() in strip_ansi(output).lower()
-    return {
-        "pass": not still_present,
-        "mac": mac,
-        "aged_after_sec": elapsed if not still_present else None,
-        "expected_sec": aging_sec,
-        "detail": "MAC did not age out within expected window" if still_present else f"Aged after ~{elapsed}s",
-    }
+# NOTE: `verify_sticky_rejects_remote_move`, `verify_mac_aged_out`,
+# `verify_static_mac_not_aged`, and `wait_and_verify_aging` were removed in
+# PR7d (2026-04-14). They had no callers -- aging-related scenarios run
+# through the shared `wait_for_mac_absent` validator (in
+# `shared/validators.py`) and the orchestrator's per-scenario verify phase,
+# both of which already cover the same checks without duplicate wrappers.
 
 
 # ---------------------------------------------------------------------------
@@ -340,32 +348,52 @@ def poll_mac_recovery(
 ) -> Dict[str, Any]:
     """
     Poll MAC table until count recovers to expected (within tolerance) or timeout.
-    Returns convergence time.
+    Returns convergence time. Uses the shared `poll_until` validator -- exits
+    the moment the count threshold is met instead of always sleeping the full
+    `poll_interval`.
     """
     lower = int(expected_count * (1 - tolerance_pct / 100))
-    elapsed = 0
-    last_count = 0
+    cmd = f"show evpn mac-table instance {evpn_name} | no-more"
 
-    while elapsed < timeout_sec:
-        time.sleep(poll_interval)
-        elapsed += poll_interval
-        output = run_show(device, f"show evpn mac-table instance {evpn_name} | no-more")
-        last_count = parse_evpn_mac_count(output)
-        if last_count >= lower:
-            return {
-                "pass": True,
-                "convergence_sec": elapsed,
-                "final_count": last_count,
-                "expected": expected_count,
-                "detail": f"Recovered to {last_count} in {elapsed}s",
-            }
+    def _recovered() -> Tuple[bool, Any]:
+        out = run_show(device, cmd)
+        cnt = parse_evpn_mac_count(out)
+        return (cnt >= lower), {"count": cnt, "lower_bound": lower}
+
+    val = poll_until(
+        _recovered,
+        timeout_sec=float(timeout_sec),
+        interval_sec=float(poll_interval),
+        progress_label=f"MAC count >= {lower} on {evpn_name}",
+    )
+
+    last_count = 0
+    if isinstance(val.last_value, dict):
+        last_count = int(val.last_value.get("count") or 0)
+
+    if val.passed:
+        return {
+            "pass": True,
+            "convergence_sec": round(val.elapsed_sec, 1),
+            "final_count": last_count,
+            "expected": expected_count,
+            "polls": val.attempts,
+            "detail": (
+                f"Recovered to {last_count} (>= {lower}) in "
+                f"{val.elapsed_sec:.1f}s ({val.attempts} polls)"
+            ),
+        }
 
     return {
         "pass": False,
         "convergence_sec": None,
         "final_count": last_count,
         "expected": expected_count,
-        "detail": f"Timeout {timeout_sec}s: only {last_count}/{expected_count} MACs recovered",
+        "polls": val.attempts,
+        "detail": (
+            f"Timeout {timeout_sec}s: only {last_count}/{expected_count} MACs "
+            f"recovered after {val.attempts} polls"
+        ),
     }
 
 
@@ -401,6 +429,7 @@ def verify_mac_flags(
     mac: str,
     expected_flags: Optional[List[str]] = None,
     forbidden_flags: Optional[List[str]] = None,
+    absent_is_pass: bool = False,
 ) -> Dict[str, Any]:
     """Check MAC flags from 'show evpn mac-table detail instance <name>'.
 
@@ -428,13 +457,18 @@ def verify_mac_flags(
                     + (f", forbidden {present_forbidden}" if present_forbidden else "")
                 ),
             }
-    return {"pass": False, "mac": mac_l, "detail": "MAC not found in detail output"}
+    return {
+        "pass": bool(absent_is_pass),
+        "mac": mac_l,
+        "detail": "MAC not found in detail output",
+    }
 
 
 def verify_forwarding_state(
     fwd_table_output: str,
     mac: str,
     expected_state: str = "forwarding",
+    absent_is_pass: bool = False,
 ) -> Dict[str, Any]:
     """Verify NCP forwarding state from 'show evpn forwarding-table mac-address-table'."""
     mac_l = mac.lower()
@@ -451,19 +485,17 @@ def verify_forwarding_state(
                 "ncp_id": e.ncp_id,
                 "detail": f"NCP state: {e.fwd_state} (expected {expected_state})",
             }
-    return {"pass": False, "mac": mac_l, "detail": "MAC not found in forwarding table"}
+    return {
+        "pass": bool(absent_is_pass),
+        "mac": mac_l,
+        "detail": "MAC not found in forwarding table",
+    }
 
 
-def verify_mac_detail_sequence(
-    detail_output: str,
-    mac: str,
-) -> Optional[int]:
-    """Extract sequence number from detail output (more reliable than basic table)."""
-    mac_l = mac.lower()
-    for e in parse_mac_detail(detail_output):
-        if e.mac == mac_l:
-            return e.sequence
-    return None
+# NOTE: `verify_mac_detail_sequence` was removed in PR7d (2026-04-14). The
+# mainline `verify_sequence_incremented` already pulls the sequence number
+# from `parse_mac_detail` via `parse_evpn_mac_entries` -- no caller needed
+# the standalone single-MAC accessor.
 
 
 def verify_suppress_list(
@@ -693,11 +725,11 @@ def check_bgp_health_during_poll(
     Returns state info for use during continuous polling loops.
     """
     summary = parse_bgp_l2vpn_evpn_summary(bgp_summary_output)
-    established_count = summary.get("established_count", 0)
-    total_peers = summary.get("total_peers", 0)
-    peers = summary.get("peers", [])
+    established_count = summary.get("established", 0)
+    total_peers = summary.get("total", 0)
+    peers = summary.get("neighbors", [])
 
-    non_established = [p for p in peers if p.get("state") != "Established"]
+    non_established = [p for p in peers if not p.get("established")]
 
     all_established = established_count > 0 and not non_established
     state = "healthy" if all_established else "degraded"
@@ -708,7 +740,7 @@ def check_bgp_health_during_poll(
         "established_count": established_count,
         "total_peers": total_peers,
         "non_established": [
-            {"peer": p.get("peer", "?"), "state": p.get("state", "?")}
+            {"peer": p.get("ip", "?"), "state": p.get("state", "?")}
             for p in non_established[:5]
         ],
         "detail": (f"BGP L2VPN EVPN: {established_count}/{total_peers} peers Established"

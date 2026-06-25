@@ -1,0 +1,267 @@
+{
+  "name": "sr-mpls-ti-lfa",
+  "protocol": "sr",
+  "scale": "medium",
+  "summary": "SR-MPLS core with TI-LFA fast-reroute. Node-SIDs advertised via IS-IS SR; every router pre-computes a backup path for sub-50 ms convergence on link failure.",
+  "tags": [
+    "sr",
+    "sr-mpls",
+    "ti-lfa",
+    "fast-reroute",
+    "node-sid"
+  ],
+  "objects": [
+    {
+      "id": "sr",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 960,
+      "y": 540,
+      "width": 1400,
+      "height": 520,
+      "fillColor": "#c0392b",
+      "fillEnabled": true,
+      "fillOpacity": 0.06,
+      "strokeColor": "#c0392b",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 16,
+      "label": "SR-MPLS Core"
+    },
+    {
+      "id": "pe1",
+      "type": "device",
+      "label": "PE1\nSID 16001",
+      "x": 360,
+      "y": 540,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6"
+    },
+    {
+      "id": "p1",
+      "type": "device",
+      "label": "P1\nSID 16002",
+      "x": 680,
+      "y": 340,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "p2",
+      "type": "device",
+      "label": "P2\nSID 16003",
+      "x": 960,
+      "y": 340,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "p3",
+      "type": "device",
+      "label": "P3\nSID 16004",
+      "x": 1240,
+      "y": 340,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "pe2",
+      "type": "device",
+      "label": "PE2\nSID 16005",
+      "x": 1560,
+      "y": 540,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6"
+    },
+    {
+      "id": "p4",
+      "type": "device",
+      "label": "P4\nSID 16006",
+      "x": 680,
+      "y": 740,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "p5",
+      "type": "device",
+      "label": "P5\nSID 16007",
+      "x": 960,
+      "y": 740,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "p6",
+      "type": "device",
+      "label": "P6\nSID 16008",
+      "x": 1240,
+      "y": 740,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "l_pe1_p1",
+      "type": "link",
+      "device1": "pe1",
+      "device2": "p1",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "solid",
+      "label": "SR"
+    },
+    {
+      "id": "l_pe1_p4",
+      "type": "link",
+      "device1": "pe1",
+      "device2": "p4",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "solid",
+      "label": "SR"
+    },
+    {
+      "id": "l_p1_p2",
+      "type": "link",
+      "device1": "p1",
+      "device2": "p2",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "solid",
+      "label": "SR"
+    },
+    {
+      "id": "l_p2_p3",
+      "type": "link",
+      "device1": "p2",
+      "device2": "p3",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "solid",
+      "label": "SR"
+    },
+    {
+      "id": "l_p3_pe2",
+      "type": "link",
+      "device1": "p3",
+      "device2": "pe2",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "solid",
+      "label": "SR"
+    },
+    {
+      "id": "l_p4_p5",
+      "type": "link",
+      "device1": "p4",
+      "device2": "p5",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "solid",
+      "label": "SR"
+    },
+    {
+      "id": "l_p5_p6",
+      "type": "link",
+      "device1": "p5",
+      "device2": "p6",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "solid",
+      "label": "SR"
+    },
+    {
+      "id": "l_p6_pe2",
+      "type": "link",
+      "device1": "p6",
+      "device2": "pe2",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "solid",
+      "label": "SR"
+    },
+    {
+      "id": "l_p1_p4",
+      "type": "link",
+      "device1": "p1",
+      "device2": "p4",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "solid",
+      "label": "SR"
+    },
+    {
+      "id": "l_p3_p6",
+      "type": "link",
+      "device1": "p3",
+      "device2": "p6",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "solid",
+      "label": "SR"
+    },
+    {
+      "id": "l_primary",
+      "type": "link",
+      "device1": "pe1",
+      "device2": "p2",
+      "linkType": "sr-mpls",
+      "color": "#c0392b",
+      "style": "arrow",
+      "width": 4,
+      "label": "Primary SR path"
+    },
+    {
+      "id": "fail",
+      "type": "shape",
+      "shapeType": "cross",
+      "x": 820,
+      "y": 340,
+      "width": 60,
+      "height": 60,
+      "fillColor": "#e74c3c",
+      "fillEnabled": true,
+      "strokeColor": "#e74c3c",
+      "strokeEnabled": true,
+      "strokeWidth": 4,
+      "label": "link failure"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "SR-MPLS with TI-LFA Fast-Reroute",
+      "x": 960,
+      "y": 140,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_ti",
+      "type": "text",
+      "text": "TI-LFA: Topology-Independent LFA\nPre-computes a post-convergence backup path\nusing node + adjacency SIDs\nSub-50 ms protection",
+      "x": 960,
+      "y": 940,
+      "fontSize": 11,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#c0392b",
+      "borderWidth": 1
+    }
+  ]
+}

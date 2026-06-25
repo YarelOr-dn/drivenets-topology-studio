@@ -373,6 +373,18 @@ const TopologyRegistry = {
             description: 'Bridge Domain legend panel, visibility, and lifecycle',
             methods: ['showBDLegend', 'hideBDLegend', 'toggleBDVisibility', 'setBDVisibilityAll', 'updateDeviceVisibilityByBD', 'toggleBDLegendPanel', 'updateBDHierarchyButton', '_saveBDPanelState', '_loadBDPanelState', 'restoreBDPanelIfNeeded', '_updateBDPanelTheme', '_reconstructBDMetadataFromCanvas', 'toggleBDLinkView', 'applyBDViewMode', 'highlightBDPath', 'createBDTextBox', 'inject']
         },
+        'groupsPanel': {
+            file: 'topology-groups-panel.js',
+            object: 'GroupsPanel',
+            description: 'Unified floating Groups panel: manual groups + BD-derived groups (per-user state)',
+            methods: ['isOpen', 'show', 'hide', 'toggle', 'refresh', 'restoreIfNeeded', 'groupSelectionWithPrompt', 'addObjectToGroup', 'removeObjectFromGroup', 'listManualGroups']
+        },
+        'objectGroupPopover': {
+            file: 'topology-groups-panel.js',
+            object: 'ObjectGroupPopover',
+            description: 'Smart per-object Group popover used by the device/shape/text/link toolbars',
+            methods: ['open', 'toggleFor']
+        },
         'touchHandler': {
             file: 'topology-touch.js',
             object: 'TouchHandler',

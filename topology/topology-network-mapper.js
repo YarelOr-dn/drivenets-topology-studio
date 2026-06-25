@@ -42,6 +42,9 @@ class NetworkMapperManager {
             e.stopPropagation();
             const isVisible = panel.style.display === 'block';
             if (!isVisible) {
+                if (this.editor && typeof this.editor.hideAllSelectionToolbars === 'function') {
+                    this.editor.hideAllSelectionToolbars();
+                }
                 // Close other panels
                 this._closeOtherPanels();
                 this._positionPanel(btn, panel);
@@ -255,6 +258,22 @@ class NetworkMapperManager {
 
     // ========== DISCOVERY CONTROL ==========
 
+    _setProgressText(text) {
+        const progressText = document.getElementById('nm-progress-text');
+        if (progressText) progressText.textContent = text;
+    }
+
+    _resetStopButton() {
+        const stopBtn = document.getElementById('nm-stop-discovery');
+        if (!stopBtn) return;
+        stopBtn.disabled = false;
+        stopBtn.style.opacity = '';
+        stopBtn.style.cursor = '';
+        stopBtn.style.pointerEvents = '';
+        // Match original index.html label so re-runs look identical to first open
+        stopBtn.innerHTML = '\u23F9 Stop';
+    }
+
     async startDiscovery() {
         const seedInput = document.getElementById('nm-seed-input');
         const useInventory = document.getElementById('nm-use-inventory')?.checked || false;
@@ -271,7 +290,6 @@ class NetworkMapperManager {
             return;
         }
 
-        // Collect canvas devices with SSH config for DNAAS-aware resolution
         const knownDevices = this.editor.objects
             .filter(o => o.type === 'device' && (o.sshConfig?.host || o.deviceSerial))
             .map(o => ({
@@ -284,9 +302,20 @@ class NetworkMapperManager {
             }));
         this._discoveryCredentials = { username, password };
 
-        // Show progress section
+        // Cancel any prior run before starting a new one
+        if (this._pollInterval) {
+            clearInterval(this._pollInterval);
+            this._pollInterval = null;
+        }
+        this._jobId = null;
+        this._lastDiscoveryData = null;
+        this._resetStopButton();
+
+        // Progress UI: show AND update text BEFORE fetch so user never
+        // sees a stale "Connecting..." frozen header.
         this._showProgress();
-        this._setStatus('Discovering...', 'running');
+        this._setStatus('Starting...', 'running');
+        this._setProgressText(`Submitting ${seeds.length} seed${seeds.length !== 1 ? 's' : ''}...`);
 
         const btn = document.getElementById('btn-network-mapper');
         if (btn) btn.classList.add('nm-running');
@@ -305,39 +334,106 @@ class NetworkMapperManager {
                     known_devices: knownDevices
                 })
             });
-            const data = await resp.json();
-            if (data.error) {
+            const data = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+            if (!resp.ok || data.error) {
+                const msg = data.error || data.detail || `HTTP ${resp.status}`;
                 this._setStatus('Error', 'error');
-                this.editor.showToast('Discovery failed: ' + data.error, 'error');
+                this._setProgressText(`Start failed: ${msg}`);
+                this.editor.showToast('Discovery failed: ' + msg, 'error');
                 if (btn) btn.classList.remove('nm-running');
+                const spinner = document.getElementById('nm-spinner');
+                if (spinner) spinner.style.display = 'none';
                 return;
             }
 
             this._jobId = data.job_id;
+            this._setStatus('Discovering...', 'running');
+            this._setProgressText(`Discovering (${seeds.length} seed${seeds.length !== 1 ? 's' : ''})...`);
             this._startPolling();
         } catch (err) {
             this._setStatus('Error', 'error');
+            this._setProgressText(`Request failed: ${err.message}`);
             this.editor.showToast('Discovery request failed: ' + err.message, 'error');
             if (btn) btn.classList.remove('nm-running');
+            const spinner = document.getElementById('nm-spinner');
+            if (spinner) spinner.style.display = 'none';
         }
     }
 
     async stopDiscovery() {
-        if (!this._jobId) return;
+        // Always give instant visual feedback so Stop never looks "dead",
+        // even if the backend takes a second to acknowledge.
+        const stopBtn = document.getElementById('nm-stop-discovery');
+        if (stopBtn) {
+            stopBtn.disabled = true;
+            stopBtn.style.opacity = '0.55';
+            stopBtn.style.cursor = 'not-allowed';
+            stopBtn.style.pointerEvents = 'none';
+            stopBtn.innerHTML = 'Cancelling...';
+        }
+        this._setStatus('Cancelling...', 'cancelled');
+        this._setProgressText('Cancelling... (waiting for in-flight SSH to abort)');
+
+        const jobId = this._jobId;
+        if (!jobId) {
+            this._finalizeStopUI('Cancelled');
+            return;
+        }
+
         try {
-            await fetch('/api/network-mapper/stop', {
+            const resp = await fetch('/api/network-mapper/stop', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ job_id: this._jobId })
+                body: JSON.stringify({ job_id: jobId })
             });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok && data.error) {
+                // "Job not found" usually means the job already completed or
+                // the server restarted -- still finalize the UI so the user
+                // can click Start again.
+                console.warn('[NetworkMapper] Stop returned:', data.error);
+            }
         } catch (e) {
-            console.warn('[NetworkMapper] Stop failed:', e);
+            console.warn('[NetworkMapper] Stop request failed:', e);
         }
+
+        // Backend only marks cancelled=True. The crawler polls that flag between
+        // futures, so UI update comes via the normal polling path. As a safety
+        // net, force-finalize after a short window so the user never gets stuck.
+        setTimeout(() => {
+            if (this._pollInterval) {
+                // Backend hasn't flipped to "cancelled" yet -- force local reset.
+                this._finalizeStopUI('Cancelled');
+            }
+        }, 15000);
+    }
+
+    _finalizeStopUI(statusText) {
+        if (this._pollInterval) {
+            clearInterval(this._pollInterval);
+            this._pollInterval = null;
+        }
+        this._setStatus(statusText || 'Cancelled', 'cancelled');
+        this._setProgressText(statusText || 'Cancelled');
+        const spinner = document.getElementById('nm-spinner');
+        if (spinner) spinner.style.display = 'none';
+        const btn = document.getElementById('btn-network-mapper');
+        if (btn) btn.classList.remove('nm-running');
+        this._resetStopButton();
     }
 
     async mapAllFromMCP() {
+        if (this._pollInterval) {
+            clearInterval(this._pollInterval);
+            this._pollInterval = null;
+        }
+        this._jobId = null;
+        this._lastDiscoveryData = null;
+        this._resetStopButton();
+
         this._showProgress();
-        this._setStatus('Querying Network Mapper...', 'running');
+        this._setStatus('Querying MCP...', 'running');
+        this._setProgressText('Querying Network Mapper MCP...');
         this._autoGenerate = true;
         const btn = document.getElementById('btn-network-mapper');
         if (btn) btn.classList.add('nm-running');
@@ -348,19 +444,27 @@ class NetworkMapperManager {
                 headers: { 'Content-Type': 'application/json' },
                 body: '{}'
             });
-            const data = await resp.json();
-            if (data.error) {
+            const data = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+            if (!resp.ok || data.error) {
+                const msg = data.error || data.detail || `HTTP ${resp.status}`;
                 this._setStatus('Error', 'error');
-                this.editor.showToast('MCP map failed: ' + data.error, 'error');
+                this._setProgressText(`MCP map failed: ${msg}`);
+                this.editor.showToast('MCP map failed: ' + msg, 'error');
                 if (btn) btn.classList.remove('nm-running');
+                const spinner = document.getElementById('nm-spinner');
+                if (spinner) spinner.style.display = 'none';
                 return;
             }
             this._jobId = data.job_id;
+            this._setProgressText('Mapping network via MCP...');
             this._startPolling();
         } catch (err) {
             this._setStatus('Error', 'error');
+            this._setProgressText(`Request failed: ${err.message}`);
             this.editor.showToast('MCP map request failed: ' + err.message, 'error');
             if (btn) btn.classList.remove('nm-running');
+            const spinner = document.getElementById('nm-spinner');
+            if (spinner) spinner.style.display = 'none';
         }
     }
 
@@ -375,46 +479,64 @@ class NetworkMapperManager {
         if (!this._jobId) return;
         try {
             const resp = await fetch(`/api/network-mapper/status?job_id=${this._jobId}`);
-            const data = await resp.json();
-            if (data.error) {
+            let data;
+            try {
+                data = await resp.json();
+            } catch (_) {
+                data = { error: `HTTP ${resp.status}` };
+            }
+            if (!resp.ok || data.error) {
                 this._pollFailureCount++;
+                const errMsg = data.error || data.detail || `HTTP ${resp.status}`;
+                // Keep the progress text informative so the user can see that
+                // polling is alive but something is wrong, instead of leaving
+                // the stale "Connecting..." header in place.
+                this._setProgressText(`Polling... (${errMsg})`);
                 if (this._pollFailureCount === 1) {
-                    this.editor.showToast(`Network Mapper: ${data.error}`, 'warning');
+                    this.editor.showToast(`Network Mapper: ${errMsg}`, 'warning');
                 } else if (this._pollFailureCount >= 3) {
                     this.editor.showToast('Network Mapper API not responding -- check if discovery_api.py is running', 'error');
                     this._pollFailureCount = 0;
+                    // Stop ourselves after repeated 404s (e.g., the server was
+                    // restarted and the job was wiped). Without this the spinner
+                    // would spin forever with a "Job not found" error.
+                    if (errMsg.toLowerCase().includes('job not found')) {
+                        this._finalizeStopUI('Job lost (server restarted?)');
+                    }
                 }
                 return;
             }
             this._pollFailureCount = 0;
 
-            // Update progress UI
             const progress = data.progress || {};
             const discovered = progress.discovered || 0;
             const max = progress.max || 50;
             const queued = progress.queued || 0;
             const failed = progress.failed || 0;
 
-            const progressText = document.getElementById('nm-progress-text');
             const progressBar = document.getElementById('nm-progress-bar');
             const countDiscovered = document.getElementById('nm-count-discovered');
             const countQueued = document.getElementById('nm-count-queued');
             const countFailed = document.getElementById('nm-count-failed');
             const logOutput = document.getElementById('nm-log-output');
 
-            if (progressText) progressText.textContent = `Discovered ${discovered} device${discovered !== 1 ? 's' : ''}...`;
+            if (data.status === 'running' || data.status === 'starting') {
+                if (queued > 0 && discovered === 0) {
+                    this._setProgressText(`Connecting to ${queued} device${queued !== 1 ? 's' : ''}...`);
+                } else {
+                    this._setProgressText(`Discovered ${discovered} device${discovered !== 1 ? 's' : ''}, ${queued} queued...`);
+                }
+            }
             if (progressBar) progressBar.style.width = Math.min(100, (discovered / max) * 100) + '%';
             if (countDiscovered) countDiscovered.textContent = discovered;
             if (countQueued) countQueued.textContent = queued;
             if (countFailed) countFailed.textContent = failed;
 
-            // Update log
             if (logOutput && data.log) {
                 logOutput.textContent = data.log.join('\n');
                 logOutput.scrollTop = logOutput.scrollHeight;
             }
 
-            // Check completion
             if (data.status === 'completed' || data.status === 'cancelled' || data.status === 'error') {
                 clearInterval(this._pollInterval);
                 this._pollInterval = null;
@@ -429,11 +551,12 @@ class NetworkMapperManager {
                 const spinner = document.getElementById('nm-spinner');
                 if (spinner) spinner.style.display = 'none';
 
-                if (progressText) {
-                    progressText.textContent = data.status === 'completed'
-                        ? `Done: ${discovered} devices, ${(data.links || []).length} links`
-                        : data.status === 'cancelled' ? 'Cancelled' : 'Error';
-                }
+                this._resetStopButton();
+
+                const finalText = data.status === 'completed'
+                    ? `Done: ${discovered} devices, ${(data.links || []).length} links`
+                    : data.status === 'cancelled' ? 'Cancelled' : 'Error';
+                this._setProgressText(finalText);
 
                 this._setStatus(data.status === 'completed' ? 'Complete' : data.status, data.status);
                 this._showResultActions();
@@ -460,6 +583,7 @@ class NetworkMapperManager {
         } catch (err) {
             this._pollFailureCount++;
             const msg = err.message || String(err);
+            this._setProgressText(`Polling... (${msg})`);
             if (this._pollFailureCount === 1) {
                 this.editor.showToast(`Network Mapper API error: ${msg}`, 'warning');
             } else if (this._pollFailureCount >= 3) {
@@ -509,6 +633,28 @@ class NetworkMapperManager {
         const creds = this._discoveryCredentials || { username: 'dnroot', password: 'dnroot' };
         let devCounter = 0, linkCounter = 0, textCounter = 0;
 
+        // SN host-lock preservation: build a fast lookup of devices that
+        // are already on the canvas with `_snVerified` set so we can
+        // carry that state forward into the regenerated topology. Without
+        // this, a Network Mapper re-run would overwrite the operator's
+        // verified SN-based host with whatever mgmt IP the mapper just
+        // produced -- which is exactly the "ghost IP keeps coming back"
+        // bug we're fixing here.
+        const _existingSnLocks = new Map();
+        try {
+            const existingObjs = (this.editor && Array.isArray(this.editor.objects)) ? this.editor.objects : [];
+            for (const obj of existingObjs) {
+                if (!obj || obj.type !== 'device' || !obj.sshConfig || !obj.sshConfig._snVerified) continue;
+                const keys = [];
+                if (obj.label) keys.push(String(obj.label).toLowerCase());
+                if (obj.deviceSerial) keys.push(String(obj.deviceSerial).toLowerCase());
+                if (obj.sshConfig._snVerifiedHost) keys.push(String(obj.sshConfig._snVerifiedHost).toLowerCase());
+                for (const k of keys) {
+                    if (k && !_existingSnLocks.has(k)) _existingSnLocks.set(k, obj);
+                }
+            }
+        } catch (_) { /* preservation is best-effort */ }
+
         // --- LAYER 1: Devices (drawn first = bottom z-order) ---
         for (const name of deviceNames) {
             const dev = devices[name];
@@ -531,7 +677,29 @@ class NetworkMapperManager {
             };
 
             const connectHost = dev.mgmt_ip || dev._connect_host || '';
-            if (connectHost || dev.serial) {
+
+            // Match against an existing SN-locked canvas device. If we
+            // find one, preserve its sshConfig (keeps the lock + the
+            // operator's working host alive), and only fall back to the
+            // mapper-supplied mgmt IP when no lock was set. The lookup
+            // keys mirror what we indexed above (label, serial,
+            // verified-host).
+            let _snLockedExisting = null;
+            try {
+                const _candidates = [
+                    String(dev.hostname || '').toLowerCase(),
+                    String(name || '').toLowerCase(),
+                    String(dev.serial || '').toLowerCase(),
+                ].filter(Boolean);
+                for (const k of _candidates) {
+                    if (_existingSnLocks.has(k)) { _snLockedExisting = _existingSnLocks.get(k); break; }
+                }
+            } catch (_) { _snLockedExisting = null; }
+
+            if (_snLockedExisting && _snLockedExisting.sshConfig) {
+                deviceObj.sshConfig = { ..._snLockedExisting.sshConfig };
+                console.log(`[NetworkMapper] preserving SN-locked sshConfig for ${dev.hostname || name} (snVerifiedHost=${deviceObj.sshConfig._snVerifiedHost || ''})`);
+            } else if (connectHost || dev.serial) {
                 deviceObj.sshConfig = {
                     host: connectHost,
                     hostBackup: dev.serial || dev.hostname || '',
@@ -1098,7 +1266,7 @@ class NetworkMapperManager {
             if (result.error) throw new Error(result.error);
 
             if (window.FileOps?.updateTopologyIndicator) {
-                window.FileOps.updateTopologyIndicator(this.editor, name, 'Network Mapper', '#06b6d4', sectionId);
+                window.FileOps.updateTopologyIndicator(name, 'Network Mapper', '#06b6d4', sectionId);
             }
 
             this.editor.showToast(`Saved to Network Mapper: ${name}`, 'success');
@@ -1149,9 +1317,16 @@ class NetworkMapperManager {
         const resultActions = document.getElementById('nm-result-actions');
         if (progressSection) progressSection.style.display = 'none';
         if (resultActions) resultActions.style.display = 'none';
+        if (this._pollInterval) {
+            clearInterval(this._pollInterval);
+            this._pollInterval = null;
+        }
         this._setStatus('Ready', 'ready');
+        this._setProgressText('Connecting...');
         this._lastDiscoveryData = null;
         this._jobId = null;
+        this._pollFailureCount = 0;
+        this._resetStopButton();
 
         const btn = document.getElementById('btn-network-mapper');
         if (btn) {

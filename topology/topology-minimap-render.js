@@ -22,6 +22,14 @@ window.MinimapRender = {
         this._topoCacheHash = null;
     },
 
+    _getDpr() {
+        const raw = window.devicePixelRatio || 1;
+        if (!Number.isFinite(raw) || raw <= 0) return this.DPR;
+        // Keep the minimap supersampled even on 1x displays, and follow
+        // retina/browser zoom up to a small cap to avoid blurry downscales.
+        return Math.max(2, Math.min(3, raw));
+    },
+
     _getTopoHash(editor) {
         const objs = editor.objects;
         let h = objs.length;
@@ -54,7 +62,7 @@ window.MinimapRender = {
         if (!editor.minimap || !editor.minimap.canvas) return;
 
         const canvas = editor.minimap.canvas;
-        const dpr = this.DPR;
+        const dpr = this._getDpr();
         const cssW = this.CSS_W;
         const cssH = this.CSS_H;
         const intW = cssW * dpr;
@@ -67,6 +75,9 @@ window.MinimapRender = {
 
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
+        if (editor.configureCanvasQuality) {
+            editor.configureCanvasQuality(ctx, { smoothing: true });
+        }
 
         const isDark = editor.darkMode;
         const bounds = editor.getMinimapBounds();
@@ -122,8 +133,14 @@ window.MinimapRender = {
         ctx.clearRect(0, 0, intW, intH);
         ctx.scale(dpr, dpr);
 
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
+        if (editor.configureCanvasQuality) {
+            editor.configureCanvasQuality(ctx, { smoothing: true });
+        } else {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+        }
 
         ctx.fillStyle = isDark ? '#1a1a1a' : '#F5F5F2';
         ctx.fillRect(0, 0, cssW, cssH);

@@ -1,0 +1,33 @@
+{
+  "started_at": "2026-04-23T15:25:09.951+00:00",
+  "stopped_at": "",
+  "poll_interval_sec": 30.0,
+  "poll_count": 1,
+  "new_cores_total": 1,
+  "ok": false,
+  "devices": [
+    {
+      "device": "PE-4",
+      "baseline": [
+        "bgpd.core.111"
+      ],
+      "observed": [
+        "bgpd.core.111",
+        "bgpd.core.222 2026-04-19"
+      ],
+      "new_events": [
+        {
+          "device": "PE-4",
+          "dump_line": "bgpd.core.222 2026-04-19",
+          "observed_at": "2026-04-23T15:25:09.951+00:00",
+          "poll_index": 1
+        }
+      ],
+      "last_poll_ts": 1776957909.951346,
+      "last_poll_error": "",
+      "poll_count": 1,
+      "new_count": 1
+    }
+  ],
+  "updated_at": "2026-04-23T15:25:09.951+00:00"
+}

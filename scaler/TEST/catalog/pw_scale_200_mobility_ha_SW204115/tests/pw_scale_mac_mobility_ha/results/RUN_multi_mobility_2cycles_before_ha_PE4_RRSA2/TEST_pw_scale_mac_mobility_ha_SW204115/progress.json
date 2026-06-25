@@ -1,0 +1,11 @@
+{
+  "detail": "",
+  "failed_services": 200,
+  "iteration": 4,
+  "passed_services": 0,
+  "phase": "multi_mobility_cycle_1_baseline_verify",
+  "status": "running",
+  "step": "mac_learning_poll",
+  "timestamp": "2026-05-04T11:01:01+0000",
+  "total_services": 200
+}

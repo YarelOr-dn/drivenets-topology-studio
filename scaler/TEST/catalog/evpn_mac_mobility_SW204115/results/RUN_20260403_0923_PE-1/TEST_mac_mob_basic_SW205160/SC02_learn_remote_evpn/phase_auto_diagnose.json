@@ -1,0 +1,139 @@
+{
+  "phase_name": "auto_diagnose",
+  "started_at": "2026-04-03T09:29:55.575+00:00",
+  "completed_at": "2026-04-03T09:31:29.961+00:00",
+  "duration_sec": 94.386,
+  "command_count": 16,
+  "commands": [
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include MAC | no-more",
+      "timestamp": "2026-04-03T09:29:55.575+00:00",
+      "duration_ms": 8161,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include EVPN | no-more",
+      "timestamp": "2026-04-03T09:30:03.736+00:00",
+      "duration_ms": 8862,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include withdraw | no-more",
+      "timestamp": "2026-04-03T09:30:12.598+00:00",
+      "duration_ms": 7612,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include announce | no-more",
+      "timestamp": "2026-04-03T09:30:20.211+00:00",
+      "duration_ms": 8061,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include seq | no-more",
+      "timestamp": "2026-04-03T09:30:28.272+00:00",
+      "duration_ms": 5808,
+      "phase": "auto_diagnose",
+      "output_length": 1244,
+      "output_preview": "2026-04-03T09:27:02.880646 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2141022:1106555:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 44991) seq:3441426954 ack:3090326841 flags:FA msgSize:0\n2026-04-03T09:27:11.915346 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2141047:1106574:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local ad"
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include duplicate | no-more",
+      "timestamp": "2026-04-03T09:30:34.080+00:00",
+      "duration_ms": 8912,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:27 | include suppress | no-more",
+      "timestamp": "2026-04-03T09:30:42.993+00:00",
+      "duration_ms": 12516,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 09:27 | include MAC | no-more",
+      "timestamp": "2026-04-03T09:30:55.509+00:00",
+      "duration_ms": 11765,
+      "phase": "auto_diagnose",
+      "output_length": 1291,
+      "output_preview": "2026-03-23T09:27:14.134763 +02:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 121419:2119567: vty[??]@# show evpn mac-table\n2026-03-23T09:27:14.135795 +02:00 [INFO      ] [EvpnServiceVtysh.cpp:223:l2_evpn_show_mac_async_iteration] [rib-manager:1344:1344] 121420:2119567: finish\n2026-03-23T09:27:29.814887 +02:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 121427:2119696: vty[??]@# show evpn mac-table\n2026-03-23T09:27:29.815901 +02:00 [INFO      ] [Evpn"
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 09:27 | include evpn | no-more",
+      "timestamp": "2026-04-03T09:31:07.275+00:00",
+      "duration_ms": 12868,
+      "phase": "auto_diagnose",
+      "output_length": 24408,
+      "output_preview": "2026-03-23T09:27:14.134763 +02:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 121419:2119567: vty[??]@# show evpn mac-table\n2026-03-23T09:27:14.135795 +02:00 [INFO      ] [EvpnServiceVtysh.cpp:223:l2_evpn_show_mac_async_iteration] [rib-manager:1344:1344] 121420:2119567: finish\n2026-03-23T09:27:29.814887 +02:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 121427:2119696: vty[??]@# show evpn mac-table\n2026-03-23T09:27:29.815901 +02:00 [INFO      ] [Evpn"
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 09:27 | include FIB | no-more",
+      "timestamp": "2026-04-03T09:31:20.144+00:00",
+      "duration_ms": 8611,
+      "phase": "auto_diagnose",
+      "output_length": 398,
+      "output_preview": "2026-03-24T08:44:26.861192 +02:00 [INFO      ] [evpn_fib_callbacks.cpp:137:evpn_local_l2_neighbor] [rib-manager:1344:1344] 141509:2783137: EVPN local neighbor: evpn_id:1 mac:00:de:ad:02:00:01 ip:10.99.214.20 reachability:2\n2026-03-24T09:27:46.757631 +02:00 [INFO      ] [zserv.c:4179:zsend_fib_preserved] [rib-manager:1344:1344] 145114:2804220: Send FIB_PRESERVED message to client. fib_preserved=2"
+    },
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+      "timestamp": "2026-04-03T09:31:28.756+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 35,
+      "output_preview": "  ETH TAG: 0\n    MAC table is empty"
+    },
+    {
+      "command": "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+      "timestamp": "2026-04-03T09:31:29.007+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 207,
+      "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+    },
+    {
+      "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+      "timestamp": "2026-04-03T09:31:29.258+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 42,
+      "output_preview": "Number of MAC-Mobility entries in redis: 0"
+    },
+    {
+      "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+      "timestamp": "2026-04-03T09:31:29.508+00:00",
+      "duration_ms": 100,
+      "phase": "auto_diagnose",
+      "output_length": 26,
+      "output_preview": "ERROR: Incomplete command."
+    },
+    {
+      "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-03T09:31:29.609+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 18,
+      "output_preview": "EvpnMacs [size: 0]"
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-03T09:31:29.860+00:00",
+      "duration_ms": 100,
+      "phase": "auto_diagnose",
+      "output_length": 442,
+      "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+    }
+  ],
+  "parsed_values": {},
+  "anomalies": []
+}

@@ -1,0 +1,82 @@
+{
+  "data": {
+    "dnaas_preflight_plan": {
+      "data": {
+        "mode": "full",
+        "require_ready": false,
+        "sampled_services": [
+          "EVPN_PW_S001",
+          "EVPN_PW_S002"
+        ]
+      },
+      "detail": "dry-run planned 4 DNAAS preflight checks",
+      "ok": true,
+      "phase": "dnaas_preflight_prereq"
+    },
+    "expected_traffic_count": 4,
+    "first_service": {
+      "evi": 3101,
+      "index": 1,
+      "inner_vlan": 3101,
+      "label_block_budget_end": 7,
+      "label_block_budget_start": 0,
+      "label_block_ordinal": 0,
+      "label_block_size": 8,
+      "name": "EVPN_PW_S001",
+      "pe4_ac": "ge100-18/0/0.3101",
+      "pe4_device": "YOR_CL_PE-4",
+      "pe4_dst_mac": "02:aa:ad:01:00:01",
+      "pe4_outer_vlan": 219,
+      "pe4_ownership_tag": "[STC-PE4-S001-i3101]",
+      "pe4_rd": "4.4.4.4:3101",
+      "pe4_site_id": 10001,
+      "pe4_src_mac": "00:de:ad:01:00:01",
+      "pe4_stream_name": "pw_scale_pe4_s001_i3101",
+      "route_target": "1234567:3101",
+      "rr_ac": "bundle-100.3101",
+      "rr_device": "RR-SA-2",
+      "rr_dst_mac": "02:aa:be:01:00:01",
+      "rr_ownership_tag": "[STC-RRSA2-S001-i3101]",
+      "rr_rd": "2.2.2.2:3101",
+      "rr_site_id": 20001,
+      "rr_spirent_outer_vlan": 215,
+      "rr_src_mac": "00:de:be:01:00:01",
+      "rr_stream_name": "pw_scale_rr_s001_i3101",
+      "rr_wire_outer_vlan": 4
+    },
+    "last_service": {
+      "evi": 3102,
+      "index": 2,
+      "inner_vlan": 3102,
+      "label_block_budget_end": 15,
+      "label_block_budget_start": 8,
+      "label_block_ordinal": 1,
+      "label_block_size": 8,
+      "name": "EVPN_PW_S002",
+      "pe4_ac": "ge100-18/0/0.3102",
+      "pe4_device": "YOR_CL_PE-4",
+      "pe4_dst_mac": "02:aa:ad:01:00:02",
+      "pe4_outer_vlan": 219,
+      "pe4_ownership_tag": "[STC-PE4-S002-i3102]",
+      "pe4_rd": "4.4.4.4:3102",
+      "pe4_site_id": 10002,
+      "pe4_src_mac": "00:de:ad:01:00:02",
+      "pe4_stream_name": "pw_scale_pe4_s002_i3102",
+      "route_target": "1234567:3102",
+      "rr_ac": "bundle-100.3102",
+      "rr_device": "RR-SA-2",
+      "rr_dst_mac": "02:aa:be:01:00:02",
+      "rr_ownership_tag": "[STC-RRSA2-S002-i3102]",
+      "rr_rd": "2.2.2.2:3102",
+      "rr_site_id": 20002,
+      "rr_spirent_outer_vlan": 215,
+      "rr_src_mac": "00:de:be:01:00:02",
+      "rr_stream_name": "pw_scale_rr_s002_i3102",
+      "rr_wire_outer_vlan": 4
+    },
+    "service_count": 2
+  },
+  "detail": "dry-run prerequisite context generated",
+  "ok": true,
+  "phase": "prerequisite_gate"
+}

@@ -1,0 +1,259 @@
+{
+  "name": "pure-l2-backbone",
+  "protocol": "isis",
+  "scale": "medium",
+  "summary": "IS-IS pure-L2 backbone. All routers run level-2-only in a single area -- the scale-out IGP choice most SP core networks pick.",
+  "tags": [
+    "isis",
+    "l2",
+    "pure-l2",
+    "sp-core",
+    "8-node"
+  ],
+  "objects": [
+    {
+      "id": "l2",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 960,
+      "y": 540,
+      "width": 1300,
+      "height": 520,
+      "fillColor": "#95a5a6",
+      "fillEnabled": true,
+      "fillOpacity": 0.1,
+      "strokeColor": "#95a5a6",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 16,
+      "label": "Pure L2 Backbone (Area 49.0000)"
+    },
+    {
+      "id": "r1",
+      "type": "device",
+      "label": "R1",
+      "x": 420,
+      "y": 420,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e",
+      "ip": "10.0.0.1"
+    },
+    {
+      "id": "r2",
+      "type": "device",
+      "label": "R2",
+      "x": 720,
+      "y": 380,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e",
+      "ip": "10.0.0.2"
+    },
+    {
+      "id": "r3",
+      "type": "device",
+      "label": "R3",
+      "x": 1020,
+      "y": 420,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e",
+      "ip": "10.0.0.3"
+    },
+    {
+      "id": "r4",
+      "type": "device",
+      "label": "R4",
+      "x": 1320,
+      "y": 380,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e",
+      "ip": "10.0.0.4"
+    },
+    {
+      "id": "r5",
+      "type": "device",
+      "label": "R5",
+      "x": 1620,
+      "y": 420,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e",
+      "ip": "10.0.0.5"
+    },
+    {
+      "id": "r6",
+      "type": "device",
+      "label": "R6",
+      "x": 620,
+      "y": 720,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e",
+      "ip": "10.0.0.6"
+    },
+    {
+      "id": "r7",
+      "type": "device",
+      "label": "R7",
+      "x": 1120,
+      "y": 720,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e",
+      "ip": "10.0.0.7"
+    },
+    {
+      "id": "r8",
+      "type": "device",
+      "label": "R8",
+      "x": 1520,
+      "y": 720,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e",
+      "ip": "10.0.0.8"
+    },
+    {
+      "id": "l_r1_r2",
+      "type": "link",
+      "device1": "r1",
+      "device2": "r2",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L2"
+    },
+    {
+      "id": "l_r2_r3",
+      "type": "link",
+      "device1": "r2",
+      "device2": "r3",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L2"
+    },
+    {
+      "id": "l_r3_r4",
+      "type": "link",
+      "device1": "r3",
+      "device2": "r4",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L2"
+    },
+    {
+      "id": "l_r4_r5",
+      "type": "link",
+      "device1": "r4",
+      "device2": "r5",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L2"
+    },
+    {
+      "id": "l_r1_r6",
+      "type": "link",
+      "device1": "r1",
+      "device2": "r6",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L2"
+    },
+    {
+      "id": "l_r3_r7",
+      "type": "link",
+      "device1": "r3",
+      "device2": "r7",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L2"
+    },
+    {
+      "id": "l_r5_r8",
+      "type": "link",
+      "device1": "r5",
+      "device2": "r8",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L2"
+    },
+    {
+      "id": "l_r6_r7",
+      "type": "link",
+      "device1": "r6",
+      "device2": "r7",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L2"
+    },
+    {
+      "id": "l_r7_r8",
+      "type": "link",
+      "device1": "r7",
+      "device2": "r8",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L2"
+    },
+    {
+      "id": "l_r2_r6",
+      "type": "link",
+      "device1": "r2",
+      "device2": "r6",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L2"
+    },
+    {
+      "id": "l_r4_r8",
+      "type": "link",
+      "device1": "r4",
+      "device2": "r8",
+      "linkType": "isis",
+      "color": "#9b59b6",
+      "style": "solid",
+      "label": "IS-IS L2"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "IS-IS Pure L2 Backbone (all L2)",
+      "x": 960,
+      "y": 140,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_note",
+      "type": "text",
+      "text": "All 8 routers configured level-2-only.\nSingle Area 49.0000 -- no L1 adjacency.\nPreferred in SP cores where IS-IS is the IGP.",
+      "x": 960,
+      "y": 920,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#334155",
+      "borderWidth": 1
+    }
+  ]
+}

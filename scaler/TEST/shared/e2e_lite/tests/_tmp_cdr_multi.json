@@ -1,0 +1,44 @@
+{
+  "started_at": "2026-04-23T15:25:09.949+00:00",
+  "stopped_at": "",
+  "poll_interval_sec": 30.0,
+  "poll_count": 1,
+  "new_cores_total": 1,
+  "ok": false,
+  "devices": [
+    {
+      "device": "PE-4",
+      "baseline": [
+        "bgpd.core.a"
+      ],
+      "observed": [
+        "bgpd.core.a"
+      ],
+      "new_events": [],
+      "last_poll_ts": 1776957909.9502676,
+      "last_poll_error": "",
+      "poll_count": 1,
+      "new_count": 0
+    },
+    {
+      "device": "PE-1",
+      "baseline": [],
+      "observed": [
+        "bgpd.core.new"
+      ],
+      "new_events": [
+        {
+          "device": "PE-1",
+          "dump_line": "bgpd.core.new",
+          "observed_at": "2026-04-23T15:25:09.950+00:00",
+          "poll_index": 1
+        }
+      ],
+      "last_poll_ts": 1776957909.9502945,
+      "last_poll_error": "",
+      "poll_count": 1,
+      "new_count": 1
+    }
+  ],
+  "updated_at": "2026-04-23T15:25:09.950+00:00"
+}

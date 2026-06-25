@@ -1,0 +1,288 @@
+{
+  "name": "multi-site-vpn",
+  "protocol": "mpls-l3vpn",
+  "scale": "medium",
+  "summary": "Multi-site MPLS L3VPN hub-and-spoke. Three spoke sites share routes via a central hub PE using asymmetric RT import/export (classic enterprise managed-services VPN design).",
+  "tags": [
+    "mpls",
+    "l3vpn",
+    "hub-spoke",
+    "multi-site",
+    "rt-asymmetric"
+  ],
+  "objects": [
+    {
+      "id": "core",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 960,
+      "y": 540,
+      "width": 1500,
+      "height": 440,
+      "fillColor": "#e74c3c",
+      "fillEnabled": true,
+      "fillOpacity": 0.06,
+      "strokeColor": "#e74c3c",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 16,
+      "label": "MPLS Core"
+    },
+    {
+      "id": "hub_pe",
+      "type": "device",
+      "label": "HUB-PE",
+      "x": 960,
+      "y": 540,
+      "role": "pe",
+      "visualStyle": "hex",
+      "color": "#f39c12",
+      "radius": 50
+    },
+    {
+      "id": "pn",
+      "type": "device",
+      "label": "P-N",
+      "x": 640,
+      "y": 440,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "ps",
+      "type": "device",
+      "label": "P-S",
+      "x": 1280,
+      "y": 640,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "spkpe1",
+      "type": "device",
+      "label": "SPK-PE-1",
+      "x": 340,
+      "y": 400,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6"
+    },
+    {
+      "id": "cesite1",
+      "type": "device",
+      "label": "CE-Site1",
+      "x": 160,
+      "y": 200,
+      "role": "ce",
+      "visualStyle": "simple",
+      "color": "#16a085"
+    },
+    {
+      "id": "l_cesite1_spkpe1",
+      "type": "link",
+      "device1": "cesite1",
+      "device2": "spkpe1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "CE-PE"
+    },
+    {
+      "id": "spkpe2",
+      "type": "device",
+      "label": "SPK-PE-2",
+      "x": 1580,
+      "y": 400,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6"
+    },
+    {
+      "id": "cesite2",
+      "type": "device",
+      "label": "CE-Site2",
+      "x": 1760,
+      "y": 200,
+      "role": "ce",
+      "visualStyle": "simple",
+      "color": "#16a085"
+    },
+    {
+      "id": "l_cesite2_spkpe2",
+      "type": "link",
+      "device1": "cesite2",
+      "device2": "spkpe2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "CE-PE"
+    },
+    {
+      "id": "spkpe3",
+      "type": "device",
+      "label": "SPK-PE-3",
+      "x": 960,
+      "y": 800,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6"
+    },
+    {
+      "id": "cesite3",
+      "type": "device",
+      "label": "CE-Site3",
+      "x": 960,
+      "y": 1020,
+      "role": "ce",
+      "visualStyle": "simple",
+      "color": "#16a085"
+    },
+    {
+      "id": "l_cesite3_spkpe3",
+      "type": "link",
+      "device1": "cesite3",
+      "device2": "spkpe3",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "CE-PE"
+    },
+    {
+      "id": "l_spkpe1_pn",
+      "type": "link",
+      "device1": "spkpe1",
+      "device2": "pn",
+      "linkType": "mpls",
+      "color": "#e74c3c",
+      "style": "solid",
+      "label": "LDP"
+    },
+    {
+      "id": "l_spkpe2_ps",
+      "type": "link",
+      "device1": "spkpe2",
+      "device2": "ps",
+      "linkType": "mpls",
+      "color": "#e74c3c",
+      "style": "solid",
+      "label": "LDP"
+    },
+    {
+      "id": "l_spkpe3_ps",
+      "type": "link",
+      "device1": "spkpe3",
+      "device2": "ps",
+      "linkType": "mpls",
+      "color": "#e74c3c",
+      "style": "solid",
+      "label": "LDP"
+    },
+    {
+      "id": "l_pn_hub_pe",
+      "type": "link",
+      "device1": "pn",
+      "device2": "hub_pe",
+      "linkType": "mpls",
+      "color": "#e74c3c",
+      "style": "solid",
+      "label": "LDP"
+    },
+    {
+      "id": "l_ps_hub_pe",
+      "type": "link",
+      "device1": "ps",
+      "device2": "hub_pe",
+      "linkType": "mpls",
+      "color": "#e74c3c",
+      "style": "solid",
+      "label": "LDP"
+    },
+    {
+      "id": "l_pn_ps",
+      "type": "link",
+      "device1": "pn",
+      "device2": "ps",
+      "linkType": "mpls",
+      "color": "#e74c3c",
+      "style": "solid",
+      "label": "LDP"
+    },
+    {
+      "id": "lv_spkpe1_hub",
+      "type": "link",
+      "device1": "spkpe1",
+      "device2": "hub_pe",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "label": "VPNv4 hub-spoke"
+    },
+    {
+      "id": "lv_spkpe2_hub",
+      "type": "link",
+      "device1": "spkpe2",
+      "device2": "hub_pe",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "label": "VPNv4 hub-spoke"
+    },
+    {
+      "id": "lv_spkpe3_hub",
+      "type": "link",
+      "device1": "spkpe3",
+      "device2": "hub_pe",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "label": "VPNv4 hub-spoke"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "Multi-Site MPLS L3VPN (Hub-Spoke)",
+      "x": 960,
+      "y": 120,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_vrfhub",
+      "type": "text",
+      "text": "VRF HUB\nRD 65000:1\nRT export 1:1\nRT import 1:100",
+      "x": 960,
+      "y": 700,
+      "fontSize": 11,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#3498db",
+      "borderWidth": 1
+    },
+    {
+      "id": "t_vrfspoke",
+      "type": "text",
+      "text": "VRF SPOKE\nRD 65000:100\nRT export 1:100\nRT import 1:1",
+      "x": 1760,
+      "y": 340,
+      "fontSize": 11,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#e67e22",
+      "borderWidth": 1
+    }
+  ]
+}

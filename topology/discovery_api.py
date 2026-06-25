@@ -9,6 +9,7 @@ import threading
 import json
 import os
 import re
+import sqlite3
 import time
 from datetime import datetime
 from pathlib import Path
@@ -28,12 +29,149 @@ SCRIPT_DIR = Path(__file__).parent
 # Use main discovery script which supports --multi-bd flag
 DISCOVERY_SCRIPT = SCRIPT_DIR / "dnaas_path_discovery.py"
 OUTPUT_DIR = SCRIPT_DIR / "output"
+DNOS_MCP_CLI = Path(os.path.expanduser(os.environ.get(
+    "DNOS_MCP_CLI",
+    "~/.cursor/tools/dnos_mcp.py",
+)))
+DNOS_MCP_DISCOVERY_ENABLED = (
+    os.environ.get("DNAAS_DNOS_MCP_DISCOVERY", "1").strip().lower()
+    not in {"0", "false", "no", "off"}
+)
+
+# Salvage-tolerant reader / atomic writer for SCALER operational.json.
+# Imported lazily inside helpers so the module can still load when the
+# topology code is run from outside the topology package directory.
+def _safe_read_ops(path):
+    try:
+        from routes._ops_writer import read_ops as _r
+        return _r(Path(path))
+    except Exception:
+        try:
+            with open(path) as fh:
+                return json.load(fh)
+        except Exception:
+            return {}
+
+
+def _safe_update_ops(path, mutator, create_if_missing=True):
+    try:
+        from routes._ops_writer import update_ops as _u
+        return _u(Path(path), mutator, create_if_missing=create_if_missing)
+    except Exception:
+        return False, None
+# Per-user output isolation:
+#   <OUTPUT_DIR>/users/<username>/  -> authenticated user (X-User header)
+#   <OUTPUT_DIR>/global/            -> unauthenticated callers (no X-User)
+#
+# /api/discovery/start spawns the discovery script with DNAAS_OUTPUT_DIR set
+# to the caller's per-user dir. /api/discovery/list and /api/discovery/file/*
+# (and the multi-bd equivalents) only return files that live under the
+# caller's per-user dir, so user A's discovery results never appear in user
+# B's listing or downloads.
+USERS_OUTPUT_ROOT = OUTPUT_DIR / "users"
+GLOBAL_OUTPUT_DIR = OUTPUT_DIR / "global"
+# Inheritor for the legacy global ``output/*.json`` discovery dump.
+# Pre-username-migration this was "yarel"; post-migration the same human
+# logs in as "yor". The default accepts either so the one-shot legacy
+# move still finds a home regardless of which DB row first triggers it.
+_LEGACY_OUTPUT_OWNERS_DEFAULT = ("yor", "yarel")
+_legacy_output_owner_env = (os.environ.get("LEGACY_OUTPUT_OWNER") or "").strip()
+LEGACY_OUTPUT_OWNERS = (
+    tuple(u.strip() for u in _legacy_output_owner_env.split(",") if u.strip())
+    if _legacy_output_owner_env
+    else _LEGACY_OUTPUT_OWNERS_DEFAULT
+)
+LEGACY_OUTPUT_OWNER = LEGACY_OUTPUT_OWNERS[0]  # back-compat alias for old refs
+_legacy_output_migrated = False
+
+
+def _safe_user_segment(name: str) -> str:
+    """Sanitize a username so it is safe to use as a single path component."""
+    if not name:
+        return ""
+    return "".join(c if c.isalnum() or c in "-_." else "_" for c in name)
+
+
+def _user_output_dir(username: str) -> Path:
+    """Return the per-user output directory, creating it on demand.
+
+    Anonymous callers (no X-User header) get the shared GLOBAL_OUTPUT_DIR so
+    legacy CLI / direct integrations keep working, but they only see files
+    inside that bucket and never another user's per-user dir.
+    """
+    safe = _safe_user_segment(username)
+    if not safe or safe in ("default", "unknown"):
+        target = GLOBAL_OUTPUT_DIR
+    else:
+        target = USERS_OUTPUT_ROOT / safe
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _maybe_migrate_legacy_output():
+    """Move pre-multiuser discovery files from OUTPUT_DIR/*.json into the
+    founder's per-user dir on first request, so they don't leak into every
+    user's listing.
+    """
+    global _legacy_output_migrated
+    if _legacy_output_migrated:
+        return
+    _legacy_output_migrated = True
+    try:
+        if not OUTPUT_DIR.exists():
+            return
+        target = _user_output_dir(LEGACY_OUTPUT_OWNER)
+        moved = 0
+        for entry in OUTPUT_DIR.iterdir():
+            if entry.is_file() and entry.suffix.lower() in {".json", ".txt", ".xlsx"}:
+                dst = target / entry.name
+                if dst.exists():
+                    continue
+                try:
+                    entry.rename(dst)
+                    moved += 1
+                except Exception:
+                    pass
+        if moved:
+            print(f"[discovery_api] Migrated {moved} legacy output files -> {target}")
+    except Exception as e:
+        print(f"[discovery_api] Legacy output migration FAILED: {e}")
+
+
+def _request_owner(handler) -> str:
+    """Extract the X-User header forwarded by serve.py. Empty string for
+    unauthenticated callers (mapped to the shared global bucket)."""
+    return (handler.headers.get("X-User") or "").strip()
+
+
+def _owner_or_global(owner: str) -> str:
+    owner = (owner or "").strip()
+    return owner if owner else "global"
+
+
+def _inventory_path() -> Path:
+    """Resolve device_inventory.json from env / co-located fallback.
+
+    Priority:
+      1. $TOPOLOGY_INVENTORY_PATH    (full path override)
+      2. /home/dn/CURSOR/device_inventory.json (legacy live deploy)
+      3. <script_dir>/device_inventory.json    (worktree fallback)
+    """
+    env_path = os.environ.get('TOPOLOGY_INVENTORY_PATH', '').strip()
+    if env_path:
+        return Path(env_path).expanduser()
+    legacy = Path('/home/dn/CURSOR/device_inventory.json')
+    if legacy.exists():
+        return legacy
+    return SCRIPT_DIR / 'device_inventory.json'
 
 # Store running jobs
 jobs = {}
 job_counter = 0
 job_lock = threading.Lock()
 job_processes = {}  # Store subprocess handles for cancellation
+lldp_device_current = {}
+lldp_device_queues = {}
 
 # Network Mapper jobs (separate from discovery jobs)
 nm_jobs = {}
@@ -99,6 +237,355 @@ def _mcp_call(fn_name, *args, **kwargs):
                 raise
 
 
+def _call_dnos_config_mcp(tool_name: str, arguments: dict, timeout: int = 45) -> dict:
+    """Call dnos-config through the documented MCP CLI fallback.
+
+    discovery_api runs outside Cursor's native CallMcpTool surface, so the
+    supported boundary is ~/.cursor/tools/dnos_mcp.py. Do not import
+    dnos_config_mcp internals here.
+    """
+    if not DNOS_MCP_CLI.exists():
+        raise RuntimeError(f"dnos-config MCP CLI not found: {DNOS_MCP_CLI}")
+    cmd = [
+        "python3",
+        str(DNOS_MCP_CLI),
+        tool_name,
+        json.dumps(arguments or {}),
+    ]
+    proc = subprocess.run(
+        cmd,
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        raise RuntimeError(detail or f"{tool_name} failed with exit {proc.returncode}")
+    output = (proc.stdout or "").strip()
+    if not output:
+        raise RuntimeError(f"{tool_name} returned empty output")
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{tool_name} returned non-JSON output: {output[:200]}") from exc
+
+
+_DNOS_MCP_BD_COLORS = [
+    "#3498db", "#e74c3c", "#2ecc71", "#9b59b6", "#f39c12",
+    "#1abc9c", "#e91e63", "#00bcd4", "#ff5722", "#8bc34a",
+]
+
+
+def _dnaas_mcp_role(name: str) -> str:
+    upper = (name or "").upper()
+    if "SUPERSPINE" in upper or "SUPER-SPINE" in upper:
+        return "SUPERSPINE"
+    if "SPINE" in upper:
+        return "SPINE"
+    if "LEAF" in upper:
+        return "LEAF"
+    if "SPIRENT" in upper or "IXIA" in upper or "TEST" in upper:
+        return "TEST_EQUIPMENT"
+    return "PE"
+
+
+def _dnaas_mcp_device_style(role: str) -> tuple:
+    if role == "SUPERSPINE":
+        return "#c0392b", "server"
+    if role == "SPINE":
+        return "#9b59b6", "server"
+    if role == "LEAF":
+        return "#e67e22", "server"
+    if role == "TEST_EQUIPMENT":
+        return "#16a085", "server"
+    return "#3498db", "classic"
+
+
+def _dnaas_mcp_vlan_from_link(link: dict) -> int:
+    for key in ("vlan", "global_vlan", "vlan_id"):
+        try:
+            if link.get(key) is not None:
+                return int(link.get(key))
+        except Exception:
+            pass
+    for encap_key in ("wire_encap_out", "bd_encap_in", "starting_bd_encap"):
+        encap = link.get(encap_key) or {}
+        try:
+            if encap.get("outer") is not None:
+                return int(encap.get("outer"))
+        except Exception:
+            pass
+    return None
+
+
+def _dnos_mcp_walk_to_topology(payload: dict, source_name: str) -> dict:
+    """Convert dnos_dnaas_walk_from_dut JSON into the existing DNAAS canvas shape."""
+    if not payload or not payload.get("ok"):
+        raise ValueError("dnos-config walk returned no usable data")
+
+    source_label = payload.get("dut") or source_name
+    devices = {}
+    links = []
+    bridge_domains = {}
+    device_bd_mapping = {}
+    device_index_meta = payload.get("device_index_meta") or {}
+
+    def add_device(name: str):
+        if not name or name in devices:
+            return
+        role = _dnaas_mcp_role(name)
+        color, visual_style = _dnaas_mcp_device_style(role)
+        meta = device_index_meta.get(name) or {}
+        dev = {
+            "name": name,
+            "role": role,
+            "color": color,
+            "visualStyle": visual_style,
+            "sshConfig": None,
+        }
+        ip = meta.get("device_ip") or meta.get("ip") or ""
+        if role in {"SUPERSPINE", "SPINE", "LEAF"}:
+            dev["sshConfig"] = {
+                "host": ip or name,
+                "hostBackup": name,
+                "user": "sisaev",
+                "password": "Drive1234!",
+            }
+        elif role == "PE":
+            dev["sshConfig"] = {
+                "host": ip or "",
+                "hostBackup": name,
+                "user": "dnroot",
+                "password": "dnroot",
+            }
+        devices[name] = dev
+
+    def add_bd(name: str, vlan=None):
+        if not name:
+            return
+        if name not in bridge_domains:
+            bridge_domains[name] = {
+                "name": name,
+                "type": "DNAAS_MCP",
+                "vlan": vlan,
+                "color": _DNOS_MCP_BD_COLORS[len(bridge_domains) % len(_DNOS_MCP_BD_COLORS)],
+                "source": "dnos-config-mcp",
+            }
+        elif bridge_domains[name].get("vlan") is None and vlan is not None:
+            bridge_domains[name]["vlan"] = vlan
+
+    def map_bd(device: str, bd_name: str):
+        if not device or not bd_name:
+            return
+        entry = device_bd_mapping.setdefault(device, {
+            "bridge_domains": [],
+            "bd_count": 0,
+            "device_type": _dnaas_mcp_role(device),
+        })
+        if bd_name not in entry["bridge_domains"]:
+            entry["bridge_domains"].append(bd_name)
+            entry["bd_count"] = len(entry["bridge_domains"])
+
+    def add_link(from_dev: str, to_dev: str, from_if: str, to_if: str,
+                 bd_name: str, vlan=None, is_termination=False):
+        if not from_dev or not to_dev:
+            return
+        add_device(from_dev)
+        add_device(to_dev)
+        add_bd(bd_name, vlan)
+        map_bd(from_dev, bd_name)
+        map_bd(to_dev, bd_name)
+        links.append({
+            "from": from_dev,
+            "to": to_dev,
+            "from_if": from_if or "",
+            "to_if": to_if or "",
+            "bd_name": bd_name or "",
+            "global_vlan": vlan,
+            "is_termination": bool(is_termination),
+        })
+
+    add_device(source_label)
+
+    for ac in payload.get("dut_acs") or []:
+        lldp = ac.get("lldp_to_dnaas") or {}
+        dnaas_ac = ac.get("dnaas_ac") or {}
+        leaf = dnaas_ac.get("device") or lldp.get("neighbor_device")
+        bd_name = dnaas_ac.get("bd_name") or ac.get("bd_chain_id", "").split("::")[-1]
+        chain = (payload.get("bd_chains") or {}).get(ac.get("bd_chain_id") or "") or {}
+        vlan = None
+        for hop in chain.get("hops") or []:
+            vlan = _dnaas_mcp_vlan_from_link(hop)
+            if vlan is not None:
+                break
+        add_link(
+            source_label,
+            leaf,
+            ac.get("dut_interface") or "",
+            lldp.get("neighbor_port") or dnaas_ac.get("interface") or "",
+            bd_name,
+            vlan,
+            is_termination=True,
+        )
+
+    for chain in (payload.get("bd_chains") or {}).values():
+        chain_bd = chain.get("bd_name") or ""
+        for hop in chain.get("hops") or []:
+            next_info = hop.get("lldp_to_next") or {}
+            add_link(
+                hop.get("device") or chain.get("starting_leaf"),
+                next_info.get("neighbor_device"),
+                hop.get("uplink_ac") or "",
+                next_info.get("neighbor_port") or "",
+                hop.get("bd_name") or chain_bd,
+                _dnaas_mcp_vlan_from_link(hop),
+            )
+        if chain.get("reaches_spirent_ingress"):
+            spirent_leaf = chain.get("terminus") or payload.get("spirent_ingress_leaf")
+            add_link(
+                spirent_leaf,
+                "Spirent 6/13",
+                "ge100-0/0/15",
+                "//100.64.3.238/6/13",
+                chain_bd,
+                _dnaas_mcp_vlan_from_link(chain),
+                is_termination=True,
+            )
+
+    tier_y = {
+        "SUPERSPINE": 220,
+        "SPINE": 520,
+        "LEAF": 820,
+        "PE": 1120,
+        "TEST_EQUIPMENT": 1120,
+    }
+    tier_order = ["SUPERSPINE", "SPINE", "LEAF", "PE", "TEST_EQUIPMENT"]
+    device_ids = {}
+    objects = []
+    idx = 0
+    for role in tier_order:
+        names = sorted([name for name, info in devices.items() if info["role"] == role])
+        if not names:
+            continue
+        spacing = 420 if len(names) <= 5 else 320
+        start_x = 1200 - ((len(names) - 1) * spacing / 2)
+        for pos, name in enumerate(names):
+            info = devices[name]
+            dev_id = f"device_{idx}"
+            device_ids[name] = dev_id
+            obj = {
+                "id": dev_id,
+                "type": "device",
+                "deviceType": "router",
+                "x": start_x + pos * spacing,
+                "y": tier_y.get(role, 900),
+                "radius": 50,
+                "rotation": 0,
+                "color": info["color"],
+                "label": name,
+                "locked": False,
+                "visualStyle": info["visualStyle"],
+            }
+            if info.get("sshConfig"):
+                obj["sshConfig"] = info["sshConfig"]
+            objects.append(obj)
+            idx += 1
+
+    link_idx = 0
+    for link in links:
+        dev1 = device_ids.get(link["from"])
+        dev2 = device_ids.get(link["to"])
+        if not dev1 or not dev2:
+            continue
+        bd = bridge_domains.get(link["bd_name"], {})
+        vlan = link.get("global_vlan")
+        vlan_text = str(vlan) if vlan is not None else ""
+        objects.append({
+            "id": f"link_{link_idx}",
+            "type": "link",
+            "device1": dev1,
+            "device2": dev2,
+            "color": bd.get("color") or "#2c3e50",
+            "style": "solid",
+            "width": 2,
+            "_bdName": link.get("bd_name") or "",
+            "linkDetails": {
+                "interfaceA": link.get("from_if") or "",
+                "interfaceB": link.get("to_if") or "",
+                "physicalInterfaceA": (link.get("from_if") or "").split(".")[0],
+                "physicalInterfaceB": (link.get("to_if") or "").split(".")[0],
+                "description": f"{link['from']} <-> {link['to']} ({link.get('bd_name') or 'DNAAS'})",
+                "bd_name": link.get("bd_name") or "",
+                "bd_type": bd.get("type") or "DNAAS_MCP",
+                "vlan_id": vlan,
+                "global_vlan": vlan,
+                "vlanIdA": vlan_text,
+                "vlanIdB": vlan_text,
+                "is_termination": bool(link.get("is_termination")),
+                "source": "dnos-config-mcp",
+            },
+        })
+        link_idx += 1
+
+    return {
+        "version": "1.0",
+        "objects": objects,
+        "metadata": {
+            "name": "DNAAS dnos-config MCP Discovery",
+            "created": datetime.now().isoformat(),
+            "source": source_label,
+            "source_backend": "dnos-config-mcp",
+            "bridge_domains": list(bridge_domains.values()),
+            "device_bd_mapping": device_bd_mapping,
+            "view_mode": "combined",
+            "dnos_config_mcp": {
+                "tool": "dnos_dnaas_walk_from_dut",
+                "summary": payload.get("summary") or {},
+                "cache": payload.get("cache") or {},
+                "spirent_ingress_leaf": payload.get("spirent_ingress_leaf"),
+            },
+        },
+    }
+
+
+def _try_dnos_mcp_discovery(serial: str, owner_dir: Path, prefix: str, log=None) -> Path:
+    """Try cached/config-derived dnos-config DNAAS discovery; return saved JSON path."""
+    if not DNOS_MCP_DISCOVERY_ENABLED:
+        raise RuntimeError("dnos-config MCP discovery disabled by DNAAS_DNOS_MCP_DISCOVERY")
+    if not serial:
+        raise RuntimeError("missing source device")
+
+    def emit(msg):
+        if log:
+            log(msg)
+
+    emit("[INFO] Trying dnos-config MCP DNAAS discovery...")
+    payload = _call_dnos_config_mcp(
+        "dnos_dnaas_walk_from_dut",
+        {
+            "device_name": serial,
+            "caller_intent": "general",
+            "freshness": "prefer_cached",
+            "format": "json",
+        },
+        timeout=int(os.environ.get("DNAAS_DNOS_MCP_TIMEOUT", "75")),
+    )
+    summary = payload.get("summary") or {}
+    if not payload.get("ok") or int(summary.get("total_dut_acs") or 0) <= 0:
+        raise RuntimeError(payload.get("error") or payload.get("errors") or "no DUT ACs returned")
+    topology = _dnos_mcp_walk_to_topology(payload, serial)
+    filename = f"{prefix}_mcp_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    out_path = owner_dir / filename
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(topology, fh, indent=2)
+    emit(
+        "[OK] dnos-config MCP discovery saved "
+        f"{filename}: {summary.get('reachable', 0)}/{summary.get('total_dut_acs', 0)} reachable ACs"
+    )
+    return out_path
+
+
 def _nm_cleanup_old_jobs():
     """Remove completed nm_jobs older than 30 minutes."""
     cutoff = time.time() - 1800
@@ -119,6 +606,152 @@ def _cleanup_old_discovery_jobs():
                      and j.get('created_at', 0) < cutoff]
         for jid in to_remove:
             jobs.pop(jid, None)
+
+
+_job_store_lock = threading.Lock()
+
+
+def _job_store_path(owner: str) -> Path:
+    """Per-user durable discovery job DB path."""
+    owner = _owner_or_global(owner)
+    if owner == "global":
+        GLOBAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        return GLOBAL_OUTPUT_DIR / "discovery_jobs.db"
+    try:
+        from api.auth.user_store import user_store
+        return user_store.user_data_path(owner, "discovery_jobs.db")
+    except Exception:
+        # Fallback for standalone discovery_api runs outside the package setup.
+        fallback = USERS_OUTPUT_ROOT / _safe_user_segment(owner)
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback / "discovery_jobs.db"
+
+
+def _open_job_store(owner: str):
+    db_path = _job_store_path(owner)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), timeout=5.0)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS jobs (
+            job_id TEXT PRIMARY KEY,
+            owner TEXT NOT NULL,
+            type TEXT NOT NULL,
+            device_key TEXT,
+            status TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            payload TEXT NOT NULL
+        )
+    """)
+    return conn
+
+
+def _serializable_job(job: dict) -> dict:
+    out = {}
+    for key, value in (job or {}).items():
+        if key.startswith("_"):
+            continue
+        try:
+            json.dumps(value)
+            out[key] = value
+        except Exception:
+            out[key] = str(value)
+    out["updated_at"] = time.time()
+    return out
+
+
+def _persist_job(job_id: str, job: dict):
+    if not job_id or not job:
+        return
+    owner = _owner_or_global(job.get("owner", "global"))
+    payload = _serializable_job(job)
+    with _job_store_lock:
+        try:
+            conn = _open_job_store(owner)
+            try:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO jobs
+                      (job_id, owner, type, device_key, status, created_at, updated_at, payload)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        job_id,
+                        owner,
+                        payload.get("type", "unknown"),
+                        payload.get("device_key") or payload.get("resolved_target") or payload.get("serial") or "",
+                        payload.get("status", "unknown"),
+                        float(payload.get("created_at") or time.time()),
+                        float(payload.get("updated_at") or time.time()),
+                        json.dumps(payload, ensure_ascii=False),
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            print(f"[Jobs] persist failed for {job_id}: {exc}")
+
+
+def _set_job_fields(job_id: str, **updates):
+    with job_lock:
+        job = jobs.get(job_id)
+        if not job:
+            return None
+        job.update(updates)
+        snapshot = dict(job)
+    _persist_job(job_id, snapshot)
+    return snapshot
+
+
+def _append_job_line(job_id: str, line: str):
+    with job_lock:
+        job = jobs.get(job_id)
+        if not job:
+            return
+        job.setdefault("output_lines", []).append(line)
+        snapshot = dict(job)
+    _persist_job(job_id, snapshot)
+
+
+def _load_recent_jobs():
+    """Rehydrate recent durable jobs as interrupted/readable after API restart."""
+    roots = [GLOBAL_OUTPUT_DIR]
+    users_root = Path.home() / ".topology_users"
+    if users_root.exists():
+        try:
+            roots.extend([p for p in users_root.iterdir() if p.is_dir()])
+        except Exception:
+            pass
+    cutoff = time.time() - 86400
+    restored = 0
+    with job_lock:
+        for root in roots:
+            db_path = root / "discovery_jobs.db"
+            if not db_path.exists():
+                continue
+            try:
+                conn = sqlite3.connect(str(db_path), timeout=2.0)
+                try:
+                    for job_id, payload_text in conn.execute(
+                        "SELECT job_id, payload FROM jobs WHERE updated_at >= ?", (cutoff,)
+                    ):
+                        payload = json.loads(payload_text or "{}")
+                        if payload.get("status") in ("running", "starting", "queued"):
+                            payload["status"] = "interrupted"
+                            payload["error"] = "Discovery API restarted while this job was active"
+                            payload.setdefault("output_lines", []).append("[WARN] Discovery API restarted; job state was restored as interrupted")
+                        jobs[job_id] = payload
+                        restored += 1
+                finally:
+                    conn.close()
+            except Exception as exc:
+                print(f"[Jobs] rehydrate skipped {db_path}: {exc}")
+    if restored:
+        print(f"[Jobs] Rehydrated {restored} recent discovery jobs")
 
 
 # ANSI escape code pattern for stripping colors
@@ -186,6 +819,148 @@ def _parse_lldp_output(output: str) -> list:
     return neighbors
 
 
+def _lldp_device_match(search: str, hostname: str, dir_name: str, serial: str, connection_ip: str, raw_serial: str) -> bool:
+    """Match a search term to a device using word-boundary-aware logic.
+
+    Prevents false positives like "PE" matching "PE-1" and "PE-2".
+    Exact match on hostname/serial/IP always wins. For substring matching,
+    requires the match to sit on a word boundary (separated by ``-``, ``_``,
+    or start/end of string) so "PE-4" matches "YOR_CL_PE-4" but not "PE-40".
+    """
+    s = search.lower()
+    h = hostname.lower()
+    d = dir_name.lower()
+
+    if s == h or s == d:
+        return True
+    if serial and serial.lower() == s:
+        return True
+    if connection_ip and connection_ip == raw_serial:
+        return True
+
+    def _boundary_match(needle: str, haystack: str) -> bool:
+        idx = haystack.find(needle)
+        if idx < 0:
+            return False
+        before_ok = idx == 0 or haystack[idx - 1] in ("-", "_", ".")
+        end = idx + len(needle)
+        after_ok = end == len(haystack) or haystack[end] in ("-", "_", ".")
+        return before_ok and after_ok
+
+    return _boundary_match(s, h) or _boundary_match(s, d)
+
+
+def _resolve_discovery_target(name: str, ssh_hint: str = None, known_devices: list = None) -> dict:
+    """Resolve a label/serial/IP to the best connect target for discovery API.
+
+    Returns {target, source, input, ssh_hint, reachable?}. The resolver is
+    intentionally read-only; mutating operations may run a follow-up preflight.
+    """
+    import socket
+    raw = (name or "").strip()
+    hint = (ssh_hint or "").strip()
+    if hint:
+        return {"input": raw, "target": hint, "source": "ssh_hint", "ssh_hint": hint}
+    if not raw:
+        return {"input": raw, "target": "", "source": "empty", "ssh_hint": ""}
+    if re.match(r'^\d+\.\d+\.\d+\.\d+$', raw):
+        return {"input": raw, "target": raw, "source": "ip_literal", "ssh_hint": ""}
+
+    search_lower = raw.lower()
+    if known_devices:
+        for kd in known_devices:
+            candidates = [
+                kd.get("name"), kd.get("label"), kd.get("hostname"),
+                kd.get("serial"), kd.get("host"), kd.get("hostBackup"),
+            ]
+            cand_lower = [str(c or "").lower() for c in candidates if c]
+            if search_lower in cand_lower or any(search_lower in c or c in search_lower for c in cand_lower if c):
+                for key in ("hostBackup", "host", "serial"):
+                    value = (kd.get(key) or "").strip()
+                    if value:
+                        return {"input": raw, "target": value, "source": f"known_devices.{key}", "ssh_hint": ""}
+
+    domain_suffixes = ['', '.dev.drivenets.net', '.drivenets.net', '.local']
+    for suffix in domain_suffixes:
+        try_host = raw + suffix
+        try:
+            resolved = socket.gethostbyname(try_host)
+            return {"input": raw, "target": resolved, "source": f"dns:{try_host}", "ssh_hint": ""}
+        except socket.gaierror:
+            continue
+    if raw != raw.upper():
+        try:
+            resolved = socket.gethostbyname(raw.upper())
+            return {"input": raw, "target": resolved, "source": "dns:uppercase", "ssh_hint": ""}
+        except socket.gaierror:
+            pass
+
+    db_configs = Path('/home/dn/SCALER/db/configs')
+    if db_configs.exists():
+        input_norm = raw.upper().replace('L', '1')
+        for device_dir in db_configs.iterdir():
+            if not device_dir.is_dir():
+                continue
+            op_file = device_dir / 'operational.json'
+            if not op_file.exists():
+                continue
+            try:
+                op_data = _safe_read_ops(op_file)
+                dev_serial = (op_data.get('serial_number', '') or '').upper()
+                dev_ip = op_data.get('connection_ip', '') or ''
+                dev_hostname = op_data.get('hostname', device_dir.name) or device_dir.name
+                dev_norm = dev_serial.replace('L', '1')
+                exact = (
+                    raw.lower() == dev_hostname.lower()
+                    or raw.lower() == device_dir.name.lower()
+                    or (dev_serial and raw.lower() == dev_serial.lower())
+                    or raw.lower() in dev_hostname.lower()
+                    or dev_hostname.lower() in raw.lower()
+                )
+                fuzzy = bool(dev_serial) and __import__('difflib').SequenceMatcher(None, input_norm, dev_norm).ratio() >= 0.75
+                if exact or fuzzy:
+                    target = dev_ip or dev_serial or dev_hostname
+                    return {"input": raw, "target": target, "source": "scaler-db", "ssh_hint": ""}
+            except Exception:
+                continue
+
+    inventory_file = _inventory_path()
+    if inventory_file.exists():
+        try:
+            with open(inventory_file, 'r') as f:
+                inventory = json.load(f)
+            for key, dev in inventory.get('devices', {}).items():
+                dev_hostname = (dev.get('hostname') or key)
+                dev_mgmt = dev.get('mgmt_ip', '') or ''
+                dev_serial = str(dev.get('serial') or '')
+                key_value = str(key)
+                lower_values = [dev_hostname.lower(), dev_serial.lower(), key_value.lower()]
+                if search_lower in lower_values or any(search_lower in v or v in search_lower for v in lower_values if v):
+                    for candidate in (dev_mgmt, dev_serial, key_value):
+                        if candidate and re.match(r'^\d+\.\d+\.\d+\.\d+$', str(candidate)):
+                            return {"input": raw, "target": str(candidate), "source": "device_inventory", "ssh_hint": ""}
+                    for candidate in (dev_serial, key_value, dev_hostname):
+                        if candidate:
+                            return {"input": raw, "target": str(candidate), "source": "device_inventory_name", "ssh_hint": ""}
+        except Exception:
+            pass
+
+    return {"input": raw, "target": raw, "source": "unresolved", "ssh_hint": ""}
+
+
+def _tcp_preflight(host: str, port: int = 22, timeout: float = 3.0) -> dict:
+    import socket
+    started = time.time()
+    try:
+        sock = socket.socket()
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        sock.close()
+        return {"reachable": True, "port": port, "latency_ms": int((time.time() - started) * 1000)}
+    except Exception as exc:
+        return {"reachable": False, "port": port, "error": str(exc), "latency_ms": int((time.time() - started) * 1000)}
+
+
 # ========================================================================
 # Network Mapper — Recursive LLDP Discovery Engine
 # ========================================================================
@@ -194,6 +969,10 @@ def _nm_resolve_host(name: str, known_devices: list = None) -> str:
     """Resolve a device name/serial/IP to a connectable target.
     known_devices: list of dicts from canvas with {name, host, hostBackup, serial}
     """
+    return _resolve_discovery_target(name, known_devices=known_devices).get("target") or name
+    # Legacy implementation kept below as unreachable reference during the
+    # resolver consolidation migration. Remove after the new resolver is
+    # exercised across LLDP/DNAAS/Network Mapper for a release cycle.
     import socket
     if re.match(r'^\d+\.\d+\.\d+\.\d+$', name):
         return name
@@ -227,8 +1006,7 @@ def _nm_resolve_host(name: str, known_devices: list = None) -> str:
                 op_file = device_dir / 'operational.json'
                 if op_file.exists():
                     try:
-                        with open(op_file, 'r') as f:
-                            op_data = json.load(f)
+                        op_data = _safe_read_ops(op_file)
                         dev_hostname = (op_data.get('hostname', '') or '').lower()
                         dev_ip = op_data.get('connection_ip', '') or ''
                         if dev_hostname and (name.lower() == dev_hostname or
@@ -239,7 +1017,7 @@ def _nm_resolve_host(name: str, known_devices: list = None) -> str:
                     except Exception:
                         pass
     # Try device_inventory.json
-    inv_file = Path('/home/dn/CURSOR/device_inventory.json')
+    inv_file = _inventory_path()
     if inv_file.exists():
         try:
             with open(inv_file, 'r') as f:
@@ -256,8 +1034,14 @@ def _nm_resolve_host(name: str, known_devices: list = None) -> str:
     return name
 
 
-def _nm_ssh_discover_device(host: str, username: str, password: str, timeout: int = 30) -> dict:
-    """SSH to a device and collect hostname, system info, LLDP neighbors, mgmt interfaces."""
+def _nm_ssh_discover_device(host: str, username: str, password: str, timeout: int = 30,
+                            cancel_check=None) -> dict:
+    """SSH to a device and collect hostname, system info, LLDP neighbors, mgmt interfaces.
+
+    cancel_check: optional zero-arg callable returning True when the caller wants
+    us to abort. Polled between shell commands so the user's Stop button takes
+    effect within a couple of seconds instead of the full 15-20s command loop.
+    """
     import paramiko
     result = {
         'hostname': host,
@@ -268,6 +1052,13 @@ def _nm_ssh_discover_device(host: str, username: str, password: str, timeout: in
         'lldp_neighbors': [],
         'error': None
     }
+
+    def _cancelled():
+        try:
+            return bool(cancel_check()) if cancel_check else False
+        except Exception:
+            return False
+
     try:
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -278,20 +1069,45 @@ def _nm_ssh_discover_device(host: str, username: str, password: str, timeout: in
         return result
 
     try:
+        if _cancelled():
+            result['error'] = 'cancelled'
+            try:
+                client.close()
+            except Exception:
+                pass
+            return result
+
         shell = client.invoke_shell(width=250, height=50)
         shell.settimeout(timeout)
         import time as _time
-        _time.sleep(3)
+        # Banner drain: poll cancel every 0.25s instead of blocking 3s
+        _banner_end = _time.time() + 3
+        while _time.time() < _banner_end:
+            if _cancelled():
+                result['error'] = 'cancelled'
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                return result
+            _time.sleep(0.25)
         while shell.recv_ready():
             shell.recv(65535)
             _time.sleep(0.2)
 
         def _run_cmd(cmd, wait=4, max_wait=15):
             shell.send(cmd + ' | no-more\r\n')
-            _time.sleep(wait)
+            # Poll-wait instead of a single blocking sleep so cancellation lands fast
+            wait_end = _time.time() + wait
+            while _time.time() < wait_end:
+                if _cancelled():
+                    return ''
+                _time.sleep(0.25)
             output = ''
             end = _time.time() + max_wait
             while _time.time() < end:
+                if _cancelled():
+                    return strip_ansi(output)
                 if shell.recv_ready():
                     output += shell.recv(65535).decode('utf-8', errors='replace')
                     if '#' in output.split('\n')[-1]:
@@ -309,9 +1125,15 @@ def _nm_ssh_discover_device(host: str, username: str, password: str, timeout: in
         if shell.recv_ready():
             prompt_out = shell.recv(65535).decode('utf-8', errors='replace')
         prompt_clean = strip_ansi(prompt_out).strip()
-        prompt_match = re.search(r'([A-Za-z0-9_.-]+)#', prompt_clean)
-        if prompt_match:
-            result['hostname'] = prompt_match.group(1)
+        # Use the LAST "word#" match -- the actual prompt is at the end of the
+        # output, while MOTD/banner text may contain earlier "foo#" noise.
+        prompt_matches = re.findall(r'([A-Za-z0-9_.-]+)#', prompt_clean)
+        if prompt_matches:
+            result['hostname'] = prompt_matches[-1]
+
+        if _cancelled():
+            result['error'] = 'cancelled'
+            return result
 
         # System info
         sys_output = _run_cmd('show system', wait=3)
@@ -324,12 +1146,17 @@ def _nm_ssh_discover_device(host: str, username: str, password: str, timeout: in
             elif 'version' in line_s.lower() and 'dnos' in line_s.lower():
                 result['dnos_version'] = line_s.strip()
 
+        if _cancelled():
+            result['error'] = 'cancelled'
+            return result
+
         # LLDP neighbors
         lldp_output = _run_cmd('show lldp neighbors', wait=3)
         result['lldp_neighbors'] = _parse_lldp_output(lldp_output)
-        if not result['lldp_neighbors']:
-            lldp_output2 = _run_cmd('show lldp neighbor', wait=3)
-            result['lldp_neighbors'] = _parse_lldp_output(lldp_output2)
+
+        if _cancelled():
+            result['error'] = 'cancelled'
+            return result
 
         # Management interfaces (for mgmt IP)
         if not result['mgmt_ip']:
@@ -339,6 +1166,10 @@ def _nm_ssh_discover_device(host: str, username: str, password: str, timeout: in
                 if ip_match and not ip_match.group(1).startswith('127.'):
                     result['mgmt_ip'] = ip_match.group(1)
                     break
+
+        if _cancelled():
+            result['error'] = 'cancelled'
+            return result
 
         # Interface brief for speed/state (lightweight — no detail)
         result['interfaces'] = {}
@@ -458,24 +1289,89 @@ def _parse_mcp_interfaces_detail(text: str) -> dict:
     return interfaces
 
 
+def _nm_discover_one(name: str, host: str, use_mcp: bool,
+                     ssh_user: str, ssh_pass: str,
+                     ssh_timeout: int = 12,
+                     cancel_check=None) -> dict:
+    """Worker: try MCP first, then fall back to SSH. Runs inside ThreadPoolExecutor
+    so hangs in either MCP (SSE) or SSH (paramiko) can be abandoned at cancellation
+    without blocking the main BFS loop.
+
+    cancel_check: optional callable returning True when the worker should abort.
+    Checked between the MCP call and the SSH fallback, and forwarded into the
+    SSH function so it can bail between shell commands.
+    """
+    def _cancelled():
+        try:
+            return bool(cancel_check()) if cancel_check else False
+        except Exception:
+            return False
+
+    if _cancelled():
+        return {
+            'hostname': name,
+            'mgmt_ip': host if re.match(r'^\d+\.\d+\.\d+\.\d+$', host) else '',
+            'serial': '', 'system_type': '', 'dnos_version': '',
+            'lldp_neighbors': [], 'interfaces': {},
+            'error': 'cancelled',
+        }
+
+    if use_mcp:
+        try:
+            mcp_result = _nm_try_network_mapper_mcp(name)
+        except Exception:
+            mcp_result = None
+        if mcp_result and mcp_result.get('lldp_neighbors'):
+            return {
+                'hostname': name,
+                'mgmt_ip': host if re.match(r'^\d+\.\d+\.\d+\.\d+$', host) else '',
+                'serial': mcp_result.get('serial', ''),
+                'system_type': mcp_result.get('system_type', ''),
+                'dnos_version': mcp_result.get('dnos_version', ''),
+                'lldp_neighbors': mcp_result['lldp_neighbors'],
+                'interfaces': mcp_result.get('interfaces', {}),
+                'error': None,
+                'source': 'mcp',
+            }
+
+    if _cancelled():
+        return {
+            'hostname': name,
+            'mgmt_ip': host if re.match(r'^\d+\.\d+\.\d+\.\d+$', host) else '',
+            'serial': '', 'system_type': '', 'dnos_version': '',
+            'lldp_neighbors': [], 'interfaces': {},
+            'error': 'cancelled',
+        }
+
+    return _nm_ssh_discover_device(
+        host, ssh_user, ssh_pass,
+        timeout=ssh_timeout,
+        cancel_check=cancel_check,
+    )
+
+
 def _nm_bfs_crawl(job_id: str, seeds: list, max_depth: int, max_devices: int,
                   username: str, password: str, use_mcp: bool, known_devices: list = None):
     """BFS crawl from seed devices using LLDP to discover the network graph.
     known_devices: canvas/DNAAS devices with SSH info for smarter resolution.
+
+    Cancellation is polled (a) at the top of each BFS iteration, and (b) after
+    every completed future inside a batch. When cancel is observed we abandon
+    outstanding futures (they run to their own timeout in their own threads but
+    we stop collecting their results) and exit immediately so the UI unblocks.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     known_devices = known_devices or []
-    # Build credentials lookup from known devices
     known_creds = {}
     for kd in known_devices:
-        for key in [kd.get('name',''), kd.get('hostBackup',''), kd.get('serial','')]:
+        for key in [kd.get('name', ''), kd.get('hostBackup', ''), kd.get('serial', '')]:
             if key:
                 known_creds[key.lower()] = kd
 
-    devices = {}   # hostname -> device_info
-    links = []     # [{from_device, to_device, from_interface, to_interface}]
-    link_set = set()  # for dedup: frozenset((devA:ifA, devB:ifB))
+    devices = {}      # hostname -> device_info
+    links = []        # [{from_device, to_device, from_interface, to_interface}]
+    link_set = set()  # dedup key for bidirectional links
     errors = []
     visited = set()   # normalized hostnames
     bfs_queue = queue.Queue()
@@ -489,6 +1385,22 @@ def _nm_bfs_crawl(job_id: str, seeds: list, max_depth: int, max_devices: int,
             if job_id in nm_jobs:
                 nm_jobs[job_id]['log'].append(msg)
 
+    def is_cancelled():
+        with nm_job_lock:
+            return bool(nm_jobs.get(job_id, {}).get('cancelled'))
+
+    def update_progress(snapshot_devices=False):
+        with nm_job_lock:
+            if job_id not in nm_jobs:
+                return
+            if snapshot_devices:
+                nm_jobs[job_id]['devices'] = dict(devices)
+            nm_jobs[job_id]['links'] = list(links)
+            nm_jobs[job_id]['errors'] = list(errors)
+            nm_jobs[job_id]['progress']['discovered'] = len(devices)
+            nm_jobs[job_id]['progress']['queued'] = bfs_queue.qsize()
+            nm_jobs[job_id]['progress']['failed'] = len(errors)
+
     # Seed the queue
     for seed in seeds:
         seed = seed.strip()
@@ -500,15 +1412,15 @@ def _nm_bfs_crawl(job_id: str, seeds: list, max_depth: int, max_devices: int,
     with nm_job_lock:
         nm_jobs[job_id]['status'] = 'running'
 
-    batch_size = 5  # concurrent SSH sessions
+    batch_size = 5        # concurrent SSH/MCP workers
+    ssh_timeout = 12      # per-device SSH connect timeout (keep stop-responsive)
 
     while not bfs_queue.empty():
-        # Check cancellation
-        with nm_job_lock:
-            if nm_jobs[job_id].get('cancelled'):
+        if is_cancelled():
+            with nm_job_lock:
                 nm_jobs[job_id]['status'] = 'cancelled'
-                log("Discovery cancelled by user")
-                return
+            log("Discovery cancelled by user")
+            return
 
         # Collect a batch from the queue
         batch = []
@@ -528,82 +1440,74 @@ def _nm_bfs_crawl(job_id: str, seeds: list, max_depth: int, max_devices: int,
         if not batch:
             break
 
-        # Discover batch concurrently
-        with ThreadPoolExecutor(max_workers=min(batch_size, len(batch))) as executor:
+        # Show activity in the "queued" counter while this batch is in flight
+        with nm_job_lock:
+            nm_jobs[job_id]['progress']['queued'] = bfs_queue.qsize() + len(batch)
+
+        executor = ThreadPoolExecutor(max_workers=min(batch_size, len(batch)))
+        try:
             futures = {}
             for name, host, depth in batch:
+                ssh_user = username
+                ssh_pass = password
+                kd = known_creds.get(name.lower()) or known_creds.get(host.lower())
+                if kd:
+                    ssh_user = kd.get('user') or username
+                    ssh_pass = kd.get('password') or password
                 log(f"Discovering {name} ({host}) at depth {depth}...")
-                # Try MCP first for enriched device data
-                mcp_result = None
-                if use_mcp:
-                    mcp_result = _nm_try_network_mapper_mcp(name)
+                fut = executor.submit(
+                    _nm_discover_one, name, host, use_mcp,
+                    ssh_user, ssh_pass, ssh_timeout,
+                    is_cancelled,
+                )
+                futures[fut] = (name, host, depth)
 
-                if mcp_result and mcp_result.get('lldp_neighbors'):
-                    device_info = {
-                        'hostname': name,
-                        'mgmt_ip': host if re.match(r'^\d+\.\d+\.\d+\.\d+$', host) else '',
-                        'serial': mcp_result.get('serial', ''),
-                        'system_type': mcp_result.get('system_type', ''),
-                        'dnos_version': mcp_result.get('dnos_version', ''),
-                        'lldp_neighbors': mcp_result['lldp_neighbors'],
-                        'interfaces': mcp_result.get('interfaces', {}),
-                        'error': None,
-                        'source': 'mcp'
-                    }
-                    futures[executor.submit(lambda d=device_info: d)] = (name, host, depth)
-                else:
-                    # Use known device credentials if available
-                    ssh_user = username
-                    ssh_pass = password
-                    kd = known_creds.get(name.lower()) or known_creds.get(host.lower())
-                    if kd:
-                        ssh_user = kd.get('user') or username
-                        ssh_pass = kd.get('password') or password
-                    futures[executor.submit(
-                        _nm_ssh_discover_device, host, ssh_user, ssh_pass
-                    )] = (name, host, depth)
-
+            cancelled_mid_batch = False
             for future in as_completed(futures):
+                if is_cancelled():
+                    cancelled_mid_batch = True
+                    break
+
                 name, host, depth = futures[future]
                 try:
                     dev_info = future.result()
                 except Exception as e:
                     errors.append({'device': name, 'host': host, 'error': str(e)})
                     log(f"  FAILED {name}: {e}")
+                    update_progress()
                     continue
+
+                # If the worker self-aborted because Stop was pressed, don't
+                # count it as a failure and don't add a partial device.
+                if dev_info.get('error') == 'cancelled':
+                    cancelled_mid_batch = True
+                    break
 
                 if dev_info.get('error'):
                     errors.append({'device': name, 'host': host, 'error': dev_info['error']})
                     log(f"  FAILED {name}: {dev_info['error']}")
-                    # Still store partial data (hostname from seed)
                     dev_info['_failed'] = True
 
-                # Use discovered hostname if available, fall back to seed name
                 actual_hostname = dev_info.get('hostname', name) or name
                 dev_info['hostname'] = actual_hostname
                 dev_info['_connect_host'] = host
                 dev_info['_depth'] = depth
                 devices[actual_hostname] = dev_info
-
-                with nm_job_lock:
-                    nm_jobs[job_id]['devices'] = dict(devices)
-                    nm_jobs[job_id]['progress']['discovered'] = len(devices)
+                update_progress(snapshot_devices=True)
 
                 log(f"  OK {actual_hostname}: {len(dev_info.get('lldp_neighbors', []))} LLDP neighbors")
 
-                # Process LLDP neighbors — add links and enqueue new devices
+                # Process LLDP neighbors -- add links and enqueue new devices
                 for neighbor in dev_info.get('lldp_neighbors', []):
                     neighbor_name = neighbor.get('neighbor_device', '')
                     if not neighbor_name:
                         continue
-
                     local_if = neighbor.get('local_interface', '')
                     remote_if = neighbor.get('neighbor_port', '')
 
-                    # Deduplicate bidirectional links
                     link_key = frozenset([
                         f"{actual_hostname}:{local_if}",
-                        f"{neighbor_name}:{remote_if}"
+                        f"{neighbor_name}:{remote_if}",
                     ])
                     if link_key not in link_set:
                         link_set.add(link_key)
@@ -611,21 +1515,30 @@ def _nm_bfs_crawl(job_id: str, seeds: list, max_depth: int, max_devices: int,
                             'from_device': actual_hostname,
                             'to_device': neighbor_name,
                             'from_interface': local_if,
-                            'to_interface': remote_if
+                            'to_interface': remote_if,
                         })
 
-                    # Enqueue neighbor if not visited
                     norm_neighbor = normalize(neighbor_name)
                     if norm_neighbor not in visited and len(devices) < max_devices:
                         resolved_neighbor = _nm_resolve_host(neighbor_name, known_devices)
                         bfs_queue.put((neighbor_name, resolved_neighbor, depth + 1))
+        finally:
+            # Abandon any still-running futures on shutdown. They will finish
+            # in background threads but we stop waiting for them.
+            try:
+                for f in list(futures):
+                    f.cancel()
+            except Exception:
+                pass
+            executor.shutdown(wait=False)
 
-        # Update progress
-        with nm_job_lock:
-            nm_jobs[job_id]['links'] = list(links)
-            nm_jobs[job_id]['errors'] = list(errors)
-            nm_jobs[job_id]['progress']['queued'] = bfs_queue.qsize()
-            nm_jobs[job_id]['progress']['failed'] = len(errors)
+        update_progress()
+
+        if cancelled_mid_batch or is_cancelled():
+            with nm_job_lock:
+                nm_jobs[job_id]['status'] = 'cancelled'
+            log("Discovery cancelled by user (during batch)")
+            return
 
     # Finalize
     with nm_job_lock:
@@ -905,6 +1818,86 @@ def _resolve_device_mgmt(device_name: str) -> dict:
     return result
 
 
+def _find_active_lldp_for_device(device_key: str):
+    if not device_key:
+        return None
+    for jid in [lldp_device_current.get(device_key)] + list(lldp_device_queues.get(device_key, [])):
+        if not jid:
+            continue
+        job = jobs.get(jid)
+        if job and job.get("status") in ("running", "queued", "starting"):
+            return jid, job
+    return None
+
+
+def _mark_lldp_current(device_key: str, job_id: str):
+    if device_key:
+        lldp_device_current[device_key] = job_id
+
+
+def _clear_lldp_current(device_key: str, job_id: str):
+    if device_key and lldp_device_current.get(device_key) == job_id:
+        lldp_device_current.pop(device_key, None)
+
+
+def _launch_lldp_job(handler, job_id: str):
+    def run_enable_lldp():
+        with job_lock:
+            job = jobs.get(job_id)
+            if not job:
+                return
+            job['status'] = 'running'
+            job['started_at'] = datetime.now().isoformat()
+            job['progress'] = max(job.get('progress', 0), 1)
+            device_key = job.get('device_key', '')
+            serial = job.get('serial', '')
+            username = job.get('_runtime_username', 'dnroot')
+            password = job.get('_runtime_password', 'dnroot')
+            skip_host_key = job.get('_runtime_skip_host_key', False)
+            ssh_host = job.get('resolved_target') or job.get('_runtime_ssh_host') or None
+            _mark_lldp_current(device_key, job_id)
+            snapshot = dict(job)
+        _persist_job(job_id, snapshot)
+        try:
+            result = handler._enable_lldp_on_device(
+                serial, job_id, username, password, skip_host_key, ssh_host=ssh_host
+            )
+            _set_job_fields(
+                job_id,
+                status='completed' if result.get('success') else 'failed',
+                progress=100,
+                interfaces_enabled=result.get('interfaces_enabled', 0),
+                interfaces=result.get('interfaces', []),
+                already_configured=result.get('already_configured', False),
+                error=None if result.get('success') else result.get('error', 'Unknown error'),
+            )
+        except Exception as e:
+            _append_job_line(job_id, f"✗ Error: {str(e)}")
+            _set_job_fields(job_id, status='failed', progress=100, error=str(e))
+        finally:
+            with job_lock:
+                job = jobs.get(job_id, {})
+                device_key = job.get('device_key', '')
+                _clear_lldp_current(device_key, job_id)
+                next_id = None
+                q = lldp_device_queues.get(device_key, [])
+                while q:
+                    candidate = q.pop(0)
+                    candidate_job = jobs.get(candidate)
+                    if candidate_job and candidate_job.get('status') == 'queued':
+                        next_id = candidate
+                        break
+                if not q:
+                    lldp_device_queues.pop(device_key, None)
+            if next_id:
+                _append_job_line(next_id, "[INFO] Previous LLDP operation finished; starting queued job")
+                _launch_lldp_job(handler, next_id)
+
+    thread = threading.Thread(target=run_enable_lldp, daemon=True)
+    thread.start()
+    return thread
+
+
 class DiscoveryHandler(BaseHTTPRequestHandler):
     def _send_json(self, data, status=200):
         self.send_response(status)
@@ -927,7 +1920,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
         Enable LLDP and admin-state on all PHYSICAL interfaces of a device.
         Only enables on ge*, eth*, hu*, ce*, qsfp* - NOT on loopbacks, management, or sub-interfaces.
         Uses SSH to configure the device.
-        
+
         If job_id is provided, updates the job's output_lines for real-time feedback.
         If skip_host_key is True, ignores all host key verification (like ssh -o StrictHostKeyChecking=no).
         If ssh_host is provided (mgmt IP), use it directly instead of resolving serial.
@@ -951,31 +1944,20 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             connect_host = None
             resolved_ip = None
             
-            # Use ssh_host (mgmt IP) directly when provided
+            # Use ssh_host directly only when the frontend has an explicit
+            # transport target. Otherwise use the shared resolver instead of
+            # SSHing to a canvas label like "RR-SA-2".
             if ssh_host and ssh_host.strip():
                 connect_host = ssh_host.strip()
                 resolved_ip = connect_host
                 log(f"Using ssh_host {connect_host} for {serial}")
             else:
-                # Resolve hostname to IP - try with domain suffix if bare hostname fails
-                connect_host = serial
-                domain_suffixes = ['', '.dev.drivenets.net', '.drivenets.net', '.local']
-                
-                for suffix in domain_suffixes:
-                    try_host = serial + suffix
-                    try:
-                        resolved_ip = socket.gethostbyname(try_host)
-                        connect_host = try_host
-                        log(f"Resolved {try_host} -> {resolved_ip}")
-                        break
-                    except socket.gaierror:
-                        continue
-            
-            if not resolved_ip:
-                log(f"[WARN] DNS lookup failed for {serial} (tried with domain suffixes)")
-                log(f"Trying direct connection to {serial}...")
-            else:
-                connect_host = resolved_ip
+                connect_host = self._resolve_serial_to_host(serial)
+                if connect_host and connect_host != serial:
+                    log(f"Resolved {serial} -> {connect_host}")
+                else:
+                    log(f"[WARN] Could not resolve {serial} from DNS/cache/inventory")
+                    log(f"Trying direct connection to {serial}...")
             
             # Connect to device
             client = paramiko.SSHClient()
@@ -1118,7 +2100,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             safe_send("\n")
             time.sleep(0.5)
             
-            safe_send("show interfaces | no-more\n")
+            safe_send("show interfaces description | no-more\n")
             time.sleep(1)
             
             output = safe_recv(15)
@@ -1137,7 +2119,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             # - Cluster NCP NIF: ge100-0/0/0, ge400-1/0/0 (nodeId is 0 or 1 for NCP-A/NCP-B)
             # Exclude: lo0, mgmt0, *.1 (sub-interfaces), bundle-*, lag-*, ctrl-*, ice*, fab*
             physical_interface_pattern = re.compile(
-                r'\b((?:ge|hu|ce|qsfp)\d*-\d+/\d+/\d+)\b',
+                r'\b((?:ge|xe|et|hu|ce|qsfp)\d*-\d+/\d+/\d+)\b',
                 re.MULTILINE
             )
             
@@ -1180,13 +2162,13 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             # ================================================================
             if unique_interfaces:
                 log("[INFO] Checking existing LLDP configuration...")
-                safe_send("show configuration protocols lldp | no-more\n")
+                safe_send("show config protocols lldp | no-more\n")
                 time.sleep(0.5)
                 lldp_config_output = safe_recv(8)
                 
                 # Parse interfaces that already have LLDP configured
                 # DNOS format: "interface ge400-0/0/1" under protocols lldp
-                lldp_configured_pattern = re.compile(r'interface\s+((?:ge|hu|ce|qsfp)\d*-\d+/\d+/\d+)', re.MULTILINE)
+                lldp_configured_pattern = re.compile(r'interface\s+((?:ge|xe|et|hu|ce|qsfp)\d*-\d+/\d+/\d+)', re.MULTILINE)
                 already_configured = set(lldp_configured_pattern.findall(lldp_config_output))
                 
                 # Check if admin-state is enabled globally
@@ -1202,7 +2184,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                     log(f"   Interfaces with LLDP: {len(already_configured)}")
                     
                     log("[INFO] Verifying interface admin-state...")
-                    safe_send("show interfaces brief | no-more\n")
+                    safe_send("show interfaces description | no-more\n")
                     time.sleep(0.5)
                     iface_status_output = safe_recv(10)
                     
@@ -1324,8 +2306,16 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                             log(f"   {line[:120]}")  # Truncate long lines
                 
                 if 'error' in commit_output.lower() or 'failed' in commit_output.lower() or 'invalid' in commit_output.lower():
-                    log(f"⚠️  WARNING: Commit may have issues!")
-                    log(f"⚠️  Check output above for errors")
+                    log("[ERROR] LLDP commit failed; configuration was not applied")
+                    safe_send("exit\n")
+                    time.sleep(0.3)
+                    client.close()
+                    return {
+                        'success': False,
+                        'error': f"LLDP commit failed: {strip_ansi(commit_output)[-500:]}",
+                        'interfaces_enabled': 0,
+                        'interfaces': unique_interfaces[:20],
+                    }
                 elif 'commit complete' in commit_output.lower():
                     log("✅ Configuration committed successfully!")
                 elif not commit_output.strip():
@@ -1387,6 +2377,13 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
         """Resolve a serial/hostname to a connectable IP or hostname.
         Tries: DNS with suffixes -> Scaler DB (fuzzy match) -> uppercase serial.
         """
+        resolved = _resolve_discovery_target(serial)
+        target = resolved.get("target") or serial
+        if target != serial:
+            print(f"[Resolve] {serial} -> {target} ({resolved.get('source')})")
+        return target
+        # Legacy implementation kept below as unreachable reference during the
+        # resolver consolidation migration.
         import socket
         from difflib import SequenceMatcher
         
@@ -1424,8 +2421,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                     op_file = device_dir / 'operational.json'
                     if op_file.exists():
                         try:
-                            with open(op_file, 'r') as f:
-                                op_data = json.load(f)
+                            op_data = _safe_read_ops(op_file)
                             dev_serial = (op_data.get('serial_number', '') or '').upper()
                             dev_ip = op_data.get('connection_ip', '') or ''
                             dev_hostname = op_data.get('hostname', device_dir.name) or device_dir.name
@@ -1455,7 +2451,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                             pass
         
         # Check device_inventory.json for mgmt_ip
-        inventory_file = Path('/home/dn/CURSOR/device_inventory.json')
+        inventory_file = _inventory_path()
         if inventory_file.exists():
             try:
                 with open(inventory_file, 'r') as f:
@@ -1464,13 +2460,16 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 for key, dev in inventory.get('devices', {}).items():
                     dev_hostname = (dev.get('hostname') or key).lower()
                     dev_mgmt = dev.get('mgmt_ip', '') or ''
+                    dev_serial = str(dev.get('serial') or '')
+                    key_value = str(key)
                     if (search_lower == dev_hostname or
                         search_lower in dev_hostname or
                         dev_hostname in search_lower or
                         search_lower == key.lower()):
-                        if dev_mgmt:
-                            print(f"[Resolve] {serial} -> {dev_mgmt} (device_inventory)")
-                            return dev_mgmt
+                        for candidate in (dev_mgmt, dev_serial, key_value):
+                            if candidate and re.match(r'^\d+\.\d+\.\d+\.\d+$', candidate):
+                                print(f"[Resolve] {serial} -> {candidate} (device_inventory)")
+                                return candidate
             except Exception:
                 pass
         
@@ -1574,25 +2573,26 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                         shell.recv(65535)
                         time.sleep(0.1)
 
-                shell.send('cat .gitcommit\n')
-                time.sleep(2)
-                out = ''
-                for _ in range(15):
-                    if shell.recv_ready():
-                        out += shell.recv(65535).decode('utf-8', errors='replace')
-                        time.sleep(0.2)
-                    else:
-                        time.sleep(0.3)
-                raw = strip_ansi(out)
-                for line in raw.split('\n'):
-                    line = line.strip()
-                    if not line or line.startswith('cat ') or line.endswith('#'):
-                        continue
-                    if 'No such file' in line or 'Permission denied' in line or 'ERROR' in line:
-                        continue
-                    m = re.match(r'^([a-fA-F0-9]{7,40}(?:-\S+)?)$', line)
-                    if m:
-                        return m.group(1)
+                for git_path in ('/.gitcommit', '.gitcommit'):
+                    shell.send(f'cat {git_path}\n')
+                    time.sleep(1)
+                    out = ''
+                    for _ in range(12):
+                        if shell.recv_ready():
+                            out += shell.recv(65535).decode('utf-8', errors='replace')
+                            time.sleep(0.2)
+                        else:
+                            time.sleep(0.25)
+                    raw = strip_ansi(out)
+                    for line in raw.split('\n'):
+                        line = line.strip()
+                        if not line or line.startswith('cat ') or line.endswith('#'):
+                            continue
+                        if 'No such file' in line or 'Permission denied' in line or 'ERROR' in line:
+                            continue
+                        m = re.match(r'^([a-fA-F0-9]{7,40}(?:-\S+)?)$', line)
+                        if m:
+                            return m.group(1)
                 return None
             finally:
                 client.close()
@@ -1638,40 +2638,31 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             while shell.recv_ready():
                 shell.recv(65535)
                 time.sleep(0.1)
-            for cmd in ("show lldp neighbor | no-more\r\n", "show lldp neighbors | no-more\r\n"):
-                shell.send(cmd)
-                time.sleep(0.5)
-                output = ""
-                end_time = time.time() + 10
-                idle_since = None
-                while time.time() < end_time:
-                    if shell.recv_ready():
-                        output += shell.recv(65535).decode('utf-8', errors='replace')
-                        idle_since = None
-                        last_line = output.rstrip().split('\n')[-1].strip() if output.rstrip() else ''
-                        if last_line.endswith('#') or last_line.endswith('>'):
-                            time.sleep(0.15)
-                            if shell.recv_ready():
-                                output += shell.recv(65535).decode('utf-8', errors='replace')
-                            break
-                    else:
-                        if idle_since is None:
-                            idle_since = time.time()
-                        elif output and (time.time() - idle_since) > 1.0:
-                            break
-                        time.sleep(0.1)
-                raw_clean = strip_ansi(output)
-                neighbors = _parse_lldp_output(raw_clean)
-                if neighbors or ('interface' in raw_clean.lower() and 'invalid' not in raw_clean.lower()):
-                    client.close()
-                    return {'lldp_neighbors': neighbors, 'raw_output': raw_clean}
-                if 'invalid' in raw_clean.lower() or 'unknown' in raw_clean.lower() or 'error' in raw_clean.lower():
-                    time.sleep(0.3)
-                    while shell.recv_ready():
-                        shell.recv(65535)
-                    continue
-                client.close()
-                return {'lldp_neighbors': neighbors, 'raw_output': raw_clean}
+            shell.send("show lldp neighbors | no-more\r\n")
+            time.sleep(0.5)
+            output = ""
+            end_time = time.time() + 10
+            idle_since = None
+            while time.time() < end_time:
+                if shell.recv_ready():
+                    output += shell.recv(65535).decode('utf-8', errors='replace')
+                    idle_since = None
+                    last_line = output.rstrip().split('\n')[-1].strip() if output.rstrip() else ''
+                    if last_line.endswith('#') or last_line.endswith('>'):
+                        time.sleep(0.15)
+                        if shell.recv_ready():
+                            output += shell.recv(65535).decode('utf-8', errors='replace')
+                        break
+                else:
+                    if idle_since is None:
+                        idle_since = time.time()
+                    elif output and (time.time() - idle_since) > 1.0:
+                        break
+                    time.sleep(0.1)
+            raw_clean = strip_ansi(output)
+            neighbors = _parse_lldp_output(raw_clean)
+            client.close()
+            return {'lldp_neighbors': neighbors, 'raw_output': raw_clean}
             client.close()
             return {'lldp_neighbors': [], 'raw_output': raw_clean}
         except Exception as e:
@@ -1694,31 +2685,24 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
         
         search_term_lower = serial.lower()
         
-        # Find matching device folder
         for device_dir in db_configs.iterdir():
             if device_dir.is_dir():
                 dev_hostname = device_dir.name.lower()
-                # Bidirectional match
-                if dev_hostname == search_term_lower or \
-                   search_term_lower in dev_hostname or \
-                   dev_hostname in search_term_lower:
+                if _lldp_device_match(search_term_lower, dev_hostname, dev_hostname, '', '', ''):
                     op_file = device_dir / 'operational.json'
                     try:
-                        op_data = {}
-                        if op_file.exists():
-                            with open(op_file, 'r') as f:
-                                op_data = json.load(f)
-                        
-                        # Update LLDP data
-                        op_data['lldp_neighbors'] = lldp_neighbors
-                        op_data['lldp_neighbor_count'] = len(lldp_neighbors)
-                        op_data['lldp_last_updated'] = datetime.now().isoformat()
-                        
-                        with open(op_file, 'w') as f:
-                            json.dump(op_data, f, indent=2)
-                        
-                        print(f"✓ Saved {len(lldp_neighbors)} LLDP neighbors to cache: {op_file}")
-                        return True
+                        _now_iso = datetime.now().isoformat()
+
+                        def _mut_lldp(d, _n=lldp_neighbors, _ts=_now_iso):
+                            d['lldp_neighbors'] = _n
+                            d['lldp_neighbor_count'] = len(_n)
+                            d['lldp_last_updated'] = _ts
+
+                        ok, _ = _safe_update_ops(op_file, _mut_lldp, create_if_missing=True)
+                        if ok:
+                            print(f"✓ Saved {len(lldp_neighbors)} LLDP neighbors to cache: {op_file}")
+                            return True
+                        return False
                     except Exception as e:
                         print(f"Failed to save cache: {e}")
                         return False
@@ -1758,12 +2742,16 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             return
 
         elif parsed.path == '/api/discovery/status':
-            # Get status of a job
+            # Get status of a job (per-user: caller can only see their own jobs)
             params = parse_qs(parsed.query)
             job_id = params.get('job_id', [None])[0]
             
             if job_id and job_id in jobs:
                 job = jobs[job_id]
+                requester = _request_owner(self) or 'global'
+                if job.get('owner', 'global') != requester:
+                    self._send_json({'error': 'Job not found'}, 404)
+                    return
                 self._send_json({
                     'job_id': job_id,
                     'status': job['status'],
@@ -1776,12 +2764,16 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 self._send_json({'error': 'Job not found'}, 404)
         
         elif parsed.path == '/api/multi-bd/status':
-            # Get status of a multi-BD job
+            # Get status of a multi-BD job (per-user: caller can only see their own jobs)
             params = parse_qs(parsed.query)
             job_id = params.get('job_id', [None])[0]
             
             if job_id and job_id in jobs:
                 job = jobs[job_id]
+                requester = _request_owner(self) or 'global'
+                if job.get('owner', 'global') != requester:
+                    self._send_json({'error': 'Job not found'}, 404)
+                    return
                 # Strip ANSI codes for clean text matching in UI
                 clean_lines = [strip_ansi(line) for line in job['output_lines']]
                 self._send_json({
@@ -1796,14 +2788,53 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 })
             else:
                 self._send_json({'error': 'Job not found'}, 404)
+
+        elif parsed.path in ('/api/discovery/find', '/api/multi-bd/find'):
+            params = parse_qs(parsed.query)
+            serial = (params.get('serial', [''])[0] or params.get('serial1', [''])[0] or '').strip()
+            if not serial:
+                self._send_json({'error': 'serial is required'}, 400)
+                return
+            requester = _request_owner(self) or 'global'
+            desired_type = 'multi_bd' if parsed.path == '/api/multi-bd/find' else 'dnaas_discovery'
+            latest = None
+            with job_lock:
+                for jid, j in jobs.items():
+                    if j.get('type') != desired_type:
+                        continue
+                    if j.get('owner', 'global') != requester:
+                        continue
+                    if (j.get('serial') or '') != serial and (j.get('serial1') or '') != serial:
+                        continue
+                    if not latest or j.get('created_at', 0) > latest[1].get('created_at', 0):
+                        latest = (jid, j)
+            if not latest:
+                self._send_json({'job_id': None, 'status': 'none'})
+                return
+            jid, j = latest
+            self._send_json({
+                'job_id': jid,
+                'status': j.get('status', 'unknown'),
+                'progress': j.get('progress', 0),
+                'output_lines': [strip_ansi(line) for line in j.get('output_lines', [])],
+                'result_file': j.get('result_file'),
+                'bd_count': j.get('bd_count', 0),
+                'error': j.get('error'),
+                'created_at': j.get('created_at', 0),
+            })
         
         elif parsed.path == '/api/enable-lldp/status':
-            # Get status of an LLDP enable job (for real-time feedback)
+            # Get status of an LLDP enable job (per-user: caller can only see their own jobs)
             params = parse_qs(parsed.query)
             job_id = params.get('job_id', [None])[0]
             
             if job_id and job_id in jobs:
                 job = jobs[job_id]
+                requester = _request_owner(self) or 'global'
+                if job.get('owner', 'global') != requester:
+                    # Never leak the existence of another user's job
+                    self._send_json({'error': 'Job not found'}, 404)
+                    return
                 self._send_json({
                     'job_id': job_id,
                     'status': job['status'],
@@ -1812,22 +2843,76 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                     'interfaces_enabled': job.get('interfaces_enabled', 0),
                     'interfaces': job.get('interfaces', []),
                     'already_configured': job.get('already_configured', False),
+                    'queued_behind': job.get('queued_behind'),
+                    'device_key': job.get('device_key'),
+                    'resolve': job.get('resolve'),
+                    'preflight': job.get('preflight'),
                     'error': job.get('error')
                 })
             else:
                 self._send_json({'error': 'Job not found'}, 404)
         
+        elif parsed.path == '/api/enable-lldp/find':
+            # Reconnect helper: given a serial, return the latest LLDP job
+            # for THIS user (owner) and that serial. Lets the client
+            # transparently re-attach to an in-flight job after a tab
+            # reload, or skip resubmission if the job is still running.
+            params = parse_qs(parsed.query)
+            serial = (params.get('serial', [''])[0] or '').strip()
+            if not serial:
+                self._send_json({'error': 'serial is required'}, 400)
+                return
+            requester = _request_owner(self) or 'global'
+            latest = None
+            with job_lock:
+                for jid, j in jobs.items():
+                    if j.get('type') != 'enable_lldp':
+                        continue
+                    if j.get('owner', 'global') != requester:
+                        continue
+                    if (j.get('serial') or '') != serial:
+                        continue
+                    if not latest or j.get('created_at', 0) > latest[1].get('created_at', 0):
+                        latest = (jid, j)
+            if not latest:
+                self._send_json({'job_id': None, 'status': 'none'})
+                return
+            jid, j = latest
+            self._send_json({
+                'job_id': jid,
+                'status': j.get('status', 'unknown'),
+                'progress': j.get('progress', 0),
+                'output_lines': j.get('output_lines', []),
+                'interfaces_enabled': j.get('interfaces_enabled', 0),
+                'interfaces': j.get('interfaces', []),
+                'already_configured': j.get('already_configured', False),
+                'error': j.get('error'),
+                'created_at': j.get('created_at', 0),
+                'queued_behind': j.get('queued_behind'),
+                'device_key': j.get('device_key'),
+                'resolve': j.get('resolve'),
+                'preflight': j.get('preflight'),
+            })
+
         elif parsed.path == '/api/enable-lldp/cancel':
-            # Cancel an LLDP enable job and close SSH session
+            # Cancel an LLDP enable job and close SSH session (per-user)
             params = parse_qs(parsed.query)
             job_id = params.get('job_id', [None])[0]
             
             if job_id and job_id in jobs:
                 job = jobs[job_id]
+                requester = _request_owner(self) or 'global'
+                if job.get('owner', 'global') != requester:
+                    self._send_json({'error': 'Job not found'}, 404)
+                    return
                 job['cancelled'] = True
                 job['status'] = 'cancelled'
                 job['error'] = 'Cancelled by user'
                 job['output_lines'].append('⚠ LLDP enable cancelled by user')
+                device_key = job.get('device_key', '')
+                if device_key in lldp_device_queues:
+                    lldp_device_queues[device_key] = [jid for jid in lldp_device_queues[device_key] if jid != job_id]
+                _clear_lldp_current(device_key, job_id)
                 
                 # Close SSH client if stored - be aggressive
                 if '_ssh_client' in job:
@@ -1841,16 +2926,22 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                     except Exception as e:
                         job['output_lines'].append(f'⚠ SSH close error: {e}')
                 
+                _persist_job(job_id, dict(job))
                 self._send_json({'job_id': job_id, 'status': 'cancelled', 'message': 'LLDP enable cancelled'})
             else:
                 self._send_json({'error': 'Job not found'}, 404)
         
         elif parsed.path.startswith('/api/multi-bd/file/'):
-            # Serve a multi-BD result file by name
+            # Serve a multi-BD result file by name -- ONLY from caller's bucket.
             filename = parsed.path.replace('/api/multi-bd/file/', '')
-            # Security: only allow multi_bd_*.json or dnaas_*.json files
+            if '/' in filename or '\\' in filename or '..' in filename:
+                self._send_json({'error': 'Invalid filename'}, 400)
+                return
             if (filename.startswith('multi_bd_') or filename.startswith('dnaas_')) and filename.endswith('.json'):
-                filepath = OUTPUT_DIR / filename
+                _maybe_migrate_legacy_output()
+                owner = _request_owner(self)
+                owner_dir = _user_output_dir(owner)
+                filepath = owner_dir / filename
                 if filepath.exists() and filepath.is_file():
                     try:
                         with open(filepath, 'r') as f:
@@ -1880,7 +2971,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 print(f"[devices/list] MCP list failed: {e}")
             if not devices:
-                inv_file = Path('/home/dn/CURSOR/device_inventory.json')
+                inv_file = _inventory_path()
                 if inv_file.exists():
                     try:
                         with open(inv_file) as f:
@@ -1905,6 +2996,92 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 self._send_json(result)
             else:
                 self._send_json({'error': 'Invalid path'}, 400)
+
+        elif parsed.path.startswith('/api/device/') and '/management-interfaces' in parsed.path:
+            # GET /api/device/<name>/management-interfaces
+            # Returns parsed management interface data, including ipv4_addresses[]
+            # the XRAY capture flow needs to resolve a DUT host without prompting.
+            path_parts = parsed.path.split('/')
+            if len(path_parts) < 5:
+                self._send_json({'error': 'Invalid path'}, 400)
+                return
+            from urllib.parse import unquote
+            device_name = unquote(path_parts[3])
+            mgmt_text = ''
+            mgmt_ip = ''
+            interfaces = []
+            source = ''
+            try:
+                nm = _get_mcp_client()
+                mgmt_text = nm._call_tool('get_device_management_interfaces',
+                                          {'device_name': device_name}) or ''
+            except Exception as e:
+                print(f"[mgmt-iface] MCP lookup failed for {device_name}: {e}")
+
+            if mgmt_text and 'not found' not in str(mgmt_text).lower():
+                source = 'network-mapper'
+                mgmt_ip = _extract_mgmt_ip(mgmt_text)
+                # Build a structured interfaces[] view from the raw markdown so
+                # serve.py / xray-popup can consume {name, ipv4_addresses[]}.
+                current_iface = None
+                import re as _re
+                for line in str(mgmt_text).split('\n'):
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    m_name = _re.match(r'^[*\-+]?\s*(?:interface\s*[:=]?\s*)?'
+                                       r'([A-Za-z0-9_\-]+(?:\d+/\d+/\d+(?:\.\d+)?)?)'
+                                       r'\s*[:\-]?\s*$', stripped)
+                    if 'mgmt' in stripped.lower() and not _re.search(r'\d+\.\d+\.\d+\.\d+', stripped):
+                        for tok in stripped.split():
+                            if 'mgmt' in tok.lower() and len(tok) < 40:
+                                current_iface = {'name': tok.strip('*-+:'), 'ipv4_addresses': []}
+                                interfaces.append(current_iface)
+                                break
+                    ip_match = _re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?:/\d{1,2})?)', stripped)
+                    if ip_match:
+                        if current_iface is None:
+                            current_iface = {'name': 'mgmt0', 'ipv4_addresses': []}
+                            interfaces.append(current_iface)
+                        current_iface['ipv4_addresses'].append(ip_match.group(1))
+
+            if not mgmt_ip:
+                # Inventory fallback so the endpoint never returns 404 for
+                # devices we have a recorded mgmt_ip for.
+                try:
+                    inv_file = _inventory_path()
+                    if inv_file.exists():
+                        with open(inv_file) as f:
+                            inv = json.load(f)
+                        search_lower = device_name.lower()
+                        for key, dev in inv.get('devices', {}).items():
+                            host_lower = (dev.get('hostname') or key).lower()
+                            if (search_lower == host_lower or
+                                search_lower in host_lower or
+                                host_lower in search_lower or
+                                search_lower == key.lower()):
+                                ip = (dev.get('mgmt_ip') or '').split('/')[0]
+                                if ip:
+                                    mgmt_ip = ip
+                                    if not interfaces:
+                                        interfaces.append({'name': 'mgmt0',
+                                                           'ipv4_addresses': [ip]})
+                                    source = source or 'inventory'
+                                    break
+                except Exception:
+                    pass
+
+            if not interfaces and mgmt_ip:
+                interfaces.append({'name': 'mgmt0', 'ipv4_addresses': [mgmt_ip]})
+
+            self._send_json({
+                'device': device_name,
+                'mgmt_ip': mgmt_ip,
+                'interfaces': interfaces,
+                'source': source or 'unknown',
+                'raw': mgmt_text if isinstance(mgmt_text, str) else str(mgmt_text),
+            })
+            return
 
         elif parsed.path.startswith('/api/device/') and '/lldp' in parsed.path:
             # GET endpoint: /api/device/<serial>/lldp - fetch LLDP from scaler-monitor cache
@@ -1970,20 +3147,13 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                                 op_file = device_dir / 'operational.json'
                                 if op_file.exists():
                                     try:
-                                        with open(op_file, 'r') as f:
-                                            op_data = json.load(f)
+                                        op_data = _safe_read_ops(op_file)
                                         dev_hostname = op_data.get('hostname') or device_dir.name
                                         dev_serial = op_data.get('serial_number') or ''
                                         dev_connection_ip = op_data.get('connection_ip') or ''
                                         dir_name = device_dir.name.lower()
-                                        
-                                        if dev_hostname.lower() == search_term_lower or \
-                                           search_term_lower in dev_hostname.lower() or \
-                                           dev_hostname.lower() in search_term_lower or \
-                                           search_term_lower in dir_name or \
-                                           dir_name in search_term_lower or \
-                                           (dev_serial and dev_serial.lower() == search_term_lower) or \
-                                           (dev_connection_ip and dev_connection_ip == serial):
+
+                                        if _lldp_device_match(search_term_lower, dev_hostname, dir_name, dev_serial, dev_connection_ip, serial):
                                             found_device = dev_hostname
                                             lldp_source = 'scaler-db'
                                             lldp_data = op_data.get('lldp_neighbors', [])
@@ -2000,7 +3170,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 
                 # 3. Fallback: device_inventory.json
                 if not neighbors:
-                    inventory_file = Path('/home/dn/CURSOR/device_inventory.json')
+                    inventory_file = _inventory_path()
                     if inventory_file.exists():
                         try:
                             with open(inventory_file, 'r') as f:
@@ -2008,9 +3178,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                             devices = inventory.get('devices', {})
                             for device_key, device_data in devices.items():
                                 dev_hostname = device_data.get('hostname', device_key)
-                                if dev_hostname.lower() == search_term_lower or \
-                                   search_term_lower in dev_hostname.lower() or \
-                                   dev_hostname.lower() in search_term_lower:
+                                if _lldp_device_match(search_term_lower, dev_hostname, device_key, '', '', ''):
                                     found_device = dev_hostname
                                     lldp_source = 'device-inventory'
                                     for n in device_data.get('lldp_neighbors', []):
@@ -2066,12 +3234,16 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 self._send_json({'error': 'Invalid path format'}, 400)
         
         elif parsed.path == '/api/discovery/list':
-            # List output files (both dnaas_path and multi_bd)
+            # List output files (both dnaas_path and multi_bd) -- per-user only.
+            # Caller sees ONLY files inside their own bucket (or the global
+            # bucket when unauthenticated). No cross-user listing.
+            _maybe_migrate_legacy_output()
+            owner = _request_owner(self)
+            owner_dir = _user_output_dir(owner)
             files = []
-            if OUTPUT_DIR.exists():
-                # Get both dnaas_path and multi_bd files
-                dnaas_files = list(OUTPUT_DIR.glob('dnaas_path_*.json'))
-                multi_bd_files = list(OUTPUT_DIR.glob('multi_bd_*.json'))
+            if owner_dir.exists():
+                dnaas_files = list(owner_dir.glob('dnaas_path_*.json'))
+                multi_bd_files = list(owner_dir.glob('multi_bd_*.json'))
                 all_files = dnaas_files + multi_bd_files
                 # Sort by modification time (newest first) and take top 20
                 for f in sorted(all_files, key=lambda x: x.stat().st_mtime, reverse=True)[:20]:
@@ -2084,12 +3256,19 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             self._send_json({'files': files})
         
         elif parsed.path.startswith('/api/discovery/file/'):
-            # Serve a result file by name
+            # Serve a result file by name -- ONLY if it lives in the caller's bucket.
             filename = parsed.path.replace('/api/discovery/file/', '')
             # Security: allow both dnaas_path_*.json and multi_bd_*.json files
             valid_prefix = filename.startswith('dnaas_path_') or filename.startswith('multi_bd_') or filename.startswith('dnaas_')
+            # Also reject path traversal
+            if '/' in filename or '\\' in filename or '..' in filename:
+                self._send_json({'error': 'Invalid filename'}, 400)
+                return
             if valid_prefix and filename.endswith('.json'):
-                filepath = OUTPUT_DIR / filename
+                _maybe_migrate_legacy_output()
+                owner = _request_owner(self)
+                owner_dir = _user_output_dir(owner)
+                filepath = owner_dir / filename
                 if filepath.exists() and filepath.is_file():
                     try:
                         with open(filepath, 'r') as f:
@@ -2103,7 +3282,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 self._send_json({'error': 'Invalid filename'}, 400)
         
         # ================================================================
-        # Network Mapper — status endpoint
+        # Network Mapper — status endpoint (per-user)
         # ================================================================
         elif parsed.path == '/api/network-mapper/status':
             params = parse_qs(parsed.query)
@@ -2113,6 +3292,10 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 return
             with nm_job_lock:
                 job = nm_jobs[jid]
+                requester = self.headers.get('X-User', 'default') or 'default'
+                if job.get('owner', 'default') != requester:
+                    self._send_json({'error': 'Job not found'}, 404)
+                    return
                 self._send_json({
                     'status': job['status'],
                     'progress': job['progress'],
@@ -2177,19 +3360,30 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 self._send_json({'error': 'serial1 is required'}, 400)
                 return
             
+            owner = _request_owner(self)
+            owner_dir = _user_output_dir(owner)
+
             # Create job
             _cleanup_old_discovery_jobs()
             with job_lock:
                 job_counter += 1
                 job_id = f"job_{job_counter}"
                 jobs[job_id] = {
+                    'id': job_id,
+                    'type': 'dnaas_discovery',
+                    'serial': serial1,
+                    'serial2': serial2,
                     'status': 'starting',
                     'progress': 0,
                     'output_lines': [],
                     'result_file': None,
                     'error': None,
+                    'owner': owner or 'global',
+                    'output_dir': str(owner_dir),
                     'created_at': time.time()
                 }
+                snapshot = dict(jobs[job_id])
+            _persist_job(job_id, snapshot)
             
             # Start discovery in background thread
             def run_discovery():
@@ -2197,21 +3391,55 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 job['status'] = 'running'
                 job['progress'] = 10
                 job['output_lines'].append(f"Starting hybrid discovery for {serial1}...")
+                _persist_job(job_id, dict(job))
+
+                def _job_log(message: str):
+                    job['output_lines'].append(message)
+                    _persist_job(job_id, dict(job))
+
+                requested_backend = (data.get('backend') or data.get('discovery_backend') or '').strip().lower()
+                use_dnos_mcp = data.get('use_dnos_mcp', True) is not False and requested_backend != 'legacy'
+                if use_dnos_mcp and not serial2:
+                    try:
+                        job['progress'] = 15
+                        mcp_file = _try_dnos_mcp_discovery(
+                            serial1,
+                            owner_dir,
+                            "dnaas_path",
+                            log=_job_log,
+                        )
+                        job['status'] = 'completed'
+                        job['progress'] = 100
+                        job['result_file'] = f"/api/discovery/file/{mcp_file.name}"
+                        job['output_lines'].append("[OK] Discovery completed through dnos-config MCP")
+                        _persist_job(job_id, dict(job))
+                        return
+                    except Exception as mcp_exc:
+                        job['output_lines'].append(
+                            f"[WARN] dnos-config MCP discovery unavailable, falling back to legacy script: {mcp_exc}"
+                        )
+                        _persist_job(job_id, dict(job))
                 
                 # Use NEW hybrid script: cached PE data + live DNAAS SSH only
                 cmd = ['python3', str(DISCOVERY_SCRIPT), serial1]
                 if serial2:
                     cmd.append(serial2)
                     job['output_lines'].append(f"Second device: {serial2}")
-                job['output_lines'].append("Using hybrid mode: cached PE + minimal DNAAS SSH...")
+                job['output_lines'].append(f"Using hybrid mode: cached PE + minimal DNAAS SSH (owner={owner or 'global'})...")
                 
+                # Per-user output isolation: tell the discovery script to
+                # write JSON/XLSX/TXT into THIS user's bucket only.
+                env = os.environ.copy()
+                env['DNAAS_OUTPUT_DIR'] = str(owner_dir)
+
                 try:
                     process = subprocess.Popen(
                         cmd,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
                         text=True,
-                        bufsize=1
+                        bufsize=1,
+                        env=env,
                     )
                     
                     # Store process handle for cancellation
@@ -2229,18 +3457,20 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                                 job['progress'] = min(job['progress'] + 5, 85)
                             elif 'saved' in line.lower():
                                 job['progress'] = 90
+                            if len(job['output_lines']) % 10 == 0:
+                                _persist_job(job_id, dict(job))
                     
                     process.wait()
                     
                     if process.returncode == 0:
                         job['status'] = 'completed'
                         job['progress'] = 100
-                        # Find the latest output file
-                        latest = max(OUTPUT_DIR.glob('dnaas_path_*.json'), key=lambda f: f.stat().st_mtime, default=None)
+                        # Find the latest output file (only inside owner's bucket)
+                        latest = max(owner_dir.glob('dnaas_path_*.json'), key=lambda f: f.stat().st_mtime, default=None)
                         if latest:
                             # Return web-accessible URL instead of filesystem path
                             job['result_file'] = f"/api/discovery/file/{latest.name}"
-                            job['output_lines'].append(f"✓ Output saved: {latest.name}")
+                            job['output_lines'].append(f"[OK] Output saved: {latest.name}")
                     else:
                         job['status'] = 'failed'
                         # Check output lines for specific error messages
@@ -2260,6 +3490,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                     job['error'] = str(e)
                     job['output_lines'].append(f"✗ Error: {e}")
                 finally:
+                    _persist_job(job_id, dict(job))
                     # Clean up process handle
                     if job_id in job_processes:
                         del job_processes[job_id]
@@ -2290,7 +3521,13 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 return
             
             job = jobs[job_id]
-            
+
+            # Owner gate: only the user who started the job can cancel it.
+            requester = _request_owner(self) or 'global'
+            if job.get('owner', 'global') != requester:
+                self._send_json({'error': 'Job not found'}, 404)
+                return
+
             # Try to terminate the process
             if job_id in job_processes:
                 try:
@@ -2308,7 +3545,8 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             
             job['status'] = 'cancelled'
             job['error'] = 'Cancelled by user'
-            job['output_lines'].append('⚠ Discovery cancelled by user')
+            job['output_lines'].append('[CANCELLED] Discovery cancelled by user')
+            _persist_job(job_id, dict(job))
             
             self._send_json({'job_id': job_id, 'status': 'cancelled', 'message': 'Discovery cancelled'})
         
@@ -2328,41 +3566,86 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             if not serial:
                 self._send_json({'error': 'serial is required'}, 400)
                 return
-            
+
+            owner = _request_owner(self)
+            owner_dir = _user_output_dir(owner)
+
             # Create job
             _cleanup_old_discovery_jobs()
             with job_lock:
                 job_counter += 1
                 job_id = f"multibd_{job_counter}"
                 jobs[job_id] = {
+                    'id': job_id,
+                    'type': 'multi_bd',
+                    'serial': serial,
                     'status': 'starting',
                     'progress': 0,
                     'output_lines': [],
                     'result_file': None,
                     'error': None,
                     'bd_count': 0,
+                    'owner': owner or 'global',
+                    'output_dir': str(owner_dir),
                     'created_at': time.time()
                 }
+                snapshot = dict(jobs[job_id])
+            _persist_job(job_id, snapshot)
             
             # Start multi-BD discovery in background thread
             def run_multi_bd_discovery():
                 job = jobs[job_id]
                 job['status'] = 'running'
                 job['progress'] = 10
-                job['output_lines'].append(f"Starting Multi-BD discovery for {serial}...")
+                job['output_lines'].append(f"Starting Multi-BD discovery for {serial} (owner={owner or 'global'})...")
                 start_ts = time.time()
+                _persist_job(job_id, dict(job))
+
+                def _job_log(message: str):
+                    job['output_lines'].append(message)
+                    _persist_job(job_id, dict(job))
+
+                requested_backend = (data.get('backend') or data.get('discovery_backend') or '').strip().lower()
+                use_dnos_mcp = data.get('use_dnos_mcp', True) is not False and requested_backend != 'legacy'
+                if use_dnos_mcp:
+                    try:
+                        job['progress'] = 15
+                        mcp_file = _try_dnos_mcp_discovery(
+                            serial,
+                            owner_dir,
+                            "multi_bd",
+                            log=_job_log,
+                        )
+                        with open(mcp_file, "r", encoding="utf-8") as fh:
+                            mcp_topology = json.load(fh)
+                        job['status'] = 'completed'
+                        job['progress'] = 100
+                        job['bd_count'] = len(mcp_topology.get('metadata', {}).get('bridge_domains') or [])
+                        job['result_file'] = f"/api/multi-bd/file/{mcp_file.name}"
+                        job['output_lines'].append("[OK] Multi-BD discovery completed through dnos-config MCP")
+                        _persist_job(job_id, dict(job))
+                        return
+                    except Exception as mcp_exc:
+                        job['output_lines'].append(
+                            f"[WARN] dnos-config MCP Multi-BD discovery unavailable, falling back to legacy script: {mcp_exc}"
+                        )
+                        _persist_job(job_id, dict(job))
                 
                 # Use --multi-bd flag for multi-BD discovery (MUST come before positional args)
                 cmd = ['python3', str(DISCOVERY_SCRIPT), '--multi-bd', serial]
                 job['output_lines'].append("Discovering ALL Bridge Domains...")
-                
+
+                env = os.environ.copy()
+                env['DNAAS_OUTPUT_DIR'] = str(owner_dir)
+
                 try:
                     process = subprocess.Popen(
                         cmd,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
                         text=True,
-                        bufsize=1
+                        bufsize=1,
+                        env=env,
                     )
                     
                     job_processes[job_id] = process
@@ -2381,22 +3664,23 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                                 job['progress'] = min(job['progress'] + 3, 75)
                             elif 'Discovered' in line:
                                 # Try to extract BD count
-                                import re
                                 bd_match = re.search(r'Discovered\s+(\d+)\s+Bridge', line)
                                 if bd_match:
                                     job['bd_count'] = int(bd_match.group(1))
                                 job['progress'] = 85
                             elif 'saved' in line.lower():
                                 job['progress'] = 95
+                            if len(job['output_lines']) % 10 == 0:
+                                _persist_job(job_id, dict(job))
                     
                     process.wait()
                     
                     if process.returncode == 0:
                         job['status'] = 'completed'
                         job['progress'] = 100
-                        # Find output file created during THIS run (after start_ts)
-                        multi_bd_files = list(OUTPUT_DIR.glob('multi_bd_*.json'))
-                        dnaas_files = list(OUTPUT_DIR.glob('dnaas_path_*.json'))
+                        # Find output file created during THIS run (after start_ts) inside owner's bucket
+                        multi_bd_files = list(owner_dir.glob('multi_bd_*.json'))
+                        dnaas_files = list(owner_dir.glob('dnaas_path_*.json'))
                         all_files = multi_bd_files + dnaas_files
                         recent = [f for f in all_files if f.stat().st_mtime >= start_ts]
                         latest = max(recent, key=lambda f: f.stat().st_mtime, default=None)
@@ -2415,6 +3699,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                     job['error'] = str(e)
                     job['output_lines'].append(f"✗ Error: {e}")
                 finally:
+                    _persist_job(job_id, dict(job))
                     if job_id in job_processes:
                         del job_processes[job_id]
             
@@ -2445,7 +3730,13 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 return
             
             job = jobs[job_id]
-            
+
+            # Owner gate: only the user who started the job can cancel it.
+            requester = _request_owner(self) or 'global'
+            if job.get('owner', 'global') != requester:
+                self._send_json({'error': 'Job not found'}, 404)
+                return
+
             # Try to terminate the process
             if job_id in job_processes:
                 try:
@@ -2464,6 +3755,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             job['status'] = 'cancelled'
             job['error'] = 'Cancelled by user'
             job['output_lines'].append('⚠ Multi-BD discovery cancelled by user')
+            _persist_job(job_id, dict(job))
             
             self._send_json({'job_id': job_id, 'status': 'cancelled', 'message': 'Multi-BD discovery cancelled'})
         
@@ -2483,46 +3775,101 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             username = data.get('username', 'dnroot')
             password = data.get('password', 'dnroot')
             skip_host_key = data.get('skipHostKey', False)
+            conflict_action = (data.get('conflict_action') or '').strip().lower()
             
             if not serial:
                 self._send_json({'error': 'serial is required'}, 400)
                 return
             
+            owner = _request_owner(self) or 'global'
+            resolve_info = _resolve_discovery_target(serial, ssh_hint=ssh_host or None)
+            resolved_target = resolve_info.get('target') or serial
+            device_key = resolved_target.lower()
+            preflight = _tcp_preflight(resolved_target, timeout=3.0) if resolved_target else {'reachable': False, 'error': 'no target'}
+            if not preflight.get('reachable'):
+                self._send_json({
+                    'error': f"Cannot reach {serial} via {resolved_target}: {preflight.get('error', 'unreachable')}",
+                    'preflight': preflight,
+                    'resolve': resolve_info,
+                }, 400)
+                return
             _cleanup_old_discovery_jobs()
             with job_lock:
-                job_id = f"lldp_{int(time.time() * 1000)}"
+                conflict = _find_active_lldp_for_device(device_key)
+                if conflict and conflict_action not in ('watch', 'queue'):
+                    conflict_id, conflict_job = conflict
+                    self._send_json({
+                        'error': 'LLDP operation already running for this device',
+                        'conflict': True,
+                        'existing_job_id': conflict_id,
+                        'existing_status': conflict_job.get('status'),
+                        'existing_owner': conflict_job.get('owner', 'global'),
+                        'same_owner': conflict_job.get('owner', 'global') == owner,
+                        'device_key': device_key,
+                        'resolve': resolve_info,
+                        'preflight': preflight,
+                        'options': ['watch', 'queue'],
+                    }, 409)
+                    return
+                if conflict and conflict_action == 'watch':
+                    conflict_id, conflict_job = conflict
+                    self._send_json({
+                        'job_id': conflict_id,
+                        'status': conflict_job.get('status', 'running'),
+                        'message': f'Watching existing LLDP job for {serial}',
+                        'conflict': True,
+                        'watching': True,
+                        'resolve': resolve_info,
+                    })
+                    return
+                # User-scoped job id: prevents collision across concurrent
+                # users clicking Enable LLDP in the same millisecond and
+                # makes the id self-describing for debugging.
+                # Sanitize owner for id: alnum + dot/underscore/dash only.
+                safe_owner = re.sub(r'[^a-zA-Z0-9._-]', '_', owner)[:32] or 'global'
+                job_id = f"lldp_{safe_owner}_{int(time.time() * 1000)}"
+                # Extra collision guard (two requests in the same ms).
+                suffix = 0
+                while job_id in jobs:
+                    suffix += 1
+                    job_id = f"lldp_{safe_owner}_{int(time.time() * 1000)}_{suffix}"
                 jobs[job_id] = {
                     'id': job_id,
                     'type': 'enable_lldp',
                     'serial': serial,
-                    'status': 'running',
+                    'owner': owner,
+                    'status': 'queued' if conflict and conflict_action == 'queue' else 'running',
                     'progress': 0,
                     'output_lines': [],
                     'started_at': datetime.now().isoformat(),
                     'interfaces_enabled': 0,
-                    'created_at': time.time()
+                    'created_at': time.time(),
+                    'device_key': device_key,
+                    'resolved_target': resolved_target,
+                    'resolve': resolve_info,
+                    'preflight': preflight,
+                    '_runtime_username': username,
+                    '_runtime_password': password,
+                    '_runtime_skip_host_key': skip_host_key,
+                    '_runtime_ssh_host': ssh_host or None,
                 }
+                if conflict and conflict_action == 'queue':
+                    jobs[job_id]['queued_behind'] = conflict[0]
+                    jobs[job_id]['output_lines'].append(f"[INFO] Queued behind LLDP job {conflict[0]}")
+                    lldp_device_queues.setdefault(device_key, []).append(job_id)
+                snapshot = dict(jobs[job_id])
+            _persist_job(job_id, snapshot)
+            if snapshot.get('status') != 'queued':
+                _launch_lldp_job(self, job_id)
             
-            def run_enable_lldp():
-                job = jobs[job_id]
-                try:
-                    result = self._enable_lldp_on_device(serial, job_id, username, password, skip_host_key, ssh_host=ssh_host or None)
-                    job['status'] = 'completed' if result.get('success') else 'failed'
-                    job['progress'] = 100
-                    job['interfaces_enabled'] = result.get('interfaces_enabled', 0)
-                    job['interfaces'] = result.get('interfaces', [])
-                    job['already_configured'] = result.get('already_configured', False)
-                    if not result.get('success'):
-                        job['error'] = result.get('error', 'Unknown error')
-                except Exception as e:
-                    job['status'] = 'failed'
-                    job['error'] = str(e)
-                    job['output_lines'].append(f"✗ Error: {str(e)}")
-            
-            thread = threading.Thread(target=run_enable_lldp, daemon=True)
-            thread.start()
-            
-            self._send_json({'job_id': job_id, 'status': 'started', 'message': f'LLDP enable started for {serial}'})
+            self._send_json({
+                'job_id': job_id,
+                'status': 'queued' if snapshot.get('status') == 'queued' else 'started',
+                'message': f"LLDP enable {'queued' if snapshot.get('status') == 'queued' else 'started'} for {serial}",
+                'resolve': resolve_info,
+                'preflight': preflight,
+                'queued_behind': snapshot.get('queued_behind'),
+            })
         
         elif parsed.path == '/api/device-stack-live':
             content_length = int(self.headers.get('Content-Length', 0))
@@ -2610,7 +3957,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                     print(f"[LLDP] NetworkMapper lookup skipped: {e}")
                 
                 # SECOND: Check device_inventory.json
-                inventory_file = Path('/home/dn/CURSOR/device_inventory.json')
+                inventory_file = _inventory_path()
                 if inventory_file.exists():
                     try:
                         with open(inventory_file, 'r') as f:
@@ -2651,7 +3998,6 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                 # THIRD: Check SCALER operational.json files
                 db_configs = Path('/home/dn/SCALER/db/configs')
                 if db_configs.exists():
-                    import re
                     search_clean = re.sub(r'[^a-z0-9]', '', search_term_lower)
                     
                     for device_dir in db_configs.iterdir():
@@ -2659,8 +4005,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
                             op_file = device_dir / 'operational.json'
                             if op_file.exists():
                                 try:
-                                    with open(op_file, 'r') as f:
-                                        op_data = json.load(f)
+                                    op_data = _safe_read_ops(op_file)
                                     dev_hostname = op_data.get('hostname', device_dir.name)
                                     dev_serial = op_data.get('serial_number', '')
                                     dev_connection_ip = op_data.get('connection_ip', '')
@@ -2787,7 +4132,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
 
             # If use_inventory, load seeds from device_inventory.json
             if use_inventory:
-                inv_file = Path('/home/dn/CURSOR/device_inventory.json')
+                inv_file = _inventory_path()
                 if inv_file.exists():
                     try:
                         with open(inv_file, 'r') as f:
@@ -2814,11 +4159,13 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             known_devices = data.get('known_devices', [])
 
             _nm_cleanup_old_jobs()
+            req_owner = self.headers.get('X-User', 'default')
             with nm_job_lock:
                 nm_job_counter += 1
                 job_id = f"nm_{nm_job_counter}_{int(time.time())}"
                 nm_jobs[job_id] = {
                     'status': 'starting',
+                    'owner': req_owner,
                     'progress': {'discovered': 0, 'queued': len(seeds), 'failed': 0, 'max': max_devices},
                     'devices': {},
                     'links': [],
@@ -2848,19 +4195,26 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
             jid = data.get('job_id', '')
             if jid and jid in nm_jobs:
                 with nm_job_lock:
-                    nm_jobs[jid]['cancelled'] = True
+                    job = nm_jobs[jid]
+                    requester = self.headers.get('X-User', 'default') or 'default'
+                    if job.get('owner', 'default') != requester:
+                        self._send_json({'error': 'Job not found'}, 404)
+                        return
+                    job['cancelled'] = True
                 self._send_json({'status': 'cancelling', 'job_id': jid})
             else:
                 self._send_json({'error': 'Job not found'}, 404)
 
-        # Network Mapper — full MCP-based topology (no SSH, queries MCP for all devices)
+        # Network Mapper -- full MCP-based topology (no SSH, queries MCP for all devices)
         elif parsed.path == '/api/network-mapper/mcp-map':
             _nm_cleanup_old_jobs()
+            req_owner = self.headers.get('X-User', 'default')
             with nm_job_lock:
                 nm_job_counter += 1
                 job_id = f"mcp_{nm_job_counter}_{int(time.time())}"
                 nm_jobs[job_id] = {
                     'status': 'starting',
+                    'owner': req_owner,
                     'progress': {'discovered': 0, 'queued': 0, 'failed': 0, 'max': 200},
                     'devices': {},
                     'links': [],
@@ -2882,6 +4236,7 @@ class DiscoveryHandler(BaseHTTPRequestHandler):
 
 def main():
     port = 8765
+    _load_recent_jobs()
     server = HTTPServer(('0.0.0.0', port), DiscoveryHandler)
     print(f"Discovery API server running on http://localhost:{port}")
     print("Endpoints:")

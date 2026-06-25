@@ -1,0 +1,67 @@
+{
+  "phase_name": "auto_diagnose",
+  "started_at": "2026-04-03T11:30:54.767+00:00",
+  "completed_at": "2026-04-03T11:31:07.067+00:00",
+  "duration_sec": 12.3,
+  "command_count": 7,
+  "commands": [
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 11:28 | no-more",
+      "timestamp": "2026-04-03T11:30:54.767+00:00",
+      "duration_ms": 11141,
+      "phase": "auto_diagnose",
+      "output_length": 64628,
+      "output_preview": "2026-03-19T21:29:04.484701Z [DEBUG     ] [ZEventGroup.h:35:ZEventGroup] [rib-manager:1344:1344] 1911:281: LINK-EVENT-AGGREGATOR: adding event to group 301874388413, num_events = 1, remaining delay min = 0, max = 1999, event type = NETLINK\n2026-03-19T21:29:04.535602Z [DEBUG     ] [ZEventGroup.cpp:58:runCallbacks] [rib-manager:1344:1344] 2011:285: LINK-EVENT-AGGREGATOR: running callback for event 1 in group 301925266316\n2026-03-20T08:27:52.228616Z [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_"
+    },
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+      "timestamp": "2026-04-03T11:31:05.910+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 35,
+      "output_preview": "  ETH TAG: 0\n    MAC table is empty"
+    },
+    {
+      "command": "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+      "timestamp": "2026-04-03T11:31:06.161+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 207,
+      "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+    },
+    {
+      "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+      "timestamp": "2026-04-03T11:31:06.411+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 42,
+      "output_preview": "Number of MAC-Mobility entries in redis: 0"
+    },
+    {
+      "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+      "timestamp": "2026-04-03T11:31:06.662+00:00",
+      "duration_ms": 50,
+      "phase": "auto_diagnose",
+      "output_length": 26,
+      "output_preview": "ERROR: Incomplete command."
+    },
+    {
+      "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-03T11:31:06.712+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 18,
+      "output_preview": "EvpnMacs [size: 0]"
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-03T11:31:06.963+00:00",
+      "duration_ms": 100,
+      "phase": "auto_diagnose",
+      "output_length": 442,
+      "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+    }
+  ],
+  "parsed_values": {},
+  "anomalies": []
+}

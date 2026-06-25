@@ -28,6 +28,7 @@ window.TerminalPanel = {
     _pongTimeoutMs: 25000,
     _connectTimeoutMs: 30000,
     _resizeDebounceTimer: null,
+    _bodyResizeObserver: null,
 
     _tabKey(opts) {
         const deviceId = opts.deviceId || opts.device_id || '';
@@ -114,8 +115,9 @@ window.TerminalPanel = {
     _normalizeOpts(opts) {
         const deviceId = opts.deviceId || opts.device_id || '';
         const host = opts.host || opts.ssh_host || '';
-        const user = opts.user || opts.username || 'dnroot';
-        const password = opts.password || 'dnroot';
+        const serverCredentials = opts.serverCredentials === true || opts.useServerCredentials === true;
+        const user = serverCredentials ? (opts.user || opts.username || '') : (opts.user || opts.username || 'dnroot');
+        const password = serverCredentials ? (opts.password || '') : (opts.password || 'dnroot');
         const method = opts.method || 'ssh_mgmt';
         const deviceLabel = opts.deviceLabel || opts.device_label || deviceId;
         const virshInfo = opts.virshInfo || null;
@@ -129,7 +131,7 @@ window.TerminalPanel = {
             console.warn('[Terminal] No device or host');
             return null;
         }
-        return { deviceId, host, user, password, method, deviceLabel, virshInfo };
+        return { deviceId, host, user, password, method, deviceLabel, virshInfo, serverCredentials };
     },
 
     _getWsUrl(deviceId, host, method, virshInfo) {
@@ -149,12 +151,55 @@ window.TerminalPanel = {
             params.set('kvm_user', virshInfo.kvmUser || '');
             params.set('ncc_vms', (virshInfo.nccVms || []).join(','));
         }
+        if (window.TopologyAuth && window.TopologyAuth.getToken()) {
+            params.set('token', window.TopologyAuth.getToken());
+        }
         return `${origin}/api/terminal/ws?${params}`;
     },
 
     _getActiveSession() {
         if (!this._activeTabId) return null;
         return this._tabs.get(this._activeTabId) || null;
+    },
+
+    _viewportHeight() {
+        return window.innerHeight || document.documentElement?.clientHeight || 720;
+    },
+
+    _clampPanelHeight(height) {
+        const vh = this._viewportHeight();
+        const minHeight = Math.min(260, Math.max(170, Math.floor(vh * 0.36)));
+        const maxHeight = Math.max(minHeight, vh - 28);
+        const desired = Number.isFinite(height) ? height : this._panelHeight;
+        return Math.round(Math.max(minHeight, Math.min(maxHeight, desired)));
+    },
+
+    _applyPanelHeight(height, persist) {
+        this._panelHeight = this._clampPanelHeight(height);
+        if (this._panel && !this._isMinimized) {
+            this._panel.style.height = this._panelHeight + 'px';
+            this._panel.style.maxHeight = 'calc(100vh - 28px)';
+            this._panel.style.minHeight = Math.min(170, this._panelHeight) + 'px';
+        }
+        if (persist) localStorage.setItem('terminal-height', String(this._panelHeight));
+    },
+
+    _fitSession(session, sendResize) {
+        if (!session || !session.fitAddon || !session.term || this._isMinimized) return;
+        try { session.fitAddon.fit(); } catch (_) {}
+        if (sendResize) this._sendResize(session);
+        this._updateSizeInfo();
+    },
+
+    _scheduleFit(session, delay = 0, sendResize = true) {
+        const target = session || this._getActiveSession();
+        if (!target || !target.fitAddon || this._isMinimized) return;
+        const run = () => this._fitSession(target, sendResize);
+        if (delay > 0) {
+            setTimeout(run, delay);
+        } else {
+            requestAnimationFrame(() => requestAnimationFrame(run));
+        }
     },
 
     // -----------------------------------------------------------------
@@ -164,19 +209,26 @@ window.TerminalPanel = {
     _createPanelShell() {
         const panel = document.createElement('div');
         panel.id = 'terminal-panel';
+        panel.className = 'terminal-panel';
+        this._applyPanelHeight(this._panelHeight, false);
         Object.assign(panel.style, {
             position: 'fixed',
             bottom: '0',
             left: '0',
             right: '0',
             height: this._panelHeight + 'px',
+            maxHeight: 'calc(100vh - 28px)',
+            minHeight: '170px',
             zIndex: '99998',
-            background: 'var(--dn-bg-dark, #0D1B2A)',
-            borderTop: '2px solid var(--dn-cyan, #00B4D8)',
-            boxShadow: '0 -8px 32px rgba(0,0,0,0.4)',
+            background: 'linear-gradient(180deg, rgba(16, 35, 55, 0.98), rgba(7, 17, 30, 0.99))',
+            borderTop: '1px solid rgba(0, 180, 216, 0.65)',
+            boxShadow: '0 -18px 54px rgba(0,0,0,0.48), 0 -1px 0 rgba(255,255,255,0.06)',
             display: 'flex',
             flexDirection: 'column',
             transition: 'height 0.15s ease',
+            boxSizing: 'border-box',
+            overflow: 'hidden',
+            isolation: 'isolate',
         });
 
         const dragHandle = document.createElement('div');
@@ -187,8 +239,9 @@ window.TerminalPanel = {
         });
         const dragPill = document.createElement('div');
         Object.assign(dragPill.style, {
-            width: '40px', height: '4px', borderRadius: '2px',
-            background: 'rgba(0, 180, 216, 0.35)',
+            width: '58px', height: '4px', borderRadius: '999px',
+            background: 'linear-gradient(90deg, rgba(0, 180, 216, 0.2), rgba(0, 212, 255, 0.7), rgba(0, 180, 216, 0.2))',
+            boxShadow: '0 0 14px rgba(0,180,216,0.35)',
             transition: 'background 0.15s',
         });
         dragHandle.appendChild(dragPill);
@@ -200,32 +253,58 @@ window.TerminalPanel = {
         const header = document.createElement('div');
         header.id = 'terminal-header-row';
         Object.assign(header.style, {
-            display: 'flex', alignItems: 'stretch', gap: '6px',
-            padding: '4px 6px 4px 4px',
-            background: 'var(--dn-bg-dark-secondary, #1B263B)',
-            borderBottom: '1px solid rgba(0, 180, 216, 0.2)',
-            minHeight: '36px', flexShrink: '0', userSelect: 'none',
+            display: 'flex', alignItems: 'center', gap: '8px',
+            padding: '7px 10px 7px 8px',
+            background: 'linear-gradient(90deg, rgba(21, 42, 66, 0.98), rgba(13, 27, 42, 0.96))',
+            borderBottom: '1px solid rgba(0, 180, 216, 0.22)',
+            minHeight: '46px', flexShrink: '0', userSelect: 'none',
+            boxSizing: 'border-box',
         });
+
+        const titleWrap = document.createElement('div');
+        titleWrap.className = 'terminal-title-wrap';
+        Object.assign(titleWrap.style, {
+            display: 'flex', flexDirection: 'column', justifyContent: 'center',
+            minWidth: '112px', maxWidth: '148px', flexShrink: '0', lineHeight: '1.1',
+        });
+        const title = document.createElement('span');
+        Object.assign(title.style, {
+            color: '#F8FAFC', fontSize: '11px', fontWeight: '800',
+            letterSpacing: '0.11em', fontFamily: 'Poppins, sans-serif',
+            textTransform: 'uppercase',
+        });
+        title.textContent = 'Web Terminal';
+        const subtitle = document.createElement('span');
+        Object.assign(subtitle.style, {
+            color: 'rgba(224,230,237,0.56)', fontSize: '9px',
+            fontFamily: 'JetBrains Mono, monospace', marginTop: '3px',
+        });
+        subtitle.textContent = 'xterm over SSH';
+        titleWrap.append(title, subtitle);
 
         const tabStrip = document.createElement('div');
         tabStrip.id = 'terminal-tab-strip';
         Object.assign(tabStrip.style, {
             display: 'flex', alignItems: 'center', gap: '4px',
             flex: '1', minWidth: '0', overflowX: 'auto', overflowY: 'hidden',
-            scrollbarWidth: 'thin',
+            scrollbarWidth: 'thin', padding: '2px 1px 4px',
         });
 
         const toolbar = document.createElement('div');
         Object.assign(toolbar.style, {
-            display: 'flex', alignItems: 'center', gap: '4px', flexShrink: '0',
+            display: 'flex', alignItems: 'center', gap: '5px', flexShrink: '0',
+            flexWrap: 'wrap', justifyContent: 'flex-end',
         });
 
         const connInfo = document.createElement('span');
         connInfo.id = 'terminal-conn-info';
         Object.assign(connInfo.style, {
-            fontSize: '10px', color: 'rgba(224,230,237,0.5)',
-            fontFamily: 'JetBrains Mono, monospace', maxWidth: '100px',
+            fontSize: '10px', color: 'rgba(224,230,237,0.62)',
+            fontFamily: 'JetBrains Mono, monospace', maxWidth: '128px',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            padding: '2px 8px', borderRadius: '999px',
+            background: 'rgba(255,255,255,0.045)',
+            border: '1px solid rgba(255,255,255,0.08)',
         });
 
         toolbar.append(
@@ -236,14 +315,16 @@ window.TerminalPanel = {
             this._mkToolBtn('X', 'close', () => this.close(), 'Close all tabs', true)
         );
 
-        header.append(tabStrip, connInfo, toolbar);
+        header.append(titleWrap, tabStrip, connInfo, toolbar);
         panel.appendChild(header);
 
         const body = document.createElement('div');
         body.id = 'terminal-body';
         Object.assign(body.style, {
-            flex: '1', padding: '0 6px',
-            overflow: 'hidden', minHeight: '80px',
+            flex: '1 1 auto', padding: '8px 10px 8px',
+            overflow: 'hidden', minHeight: '104px',
+            boxSizing: 'border-box',
+            background: 'radial-gradient(circle at 12% 0%, rgba(0, 180, 216, 0.08), transparent 26%), #07111e',
         });
         panel.appendChild(body);
 
@@ -251,12 +332,13 @@ window.TerminalPanel = {
         statusBar.id = 'terminal-status-bar';
         Object.assign(statusBar.style, {
             display: 'flex', alignItems: 'center', gap: '12px',
-            padding: '2px 10px',
-            background: 'var(--dn-bg-dark-secondary, #1B263B)',
+            padding: '4px 12px',
+            background: 'rgba(13, 27, 42, 0.96)',
             borderTop: '1px solid rgba(0, 180, 216, 0.15)',
-            fontSize: '10px', color: 'rgba(224,230,237,0.45)',
+            fontSize: '10px', color: 'rgba(224,230,237,0.52)',
             fontFamily: 'JetBrains Mono, monospace',
-            minHeight: '22px', flexShrink: '0',
+            minHeight: '26px', flexShrink: '0',
+            boxSizing: 'border-box',
         });
         const sizeInfo = document.createElement('span');
         sizeInfo.id = 'terminal-size-info';
@@ -295,16 +377,20 @@ window.TerminalPanel = {
             if (this._resizeDebounceTimer) clearTimeout(this._resizeDebounceTimer);
             this._resizeDebounceTimer = setTimeout(() => {
                 if (this._panel && !this._isMinimized) {
-                    const s = this._getActiveSession();
-                    if (s && s.fitAddon) {
-                        s.fitAddon.fit();
-                        this._sendResize(s);
-                        this._updateSizeInfo();
-                    }
+                    const nextHeight = this._clampPanelHeight(this._panelHeight);
+                    if (nextHeight !== this._panelHeight) this._applyPanelHeight(nextHeight, true);
+                    this._scheduleFit(this._getActiveSession(), 0, true);
                 }
             }, 100);
         };
         window.addEventListener('resize', this._resizeHandler);
+
+        if (typeof ResizeObserver !== 'undefined') {
+            this._bodyResizeObserver = new ResizeObserver(() => {
+                if (!this._isDragging) this._scheduleFit(this._getActiveSession(), 0, true);
+            });
+            this._bodyResizeObserver.observe(body);
+        }
 
         body.addEventListener('contextmenu', (e) => {
             e.preventDefault();
@@ -440,6 +526,63 @@ window.TerminalPanel = {
         const tab = strip?.querySelector(`[data-tab-id="${sessionId}"]`);
         const dot = tab?.querySelector('.terminal-tab-dot');
         if (dot) this._applyDotStyle(dot, sess.status);
+    },
+
+    /**
+     * Backend detected a ghost-IP (the IP answered with a hostname that is not
+     * the device the user clicked). The session has already been closed on the
+     * server side. We surface a clear banner, tag the session so auto-reconnect
+     * is suppressed, broadcast a custom event for the canvas/SSH dialog layer
+     * to drop `device.sshConfig.host`, and show a toast if one is available.
+     */
+    _handleGhostIp(session, msg) {
+        if (!session) return;
+        const expected = msg.expected || msg.device_id || 'unknown';
+        const actual = msg.actual || '(unknown)';
+        const ghostIp = msg.ip || '';
+        const deviceId = msg.device_id || session?.opts?.deviceId || '';
+
+        if (session.term) {
+            session.term.writeln('');
+            session.term.writeln('\x1b[41m\x1b[97m                                                                  \x1b[0m');
+            session.term.writeln(`\x1b[41m\x1b[97m   [GHOST IP DETECTED] ${expected} released its IP.              \x1b[0m`);
+            session.term.writeln('\x1b[41m\x1b[97m                                                                  \x1b[0m');
+            session.term.writeln(`\x1b[33m[WARN]\x1b[0m  Address ${ghostIp || '(n/a)'} now answers to '${actual}'.`);
+            session.term.writeln(`\x1b[36m[INFO]\x1b[0m  Stale record cleared. Next SSH click on ${expected} will re-discover.`);
+            session.term.writeln('');
+        }
+        session.status = 'disconnected';
+        session._noAutoReconnect = true;
+        session._ghostIp = { expected, actual, ip: ghostIp, deviceId };
+        this._refreshTabDot(session.id);
+
+        try {
+            window.dispatchEvent(new CustomEvent('ssh:ghost-ip-detected', {
+                detail: {
+                    deviceId,
+                    expected,
+                    actual,
+                    ip: ghostIp,
+                    summary: msg.summary || null,
+                    sessionId: session.id,
+                },
+            }));
+        } catch (_) { /* noop */ }
+
+        try {
+            const editor = window.topologyEditor || window.editor;
+            const toast = editor?.ui?.showToast
+                ? editor.ui.showToast.bind(editor.ui)
+                : (typeof window.showToast === 'function' ? window.showToast : null);
+            if (toast) {
+                toast(
+                    `[GHOST IP] ${expected} released ${ghostIp || 'its IP'} (now '${actual}'). ` +
+                    'Stale record cleared -- click SSH again to re-discover.',
+                    'warning',
+                    7000,
+                );
+            }
+        } catch (_) { /* noop */ }
     },
 
     _switchTab(id) {
@@ -628,6 +771,8 @@ window.TerminalPanel = {
                     };
                     console.log(`[Terminal] virsh_auth: kvm=${authMsg.kvm_host}, user=${authMsg.kvm_user}, nccVms=${(authMsg.ncc_vms||[]).join(',')}, activeNcc=${authMsg.active_ncc}`);
                     ws.send(JSON.stringify(authMsg));
+                } else if (opts.serverCredentials) {
+                    ws.send(JSON.stringify({ type: 'auth' }));
                 } else {
                     ws.send(JSON.stringify({ type: 'auth', user: user || 'dnroot', password: password || 'dnroot' }));
                 }
@@ -637,6 +782,7 @@ window.TerminalPanel = {
                 this._startHeartbeat(session);
                 session.status = 'connected';
                 this._refreshTabDot(session.id);
+                this._fitSession(session, false);
                 this._sendResize(session);
                 if (session.id === this._activeTabId) this._updateConnInfo();
             };
@@ -648,6 +794,8 @@ window.TerminalPanel = {
                         const msg = JSON.parse(e.data);
                         if (msg.type === 'data' && msg.text && session.term) {
                             session.term.write(msg.text);
+                        } else if (msg.type === 'ghost_ip_detected') {
+                            this._handleGhostIp(session, msg);
                         } else if (msg.type === 'error') {
                             console.error(`[Terminal] Server error: ${msg.message || msg.error}`);
                             if (session.term) session.term.writeln('\r\n\x1b[31m[ERROR]\x1b[0m ' + (msg.message || msg.error || ''));
@@ -663,6 +811,12 @@ window.TerminalPanel = {
                             session._lastPongAt = Date.now();
                             session.lastLatency = Date.now() - (session.lastPingSent || Date.now());
                             if (session.id === this._activeTabId) this._updateConnInfo();
+                        } else if (msg.type === '__ping__') {
+                            try {
+                                ws.send(JSON.stringify({ type: 'pong' }));
+                            } catch (err) {
+                                console.warn('[Terminal] pong send failed', err);
+                            }
                         }
                     } catch (_) {
                         if (session.term) session.term.write(e.data);
@@ -787,29 +941,24 @@ window.TerminalPanel = {
         if (!this._panel) return;
         const startY = e.clientY;
         const startH = this._panelHeight;
+        this._isDragging = true;
         this._panel.style.transition = 'none';
         document.body.style.userSelect = 'none';
         document.body.style.cursor = 'ns-resize';
 
         const onMove = (me) => {
             const delta = startY - me.clientY;
-            const newH = Math.max(120, Math.min(window.innerHeight - 60, startH + delta));
-            this._panelHeight = newH;
-            this._panel.style.height = newH + 'px';
+            this._applyPanelHeight(startH + delta, false);
         };
         const onUp = () => {
             this._panel.style.transition = 'height 0.15s ease';
             document.body.style.userSelect = '';
             document.body.style.cursor = '';
-            localStorage.setItem('terminal-height', String(this._panelHeight));
+            this._isDragging = false;
+            this._applyPanelHeight(this._panelHeight, true);
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
-            const s = this._getActiveSession();
-            if (s && s.fitAddon && !this._isMinimized) {
-                try { s.fitAddon.fit(); } catch (_) {}
-                this._sendResize(s);
-                this._updateSizeInfo();
-            }
+            this._scheduleFit(this._getActiveSession(), 0, true);
         };
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
@@ -1120,16 +1269,9 @@ window.TerminalPanel = {
             if (body) body.style.display = '';
             if (statusBar) statusBar.style.display = '';
             if (this._searchBar) this._searchBar.style.display = '';
-            this._panel.style.height = this._panelHeight + 'px';
+            this._applyPanelHeight(this._panelHeight, false);
             if (minBtn) minBtn.textContent = '_';
-            const s = this._getActiveSession();
-            if (s && s.fitAddon) {
-                requestAnimationFrame(() => {
-                    s.fitAddon.fit();
-                    this._sendResize(s);
-                    this._updateSizeInfo();
-                });
-            }
+            this._scheduleFit(this._getActiveSession(), 0, true);
         }
     },
 
@@ -1148,6 +1290,10 @@ window.TerminalPanel = {
             window.removeEventListener('resize', this._resizeHandler);
             this._resizeHandler = null;
         }
+        if (this._bodyResizeObserver) {
+            this._bodyResizeObserver.disconnect();
+            this._bodyResizeObserver = null;
+        }
         if (this._panel) {
             this._panel.remove();
             this._panel = null;
@@ -1155,11 +1301,40 @@ window.TerminalPanel = {
         this._tabs.clear();
         this._activeTabId = null;
         this._isMinimized = false;
+        // Global single-overlay mutex release (2026-04-22 hotfix).
+        if (window.TopoPanelMutex) {
+            try { window.TopoPanelMutex.markClosed('terminal'); } catch (_) {}
+        }
     },
 
     close() {
         for (const tid of [...this._tabs.keys()]) {
             this._closeTab(tid);
         }
+        if (window.TopoPanelMutex) {
+            try { window.TopoPanelMutex.markClosed('terminal'); } catch (_) {}
+        }
+    },
+
+    isOpen() {
+        return !!(this._panel && !this._isMinimized);
     },
 };
+
+// Join the global single-overlay mutex. `open()` wires itself via a
+// light wrapper so we don't have to edit every code path that creates
+// a tab; the wrapper defers to the real open() and then calls markOpen
+// on the way out. Registered AFTER the assignment above.
+if (window.TopoPanelMutex) {
+    window.TopoPanelMutex.register('terminal', {
+        close: function () { window.TerminalPanel.close(); },
+        isOpen: function () { return window.TerminalPanel.isOpen(); },
+    });
+    (function () {
+        var _origOpen = window.TerminalPanel.open.bind(window.TerminalPanel);
+        window.TerminalPanel.open = function (opts) {
+            try { window.TopoPanelMutex.markOpen('terminal'); } catch (_) {}
+            return _origOpen(opts);
+        };
+    })();
+}

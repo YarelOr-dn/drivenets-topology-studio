@@ -216,9 +216,14 @@ function showMultiSelectContextMenu(editor, screenX, screenY) {
             <span class="ms-btn-icon">${editor._createIconSvg ? editor._createIconSvg(iconId, 16) : '●'}</span>
             <span>${label}</span>
         `;
-        btn.onclick = (e) => {
+        btn.onclick = async (e) => {
             e.stopPropagation();
-            onClick();
+            try {
+                await onClick();
+            } catch (err) {
+                console.error('[MultiSelectMenu] action failed:', err);
+                if (editor.showToast) editor.showToast('Action failed. Check console for details.', 'error');
+            }
         };
         return btn;
     };
@@ -754,8 +759,21 @@ function showMultiSelectContextMenu(editor, screenX, screenY) {
     const hasGrouped = editor.selectedObjects.some(o => o.groupId);
     
     // Group button
-    menu.appendChild(createActionBtn('link', `Group (${editor.selectedObjects.length})`, () => {
-        if (editor.groups) editor.groups.groupSelected();
+    menu.appendChild(createActionBtn('group', `Group (${editor.selectedObjects.length})`, async () => {
+        if (window.GroupsPanel && typeof window.GroupsPanel.groupSelectionWithPrompt === 'function') {
+            const groupId = await window.GroupsPanel.groupSelectionWithPrompt(
+                editor,
+                `Group ${editor.selectedObjects.length}`
+            );
+            if (groupId && window.GroupsPanel.isOpen()) {
+                window.GroupsPanel.refresh(editor);
+            }
+        } else if (editor.groups) {
+            editor.groups.groupSelected();
+            if (window.GroupsPanel && window.GroupsPanel.isOpen()) {
+                window.GroupsPanel.refresh(editor);
+            }
+        }
         hideMultiSelectContextMenu(editor);
     }));
     

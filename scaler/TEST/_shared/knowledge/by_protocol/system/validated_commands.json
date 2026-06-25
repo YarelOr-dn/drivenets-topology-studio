@@ -1,0 +1,27 @@
+{
+  "show system | no-more": {
+    "alternatives": [],
+    "command": "show system | no-more",
+    "feature_tags": [
+      "system"
+    ],
+    "last_build": {
+      "branch": "",
+      "commit": "",
+      "device": "PE-1"
+    },
+    "last_seen_iso": "2026-04-30T14:38:42Z",
+    "notes": "",
+    "pass_count": 1,
+    "protocol": "system",
+    "seen_builds": [],
+    "seen_devices": [
+      "PE-1"
+    ],
+    "suites_seen": [
+      "evpn_mac_mobility_SW204115"
+    ],
+    "surface": "dnos_cli",
+    "valid": true
+  }
+}

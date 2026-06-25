@@ -1,0 +1,174 @@
+{
+  "_description": "Per-suite cache of DNOS CLI commands proven valid against a live device. Maintained by shared/cli_syntax_validator.py.",
+  "_last_updated": "2026-04-30",
+  "_metadata": {
+    "last_suite_id": "evpn_mac_mobility_SW204115",
+    "last_updated": "2026-04-30T14:38:42Z"
+  },
+  "completion_menus": {
+    "<root>": [
+      "clear",
+      "cmd",
+      "configure",
+      "exit",
+      "quit",
+      "request",
+      "run",
+      "set",
+      "show",
+      "unset"
+    ],
+    "show": [
+      "access-lists",
+      "arp",
+      "as-path-list",
+      "bfd",
+      "bgp",
+      "bridge-domain",
+      "cli",
+      "community-list",
+      "config",
+      "debugging",
+      "dnos-internal",
+      "ethernet-segments",
+      "evpn",
+      "evpn-vpws",
+      "evpn-vpws-fxc",
+      "extcommunity-list",
+      "file",
+      "flowspec",
+      "flowspec-local-policies",
+      "golden-config",
+      "high-availability",
+      "igmp",
+      "interfaces",
+      "isis",
+      "lacp",
+      "large-community-list",
+      "ldp",
+      "lldp",
+      "mgmt",
+      "mpls",
+      "msdp",
+      "multicast",
+      "ndp",
+      "network-services",
+      "ospf",
+      "ospfv3",
+      "pim",
+      "policy",
+      "prefix-list",
+      "priority-flow-control",
+      "qos",
+      "qppb",
+      "rib-manager",
+      "rollback",
+      "route",
+      "rpki",
+      "rsvp",
+      "seamless-bfd",
+      "segment-routing",
+      "segment-routing-srv6",
+      "services",
+      "srv6",
+      "system",
+      "tracking-policies",
+      "vpws",
+      "vrrp",
+      "vxlan"
+    ],
+    "show evpn": [
+      "arp-table",
+      "counters",
+      "database",
+      "detail",
+      "e-tree",
+      "ethernet-segments-info",
+      "forwarding-table",
+      "inclusive-multicast-table",
+      "instance",
+      "irb",
+      "irb-summary",
+      "loop-prevention",
+      "mac",
+      "mac-ip-table",
+      "mac-table",
+      "ndp-table",
+      "storm-control",
+      "summary",
+      "vpls-pw",
+      "vxlan"
+    ]
+  },
+  "known_invalid": {
+    "show evpn local-loop-prevention": {
+      "alternatives": [],
+      "command": "show evpn local-loop-prevention",
+      "feature_tags": [],
+      "last_build": {
+        "branch": "",
+        "commit": "",
+        "device": ""
+      },
+      "last_seen_iso": "2026-04-30T14:38:42Z",
+      "notes": "ERROR: ",
+      "pass_count": 1,
+      "protocol": "misc",
+      "seen_builds": [],
+      "seen_devices": [],
+      "suites_seen": [
+        "evpn_mac_mobility_SW204115"
+      ],
+      "surface": "dnos_cli",
+      "valid": true
+    }
+  },
+  "validated_commands": {
+    "show evpn instance EVPN_SI_VPLS_1 detail": {
+      "alternatives": [],
+      "command": "show evpn instance EVPN_SI_VPLS_1 detail",
+      "feature_tags": [],
+      "last_build": {
+        "branch": "",
+        "commit": "",
+        "device": ""
+      },
+      "last_seen_iso": "2026-04-30T14:38:42Z",
+      "notes": "",
+      "pass_count": 1,
+      "protocol": "misc",
+      "seen_builds": [],
+      "seen_devices": [
+        "PE-1"
+      ],
+      "suites_seen": [
+        "evpn_mac_mobility_SW204115"
+      ],
+      "surface": "dnos_cli",
+      "valid": true
+    },
+    "show system | no-more": {
+      "alternatives": [],
+      "command": "show system | no-more",
+      "feature_tags": [],
+      "last_build": {
+        "branch": "",
+        "commit": "",
+        "device": ""
+      },
+      "last_seen_iso": "2026-04-30T14:38:42Z",
+      "notes": "",
+      "pass_count": 1,
+      "protocol": "misc",
+      "seen_builds": [],
+      "seen_devices": [
+        "PE-1"
+      ],
+      "suites_seen": [
+        "evpn_mac_mobility_SW204115"
+      ],
+      "surface": "dnos_cli",
+      "valid": true
+    }
+  }
+}

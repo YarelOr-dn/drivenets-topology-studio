@@ -1,0 +1,155 @@
+{
+  "test_id": "TEST_mac_mob_evpn_pw_SW205162",
+  "test_name": "MAC Mobility | Remote EVPN <-> PW | Sticky/Non-sticky",
+  "device": "PE-1",
+  "image_version": "",
+  "started_at": "2026-04-18T20:21:05+00:00",
+  "completed_at": "2026-04-18T20:21:05+00:00",
+  "overall_verdict": "FAIL",
+  "scenario_count": 4,
+  "scenarios": [
+    {
+      "id": "SC01_evpn_to_pw",
+      "name": "Non-sticky: remote EVPN -> PW; no RT change; not counted",
+      "verdict": "WARN",
+      "duration_sec": 9.73,
+      "layer_verdicts": {
+        "trigger": "PASS",
+        "mac_flags": "PASS",
+        "forwarding": "PASS",
+        "mobility_counter": "WARN",
+        "ghost_macs": "PASS",
+        "cross_layer": "PASS",
+        "bgp_session": "PASS",
+        "traces": "SKIP",
+        "timing": "PASS"
+      },
+      "counter_diff": null,
+      "event_audit": null,
+      "health_check": null,
+      "cross_layer": null,
+      "poll_data": null,
+      "errors": []
+    },
+    {
+      "id": "SC02_pw_to_evpn",
+      "name": "PW -> EVPN; accept; static entry",
+      "verdict": "PASS",
+      "duration_sec": 17.85,
+      "layer_verdicts": {
+        "trigger": "PASS",
+        "mac_flags": "PASS",
+        "forwarding": "PASS",
+        "ghost_macs": "PASS",
+        "cross_layer": "PASS",
+        "bgp_session": "PASS",
+        "traces": "SKIP",
+        "timing": "PASS"
+      },
+      "counter_diff": null,
+      "event_audit": null,
+      "health_check": null,
+      "cross_layer": null,
+      "poll_data": null,
+      "errors": []
+    },
+    {
+      "id": "SC03_sticky_evpn_to_pw",
+      "name": "Sticky EVPN RT-2 -> PW; IGNORE move (blackholing risk)",
+      "verdict": "FAIL",
+      "duration_sec": 110.6,
+      "layer_verdicts": {
+        "trigger": "PASS",
+        "mac_flags": "PASS",
+        "forwarding": "PASS",
+        "ghost_macs": "PASS",
+        "cross_layer": "PASS",
+        "bgp_session": "FAIL",
+        "traces": "PASS",
+        "timing": "WARN"
+      },
+      "counter_diff": null,
+      "event_audit": null,
+      "health_check": null,
+      "cross_layer": null,
+      "poll_data": null,
+      "errors": []
+    },
+    {
+      "id": "SC04_pw_to_sticky_evpn",
+      "name": "PW -> Sticky EVPN; accept; datapath static sticky",
+      "verdict": "FAIL",
+      "duration_sec": 0,
+      "layer_verdicts": {
+        "trigger": "FAIL"
+      },
+      "counter_diff": null,
+      "event_audit": null,
+      "health_check": null,
+      "cross_layer": null,
+      "poll_data": null,
+      "errors": []
+    }
+  ],
+  "config_baseline": {
+    "before_label": "before_test",
+    "after_label": "after_test",
+    "clean": false,
+    "debris_detected": true,
+    "debris_summary": "Changes in: network-services evpn: +2 -1",
+    "diffs": [
+      {
+        "section": "network-services evpn",
+        "has_changes": true,
+        "added_count": 2,
+        "removed_count": 1,
+        "added_lines": [
+          "# YOR_PE-1 config-start [18-Apr-2026 23:21:05 UTC+03:00 (Israel)]",
+          "        sticky-interface enabled"
+        ],
+        "removed_lines": [
+          "# YOR_PE-1 config-start [18-Apr-2026 23:16:07 UTC+03:00 (Israel)]"
+        ],
+        "unified_diff": "--- network-services evpn (before)\n+++ network-services evpn (after)\n@@ -1,4 +1,4 @@\n-# YOR_PE-1 config-start [18-Apr-2026 23:16:07 UTC+03:00 (Israel)]\n+# YOR_PE-1 config-start [18-Apr-2026 23:21:05 UTC+03:00 (Israel)]\n network-services\n   evpn\n     instance HA_TEST_ELAN\n@@ -75,6 +75,7 @@\n         !\n       !\n       interface ge400-0/0/5.1010\n+        sticky-interface enabled\n       !\n       interface ge400-0/0/5.1011\n       !"
+      },
+      {
+        "section": "protocols bgp",
+        "has_changes": false,
+        "added_count": 0,
+        "removed_count": 0,
+        "added_lines": [],
+        "removed_lines": [],
+        "unified_diff": ""
+      }
+    ]
+  },
+  "regression": {
+    "current_run": "TEST_mac_mob_evpn_pw_SW205162",
+    "baseline_run": "none",
+    "baseline_loaded": false,
+    "has_regressions": false,
+    "regression_count": 0,
+    "improvement_count": 0,
+    "items": []
+  },
+  "cleanup": {
+    "cleanup_successful": true,
+    "config_debris_found": false,
+    "errors": [],
+    "actions": [
+      {
+        "command": "no debug evpn mac-mobility",
+        "device": "PE-1",
+        "executed": true,
+        "error": "-----------------------------------^\nERROR: Unknown word: 'debug'."
+      },
+      {
+        "command": "no set logging terminal",
+        "device": "PE-1",
+        "executed": true,
+        "error": "ERROR: Unknown word."
+      }
+    ]
+  },
+  "learning_updates": []
+}

@@ -32,6 +32,178 @@ def _derive_kvm_host(host: str) -> str:
         return host.split("-")[0] or host
     return host
 
+
+# Generic / recovery-mode prompts that appear on many different DNOS
+# devices and carry no identity information. Seeing one of these means
+# "maybe us in a degraded state" - do NOT fail the identity check.
+_GENERIC_PROMPT_HOSTS = frozenset({
+    "gi", "recovery", "baseos", "baseosshell", "grub",
+    "login", "loginas", "user", "root",
+    "linux", "localhost", "unknown",
+    "dnos", "ncc", "ncp",
+})
+
+# Prompt regex mirrors topology/routes/ssh.py :: _PROMPT_RE. Kept inline
+# so the scaler library does not depend on the topology package.
+_IDENTITY_PROMPT_RE = re.compile(
+    r"""
+    (?:
+        (?P<host_cli>[A-Za-z0-9][A-Za-z0-9._\-]{0,63})(?:\([^)]*\))?
+        \s*[>\#]\s*$
+    )
+    |
+    (?:
+        [A-Za-z0-9._\-]{1,32}@(?P<host_bash>[A-Za-z0-9][A-Za-z0-9._\-]{0,63})
+        [^\n]*[#$]\s*$
+    )
+    """,
+    re.MULTILINE | re.VERBOSE,
+)
+
+
+def _normalize_identity(name: str) -> str:
+    """Strip delimiters + lowercase so 'YOR_CL_PE-4' ~= 'pe4' after boil-down."""
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
+def _extract_remote_hostname(buf_text: str) -> str:
+    """Pull the remote device hostname from a banner/prompt buffer.
+
+    Returns the cleanest hostname we can see, or "" when none can be
+    identified (in which case callers MUST NOT fail the identity check).
+    """
+    if not buf_text:
+        return ""
+    cleaned = re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", buf_text)
+    last = ""
+    for m in _IDENTITY_PROMPT_RE.finditer(cleaned):
+        host = m.group("host_cli") or m.group("host_bash") or ""
+        host = host.strip()
+        if not host or host.lower() in {"login", "password", "last"}:
+            continue
+        if len(host) < 2 or host.isdigit():
+            continue
+        last = host
+    return last
+
+
+def _identity_matches(expected_id: str, expected_hostname: str, actual_hostname: str,
+                      extra_exact=None) -> bool:
+    """Fuzzy identity check used by connect_for_upgrade.
+
+    Returns True when we cannot disprove identity (unknown prompt, generic
+    recovery prompt, or fuzzy substring overlap in either direction).
+    Returns False only when we have a real hostname AND it has no overlap
+    with any known identifier for the target device.
+
+    ``extra_exact`` is an optional iterable of operator-approved aliases
+    (e.g. a known config-hostname rename). They are matched by EXACT
+    normalized equality only -- never via the fuzzy trigram path -- so
+    adding an alias cannot accidentally widen the ghost-IP guard for any
+    other box.
+    """
+    actual_norm = _normalize_identity(actual_hostname)
+    if not actual_norm or len(actual_norm) < 2:
+        return True
+    if actual_norm in _GENERIC_PROMPT_HOSTS:
+        return True
+    # Operator-approved aliases: exact normalized equality only.
+    for _alias in (extra_exact or []):
+        _an = _normalize_identity(_alias)
+        if _an and _an == actual_norm:
+            return True
+    candidates = []
+    for src in (expected_id, expected_hostname):
+        n = _normalize_identity(src)
+        if n and len(n) >= 2:
+            candidates.append(n)
+    if not candidates:
+        return True
+    for want in candidates:
+        if want in actual_norm or actual_norm in want:
+            return True
+        if len(want) >= 3:
+            for i in range(len(want) - 2):
+                if want[i:i + 3] in actual_norm:
+                    return True
+    return False
+
+
+def _extract_system_identity(text: str) -> dict:
+    """Parse chassis-IMMUTABLE identity from `show system` output.
+
+    The config hostname can be changed at any time (a `hostname` commit, a
+    scale test that renames the box, etc). System-Id (a per-chassis UUID)
+    and the component serial numbers do NOT change on a rename, so they let
+    the upgrade guard distinguish "same device, hostname changed" from a
+    real ghost-IP landing on a different chassis.
+
+    Returns {'system_id': <uuid str or ''>, 'serials': set(), 'system_type': ''}.
+    """
+    out = {'system_id': '', 'serials': set(), 'system_type': ''}
+    if not text:
+        return out
+    clean = re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", text)
+    m = re.search(r"System-Id:\s*([0-9a-fA-F][0-9a-fA-F-]{7,})", clean)
+    if m:
+        out['system_id'] = m.group(1).strip().lower()
+    m = re.search(r"System Type:\s*([A-Za-z0-9\-]+)", clean)
+    if m:
+        out['system_type'] = m.group(1).strip()
+    # Hardware serials (NCC/NCP/NCM/NCF table, last column) -- e.g.
+    # WDY19C7M00013-P3, WDY1A17E00011-P3, AAF1944AAAJ, WEB19B7G00012-P2.
+    for sm in re.finditer(r"\b([A-Z]{2,4}[0-9][A-Z0-9]{5,}(?:-[A-Z0-9]+)?)\b", clean):
+        out['serials'].add(sm.group(1).strip())
+    # KVM NCC VM names also act as cluster serials (e.g. kvm108-cl408d-ncc1).
+    for vm in re.finditer(r"\b(kvm\d+-[a-z0-9]+-ncc\d+)\b", clean):
+        out['serials'].add(vm.group(1).strip())
+    return out
+
+
+def _probe_system_identity(channel, timeout: float = 45.0) -> dict:
+    """Send `show system | no-more` on an already-open interactive channel
+    and parse chassis-immutable identity. Best-effort: returns empty identity
+    on any error. DNOS CLI can be slow to render, so we poll up to ``timeout``
+    seconds for the System-Id + component table to appear.
+    """
+    empty = {'system_id': '', 'serials': set(), 'system_type': ''}
+    try:
+        import time as _t
+        if channel is None:
+            return empty
+        try:
+            while channel.recv_ready():
+                channel.recv(65535)
+        except Exception:
+            pass
+        try:
+            channel.send("show system | no-more\n")
+        except Exception:
+            return empty
+        buf = ""
+        deadline = _t.time() + timeout
+        while _t.time() < deadline:
+            got = False
+            try:
+                if channel.recv_ready():
+                    buf += channel.recv(65535).decode("utf-8", "ignore")
+                    got = True
+            except Exception:
+                break
+            if "System-Id:" in buf and ("NCM" in buf or "NCC" in buf):
+                _t.sleep(0.5)
+                try:
+                    while channel.recv_ready():
+                        buf += channel.recv(65535).decode("utf-8", "ignore")
+                except Exception:
+                    pass
+                break
+            if not got:
+                _t.sleep(0.3)
+        return _extract_system_identity(buf)
+    except Exception:
+        return empty
+
 # Suppress noisy paramiko transport-layer tracebacks (e.g. SSH banner errors)
 logging.getLogger("paramiko").setLevel(logging.WARNING)
 logging.getLogger("paramiko.transport").setLevel(logging.WARNING)
@@ -355,6 +527,20 @@ class DeviceConnector:
         
         Returns dict with kvm_host, kvm_host_credentials, ncc_vms,
         ncc_console_credentials, dncli_credentials -- or None if not a KVM cluster.
+
+        Read priority (first non-empty wins):
+          1. ``<SCALER>/db/configs/<hostname>/operational.json``
+             (primary, written on every successful connect)
+          2. ``<SCALER>/db/console_mappings.json`` (legacy lab-wide map)
+          3. ``~/.topology_users/*/devices.json`` per-user console_fallback
+             blocks (durable backup; survives operational.json wipes and
+             ghost-IP reaps -- see ``topology/routes/_console_fallback``).
+
+        Source 3 lets the KVM console keep working even after
+        ``request system delete`` truncates operational.json or the ghost
+        IP reaper empties the record; as long as any user has
+        successfully probed the device once, the latest-captured block
+        is re-used instead of failing the connect.
         """
         try:
             from pathlib import Path
@@ -369,6 +555,13 @@ class DeviceConnector:
                         'kvm_host_ip': op_data.get('kvm_host_ip'),
                         'kvm_host_credentials': op_data.get('kvm_host_credentials', {}),
                         'ncc_vms': op_data.get('ncc_vms', []),
+                        'ncc_hosts': op_data.get('ncc_hosts', []),
+                        'ncc_mgmt_ip': op_data.get('ncc_mgmt_ip', ''),
+                        'active_ncc_vm': op_data.get('active_ncc_vm', ''),
+                        'active_ncc_host': op_data.get('active_ncc_host', ''),
+                        'active_ncc_source': op_data.get('active_ncc_source', ''),
+                        'device_state': op_data.get('device_state', ''),
+                        'pre_upgrade_active_ncc_vm': op_data.get('pre_upgrade_active_ncc_vm', ''),
                         'ncc_console_credentials': op_data.get('ncc_console_credentials', {}),
                         'dncli_credentials': op_data.get('dncli_credentials', {}),
                     }
@@ -389,13 +582,122 @@ class DeviceConnector:
                         'kvm_host_ip': ncc_info.get('kvm_host_ip'),
                         'kvm_host_credentials': ncc_info.get('kvm_host_credentials', {}),
                         'ncc_vms': ncc_info.get('ncc_vms', []),
+                        'ncc_hosts': ncc_info.get('ncc_hosts', []),
+                        'ncc_mgmt_ip': ncc_info.get('ncc_mgmt_ip', ''),
+                        'active_ncc_vm': ncc_info.get('active_ncc_vm', ''),
+                        'active_ncc_host': ncc_info.get('active_ncc_host', ''),
+                        'active_ncc_source': ncc_info.get('active_ncc_source', ''),
+                        'device_state': ncc_info.get('device_state', ''),
+                        'pre_upgrade_active_ncc_vm': ncc_info.get('pre_upgrade_active_ncc_vm', ''),
                         'ncc_console_credentials': ncc_info.get('ncc_console_credentials', {}),
                         'dncli_credentials': ncc_info.get('dncli_credentials', {}),
                     }
         except Exception:
             pass
-        
+
+        fallback = self._get_kvm_host_from_user_fallback()
+        if fallback:
+            return fallback
+
         return None
+
+    def _get_kvm_host_from_user_fallback(self) -> Optional[dict]:
+        """Scan ``~/.topology_users/*/devices.json`` for a stored console
+        fallback record keyed by this device's hostname.
+
+        This is the "durable backup" the topology bridge's
+        ``routes._console_fallback`` module stamps on every successful
+        probe/upgrade. We iterate over ALL users so a device that was
+        originally set up by user ``alice`` is still reachable by
+        user ``bob`` the first time they try to connect -- KVM creds
+        and NCC VM names are lab-wide facts, not per-user secrets.
+
+        Picks the most recent ``auto_captured_at`` entry when multiple
+        users have captured the same device.
+        """
+        try:
+            from pathlib import Path
+            import json
+            import os
+            base = Path(os.environ.get(
+                "TOPOLOGY_USERS_BASE",
+                str(Path.home() / ".topology_users"),
+            ))
+            if not base.is_dir():
+                return None
+            candidates = []
+            hostname_lc = (self.device.hostname or "").lower()
+            hostname_norm = hostname_lc.replace("_", "").replace("-", "")
+            for user_dir in base.iterdir():
+                if not user_dir.is_dir():
+                    continue
+                dev_file = user_dir / "devices.json"
+                if not dev_file.is_file():
+                    continue
+                try:
+                    blob = json.loads(dev_file.read_text())
+                except Exception:
+                    continue
+                if not isinstance(blob, dict):
+                    continue
+                matched = None
+                for key, entry in blob.items():
+                    if not isinstance(entry, dict):
+                        continue
+                    key_lc = key.lower()
+                    if (
+                        key_lc == hostname_lc
+                        or key_lc.replace("_", "").replace("-", "") == hostname_norm
+                    ):
+                        matched = entry
+                        break
+                if not matched:
+                    continue
+                cf = matched.get("console_fallback")
+                if not isinstance(cf, dict):
+                    continue
+                if cf.get("ncc_type") and cf.get("ncc_type") != "kvm":
+                    continue
+                if not cf.get("kvm_host_ip") and not cf.get("kvm_host_name"):
+                    continue
+                candidates.append(cf)
+
+            if not candidates:
+                return None
+
+            # Most-recent capture wins (lexicographic sort on ISO timestamp).
+            candidates.sort(
+                key=lambda c: c.get("auto_captured_at") or "",
+                reverse=True,
+            )
+            cf = candidates[0]
+            return {
+                'kvm_host': cf.get('kvm_host_name') or cf.get('kvm_host_ip'),
+                'kvm_host_ip': cf.get('kvm_host_ip') or cf.get('kvm_host_name'),
+                'kvm_host_credentials': {
+                    'username': cf.get('kvm_user') or '',
+                    'password': cf.get('kvm_pass') or '',
+                },
+                'ncc_vms': list(cf.get('ncc_vms') or []),
+                'ncc_hosts': list(cf.get('ncc_hosts') or []),
+                'ncc_mgmt_ip': cf.get('ncc_mgmt_ip') or '',
+                'active_ncc_vm': cf.get('active_ncc_vm') or '',
+                'active_ncc_host': cf.get('active_ncc_host') or '',
+                'active_ncc_source': cf.get('active_ncc_source') or '',
+                'device_state': cf.get('device_state') or '',
+                'pre_upgrade_active_ncc_vm': cf.get('pre_upgrade_active_ncc_vm') or '',
+                'ncc_console_credentials': {
+                    'username': cf.get('ncc_console_user') or '',
+                    'password': cf.get('ncc_console_pass') or '',
+                },
+                'dncli_credentials': {
+                    'username': cf.get('dncli_user') or '',
+                    'password': cf.get('dncli_pass') or '',
+                },
+                '_source': 'user_fallback',
+            }
+        except Exception:
+            return None
     
     def _get_serial_number(self) -> Optional[str]:
         """Get device serial number for SSH via SN hostname."""
@@ -670,6 +972,7 @@ class DeviceConnector:
         kvm_host = kvm_config.get('kvm_host_ip') or _derive_kvm_host(kvm_config.get('kvm_host') or '')
         kvm_creds = kvm_config.get('kvm_host_credentials', {})
         ncc_vms = kvm_config.get('ncc_vms', [])
+        ncc_hosts = kvm_config.get('ncc_hosts', []) or ncc_vms
         console_creds = kvm_config.get('ncc_console_credentials', {})
         dncli_creds = kvm_config.get('dncli_credentials', {})
         
@@ -709,7 +1012,76 @@ class DeviceConnector:
             
             _drain(channel, wait=2)  # consume SSH banner
             
-            # Find active NCC VM via virsh list (sudo required on most KVM hosts)
+            def _ordered_ncc_vms():
+                """Return NCC VMs with the most likely active VM first.
+
+                `virsh list --all` only tells us which VMs are running. In
+                normal dual-NCC clusters both NCC VMs are running, so choosing
+                the first running entry (usually `ncc0`) can land us on the
+                standby NCC. Prefer the active-NCC hints captured by the
+                topology probe / upgrade snapshot, and when possible validate
+                the hint by resolving NCC hostnames against `ncc_mgmt_ip`.
+                """
+                import socket
+
+                ordered = []
+
+                def add(vm):
+                    vm = (vm or '').strip()
+                    if vm and vm in ncc_vms and vm not in ordered:
+                        ordered.append(vm)
+
+                # First: explicit/monitored hints. `pre_upgrade_active_ncc_vm`
+                # wins during an upgrade window because the snapshot is frozen
+                # when the operator clicks Execute. Monitored KVM/DNS/virsh
+                # sources are also trusted; weak sources such as `fallback` or
+                # `kvm_first_running` are deliberately not promoted ahead of
+                # the live DNS check below.
+                add(kvm_config.get('pre_upgrade_active_ncc_vm'))
+                src = (kvm_config.get('active_ncc_source') or '').strip().lower()
+                trusted_src = (
+                    src.startswith('kvm_domifaddr_match')
+                    or src.startswith('kvm_arp_mac_match')
+                    or src.startswith('kvm_only_running')
+                    or src.startswith('virsh_console_verified')
+                    or src.startswith('pre_upgrade')
+                    or src.startswith('upgrade_start_snapshot')
+                    or src.startswith('scaler_db_cache')
+                    or src == 'dns_match'
+                    or src == 'port22_alive'
+                )
+                if trusted_src:
+                    add(kvm_config.get('active_ncc_host'))
+                    add(kvm_config.get('active_ncc_vm'))
+
+                # Next: the active NCC hostname resolves to the cluster's NCC
+                # management IP. This is the same signal used by the topology
+                # probe's dns_match fix for PE-4.
+                ncc_mgmt_ip = (kvm_config.get('ncc_mgmt_ip') or '').strip().split('/')[0]
+                if ncc_mgmt_ip and ncc_mgmt_ip != 'N/A':
+                    for host in ncc_hosts:
+                        try:
+                            if socket.gethostbyname(host) == ncc_mgmt_ip:
+                                add(host)
+                        except Exception:
+                            pass
+
+                # Finally, keep even weak cached hints ahead of raw list order
+                # only after stronger signals had their chance.
+                if not trusted_src:
+                    add(kvm_config.get('active_ncc_host'))
+                    add(kvm_config.get('active_ncc_vm'))
+
+                for vm in ncc_vms:
+                    add(vm)
+                return ordered
+
+            ordered_ncc_vms = _ordered_ncc_vms()
+
+            # Find active NCC VM via virsh list (sudo required on most KVM hosts).
+            # The candidate order is active-NCC-first; only the final fallback
+            # is "any running NCC", preserving old behavior when no active
+            # signal is available.
             channel.send("sudo virsh list --all\n")
             time.sleep(3)
             virsh_output = _drain(channel, wait=3)
@@ -719,7 +1091,7 @@ class DeviceConnector:
                 virsh_output = _drain(channel, wait=3)
             
             active_ncc = None
-            for vm_name in ncc_vms:
+            for vm_name in ordered_ncc_vms:
                 if vm_name in virsh_output and 'running' in virsh_output.split(vm_name)[1].split('\n')[0].lower():
                     active_ncc = vm_name
                     break
@@ -1699,7 +2071,9 @@ def connect_for_upgrade(hostname: str, timeout: int = 30) -> Dict[str, Any]:
     serial_number = None
     mgmt_ip = None
     device_ip = None
-    
+    ghost_last_ips = set()
+    ghost_stale = False
+
     if op_path.exists():
         try:
             with open(op_path) as f:
@@ -1707,9 +2081,39 @@ def connect_for_upgrade(hostname: str, timeout: int = 30) -> Dict[str, Any]:
                 sn = op_data.get('serial_number')
                 if sn and sn != 'N/A':
                     serial_number = sn
-                ip = op_data.get('mgmt_ip') or op_data.get('ssh_host')
-                if ip and ip != 'N/A':
-                    mgmt_ip = ip.split('/')[0] if '/' in str(ip) else ip
+
+                # Ghost-IP reaper memory. A previous identity check flipped
+                # `_stale=True` when the IP we had stored answered as a
+                # DIFFERENT device (`_stale_remote_hostname`). Do NOT dial
+                # those IPs again under any column (mgmt_ip, ssh_host,
+                # ncc_mgmt_ip) -- they belong to someone else now.
+                ghost_stale = op_data.get('_stale') is True
+                for k in ('_stale_last_mgmt_ip', '_stale_last_ssh_host', '_stale_last_ncc_mgmt_ip'):
+                    v = (op_data.get(k) or '').strip().split('/')[0]
+                    if v:
+                        ghost_last_ips.add(v)
+
+                def _not_ghost(candidate: str) -> bool:
+                    return bool(candidate) and candidate not in ghost_last_ips
+
+                _dev_state = (op_data.get('device_state') or '').upper()
+                if _dev_state in ('GI', 'BASEOS_SHELL', 'RECOVERY'):
+                    _ncc_ip = (op_data.get('ncc_mgmt_ip') or '').strip().split('/')[0]
+                    if _ncc_ip and _ncc_ip != 'N/A' and _not_ghost(_ncc_ip):
+                        mgmt_ip = _ncc_ip
+                if not mgmt_ip:
+                    for slot in ('mgmt_ip', 'ssh_host'):
+                        ip = (op_data.get(slot) or '').strip().split('/')[0]
+                        if ip and ip != 'N/A' and _not_ghost(ip):
+                            mgmt_ip = ip
+                            break
+                # Even in DNOS-priority order, if we have a ncc_mgmt_ip and
+                # the mgmt_ip was reaped as ghost, ncc_mgmt_ip is the best
+                # fallback (active NCC recovery IP is the operator's path).
+                if not mgmt_ip:
+                    _ncc_ip = (op_data.get('ncc_mgmt_ip') or '').strip().split('/')[0]
+                    if _ncc_ip and _ncc_ip != 'N/A' and _not_ghost(_ncc_ip):
+                        mgmt_ip = _ncc_ip
         except Exception:
             pass
     
@@ -1750,7 +2154,166 @@ def connect_for_upgrade(hostname: str, timeout: int = 30) -> Dict[str, Any]:
         ConnectionMethod.CONSOLE: "Console",
         ConnectionMethod.SSH_LOOPBACK: "SSH->Loopback"
     }
-    
+
+    # Identity guard: for direct-SSH methods (where the prompt can be
+    # trusted), parse the landing hostname and verify it has overlap with
+    # this device's canvas id, hostname or serial. A mismatch means we
+    # landed on a different device that answered at the same IP -- the
+    # classic ghost-IP symptom. We reap the IP and return unreachable so
+    # Phase-2 does not record another device's state as ours.
+    direct_ssh_methods = {
+        ConnectionMethod.SSH_SN,
+        ConnectionMethod.SSH_MGMT,
+        ConnectionMethod.SSH_LOOPBACK,
+    }
+    if conn_result.method in direct_ssh_methods:
+        _expected_hostname = ''
+        if op_path.exists():
+            try:
+                with open(op_path) as _f:
+                    _ops_hn = json.load(_f)
+                _expected_hostname = (_ops_hn.get('hostname') or '').strip()
+            except Exception:
+                _expected_hostname = ''
+        actual_host = _extract_remote_hostname(conn_result.output or '')
+        # Operator-approved aliases + chassis-immutable identifiers (System-Id,
+        # serials, NCC VM names) let the guard tell "same device, hostname
+        # changed" from a real ghost IP. Load them from operational.json.
+        _aliases = []
+        _known_serials = set()
+        _known_system_id = ''
+        if op_path.exists():
+            try:
+                with open(op_path) as _idf_f:
+                    _idf = json.load(_idf_f)
+                _al = _idf.get('identity_aliases')
+                if isinstance(_al, list):
+                    _aliases = [str(x) for x in _al if x]
+                for _sk in ('serial_number',):
+                    _sv = (_idf.get(_sk) or '').strip()
+                    if _sv and _sv != 'N/A':
+                        _known_serials.add(_sv)
+                _idn = _idf.get('_identity') or {}
+                _isv = (_idn.get('serial') or '').strip()
+                if _isv and _isv != 'N/A':
+                    _known_serials.add(_isv)
+                for _lk in ('known_serials', 'ncc_vms'):
+                    _lv = _idf.get(_lk)
+                    if isinstance(_lv, list):
+                        for _x in _lv:
+                            if _x:
+                                _known_serials.add(str(_x).strip())
+                _known_system_id = (_idf.get('system_id') or '').strip().lower()
+            except Exception:
+                pass
+
+        _hostname_ok = (not actual_host) or _identity_matches(
+            hostname, _expected_hostname, actual_host, extra_exact=_aliases)
+        if actual_host and not _hostname_ok:
+            # Prompt hostname looks wrong, but the chassis may simply have
+            # been renamed (config `hostname` changed by a scale test, etc).
+            # Corroborate against immutable identity BEFORE reaping the IP.
+            probed = _probe_system_identity(conn_result.channel)
+            _pid = (probed.get('system_id') or '')
+            _pser = probed.get('serials') or set()
+            _same_via = ''
+            if _known_system_id and _pid and _pid == _known_system_id:
+                _same_via = f"System-Id {_pid}"
+            elif _known_serials and (_known_serials & _pser):
+                _same_via = "serial " + ",".join(sorted(_known_serials & _pser))
+            if _same_via:
+                # Same physical box, renamed. Accept + auto-heal: learn the
+                # immutable ids, record the rename, and auto-approve the alias
+                # so the next connect is instant (no re-probe).
+                _hostname_ok = True
+                try:
+                    with open(op_path) as _h_f:
+                        _ops_h = json.load(_h_f)
+                    from datetime import datetime as _dtr, timezone as _tzr
+                    _now_h = _dtr.now(_tzr.utc).isoformat()
+                    _ops_h['_observed_hostname'] = actual_host
+                    if probed.get('system_id'):
+                        _ops_h['system_id'] = probed['system_id']
+                    if _pser:
+                        _cur = set(_ops_h.get('known_serials') or [])
+                        _cur |= {s for s in _pser
+                                 if re.match(r'^[A-Z]{2,4}[0-9]', s) or s.startswith('kvm')}
+                        _ops_h['known_serials'] = sorted(_cur)
+                    _al_h = _ops_h.get('identity_aliases')
+                    if not isinstance(_al_h, list):
+                        _al_h = []
+                    if actual_host not in _al_h:
+                        _al_h.append(actual_host)
+                    _ops_h['identity_aliases'] = _al_h
+                    _hist = _ops_h.get('_hostname_history')
+                    if not isinstance(_hist, list):
+                        _hist = []
+                    _hist.append({
+                        'at': _now_h, 'observed': actual_host,
+                        'expected': _expected_hostname or hostname,
+                        'corroborated_by': _same_via,
+                    })
+                    _ops_h['_hostname_history'] = _hist[-20:]
+                    with open(op_path, 'w') as _h_f:
+                        json.dump(_ops_h, _h_f, indent=4)
+                except Exception:
+                    pass
+
+        if actual_host and not _hostname_ok:
+            # Close ghost connection; mark the IP as stale so subsequent
+            # calls do not redial it. Do NOT raise - return a clean
+            # "unreachable" so callers fall back gracefully.
+            try:
+                if conn_result.ssh:
+                    conn_result.ssh.close()
+            except Exception:
+                pass
+            reaped_ip = (conn_result.host or '').strip().split('/')[0]
+            if op_path.exists():
+                try:
+                    with open(op_path) as _f:
+                        _ops = json.load(_f)
+                    _ops['_stale'] = True
+                    _ops['_stale_reason'] = 'ghost_ip_connect_for_upgrade'
+                    from datetime import datetime as _dt, timezone as _tz
+                    _ops['_stale_at'] = _dt.now(_tz.utc).isoformat()
+                    _ops['_stale_remote_hostname'] = actual_host
+                    if reaped_ip:
+                        _ops.setdefault('_stale_last_mgmt_ip', reaped_ip)
+                        _ops.setdefault('_stale_last_ssh_host', reaped_ip)
+                        prev_mgmt = (_ops.get('mgmt_ip') or '').strip().split('/')[0]
+                        prev_ssh = (_ops.get('ssh_host') or '').strip().split('/')[0]
+                        if prev_mgmt == reaped_ip:
+                            _ops['mgmt_ip'] = ''
+                        if prev_ssh == reaped_ip:
+                            _ops['ssh_host'] = ''
+                        _nccip = (_ops.get('ncc_mgmt_ip') or '').strip().split('/')[0]
+                        if _nccip == reaped_ip:
+                            _ops.setdefault('_stale_last_ncc_mgmt_ip', _nccip)
+                            _ops['ncc_mgmt_ip'] = ''
+                        events = _ops.get('_ghost_events')
+                        if not isinstance(events, list):
+                            events = []
+                        events.append({
+                            'at': _ops['_stale_at'],
+                            'actor_user': 'connect_for_upgrade',
+                            'cleared_ip': reaped_ip,
+                            'reason': 'ghost_ip_connect_for_upgrade',
+                            'actual_hostname': actual_host,
+                        })
+                        _ops['_ghost_events'] = events[-20:]
+                    with open(op_path, 'w') as _f:
+                        json.dump(_ops, _f, indent=4)
+                except Exception:
+                    pass
+            result['abort_reason'] = (
+                f"Ghost IP detected: connected to {actual_host} instead of "
+                f"{_expected_hostname or hostname} at {reaped_ip}. IP reaped."
+            )
+            result['ghost_ip'] = True
+            result['ghost_remote_hostname'] = actual_host
+            return result
+
     result['connected'] = True
     result['ssh'] = conn_result.ssh
     result['channel'] = conn_result.channel
@@ -1766,6 +2329,14 @@ def connect_for_upgrade(hostname: str, timeout: int = 30) -> Dict[str, Any]:
         try:
             with open(op_path) as f:
                 op_data = json.load(f)
+
+            # Snapshot previous state BEFORE we overwrite -- used for drift
+            # detection below (catches out-of-band `system delete` where the
+            # DB said DNOS but the device is now GI).
+            _prev_state = (op_data.get('device_state') or '').upper()
+            _new_state_val = (conn_result.state.value if conn_result.state else '') or ''
+            _new_state = _new_state_val.upper()
+
             if conn_result.state and conn_result.state not in (DeviceState.UNKNOWN, DeviceState.UNREACHABLE):
                 op_data['device_state'] = conn_result.state.value
             op_data['last_working_method'] = method_map.get(conn_result.method, str(conn_result.method))
@@ -1774,7 +2345,17 @@ def connect_for_upgrade(hostname: str, timeout: int = 30) -> Dict[str, Any]:
                 try:
                     resolved_ip = _sock.gethostbyname(conn_result.host)
                     stored_ip = (op_data.get('mgmt_ip') or '').split('/')[0]
-                    if resolved_ip != stored_ip:
+                    # Never resurrect a known ghost IP. If operator has
+                    # already reaped this address as belonging to another
+                    # device, leave mgmt_ip empty so subsequent resolve /
+                    # SSH paths stay honest.
+                    reaped_set = set()
+                    for _k in ('_stale_last_mgmt_ip', '_stale_last_ssh_host', '_stale_last_ncc_mgmt_ip'):
+                        _v = (op_data.get(_k) or '').strip().split('/')[0]
+                        if _v:
+                            reaped_set.add(_v)
+                    is_known_ghost = op_data.get('_stale') is True and resolved_ip in reaped_set
+                    if resolved_ip != stored_ip and not is_known_ghost:
                         op_data['mgmt_ip'] = resolved_ip
                         op_data['ssh_host'] = resolved_ip
                 except Exception:
@@ -1783,6 +2364,125 @@ def connect_for_upgrade(hostname: str, timeout: int = 30) -> Dict[str, Any]:
                 op_data['active_ncc_vm'] = conn_result.active_ncc_vm
             if conn_result.ncc_id is not None:
                 op_data['deploy_ncc_id'] = conn_result.ncc_id
+
+            # =============================================================
+            # Auto-clear _stale when identity has been proven.
+            # =============================================================
+            # Reaching this point means either:
+            #  (a) connection method was identity-guaranteed (VIRSH/SN/NCC/
+            #      CONSOLE) where the hostname was resolved via DNS/libvirt
+            #      and cannot be spoofed by a recycled DHCP IP, OR
+            #  (b) connection method was direct-SSH (MGMT/LOOPBACK) and the
+            #      identity guard above (~line 1881) already verified the
+            #      landing hostname matches the expected device.
+            # In either case the ghost-IP contamination is resolved -- we've
+            # re-established trust. Keep `_stale_last_*` for forensics, but
+            # lift the live block so subsequent callers can use the fresh
+            # state without stepping through reaper memory.
+            if op_data.get('_stale') is True:
+                from datetime import datetime as _dt_resolve, timezone as _tz_resolve
+                _resolve_at = _dt_resolve.now(_tz_resolve.utc).isoformat()
+                _resolve_via = method_map.get(conn_result.method, str(conn_result.method))
+                op_data['_stale'] = False
+                op_data['_ghost_resolved_at'] = _resolve_at
+                op_data['_ghost_resolved_via'] = _resolve_via
+                _events = op_data.get('_ghost_events')
+                if not isinstance(_events, list):
+                    _events = []
+                _events.append({
+                    'at': _resolve_at,
+                    'actor_user': 'connect_for_upgrade',
+                    'event': 'ghost_resolved',
+                    'resolved_via': _resolve_via,
+                    'new_state': _new_state or None,
+                })
+                op_data['_ghost_events'] = _events[-20:]
+
+            # =============================================================
+            # Drift detection: DNOS -> GI/BASEOS without a recent delete.
+            # =============================================================
+            # When the DB says DNOS but the live device is now in GI, either
+            # (1) we performed a `request system delete` from the wizard and
+            #     flagged `delete_initiated` (expected), or
+            # (2) someone ran `system delete` out-of-band via a console
+            #     session the wizard didn't see (unexpected - silent drift).
+            # Case (2) used to leave stale `dnos_version`, `gi_version` and
+            # `stack_components[*].current` in the DB indefinitely, making
+            # the upgrade wizard falsely report the old stack is installed.
+            # Here we record the drift for audit AND clear the stale "current"
+            # fields so the wizard shows an accurate empty stack immediately.
+            if _new_state in ('GI', 'BASEOS_SHELL') and _prev_state == 'DNOS':
+                try:
+                    from datetime import datetime as _dt_d, timezone as _tz_d, timedelta as _td_d
+                    _di = op_data.get('delete_initiated')
+                    _recent_delete = False
+                    if _di:
+                        try:
+                            _di_dt = _dt_d.fromisoformat(str(_di).replace('Z', '+00:00'))
+                            if _di_dt.tzinfo is None:
+                                _di_dt = _di_dt.replace(tzinfo=_tz_d.utc)
+                            _recent_delete = (_dt_d.now(_tz_d.utc) - _di_dt) < _td_d(minutes=30)
+                        except Exception:
+                            _recent_delete = False
+                    if not _recent_delete:
+                        _drift_at = _dt_d.now(_tz_d.utc).isoformat()
+                        _drift_events = op_data.get('_state_drift_events')
+                        if not isinstance(_drift_events, list):
+                            _drift_events = []
+                        _drift_events.append({
+                            'at': _drift_at,
+                            'from_state': _prev_state,
+                            'to_state': _new_state,
+                            'method': method_map.get(conn_result.method, str(conn_result.method)),
+                            'suspected_cause': 'out_of_band_system_delete',
+                        })
+                        op_data['_state_drift_events'] = _drift_events[-10:]
+                        # Clear stale "current" stack versions -- DNOS is gone.
+                        op_data.pop('dnos_version', None)
+                        op_data.pop('gi_version', None)
+                        op_data.pop('baseos_version', None)
+                        _sc = op_data.get('stack_components')
+                        if isinstance(_sc, list):
+                            for _c in _sc:
+                                if isinstance(_c, dict):
+                                    _c['current'] = '-'
+                        # Seed delete_initiated so downstream recovery flows
+                        # treat this as a known delete (but mark the source).
+                        op_data['delete_initiated'] = _drift_at
+                        op_data['delete_source'] = 'drift_detection'
+                except Exception:
+                    pass
+
+            # =============================================================
+            # Clear _delete_pending once the delete reaches a stable state.
+            # =============================================================
+            # _delete_pending was set by the upgrade wizard just before it
+            # sent `request system delete`. Normally Phase-5 observes GI and
+            # our block above clears it. But a wizard crash / 7-min timeout
+            # could leave it True forever, so we also self-heal:
+            #   - GI/BASEOS_SHELL on any trusted path  -> delete succeeded
+            #   - DNOS on any trusted path >30 min old -> delete was rolled
+            #     back (user aborted), device is back under DNOS control
+            if op_data.get('_delete_pending'):
+                _lift = False
+                if _new_state in ('GI', 'BASEOS_SHELL'):
+                    _lift = True
+                elif _new_state == 'DNOS':
+                    try:
+                        from datetime import datetime as _dt_p, timezone as _tz_p, timedelta as _td_p
+                        _dp_at = op_data.get('_delete_pending_at')
+                        if _dp_at:
+                            _dp_dt = _dt_p.fromisoformat(str(_dp_at).replace('Z', '+00:00'))
+                            if _dp_dt.tzinfo is None:
+                                _dp_dt = _dp_dt.replace(tzinfo=_tz_p.utc)
+                            if (_dt_p.now(_tz_p.utc) - _dp_dt) > _td_p(minutes=30):
+                                _lift = True
+                    except Exception:
+                        _lift = True
+                if _lift:
+                    op_data.pop('_delete_pending', None)
+                    op_data.pop('_delete_pending_at', None)
+
             with open(op_path, 'w') as f:
                 json.dump(op_data, f, indent=4)
         except Exception:

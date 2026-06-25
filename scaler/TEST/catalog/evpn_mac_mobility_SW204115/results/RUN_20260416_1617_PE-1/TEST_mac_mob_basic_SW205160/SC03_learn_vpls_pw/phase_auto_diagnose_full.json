@@ -1,0 +1,65 @@
+[
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 16:22 | no-more",
+    "timestamp": "2026-04-16T16:23:47.826+00:00",
+    "duration_ms": 1002,
+    "phase": "auto_diagnose",
+    "output_length": 3167,
+    "output_preview": "2026-04-14T16:22:04.439185 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 391145:14796514: Sending keepalive with TTL: 60 to redis\n2026-04-14T16:22:14.439230 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 391146:14796595: Sending keepalive with TTL: 60 to redis\n2026-04-14T16:22:24.439299 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 391147:14796674: Sending keep",
+    "output_full": "2026-04-14T16:22:04.439185 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 391145:14796514: Sending keepalive with TTL: 60 to redis\n2026-04-14T16:22:14.439230 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 391146:14796595: Sending keepalive with TTL: 60 to redis\n2026-04-14T16:22:24.439299 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 391147:14796674: Sending keepalive with TTL: 60 to redis\n2026-04-14T16:22:34.439340 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 391148:14796756: Sending keepalive with TTL: 60 to redis\n2026-04-14T16:22:44.439382 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 391149:14796836: Sending keepalive with TTL: 60 to redis\n2026-04-14T16:22:54.439434 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 391150:14796914: Sending keepalive with TTL: 60 to redis\n2026-04-15T16:22:04.925498 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 404849:15493929: Sending keepalive with TTL: 60 to redis\n2026-04-15T16:22:14.925536 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 404850:15494008: Sending keepalive with TTL: 60 to redis\n2026-04-15T16:22:24.925581 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 404851:15494090: Sending keepalive with TTL: 60 to redis\n2026-04-15T16:22:34.925948 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 404852:15494168: Sending keepalive with TTL: 60 to redis\n2026-04-15T16:22:44.926001 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 404853:15494251: Sending keepalive with TTL: 60 to redis\n2026-04-15T16:22:54.926041 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 404854:15494330: Sending keepalive with TTL: 60 to redis\n2026-04-16T16:22:05.449684 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 416225:16188651: Sending keepalive with TTL: 60 to redis\n2026-04-16T16:22:15.449728 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 416226:16188732: Sending keepalive with TTL: 60 to redis\n2026-04-16T16:22:25.449798 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 416227:16188812: Sending keepalive with TTL: 60 to redis\n2026-04-16T16:22:35.449838 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 416228:16188893: Sending keepalive with TTL: 60 to redis\n2026-04-16T16:22:45.449883 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 416229:16188972: Sending keepalive with TTL: 60 to redis\n2026-04-16T16:22:55.449929 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 416230:16189054: Sending keepalive with TTL: 60 to redis"
+  },
+  {
+    "command": "show evpn mac-table instance PW_TEST_ELAN suppress | no-more",
+    "timestamp": "2026-04-16T16:23:48.828+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 35,
+    "output_preview": "  ETH TAG: 0\n    MAC table is empty",
+    "output_full": "  ETH TAG: 0\n    MAC table is empty"
+  },
+  {
+    "command": "show evpn instance PW_TEST_ELAN loop-prevention mac-table | no-more",
+    "timestamp": "2026-04-16T16:23:49.079+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 207,
+    "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------",
+    "output_full": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+  },
+  {
+    "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+    "timestamp": "2026-04-16T16:23:49.330+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 42,
+    "output_preview": "Number of MAC-Mobility entries in redis: 0",
+    "output_full": "Number of MAC-Mobility entries in redis: 0"
+  },
+  {
+    "command": "show dnos-internal routing evpn instance PW_TEST_ELAN mac-table-ghost | no-more",
+    "timestamp": "2026-04-16T16:23:49.580+00:00",
+    "duration_ms": 50,
+    "phase": "auto_diagnose",
+    "output_length": 26,
+    "output_preview": "ERROR: Incomplete command.",
+    "output_full": "ERROR: Incomplete command."
+  },
+  {
+    "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance PW_TEST_ELAN | no-more",
+    "timestamp": "2026-04-16T16:23:49.631+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 18,
+    "output_preview": "EvpnMacs [size: 0]",
+    "output_full": "EvpnMacs [size: 0]"
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance PW_TEST_ELAN | no-more",
+    "timestamp": "2026-04-16T16:23:49.881+00:00",
+    "duration_ms": 100,
+    "phase": "auto_diagnose",
+    "output_length": 442,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+  }
+]

@@ -1,0 +1,152 @@
+{
+  "phase_name": "verify",
+  "started_at": "2026-04-16T16:22:55.869+00:00",
+  "completed_at": "2026-04-16T16:23:47.823+00:00",
+  "duration_sec": 51.954,
+  "command_count": 14,
+  "commands": [
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-16T16:22:55.869+00:00",
+      "duration_ms": 250,
+      "phase": "verify",
+      "output_length": 864,
+      "output_preview": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ------------------"
+    },
+    {
+      "command": "show evpn mac-table instance PW_TEST_ELAN mac 00:DE:AD:00:03:03 | no-more",
+      "timestamp": "2026-04-16T16:22:56.120+00:00",
+      "duration_ms": 501,
+      "phase": "verify",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show evpn mac-table detail instance PW_TEST_ELAN | no-more",
+      "timestamp": "2026-04-16T16:22:56.622+00:00",
+      "duration_ms": 501,
+      "phase": "verify",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance PW_TEST_ELAN | no-more",
+      "timestamp": "2026-04-16T16:22:57.123+00:00",
+      "duration_ms": 100,
+      "phase": "verify",
+      "output_length": 442,
+      "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+    },
+    {
+      "command": "show evpn mac-table instance PW_TEST_ELAN | no-more",
+      "timestamp": "2026-04-16T16:22:57.224+00:00",
+      "duration_ms": 250,
+      "phase": "verify",
+      "output_length": 35,
+      "output_preview": "  ETH TAG: 0\n    MAC table is empty"
+    },
+    {
+      "command": "show evpn mac-table instance PW_TEST_ELAN mac 00:DE:AD:00:03:03 | no-more",
+      "timestamp": "2026-04-16T16:22:57.475+00:00",
+      "duration_ms": 501,
+      "phase": "verify",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show evpn mac-table detail instance PW_TEST_ELAN | no-more",
+      "timestamp": "2026-04-16T16:22:57.976+00:00",
+      "duration_ms": 501,
+      "phase": "verify",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance PW_TEST_ELAN | no-more",
+      "timestamp": "2026-04-16T16:22:58.477+00:00",
+      "duration_ms": 100,
+      "phase": "verify",
+      "output_length": 442,
+      "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+    },
+    {
+      "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance PW_TEST_ELAN | no-more",
+      "timestamp": "2026-04-16T16:22:58.578+00:00",
+      "duration_ms": 200,
+      "phase": "verify",
+      "output_length": 18,
+      "output_preview": "EvpnMacs [size: 0]"
+    },
+    {
+      "command": "show evpn arp-table instance PW_TEST_ELAN | no-more",
+      "timestamp": "2026-04-16T16:22:58.778+00:00",
+      "duration_ms": 250,
+      "phase": "verify",
+      "output_length": 35,
+      "output_preview": "  ETH TAG: 0\n    ARP table is empty"
+    },
+    {
+      "command": "show dnos-internal routing evpn instance PW_TEST_ELAN mac-table-ghost | no-more",
+      "timestamp": "2026-04-16T16:22:59.029+00:00",
+      "duration_ms": 100,
+      "phase": "verify",
+      "output_length": 26,
+      "output_preview": "ERROR: Incomplete command."
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-16T16:22:59.130+00:00",
+      "duration_ms": 250,
+      "phase": "verify",
+      "output_length": 582,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 3d02h11m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11986      12389    0     0       0 00:01:01   Connect         \n\nTotal number of est"
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 16:22 | no-more",
+      "timestamp": "2026-04-16T16:22:59.381+00:00",
+      "duration_ms": 3520,
+      "phase": "verify",
+      "output_length": 55956,
+      "output_preview": "2026-04-16T14:16:22.340223 +03:00 [INFO      ] [epoll.c:196:_epoll_fd_is_ready] [bgpd:1342:1342] 6569581:12659784: epoll: fd 137 is_read 1 received socket event (events 0x5 revents 0x1d) total 536183\n2026-04-16T14:16:22.340252 +03:00 [INFO      ] [epoll.c:196:_epoll_fd_is_ready] [bgpd:1342:1342] 6569582:12659784: epoll: fd 137 is_read 0 received socket event (events 0x4 revents 0x1d) total 536184\n2026-04-16T14:16:22.340319 +03:00 [DEBUG     ] [bgp_packet.c:199:bgp_connect_check] [bgpd:1342:1342]"
+    },
+    {
+      "command": "show file traces routing_engine/fibmgrd_traces | include 16:22 | no-more",
+      "timestamp": "2026-04-16T16:23:02.902+00:00",
+      "duration_ms": 2609,
+      "phase": "verify",
+      "output_length": 34741,
+      "output_preview": "2026-04-16T13:16:22.240473 +03:00 [DEBUG     ] [MessageParser.cpp:469:HandleMessageFromNeighborManager] [fibmgrd:1578:1578] 3891001:34068251: [PACKET] Got protobuf message from Neighbor-Manager: neighbor { key { vrf_id: 4 if_id { index: 13620 cheetah_index: 13620 } ipv4 { value: 269488134 } } reachability { state: FAILED ll2addr: \"\\000\\000\\000\\000\\000\\000\" } originator: NEIGHBOUR_MANAGER }\n2026-04-16T13:16:22.240526 +03:00 [DEBUG     ] [MessageParser.cpp:1172:NeighborUpdate] [fibmgrd:1578:1578] "
+    }
+  ],
+  "parsed_values": {
+    "after_mac_count": 2,
+    "cross_layer_check": {
+      "mac": "00:de:ad:00:03:03",
+      "passed": false,
+      "fail_count": 1,
+      "warn_count": 0,
+      "layers_collected": [
+        "mac_table",
+        "mac_detail",
+        "forwarding_table",
+        "fib_database",
+        "arp_table",
+        "ghost_macs"
+      ],
+      "layers_skipped": [],
+      "mismatches": [
+        {
+          "rule": "mac_existence",
+          "severity": "FAIL",
+          "detail": "MAC 00:de:ad:00:03:03 not found in mac-table",
+          "layers": [
+            "mac_table"
+          ],
+          "evidence": {}
+        }
+      ],
+      "xray_triggered": false
+    }
+  },
+  "anomalies": []
+}

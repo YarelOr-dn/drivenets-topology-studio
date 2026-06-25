@@ -20,6 +20,17 @@
 class GroupManager {
     constructor(editor) {
         this.editor = editor;
+        if (this.editor && !this.editor._groupVisibility) {
+            this.editor._groupVisibility = {};
+        }
+    }
+
+    static get DEFAULT_PALETTE() {
+        return [
+            '#00B4D8', '#FF5E1F', '#2ecc71', '#9b59b6', '#f39c12',
+            '#1abc9c', '#e67e22', '#3b82f6', '#d35400', '#16a085',
+            '#27ae60', '#8e44ad', '#f1c40f', '#c0392b', '#64748b'
+        ];
     }
 
     // ========== GROUP OPERATIONS ==========
@@ -30,6 +41,108 @@ class GroupManager {
      */
     generateId() {
         return 'group_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    /**
+     * Deterministic color for a group. Existing object colors are preserved;
+     * this is only used when creating or repairing presentation state.
+     * @param {string} groupId - Group ID
+     * @returns {string} Hex color
+     */
+    colorForGroupId(groupId) {
+        const palette = GroupManager.DEFAULT_PALETTE;
+        const id = String(groupId || '');
+        let hash = 0;
+        for (let i = 0; i < id.length; i++) {
+            hash = ((hash << 5) - hash + id.charCodeAt(i)) | 0;
+        }
+        return palette[Math.abs(hash) % palette.length];
+    }
+
+    /**
+     * Return all current members for a group ID.
+     * @param {string} groupId - Group ID
+     * @returns {object[]} Group members
+     */
+    getMembersByGroupId(groupId) {
+        if (!groupId || !Array.isArray(this.editor.objects)) return [];
+        return this.editor.objects.filter(o => o && o.groupId === groupId);
+    }
+
+    /**
+     * Ensure every member has a stable group color for save/load and panel UI.
+     * @param {string} groupId - Group ID
+     * @returns {string} Effective group color
+     */
+    ensureGroupColor(groupId) {
+        const members = this.getMembersByGroupId(groupId);
+        if (!members.length) return this.colorForGroupId(groupId);
+        const color = members.find(m => m.groupColor)?.groupColor || this.colorForGroupId(groupId);
+        members.forEach(member => {
+            if (!member.groupColor) member.groupColor = color;
+        });
+        return color;
+    }
+
+    /**
+     * Visibility is runtime UI state, not topology object history.
+     * Ctrl/Cmd+Z must not change it, so it lives on editor._groupVisibility
+     * and is re-applied after history restore.
+     */
+    isGroupVisible(groupId) {
+        if (!groupId) return true;
+        const visibility = this.editor._groupVisibility || {};
+        return visibility[groupId] !== false;
+    }
+
+    setGroupVisibility(groupId, visible, options = {}) {
+        if (!groupId) return;
+        if (!this.editor._groupVisibility) this.editor._groupVisibility = {};
+        this.editor._groupVisibility[groupId] = visible !== false;
+        this.applyVisibility();
+        if (options.draw !== false && typeof this.editor.draw === 'function') {
+            this.editor.draw();
+        }
+        if (options.refreshPanel !== false && window.GroupsPanel?.isOpen?.()) {
+            window.GroupsPanel.refresh(this.editor);
+        }
+    }
+
+    setAllGroupsVisibility(visible, options = {}) {
+        if (!this.editor._groupVisibility) this.editor._groupVisibility = {};
+        this.getAllGroupIds().forEach(groupId => {
+            this.editor._groupVisibility[groupId] = visible !== false;
+        });
+        this.applyVisibility();
+        if (options.draw !== false && typeof this.editor.draw === 'function') {
+            this.editor.draw();
+        }
+        if (options.refreshPanel !== false && window.GroupsPanel?.isOpen?.()) {
+            window.GroupsPanel.refresh(this.editor);
+        }
+    }
+
+    applyVisibility() {
+        if (!this.editor || !Array.isArray(this.editor.objects)) return;
+        const visibility = this.editor._groupVisibility || {};
+        this.editor.objects.forEach(obj => {
+            if (!obj || !obj.groupId) {
+                if (obj && obj._hiddenByGroup) delete obj._hiddenByGroup;
+                return;
+            }
+            const hiddenByGroup = visibility[obj.groupId] === false;
+            if (hiddenByGroup) {
+                obj._hiddenByGroup = true;
+                obj._hidden = true;
+            } else if (obj._hiddenByGroup) {
+                delete obj._hiddenByGroup;
+                if (obj._hidden === true) delete obj._hidden;
+            }
+        });
+        this.editor.selectedObjects = (this.editor.selectedObjects || []).filter(obj => !(obj && obj._hiddenByGroup));
+        if (this.editor.selectedObject && this.editor.selectedObject._hiddenByGroup) {
+            this.editor.selectedObject = this.editor.selectedObjects[0] || null;
+        }
     }
 
     /**
@@ -92,10 +205,12 @@ class GroupManager {
         const leaderPos = leader.type === 'unbound' 
             ? { x: (leader.start.x + leader.end.x) / 2, y: (leader.start.y + leader.end.y) / 2 }
             : { x: leader.x, y: leader.y };
+        const groupColor = this.colorForGroupId(groupId);
         
         selected.forEach(obj => {
             obj.groupId = groupId;
             obj.groupLeaderId = leaderId;
+            obj.groupColor = obj.groupColor || groupColor;
             
             // Store relative position from leader for each member
             const objPos = obj.type === 'unbound'
@@ -122,6 +237,9 @@ class GroupManager {
             obj.groupLeaderId = null;
             obj.groupOffsetX = null;
             obj.groupOffsetY = null;
+            obj.groupName = null;
+            obj.groupColor = null;
+            delete obj._hiddenByGroup;
         });
         
         if (ungrouped.length > 0) {
@@ -205,17 +323,25 @@ class GroupManager {
         groupIds.forEach(groupId => {
             const members = this.editor.objects.filter(o => o.groupId === groupId);
             
-            if (members.length < 2) {
+            const isPanelDefinedGroup = Array.isArray(this.editor._emptyManualGroups)
+                && this.editor._emptyManualGroups.some(g => g && g.id === groupId);
+
+            if (members.length < 2 && !isPanelDefinedGroup) {
                 // Group has less than 2 members - ungroup remaining
                 members.forEach(m => {
                     m.groupId = null;
                     m.groupLeaderId = null;
                     m.groupOffsetX = null;
                     m.groupOffsetY = null;
+                    m.groupName = null;
+                    m.groupColor = null;
+                    delete m._hiddenByGroup;
                 });
                 console.log(`[GROUP] Auto-ungrouped single member from group ${groupId}`);
                 return;
             }
+
+            this.ensureGroupColor(groupId);
             
             // Check if leader still exists
             const leaderId = members[0]?.groupLeaderId;
@@ -241,6 +367,7 @@ class GroupManager {
                 }
             }
         });
+        this.applyVisibility();
     }
 
     // ========== DRAG SETUP ==========

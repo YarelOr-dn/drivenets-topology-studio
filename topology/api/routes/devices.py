@@ -5,10 +5,14 @@ Endpoints for managing network devices:
 - List, add, update, delete devices
 - Test connections
 - Sync configurations
+
+All endpoints require an authenticated user (JWT). Sensitive fields
+(password, username) are returned only to admins; everyone else gets a
+redacted view.
 """
 
-from typing import Optional, List
-from fastapi import APIRouter, HTTPException
+from typing import Optional, List, Any, Dict
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 from api.scaler_bridge import (
@@ -19,6 +23,29 @@ from api.scaler_bridge import (
     get_running_config,
     reload_device_manager
 )
+
+try:
+    from api.auth.service import get_current_user, require_role
+except Exception:  # pragma: no cover - optional in single-user deploys
+    async def get_current_user():
+        return {"username": "default", "role": "admin"}
+    def require_role(_min):
+        return get_current_user
+
+
+_REDACT_FIELDS = ("password", "device_password", "ssh_password", "secret")
+
+
+def _redact_device(dev: Dict[str, Any], role: str) -> Dict[str, Any]:
+    """Strip secrets from a device dict for non-admin viewers."""
+    if role == "admin":
+        return dev
+    safe = dict(dev)
+    for f in _REDACT_FIELDS:
+        if f in safe:
+            safe[f] = "***" if safe[f] else ""
+    return safe
+
 
 router = APIRouter()
 
@@ -76,30 +103,36 @@ class SyncResponse(BaseModel):
 # ============================================================================
 
 @router.get("/", response_model=DeviceListResponse)
-async def get_all_devices():
+async def get_all_devices(user: Dict[str, Any] = Depends(get_current_user)):
     """
     List all configured devices.
-    
+
     Returns a list of all devices registered in the SCALER database.
+    Sensitive fields (password) are stripped for non-admin viewers.
     """
     devices = list_devices()
+    role = user.get("role", "viewer")
+    safe = [_redact_device(d, role) for d in devices]
     return DeviceListResponse(
-        devices=[DeviceResponse(**d) for d in devices],
-        count=len(devices)
+        devices=[DeviceResponse(**d) for d in safe],
+        count=len(safe)
     )
 
 
 @router.get("/{device_id}", response_model=DeviceResponse)
-async def get_device_by_id(device_id: str):
+async def get_device_by_id(
+    device_id: str,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
     """
     Get a single device by ID.
-    
+
     - **device_id**: The unique identifier for the device (e.g., 'pe1')
     """
     device = get_device(device_id)
     if not device:
         raise HTTPException(status_code=404, detail=f"Device '{device_id}' not found")
-    return DeviceResponse(**device)
+    return DeviceResponse(**_redact_device(device, user.get("role", "viewer")))
 
 
 @router.post("/", response_model=DeviceResponse)

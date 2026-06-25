@@ -1,0 +1,65 @@
+[
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 18:10 | no-more",
+    "timestamp": "2026-04-14T18:13:20.690+00:00",
+    "duration_ms": 451,
+    "phase": "auto_diagnose",
+    "output_length": 2895,
+    "output_preview": "2026-04-14T18:10:01.031463 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 391991:14848583: vty[??]@> enable\n2026-04-14T18:10:01.039270 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 391992:14848587: vty[??]@# show memory\n2026-04-14T18:10:01.048711 +03:00 [INFO      ] [epoll.c:196:_epoll_fd_is_ready] [rib-manager:1344:1344] 391993:14848587: epoll: fd 115 is_read 1 received socket event (events 0x1 revents 0x11) total 41058\n2026-04-14T18:10:02.",
+    "output_full": "2026-04-14T18:10:01.031463 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 391991:14848583: vty[??]@> enable\n2026-04-14T18:10:01.039270 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 391992:14848587: vty[??]@# show memory\n2026-04-14T18:10:01.048711 +03:00 [INFO      ] [epoll.c:196:_epoll_fd_is_ready] [rib-manager:1344:1344] 391993:14848587: epoll: fd 115 is_read 1 received socket event (events 0x1 revents 0x11) total 41058\n2026-04-14T18:10:02.939340 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 391994:14848600: vty[??]@> enable\n2026-04-14T18:10:02.950462 +03:00 [INFO      ] [epoll.c:196:_epoll_fd_is_ready] [rib-manager:1344:1344] 391995:14848600: epoll: fd 115 is_read 1 received socket event (events 0x1 revents 0x11) total 41059\n2026-04-14T18:10:03.109662 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 391996:14848604: vty[??]@> enable\n2026-04-14T18:10:03.120750 +03:00 [INFO      ] [epoll.c:196:_epoll_fd_is_ready] [rib-manager:1344:1344] 391997:14848605: epoll: fd 115 is_read 1 received socket event (events 0x1 revents 0x11) total 41060\n2026-04-14T18:10:03.286435 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 391998:14848608: vty[??]@> enable\n2026-04-14T18:10:03.298684 +03:00 [INFO      ] [epoll.c:196:_epoll_fd_is_ready] [rib-manager:1344:1344] 391999:14848608: epoll: fd 115 is_read 1 received socket event (events 0x1 revents 0x11) total 41061\n2026-04-14T18:10:03.456239 +03:00 [INFO      ] [vty.c:450:log_prompt_format] [rib-manager:1344:1344] 392000:14848614: vty[??]@> enable\n2026-04-14T18:10:03.468318 +03:00 [INFO      ] [epoll.c:196:_epoll_fd_is_ready] [rib-manager:1344:1344] 392001:14848614: epoll: fd 115 is_read 1 received socket event (events 0x1 revents 0x11) total 41062\n2026-04-14T18:10:04.474691 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 392002:14848623: Sending keepalive with TTL: 60 to redis\n2026-04-14T18:10:14.474753 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 392003:14848702: Sending keepalive with TTL: 60 to redis\n2026-04-14T18:10:24.474793 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 392004:14848783: Sending keepalive with TTL: 60 to redis\n2026-04-14T18:10:34.474833 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 392005:14848863: Sending keepalive with TTL: 60 to redis\n2026-04-14T18:10:44.474870 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 392006:14848944: Sending keepalive with TTL: 60 to redis\n2026-04-14T18:10:54.475243 +03:00 [INFO      ] [zebra_db_checkpoint.c:92:zebra_send_keepalive] [rib-manager:1344:1344] 392007:14849023: Sending keepalive with TTL: 60 to redis"
+  },
+  {
+    "command": "show evpn mac-table instance PW_TEST_ELAN suppress | no-more",
+    "timestamp": "2026-04-14T18:13:21.142+00:00",
+    "duration_ms": 501,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show evpn instance PW_TEST_ELAN loop-prevention mac-table | no-more",
+    "timestamp": "2026-04-14T18:13:21.643+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 207,
+    "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------",
+    "output_full": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+  },
+  {
+    "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+    "timestamp": "2026-04-14T18:13:21.894+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 42,
+    "output_preview": "Number of MAC-Mobility entries in redis: 0",
+    "output_full": "Number of MAC-Mobility entries in redis: 0"
+  },
+  {
+    "command": "show dnos-internal routing evpn instance PW_TEST_ELAN mac-table-ghost | no-more",
+    "timestamp": "2026-04-14T18:13:22.145+00:00",
+    "duration_ms": 50,
+    "phase": "auto_diagnose",
+    "output_length": 26,
+    "output_preview": "ERROR: Incomplete command.",
+    "output_full": "ERROR: Incomplete command."
+  },
+  {
+    "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance PW_TEST_ELAN | no-more",
+    "timestamp": "2026-04-14T18:13:22.195+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 18,
+    "output_preview": "EvpnMacs [size: 0]",
+    "output_full": "EvpnMacs [size: 0]"
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance PW_TEST_ELAN | no-more",
+    "timestamp": "2026-04-14T18:13:22.446+00:00",
+    "duration_ms": 100,
+    "phase": "auto_diagnose",
+    "output_length": 874,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: PW_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress   ",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: PW_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress              | Interface              | Egress-Encapsulation           | Timestamp              | Flags            |\n+-------------------------+------------------------+--------------------------------+------------------------+------------------+\n| (*)00:de:ad:00:02:02    | ge400-0/0/5.5          | M{16}                          | 14-Apr-2026-21:08:57   | R                |"
+  }
+]

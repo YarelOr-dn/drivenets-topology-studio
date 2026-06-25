@@ -1,0 +1,32 @@
+{
+  "data": {
+    "inner_vlan": {
+      "count": 200,
+      "end": 3300,
+      "start": 3101
+    },
+    "logical_flows_per_side": 200,
+    "pe4_moves_rr_macs": {
+      "dst_mac_end": "02:aa:fb:01:00:c8",
+      "dst_mac_start": "02:aa:fb:01:00:01",
+      "outer_vlan": 219,
+      "src_mac_end": "00:de:be:01:00:c8",
+      "src_mac_start": "00:de:be:01:00:01"
+    },
+    "rr_sa_2_moves_pe4_macs": {
+      "dst_mac_end": "02:aa:fa:01:00:c8",
+      "dst_mac_start": "02:aa:fa:01:00:01",
+      "outer_vlan": 215,
+      "src_mac_end": "00:de:ad:01:00:c8",
+      "src_mac_start": "00:de:ad:01:00:01"
+    },
+    "strategy": "mass_mobility_modifier",
+    "stream_names": [
+      "pw_mob_rr_moves_pe4_i3101_3300",
+      "pw_mob_pe4_moves_rr_i3101_3300"
+    ]
+  },
+  "detail": "created 2 reverse modifier StreamBlocks for 400 logical flows",
+  "ok": true,
+  "phase": "mass_mobility_streams_create"
+}

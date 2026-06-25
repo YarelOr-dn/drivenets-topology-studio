@@ -1,0 +1,228 @@
+{
+  "id": "TEST_mac_mob_irb_si_reject_G2",
+  "name": "MAC Mobility | IRB + Seamless-Integration Rejection",
+  "type": "config-validation",
+  "feature": "evpn-mac-mobility",
+  "source": "gap-analysis:G2 from SW-204115 epic description",
+  "jira_key": "SW-204115",
+  "parent_category": "SW-204115",
+  "status": "wired",
+  "status_note": "G2 wired 2026-04-19 via PR-G2: commit_check_assert handler in mac_mobility_orchestrator.py routes the 3 trigger verbs through a candidate-only commit-check + rollback-0 flow. DNOS syntax was live-validated on PE-1 (DNOS 26.2.0): correct keywords are 'router-interface irbN' (NOT 'irb interface'). The rejection error captured live: 'EVPN router-interface (IRB) and Seamless VPLS (EVPN seamless-integration) cannot be configured at the same time.'",
+  "linked_user_stories": [
+    "SW-204115"
+  ],
+  "created": "2026-03-23",
+  "wired": "2026-04-19",
+  "gap_rationale": "SW-204115 epic states: 'IRB Not Allowed to be configured with Seamless -> Test config changes.' Validates that the CLI rejects EVPN router-interface (IRB) when seamless-integration is enabled, and vice-versa. This is a critical config guard.",
+  "device_requirements": {
+    "type": "any",
+    "features": [
+      "evpn",
+      "seamless-integration"
+    ],
+    "min_ncp_count": 1,
+    "notes": "No traffic needed. Pure config-validation test. Reuses any existing EVPN instance with seamless-integration as the SI fixture and any non-SI instance as the negative-control fixture."
+  },
+  "prerequisites": [
+    {
+      "id": "evpn_instance_with_si",
+      "check": "evpn_instance_exists_with_si",
+      "fix_via": "operator",
+      "check_command": "show config network-services evpn | no-more",
+      "pass_criteria": "Instance {si_instance_name} present and contains 'seamless-integration'",
+      "fix_config": "Manual: ensure an EVPN instance with seamless-integration exists on DUT (e.g. HA_TEST_ELAN on PE-1)."
+    },
+    {
+      "id": "evpn_instance_without_si",
+      "check": "evpn_instance_exists_no_si",
+      "fix_via": "operator",
+      "check_command": "show config network-services evpn | no-more",
+      "pass_criteria": "Instance {non_si_instance_name} present and does NOT contain 'seamless-integration'",
+      "fix_config": "Manual: ensure a no-SI EVPN instance exists on DUT (e.g. test_irb_reject on PE-1)."
+    }
+  ],
+  "show_commands_validated": {
+    "show config network-services evpn instance {si_instance_name} | no-more": "Verify SI instance fixture is intact",
+    "show config network-services evpn instance {non_si_instance_name} | no-more": "Verify non-SI instance fixture is intact"
+  },
+  "scenarios": [
+    {
+      "id": "SC01_add_irb_to_si_instance",
+      "name": "router-interface (IRB) on SI-enabled instance -> commit check must REJECT",
+      "what_happens": "Add a router-interface (IRB) binding to an EVPN instance that already has seamless-integration enabled. DNOS commit-check must reject with 'cannot be configured at the same time'. Rollback 0 always.",
+      "what_cannot_happen": "Commit-check must NOT pass. If both IRB and SI coexist successfully in the candidate, this is a BUG.",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show config network-services evpn instance {si_instance_name} | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "attempt_irb_config",
+          "config_commands": [
+            "interfaces {test_irb_name} admin-state enabled",
+            "network-services evpn instance {si_instance_name} router-interface {test_irb_name}"
+          ],
+          "expect": "fail",
+          "expected_error_regex": [
+            "cannot be configured at the same time",
+            "router-interface.*seamless",
+            "IRB.*seamless"
+          ],
+          "method": "commit_check_assert"
+        },
+        "verify": {
+          "expect": {
+            "cli_rejects_with_error": true,
+            "commit_fails_or_config_rejected": true,
+            "irb_absent_from_running": true,
+            "seamless_integration_still_present": true,
+            "expected_error_patterns": [
+              "cannot be configured at the same time",
+              "router-interface",
+              "seamless"
+            ]
+          },
+          "show_commands": [
+            "show config network-services evpn instance {si_instance_name} | no-more"
+          ]
+        }
+      }
+    },
+    {
+      "id": "SC02_add_si_to_irb_instance",
+      "name": "seamless-integration on instance with router-interface (IRB) -> commit check must REJECT",
+      "what_happens": "Bind router-interface to a NON-SI instance, then attempt to add seamless-integration. Commit-check must reject the combined candidate. Rollback 0 always.",
+      "what_cannot_happen": "Both IRB and SI must not coexist in the candidate.",
+      "phases": {
+        "trigger": {
+          "action": "create_irb_instance_then_add_si",
+          "config_commands": [
+            "interfaces {test_irb_name} admin-state enabled",
+            "network-services evpn instance {non_si_instance_name} router-interface {test_irb_name}",
+            "network-services evpn instance {non_si_instance_name} seamless-integration"
+          ],
+          "expect": "fail",
+          "expected_error_regex": [
+            "cannot be configured at the same time",
+            "router-interface.*seamless",
+            "IRB.*seamless",
+            "source-if must be configured"
+          ],
+          "method": "commit_check_assert"
+        },
+        "verify": {
+          "expect": {
+            "cli_rejects_with_error": true,
+            "si_absent_when_irb_present": true,
+            "expected_error_patterns": [
+              "cannot be configured at the same time",
+              "seamless"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "SC03_remove_si_add_irb_success",
+      "name": "router-interface (IRB) on a fresh non-SI instance -> commit check must SUCCEED",
+      "what_happens": "Positive control: add router-interface (IRB) to a non-SI instance (no seamless-integration). Commit-check must pass. Rollback 0 always (we never commit during validation).",
+      "what_cannot_happen": "Commit-check must not fail. If it does, IRB is broken beyond the SI guard.",
+      "phases": {
+        "trigger": {
+          "action": "remove_si_add_irb",
+          "config_commands": [
+            "interfaces {test_irb_name} admin-state enabled",
+            "network-services evpn instance {non_si_instance_name} router-interface {test_irb_name}"
+          ],
+          "expect": "pass",
+          "method": "commit_check_assert"
+        },
+        "verify": {
+          "expect": {
+            "commit_succeeds": true,
+            "irb_present_in_candidate": true,
+            "si_absent_in_candidate": true
+          }
+        }
+      },
+      "cleanup": {
+        "commands": [],
+        "description": "No cleanup needed: commit_check_assert always rolls back the candidate. Nothing was committed."
+      }
+    }
+  ],
+  "runtime_parameters": {
+    "si_instance_name": {
+      "resolve": "static",
+      "value": "HA_TEST_ELAN",
+      "fallback_resolve": "runtime",
+      "fallback_from": "show config network-services evpn | grep -B0 seamless-integration"
+    },
+    "non_si_instance_name": {
+      "resolve": "static",
+      "value": "test_irb_reject",
+      "fallback_resolve": "runtime",
+      "fallback_from": "show config network-services evpn | grep instance"
+    },
+    "test_irb_name": {
+      "resolve": "static",
+      "value": "irb9099",
+      "notes": "DNOS 26.2 IRB form is 'irbN' (no dash). Live-validated on PE-1 2026-04-19."
+    }
+  },
+  "verdict": {
+    "layers": 4,
+    "stop_on_fail": true
+  },
+  "counter_commands": [
+    {
+      "label": "ghost_mac_count",
+      "command": "show dnos-internal routing evpn instance {si_instance_name} mac-table-ghost detail | no-more",
+      "parser": "line_count",
+      "description": "Ghost MAC detection on SI fixture (must remain zero -- we never commit)"
+    }
+  ],
+  "counter_expectations": [
+    {
+      "label": "ghost_mac_count",
+      "rule": "zero"
+    }
+  ],
+  "event_expectations": [
+    {
+      "event": "BGP_NOTIFICATION",
+      "expect": "absent"
+    }
+  ],
+  "health_checks": {
+    "processes": [
+      "routing:bgpd",
+      "routing:fibmgrd"
+    ],
+    "check_crashes": true,
+    "check_alarms": true
+  },
+  "cleanup_commands": [
+    "end"
+  ],
+  "config_baseline": {
+    "sections": [
+      "network-services evpn"
+    ],
+    "full_config": false,
+    "ignore_patterns": [
+      "last-modified",
+      "commit-id"
+    ]
+  },
+  "config_generator_ref": "config_generator.json -> per_test_config_requirements.irb_si_rejection",
+  "live_validation_evidence": {
+    "device": "PE-1 (100.64.4.200)",
+    "dnos_version": "DNOS 26.2.0 build 20_priv",
+    "validated_on": "2026-04-19",
+    "rejection_error_captured": "ERROR: EVPN router-interface (IRB) and Seamless VPLS (EVPN seamless-integration) cannot be configured at the same time. .",
+    "discovery_method": "interactive ? completion under 'network-services evpn instance HA_TEST_ELAN ?' revealed router-interface keyword",
+    "runtime_corrections_log": "shared/runtime_corrections.json -> dnos_26_2_irb_evpn_syntax"
+  }
+}

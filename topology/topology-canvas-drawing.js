@@ -37,32 +37,209 @@ window.CanvasDrawing = {
         return 0.2126 * r + 0.7152 * g + 0.0722 * b;
     },
 
+    // 2026-05-12 [split-color refine]: trace the visible-shape path of a
+    // device into the current canvas path (assumes the caller has
+    // already translated + rotated into the device-local frame). Used
+    // to clip the seam-bevel pass so the highlight/shadow never leaks
+    // outside the device outline. Uses the same shape-type discrimination
+    // as the selection-ring code (circle | rectangle | hexagon | classic).
+    _traceDeviceShapePath(editor, device, bounds) {
+        const r = device.radius || 30;
+        editor.ctx.beginPath();
+        switch (bounds && bounds.type) {
+            case 'classic': {
+                const hw = bounds.width / 2;
+                const top = bounds.top;
+                const bottom = bounds.bottom;
+                editor.ctx.rect(-hw, top, hw * 2, bottom - top);
+                break;
+            }
+            case 'rectangle': {
+                const hw = bounds.width / 2;
+                const hh = bounds.height / 2;
+                editor.ctx.rect(-hw, -hh, hw * 2, hh * 2);
+                break;
+            }
+            case 'hexagon': {
+                const hexR = r * 0.65;
+                for (let i = 0; i < 6; i++) {
+                    const angle = (Math.PI / 6) + (i * Math.PI / 3);
+                    const px = Math.cos(angle) * hexR;
+                    const py = Math.sin(angle) * hexR;
+                    if (i === 0) editor.ctx.moveTo(px, py);
+                    else editor.ctx.lineTo(px, py);
+                }
+                editor.ctx.closePath();
+                break;
+            }
+            case 'circle':
+            default:
+                editor.ctx.arc(0, 0, r, 0, Math.PI * 2);
+                break;
+        }
+    },
+
+    // 2026-05-12 [split-color refine]: paint the paper-fold seam bevel
+    // along the split midline. The bevel is two thin rects clipped to
+    // the device shape: one slightly LIGHTER on the left side of the
+    // seam (a soft highlight) and one slightly DARKER on the right.
+    // The total bevel width is ~2 screen pixels regardless of zoom.
+    //
+    // Why this treatment (vs. a single divider line or a gradient
+    // smear)? A single hairline can look graphic-design-flat over
+    // similar colors and disappears entirely over high-contrast joins.
+    // A gradient blend muddles the colors. A 1px-light + 1px-dark
+    // paper-fold suggests a physical fold so the eye reads the seam
+    // as intentional even when both halves are visually similar, and
+    // it scales down to invisible at extreme zoom-out without
+    // breaking the silhouette.
+    _paintSplitSeamBevel(editor, device, bounds) {
+        if (!device || !editor || !editor.ctx) return;
+        const rotation = (device.rotation || 0) * Math.PI / 180;
+        const halfH = Math.max((bounds && bounds.height) ? bounds.height / 2 : device.radius,
+                               device.radius || 30) + (device.radius || 30);
+        const zoom = (editor.zoom && editor.zoom > 0) ? editor.zoom : 1;
+        // Width of each side of the bevel. Slightly fattened in screen
+        // space to survive subpixel rounding on HiDPI displays.
+        const bevelW = 1 / zoom;
+
+        // Color stack: in dark mode use a brighter highlight + softer
+        // shadow; in light mode invert the alpha balance.
+        const highlightAlpha = editor.darkMode ? 0.45 : 0.4;
+        const shadowAlpha = editor.darkMode ? 0.35 : 0.28;
+
+        editor.ctx.save();
+        editor.ctx.translate(device.x, device.y);
+        editor.ctx.rotate(rotation);
+        // Clip to the device shape so the seam never paints over
+        // background / links / neighbouring devices.
+        this._traceDeviceShapePath(editor, device, bounds);
+        editor.ctx.clip();
+
+        // LEFT side of seam: 1px wide highlight, just inside the left
+        // half. Pre-multiplied by globalAlpha so we still get crisp
+        // anti-aliased edges from canvas rasteriser.
+        editor.ctx.fillStyle = `rgba(255, 255, 255, ${highlightAlpha})`;
+        editor.ctx.fillRect(-bevelW, -halfH, bevelW, halfH * 2);
+
+        // RIGHT side of seam: 1px wide shadow, just inside the right
+        // half. The two together form the paper-fold suggestion.
+        editor.ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
+        editor.ctx.fillRect(0, -halfH, bevelW, halfH * 2);
+
+        editor.ctx.restore();
+    },
+
     drawDevice(editor, device, unused = false, skipLabelArg = false) {
         this._initBadgeClickHandlers(editor);
         const isSelected = editor.selectedObject === device || editor.selectedObjects.includes(device);
         const style = device.visualStyle || 'circle';
-        
+
         // Check if multiple objects are selected - skip individual handles in multi-select
         const isMultiSelect = editor.selectedObjects.length > 1;
-        
-        // Dispatch to appropriate drawing method based on visualStyle
-        switch (style) {
-            case 'classic':
-                editor.drawDeviceClassicRouter(device, isSelected);
-                break;
-            case 'simple':
-                editor.drawDeviceSimpleRouter(device, isSelected);
-                break;
-            case 'server':
-                editor.drawDeviceServerTower(device, isSelected);
-                break;
-            case 'hex':
-                editor.drawDeviceHexRouter(device, isSelected);
-                break;
-            case 'circle':
-            default:
-                editor.drawDeviceCircle(device, isSelected);
-                break;
+
+        // 2026-05-12 [split-color]: when a device has BOTH colorLeft and
+        // colorRight set, render the body as two halves split along the
+        // device's local vertical midline. Implementation strategy:
+        //
+        //   1. Pass 1: clip to the LEFT half of the device's local
+        //      bounding box (in the device's rotated frame), set
+        //      `device._renderColorOverride = device.colorLeft`, and
+        //      dispatch the normal per-shape draw function. All fills,
+        //      gradients, borders, and labels stroke onto the clipped
+        //      canvas and only the LEFT half is painted.
+        //
+        //   2. Pass 2: same procedure with the RIGHT half clip and
+        //      `colorRight`. Borders and labels at the seam x=device.x
+        //      get drawn twice with identical pixel positions; both
+        //      passes write the same border colour, so this is visually
+        //      idempotent (no double-strokes, no anti-aliasing seam).
+        //
+        //   3. The override is cleared at the end so any later code
+        //      that reads `_safeDeviceColor(device)` (selection ring,
+        //      label, copy-style helpers) sees the legacy
+        //      `device.color` again.
+        //
+        // For solid (non-split) mode the path is unchanged -- we just
+        // call the per-shape draw function directly.
+        const _splitMode = (typeof device.colorLeft === 'string' && device.colorLeft.trim().length > 0) &&
+                           (typeof device.colorRight === 'string' && device.colorRight.trim().length > 0);
+
+        const _drawShape = () => {
+            switch (style) {
+                case 'classic':
+                    editor.drawDeviceClassicRouter(device, isSelected);
+                    break;
+                case 'simple':
+                    editor.drawDeviceSimpleRouter(device, isSelected);
+                    break;
+                case 'server':
+                    editor.drawDeviceServerTower(device, isSelected);
+                    break;
+                case 'hex':
+                    editor.drawDeviceHexRouter(device, isSelected);
+                    break;
+                case 'circle':
+                default:
+                    editor.drawDeviceCircle(device, isSelected);
+                    break;
+            }
+        };
+
+        if (_splitMode) {
+            // Compute a clip rectangle in the device's local (rotated)
+            // frame that comfortably contains the entire shape. We use
+            // getDeviceBounds() to get accurate shape-aware width/height
+            // and pad generously so 3D depth, shadow offsets, and the
+            // selection ring still fall inside the clip when they should.
+            const bounds = (typeof editor.getDeviceBounds === 'function')
+                ? editor.getDeviceBounds(device)
+                : { width: device.radius * 2, height: device.radius * 2 };
+            const r = device.radius || 30;
+            const halfW = Math.max(bounds.width / 2, r) + r;
+            const halfH = Math.max(bounds.height / 2, r) + r;
+            const rotation = (device.rotation || 0) * Math.PI / 180;
+
+            // Pass 1: LEFT half
+            editor.ctx.save();
+            editor.ctx.translate(device.x, device.y);
+            editor.ctx.rotate(rotation);
+            editor.ctx.beginPath();
+            editor.ctx.rect(-halfW, -halfH, halfW, halfH * 2);
+            editor.ctx.clip();
+            editor.ctx.rotate(-rotation);
+            editor.ctx.translate(-device.x, -device.y);
+            device._renderColorOverride = device.colorLeft;
+            _drawShape();
+            editor.ctx.restore();
+
+            // Pass 2: RIGHT half
+            editor.ctx.save();
+            editor.ctx.translate(device.x, device.y);
+            editor.ctx.rotate(rotation);
+            editor.ctx.beginPath();
+            editor.ctx.rect(0, -halfH, halfW, halfH * 2);
+            editor.ctx.clip();
+            editor.ctx.rotate(-rotation);
+            editor.ctx.translate(-device.x, -device.y);
+            device._renderColorOverride = device.colorRight;
+            _drawShape();
+            editor.ctx.restore();
+
+            device._renderColorOverride = null;
+
+            // 2026-05-12 [split-color refine]: paint a subtle "paper-fold"
+            // bevel along the seam so the join reads cleanly even when
+            // both halves are close in luminance. A 1px-ish lighter line
+            // on the LEFT side of the seam plus a 1px-ish darker line on
+            // the RIGHT side suggests a fold without a hard divider.
+            // Bevel width scales with zoom so it stays visually consistent
+            // (~1 screen px per side). The bevel is clipped to the
+            // device's shape (using `getDeviceBounds` type) so it never
+            // leaks into the link/canvas area beneath the device.
+            this._paintSplitSeamBevel(editor, device, bounds);
+        } else {
+            _drawShape();
         }
 
         if (!device._hostnameMismatch) {
@@ -181,11 +358,13 @@ window.CanvasDrawing = {
             const rotationDegrees = Math.round(device.rotation || 0);
             if (rotationDegrees !== 0) {
                 editor.ctx.save();
-                editor.ctx.font = `${10 / editor.zoom}px Arial`;
+                const rotTextSize = editor.getScreenStableFontSize ? editor.getScreenStableFontSize(10, 11) : (10 / editor.zoom);
+                const rotTextGap = editor.getScreenStableStrokeWidth ? editor.getScreenStableStrokeWidth(8, 8) : (8 / editor.zoom);
+                editor.ctx.font = `${rotTextSize}px Arial`;
                 editor.ctx.fillStyle = '#27ae60';
                 editor.ctx.textAlign = 'center';
                 editor.ctx.textBaseline = 'middle';
-                editor.ctx.fillText(`${rotationDegrees}°`, handleX, handleY - arcRadius - 8 / editor.zoom);
+                editor.ctx.fillText(`${rotationDegrees}°`, handleX, handleY - arcRadius - rotTextGap);
                 editor.ctx.restore();
             }
             
@@ -279,7 +458,10 @@ window.CanvasDrawing = {
                 }
                 
                 const text = `${normalizedDegrees}°`;
-                editor.ctx.font = `bold ${11 / editor.zoom}px Arial`;
+                const angleMeterSize = editor.getScreenStableFontSize
+                    ? editor.getScreenStableFontSize(11, 11)
+                    : (11 / editor.zoom);
+                editor.ctx.font = `bold ${angleMeterSize}px Arial`;
                 const metrics = editor.ctx.measureText(text);
                 
                 const bgPad = 5 / editor.zoom;
@@ -393,61 +575,10 @@ window.CanvasDrawing = {
             editor.ctx.restore();
         }
         
-        // Draw GROUP indicator icon if device belongs to a group
-        // Shows a small chain link icon at the bottom-left corner
-        if (device.groupId) {
-            editor.ctx.save();
-            
-            const iconScale = 1 / editor.zoom;
-            const iconSize = 12 * iconScale;
-            
-            // Position at bottom-left of device
-            const iconX = device.x - device.radius * 0.7;
-            const iconY = device.y + device.radius + 8 * iconScale;
-            
-            editor.ctx.translate(iconX, iconY);
-            
-            // Background circle with purple/magenta color (distinct from lock/terminal)
-            editor.ctx.beginPath();
-            editor.ctx.arc(0, 0, iconSize * 0.7, 0, Math.PI * 2);
-            const groupGradient = editor.ctx.createRadialGradient(0, 0, 0, 0, 0, iconSize * 0.7);
-            groupGradient.addColorStop(0, 'rgba(155, 89, 182, 0.95)');
-            groupGradient.addColorStop(1, 'rgba(142, 68, 173, 0.95)');
-            editor.ctx.fillStyle = groupGradient;
-            editor.ctx.fill();
-            
-            // White border
-            editor.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-            editor.ctx.lineWidth = 1.5 * iconScale;
-            editor.ctx.stroke();
-            
-            // Draw chain link icon in white
-            editor.ctx.strokeStyle = '#ffffff';
-            editor.ctx.lineWidth = 1.5 * iconScale;
-            editor.ctx.lineCap = 'round';
-            
-            // Two interlocking ovals for chain link
-            const ovalW = iconSize * 0.3;
-            const ovalH = iconSize * 0.2;
-            
-            // Left oval
-            editor.ctx.beginPath();
-            editor.ctx.ellipse(-ovalW * 0.4, 0, ovalW, ovalH, 0, 0, Math.PI * 2);
-            editor.ctx.stroke();
-            
-            // Right oval (overlapping)
-            editor.ctx.beginPath();
-            editor.ctx.ellipse(ovalW * 0.4, 0, ovalW, ovalH, 0, 0, Math.PI * 2);
-            editor.ctx.stroke();
-            
-            editor.ctx.restore();
-        }
-        
         // Terminal button position calculation (actual drawing is in separate pass for top layer)
-        // Only show when device is selected and has an address (either sshConfig.host or legacy deviceAddress)
+        // Always show on selected devices so user can click to connect or configure SSH
         // MULTI-SELECT: Skip terminal button when multiple objects selected
-        const hasSSHConfig = device.sshConfig?.host || (device.deviceAddress && device.deviceAddress.trim() !== '');
-        if (isSelected && hasSSHConfig && !isMultiSelect) {
+        if (isSelected && !isMultiSelect) {
             // Calculate and store button position for hit detection and later drawing
             const btnRadius = 10 / editor.zoom;
             const deviceRotation = (device.rotation || 0) * Math.PI / 180;
@@ -476,6 +607,47 @@ window.CanvasDrawing = {
             }
         }
     },
+
+    _paintDeviceLabelScreenContent(editor, device, label, labelY, fontSize, fontFamily, fontWeight, strokeColor, strokeWidth, textColor) {
+        const zoom = Math.max(0.05, Number(editor.zoom) || 1);
+        if (zoom >= 1.05) return false;
+        const dpr = Math.max(1, Number(editor.dpr) || window.devicePixelRatio || 1);
+        const sharpPan = typeof editor.getSharpPanOffset === 'function'
+            ? editor.getSharpPanOffset()
+            : { x: Math.round(editor.panOffset?.x || 0), y: Math.round(editor.panOffset?.y || 0) };
+        const snapCss = (value) => Math.round((Number(value) || 0) * dpr) / dpr;
+        const screenX = snapCss(sharpPan.x + (device.x || 0) * zoom);
+        const screenY = snapCss(sharpPan.y + (device.y || 0) * zoom);
+        const screenFontSize = Math.max(1, fontSize * zoom);
+        const screenLabelY = snapCss(labelY * zoom);
+
+        editor.ctx.save();
+        editor.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        if (typeof editor.configureCanvasQuality === 'function') {
+            editor.configureCanvasQuality(editor.ctx, { smoothing: false, textRendering: 'geometricPrecision' });
+        } else {
+            editor.ctx.imageSmoothingEnabled = false;
+            editor.ctx.lineJoin = 'round';
+            editor.ctx.lineCap = 'round';
+        }
+        editor.ctx.translate(screenX, screenY);
+        editor.ctx.rotate((device.rotation || 0) * Math.PI / 180);
+        editor.ctx.font = `${fontWeight} ${screenFontSize}px ${fontFamily}`;
+        editor.ctx.textAlign = 'center';
+        editor.ctx.textBaseline = 'middle';
+        if (strokeColor) {
+            editor.ctx.lineWidth = Math.max(strokeWidth * zoom, 1 / dpr);
+            editor.ctx.strokeStyle = strokeColor;
+            editor.ctx.lineJoin = 'round';
+            editor.ctx.lineCap = 'round';
+            editor.ctx.miterLimit = 2;
+            editor.ctx.strokeText(label, 0, screenLabelY);
+        }
+        editor.ctx.fillStyle = textColor;
+        editor.ctx.fillText(label, 0, screenLabelY);
+        editor.ctx.restore();
+        return true;
+    },
     
     /**
      * Draw device label separately - called in a second pass to ensure labels
@@ -489,14 +661,28 @@ window.CanvasDrawing = {
         
         const style = device.visualStyle || 'circle';
         
+        // Use custom labelSize if set, otherwise calculate based on radius
+        // ENHANCED: Scale label size more with device size (0.5 factor, max 36px)
+        const baseFontSize = device.labelSize || Math.max(12, Math.min(device.radius * 0.5, 36));
+        const fontSize = editor.getScreenStableFontSize
+            ? editor.getScreenStableFontSize(baseFontSize, 11)
+            : baseFontSize;
+
+        // LOD cull: at extreme zoom-out a 3px-tall stroke-and-fill label is
+        // illegible and just adds visual noise + draw cost during pan. Skip
+        // it entirely once the rendered glyph would be smaller than the
+        // outline stroke width (~3 screen px). This stays under the soft
+        // floor so labels still appear at moderately low zoom (~0.18+ for
+        // typical labelSize=16) -- only the truly-too-tiny cases are culled.
+        const renderedScreenPx = fontSize * (editor.zoom || 1);
+        if (renderedScreenPx < 3) {
+            return;
+        }
+
         // Draw device label - rotated and scaled with device
         editor.ctx.save();
         editor.ctx.translate(device.x, device.y);
         editor.ctx.rotate((device.rotation || 0) * Math.PI / 180);
-        
-        // Use custom labelSize if set, otherwise calculate based on radius
-        // ENHANCED: Scale label size more with device size (0.5 factor, max 36px)
-        const fontSize = device.labelSize || Math.max(12, Math.min(device.radius * 0.5, 36));
         // Use device's font family, or default DEVICE font family, or fallback to Inter
         const fontFamily = device.fontFamily || editor.defaultDeviceFontFamily || 'Inter, sans-serif';
         const fontWeight = device.fontWeight || '600';
@@ -528,9 +714,12 @@ window.CanvasDrawing = {
             // PER-LETTER STROKE APPROACH: Each letter gets its own border/outline
             // This creates visual separation from links without a background block
             
-            const strokeWidth = editor.darkMode 
-                ? Math.max(3.5, fontSize * 0.22) 
-                : Math.max(4.5, fontSize * 0.28);
+            const baseStrokeWidth = editor.darkMode
+                ? Math.max(2.4, fontSize * 0.16)
+                : Math.max(2.8, fontSize * 0.18);
+            const strokeWidth = editor.getScreenStableStrokeWidth
+                ? editor.getScreenStableStrokeWidth(baseStrokeWidth, 1.4)
+                : baseStrokeWidth;
             let strokeColor;
             if (device.labelOutlineColor === 'none') {
                 strokeColor = null;
@@ -544,33 +733,112 @@ window.CanvasDrawing = {
             
             // Text fill color - use device.labelColor if set, else auto based on mode
             const textColor = device.labelColor || (editor.darkMode ? '#ECF0F1' : '#0d1b2a');
-            
-            if (strokeColor) {
-                editor.ctx.lineWidth = strokeWidth;
-                editor.ctx.strokeStyle = strokeColor;
-                editor.ctx.lineJoin = 'round';
-                editor.ctx.lineCap = 'round';
-                editor.ctx.miterLimit = 2;
-                editor.ctx.strokeText(label, 0, labelY);
-            }
-            
-            editor.ctx.fillStyle = textColor;
-            editor.ctx.fillText(label, 0, labelY);
-            
-            // Optional: Add subtle drop shadow for depth (labels below device get extra emphasis)
-            if (labelBelow) {
-                // Re-draw with slight shadow for depth
+
+            // 2026-05-12 [split-color refine]: in split mode the seam
+            // introduces a high-contrast transition directly under
+            // labels that sit ON the device body (circle / default
+            // styles). The per-letter outline alone can read as
+            // "half-haloed" when one side of the device is light and
+            // the other is dark. Paint a faint rounded-rect backdrop
+            // under the label in split mode so the text reads as a
+            // single coherent label across the join. We only do this
+            // when the label is over the body (NOT labelBelow) -- below-
+            // body labels sit on the canvas background and already
+            // benefit from the existing outline.
+            const _splitModeLabel = (typeof device.colorLeft === 'string' && device.colorLeft.trim().length > 0) &&
+                                    (typeof device.colorRight === 'string' && device.colorRight.trim().length > 0);
+            if (_splitModeLabel && !labelBelow) {
+                const prevFont = editor.ctx.font;
+                editor.ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+                const tw = editor.ctx.measureText(label).width;
+                editor.ctx.font = prevFont;
+                const padX = Math.max(3, fontSize * 0.22);
+                const padY = Math.max(2, fontSize * 0.14);
+                const bgW = tw + padX * 2;
+                const bgH = fontSize + padY * 2;
+                const bgR = Math.max(2, fontSize * 0.20);
+                // Pick the backdrop tone that contrasts with the text:
+                // light text -> navy-deep backdrop, dark text -> cloud.
+                const textLum = this._luminance(textColor);
+                const bgFill = textLum > 0.5
+                    ? 'rgba(13, 27, 42, 0.55)'   // --dn-navy-deep @ 55%
+                    : 'rgba(240, 244, 248, 0.62)'; // --dn-cloud @ 62%
                 editor.ctx.save();
-                editor.ctx.shadowColor = editor.darkMode ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.2)';
-            editor.ctx.shadowBlur = 2;
-            editor.ctx.shadowOffsetX = 0;
-            editor.ctx.shadowOffsetY = 1;
-                editor.ctx.fillStyle = textColor;
-            editor.ctx.fillText(label, 0, labelY);
+                editor.ctx.fillStyle = bgFill;
+                if (editor.ctx.roundRect) {
+                    editor.ctx.beginPath();
+                    editor.ctx.roundRect(-bgW / 2, labelY - bgH / 2, bgW, bgH, bgR);
+                    editor.ctx.fill();
+                } else {
+                    editor.ctx.fillRect(-bgW / 2, labelY - bgH / 2, bgW, bgH);
+                }
                 editor.ctx.restore();
             }
+
+            const paintedLabelInScreenSpace = this._paintDeviceLabelScreenContent(
+                editor, device, label, labelY, fontSize, fontFamily, fontWeight, strokeColor, strokeWidth, textColor
+            );
+            if (!paintedLabelInScreenSpace) {
+                if (strokeColor) {
+                    editor.ctx.lineWidth = strokeWidth;
+                    editor.ctx.strokeStyle = strokeColor;
+                    editor.ctx.lineJoin = 'round';
+                    editor.ctx.lineCap = 'round';
+                    editor.ctx.miterLimit = 2;
+                    editor.ctx.strokeText(label, 0, labelY);
+                }
+
+                editor.ctx.fillStyle = textColor;
+                editor.ctx.fillText(label, 0, labelY);
+
+                // Optional: Add subtle drop shadow for depth (labels below device get extra emphasis)
+                if (labelBelow) {
+                    // Re-draw with slight shadow for depth
+                    editor.ctx.save();
+                    editor.ctx.shadowColor = editor.darkMode ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.2)';
+                    editor.ctx.shadowBlur = 2;
+                    editor.ctx.shadowOffsetX = 0;
+                    editor.ctx.shadowOffsetY = 1;
+                    editor.ctx.fillStyle = textColor;
+                    editor.ctx.fillText(label, 0, labelY);
+                    editor.ctx.restore();
+                }
+            }
+
+            // Mode badge: only alert when the device is in a non-DNOS mode.
+            // DNOS is the normal operating state and should not appear as an
+            // extra canvas label on newly onboarded devices.
+            if (renderedScreenPx >= 8) {
+                const _devMode = (device._deviceMode || '').toUpperCase();
+                if (_devMode === 'GI' || _devMode === 'RECOVERY') {
+                    const badgeFont = Math.max(7, Math.min(fontSize * 0.55, 12));
+                    const badgeY = labelBelow
+                        ? labelY + fontSize * 0.85
+                        : -fontSize * 0.85;
+                    const padX = badgeFont * 0.55;
+                    const padY = badgeFont * 0.30;
+                    editor.ctx.font = `700 ${badgeFont}px ${fontFamily}`;
+                    const tw = editor.ctx.measureText(_devMode).width;
+                    const bgColor = _devMode === 'GI' ? '#f39c12' : '#e74c3c';
+                    const rx = Math.max(2, badgeFont * 0.35);
+                    const w = tw + padX * 2;
+                    const h = badgeFont + padY * 2;
+                    editor.ctx.beginPath();
+                    if (editor.ctx.roundRect) {
+                        editor.ctx.roundRect(-w / 2, badgeY - h / 2, w, h, rx);
+                    } else {
+                        editor.ctx.rect(-w / 2, badgeY - h / 2, w, h);
+                    }
+                    editor.ctx.fillStyle = bgColor;
+                    editor.ctx.fill();
+                    editor.ctx.fillStyle = '#ffffff';
+                    editor.ctx.textAlign = 'center';
+                    editor.ctx.textBaseline = 'middle';
+                    editor.ctx.fillText(_devMode, 0, badgeY);
+                }
+            }
         }
-        
+
         editor.ctx.restore();
     },
     
@@ -727,15 +995,34 @@ window.CanvasDrawing = {
         editor.ctx.save();
         editor.ctx.translate(textObj.x, textObj.y);
         editor.ctx.rotate(effGapR * Math.PI / 180);
-        
-        // Measure text using proper font (include fontStyle for italic)
-        const fontStyle = textObj.fontStyle || 'normal';
-        const fontWeight = textObj.fontWeight || 'normal';
-        const fontFamily = textObj.fontFamily || 'Arial, sans-serif';
-        editor.ctx.font = `${fontStyle} ${fontWeight} ${textObj.fontSize}px ${fontFamily}`;
-        const metrics = editor.ctx.measureText(textObj.text || 'Text');
-        const w = metrics.width;
-        const h = parseInt(textObj.fontSize);
+
+        // Eraser geometry must mirror the rendered TB exactly so the link
+        // line is hidden in lockstep with the text background. Resolve via
+        // getTextEffectiveBounds: that single source of truth honours
+        // edge-stretched manual width/height + word-wrap, while still
+        // returning auto-measured glyph bounds for legacy auto-size labels.
+        // Polish + QA pass 2026-05-12 -- previously used raw measureText
+        // which produced a too-narrow eraser if the operator had stretched
+        // an attached label.
+        let w;
+        let h;
+        if (window.ObjectDetection && window.ObjectDetection.getTextEffectiveBounds) {
+            const bounds = window.ObjectDetection.getTextEffectiveBounds(editor, textObj);
+            w = bounds.w;
+            h = bounds.h;
+        } else {
+            const fontStyle = textObj.fontStyle || 'normal';
+            const fontWeight = textObj.fontWeight || 'normal';
+            const fontFamily = textObj.fontFamily || 'Arial, sans-serif';
+            const requestedFontSize = Number(textObj.fontSize) || 14;
+            const displayFontSize = editor.getDprSnappedFontSize
+                ? editor.getDprSnappedFontSize(requestedFontSize)
+                : requestedFontSize;
+            editor.ctx.font = `${fontStyle} ${fontWeight} ${displayFontSize}px ${fontFamily}`;
+            const metrics = editor.ctx.measureText(textObj.text || 'Text');
+            w = metrics.width;
+            h = parseInt(displayFontSize) || 14;
+        }
         
         // Padding around text for the gap
         const padding = 6;
@@ -752,17 +1039,478 @@ window.CanvasDrawing = {
         
         editor.ctx.restore();
     },
-    
+
+    _normalizeTextBackgroundOpacity(value) {
+        let opacity = value;
+        if (opacity === undefined) {
+            opacity = 0.95;
+        } else if (opacity > 1) {
+            opacity = opacity / 100;
+        }
+        opacity = Number(opacity);
+        return Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 0.95;
+    },
+
+    _createTextRasterCanvas(width, height) {
+        if (typeof OffscreenCanvas !== 'undefined') {
+            return new OffscreenCanvas(width, height);
+        }
+        if (typeof document === 'undefined') return null;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        return canvas;
+    },
+
+    _getTextRasterScale(editor) {
+        const zoom = Math.max(0.05, Number(editor.zoom) || 1);
+        const dpr = Math.max(1, Number(editor.dpr) || 1);
+        const destinationScale = zoom * dpr;
+        const supersample = destinationScale < 3 ? 2 : 1.25;
+        const scale = Math.max(destinationScale, destinationScale * supersample);
+        // Keep the offscreen cache high-DPI without letting one giant TB allocate
+        // a huge bitmap. Geometry still comes from the measured world box.
+        return Math.max(1, Math.min(8, Math.ceil(scale * 64) / 64));
+    },
+
+    _getTextRasterCache(editor) {
+        if (!editor._textRasterCache) {
+            editor._textRasterCache = new Map();
+        }
+        return editor._textRasterCache;
+    },
+
+    _pruneTextRasterCache(cache) {
+        const MAX_ENTRIES = 220;
+        const MAX_PIXELS = 24_000_000;
+        let pixels = 0;
+        for (const entry of cache.values()) {
+            pixels += entry.pixels || 0;
+        }
+        while (cache.size > MAX_ENTRIES || pixels > MAX_PIXELS) {
+            const firstKey = cache.keys().next().value;
+            if (firstKey === undefined) break;
+            const entry = cache.get(firstKey);
+            pixels -= entry?.pixels || 0;
+            cache.delete(firstKey);
+        }
+    },
+
+    _paintTextVectorContent(editor, ctx, text, paint) {
+        if (paint.shouldDrawBackground) {
+            ctx.save();
+            ctx.globalAlpha = paint.backgroundOpacity;
+            ctx.fillStyle = paint.bgColor;
+            ctx.fillRect(
+                -paint.w / 2 - paint.padding,
+                -paint.h / 2 - paint.padding,
+                paint.w + paint.padding * 2,
+                paint.h + paint.padding * 2
+            );
+            ctx.restore();
+        }
+
+        ctx.font = paint.font;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        paint.lines.forEach((line, index) => {
+            const y = paint.startY + index * paint.lineHeight;
+
+            if (text.showBorder && text.borderWidth > 0) {
+                ctx.strokeStyle = text.borderColor || '#0066FA';
+                ctx.lineWidth = editor.getScreenStableStrokeWidth
+                    ? editor.getScreenStableStrokeWidth(text.borderWidth || 2, 1.2)
+                    : (text.borderWidth || 2);
+                ctx.lineJoin = 'round';
+                ctx.miterLimit = 2;
+                ctx.strokeText(line || ' ', 0, y);
+            } else if (text.strokeWidth && text.strokeWidth > 0) {
+                ctx.strokeStyle = text.strokeColor || '#000000';
+                ctx.lineWidth = editor.getScreenStableStrokeWidth
+                    ? editor.getScreenStableStrokeWidth(text.strokeWidth || 2, 1.2)
+                    : (text.strokeWidth || 2);
+                ctx.lineJoin = 'round';
+                ctx.miterLimit = 2;
+                ctx.strokeText(line || ' ', 0, y);
+            }
+
+            if (paint.textColorOverride) {
+                ctx.fillStyle = paint.textColorOverride;
+            } else if (paint.shouldDrawBackground && paint.bgColor && paint.bgColor !== 'transparent') {
+                ctx.fillStyle = this._contrastColorForBg(editor, text.color, paint.bgColor);
+            } else {
+                ctx.fillStyle = editor.adjustColorForMode(text.color);
+            }
+            ctx.fillText(line || ' ', 0, y);
+        });
+    },
+
+    _getGeneratedLabelFontSize(editor, worldSize, minScreenPx = 11) {
+        const size = Number(worldSize) || minScreenPx;
+        const zoom = Math.max(0.05, Number(editor.zoom) || 1);
+        const naturalScreen = size * zoom;
+        if (naturalScreen >= minScreenPx) return size;
+        const targetWorld = minScreenPx / zoom;
+        // Generated labels are system annotations, not user-placed geometry:
+        // allow more inflation than regular TBs so the architecture is readable
+        // from the default generated-topology view.
+        return Math.min(targetWorld, size * 3.0);
+    },
+
+    /**
+     * Word-wrap text content into lines that each fit inside `maxWidth`
+     * (in world pixels) given the font currently set on `ctx`. Mirrors the
+     * inline text-editor's `white-space: pre-wrap; word-wrap: break-word`
+     * behaviour: explicit \n always breaks, words wrap on whitespace, and
+     * a single word that is wider than maxWidth is broken character-by-
+     * character (otherwise a long URL would overflow the bbox forever).
+     *
+     * Used by drawText when the text box has been resized from its edges
+     * (manual-size mode). Auto-size text boxes do not wrap -- they
+     * preserve the legacy "split on \n only" rendering.
+     */
+    _wrapTextLinesToWidth(ctx, content, maxWidth) {
+        const out = [];
+        if (!Number.isFinite(maxWidth) || maxWidth <= 0) {
+            return content.split('\n');
+        }
+        const sourceLines = String(content).split('\n');
+        for (const source of sourceLines) {
+            if (source.length === 0) {
+                out.push('');
+                continue;
+            }
+            // Whitespace-preserving word split: every run of non-whitespace
+            // becomes a "word", every run of whitespace is appended onto the
+            // current line. This stops "Hello world" from collapsing its
+            // space when re-emitted.
+            const tokens = source.match(/\S+|\s+/g) || [source];
+            let current = '';
+            for (const token of tokens) {
+                const candidate = current + token;
+                if (ctx.measureText(candidate).width <= maxWidth) {
+                    current = candidate;
+                    continue;
+                }
+                // candidate overflows. If the failing token is whitespace
+                // we drop it (line-end space) and start fresh.
+                if (/^\s+$/.test(token)) {
+                    if (current.length > 0) {
+                        out.push(current);
+                        current = '';
+                    }
+                    continue;
+                }
+                // The token is a word that pushes us past maxWidth.
+                if (current.length > 0) {
+                    out.push(current);
+                    current = '';
+                }
+                // If the lone word still does not fit, character-break it.
+                if (ctx.measureText(token).width > maxWidth) {
+                    let chunk = '';
+                    for (const ch of token) {
+                        if (ctx.measureText(chunk + ch).width <= maxWidth || chunk.length === 0) {
+                            chunk += ch;
+                        } else {
+                            out.push(chunk);
+                            chunk = ch;
+                        }
+                    }
+                    current = chunk;
+                } else {
+                    current = token;
+                }
+            }
+            out.push(current);
+        }
+        // Always return at least one (possibly empty) line so callers that
+        // do `lines.length * lineHeight` never get zero height.
+        return out.length === 0 ? [''] : out;
+    },
+
+    /**
+     * Truncate `line` so it fits inside `maxWidth` (in world pixels) given
+     * the font currently set on `ctx`, and append a single-character
+     * ellipsis. Used by drawText when the user has height-locked a text
+     * box and the wrapped content has more lines than fit -- the last
+     * visible line is replaced by the truncated form so the operator
+     * sees that content was elided rather than silently lost.
+     *
+     * Character-break (greedy backward shrink) handles long URLs and
+     * any token that the wrap step itself broke mid-word.
+     */
+    _truncateToWidthWithEllipsis(ctx, line, maxWidth) {
+        const ELLIPSIS = '\u2026';
+        if (!Number.isFinite(maxWidth) || maxWidth <= 0) return line;
+        if (ctx.measureText(line + ELLIPSIS).width <= maxWidth) return line + ELLIPSIS;
+        let cut = line;
+        while (cut.length > 0 && ctx.measureText(cut + ELLIPSIS).width > maxWidth) {
+            cut = cut.slice(0, -1);
+        }
+        return cut + ELLIPSIS;
+    },
+
+    _paintTextScreenContent(editor, text, paint, effectiveRotation, snappedTx, snappedTy) {
+        const zoom = Math.max(0.05, Number(editor.zoom) || 1);
+        const dpr = Math.max(1, Number(editor.dpr) || window.devicePixelRatio || 1);
+        const sharpPan = typeof editor.getSharpPanOffset === 'function'
+            ? editor.getSharpPanOffset()
+            : { x: Math.round(editor.panOffset?.x || 0), y: Math.round(editor.panOffset?.y || 0) };
+        const snapCss = (value) => Math.round((Number(value) || 0) * dpr) / dpr;
+        const screenX = snapCss(sharpPan.x + (snappedTx || 0) * zoom);
+        const screenY = snapCss(sharpPan.y + (snappedTy || 0) * zoom);
+        const fontSize = Math.max(1, (Number(paint.fontSize) || 14) * zoom);
+        const lineHeight = Math.max(1, paint.lineHeight * zoom);
+        const textW = Math.max(1, paint.w * zoom);
+        const textH = Math.max(1, paint.h * zoom);
+        const padding = Math.max(0, paint.padding * zoom);
+        const startY = -textH / 2 + lineHeight / 2;
+        const fontStyle = text.fontStyle || 'normal';
+        const fontWeight = text.fontWeight || 'normal';
+        const fontFamily = text.fontFamily || 'Arial, sans-serif';
+
+        editor.ctx.save();
+        editor.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        if (typeof editor.configureCanvasQuality === 'function') {
+            editor.configureCanvasQuality(editor.ctx, { smoothing: false, textRendering: 'geometricPrecision' });
+        } else {
+            editor.ctx.imageSmoothingEnabled = false;
+            editor.ctx.lineJoin = 'round';
+            editor.ctx.lineCap = 'round';
+        }
+        editor.ctx.translate(screenX, screenY);
+        editor.ctx.rotate((effectiveRotation || 0) * Math.PI / 180);
+
+        if (paint.shouldDrawBackground) {
+            editor.ctx.save();
+            editor.ctx.globalAlpha = paint.backgroundOpacity;
+            editor.ctx.fillStyle = paint.bgColor;
+            const x = snapCss(-textW / 2 - padding);
+            const y = snapCss(-textH / 2 - padding);
+            const w = snapCss(textW + padding * 2);
+            const h = snapCss(textH + padding * 2);
+            editor.ctx.fillRect(x, y, w, h);
+            editor.ctx.restore();
+        }
+
+        editor.ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
+        editor.ctx.textAlign = 'center';
+        editor.ctx.textBaseline = 'middle';
+
+        paint.lines.forEach((line, index) => {
+            const y = snapCss(startY + index * lineHeight);
+            if (text.showBorder && text.borderWidth > 0) {
+                editor.ctx.strokeStyle = text.borderColor || '#0066FA';
+                editor.ctx.lineWidth = Math.max((text.borderWidth || 2) * zoom, 1 / dpr);
+                editor.ctx.lineJoin = 'round';
+                editor.ctx.miterLimit = 2;
+                editor.ctx.strokeText(line || ' ', 0, y);
+            } else if (text.strokeWidth && text.strokeWidth > 0) {
+                editor.ctx.strokeStyle = text.strokeColor || '#000000';
+                editor.ctx.lineWidth = Math.max((text.strokeWidth || 2) * zoom, 1 / dpr);
+                editor.ctx.lineJoin = 'round';
+                editor.ctx.miterLimit = 2;
+                editor.ctx.strokeText(line || ' ', 0, y);
+            }
+
+            if (paint.textColorOverride) {
+                editor.ctx.fillStyle = paint.textColorOverride;
+            } else if (paint.shouldDrawBackground && paint.bgColor && paint.bgColor !== 'transparent') {
+                editor.ctx.fillStyle = this._contrastColorForBg(editor, text.color, paint.bgColor);
+            } else {
+                editor.ctx.fillStyle = editor.adjustColorForMode(text.color);
+            }
+            editor.ctx.fillText(line || ' ', 0, y);
+        });
+
+        editor.ctx.restore();
+        return true;
+    },
+
+    _drawTextRasterContent(editor, text, paint) {
+        const strokeWidth = text.showBorder && text.borderWidth > 0
+            ? (text.borderWidth || 2)
+            : (text.strokeWidth && text.strokeWidth > 0 ? (text.strokeWidth || 2) : 0);
+        const visiblePad = paint.shouldDrawBackground ? paint.padding : 0;
+        const rasterPad = Math.max(3, visiblePad, strokeWidth + 3);
+        const box = {
+            x: -paint.w / 2 - rasterPad,
+            y: -paint.h / 2 - rasterPad,
+            w: paint.w + rasterPad * 2,
+            h: paint.h + rasterPad * 2
+        };
+
+        if (!Number.isFinite(box.w) || !Number.isFinite(box.h) || box.w <= 0 || box.h <= 0) {
+            return false;
+        }
+
+        const renderScale = this._getTextRasterScale(editor);
+        const pixelW = Math.max(1, Math.ceil(box.w * renderScale));
+        const pixelH = Math.max(1, Math.ceil(box.h * renderScale));
+        const pixels = pixelW * pixelH;
+        if (pixels > 4_000_000) {
+            return false;
+        }
+
+        const key = [
+            paint.textContent,
+            paint.font,
+            paint.w.toFixed(3),
+            paint.h.toFixed(3),
+            paint.lineHeight.toFixed(3),
+            paint.padding,
+            paint.bgColor,
+            paint.backgroundOpacity,
+            paint.shouldDrawBackground ? 1 : 0,
+            text.color || '',
+            text.showBorder ? 1 : 0,
+            text.borderWidth || 0,
+            text.borderColor || '',
+            text.strokeWidth || 0,
+            text.strokeColor || '',
+            editor.darkMode ? 1 : 0,
+            renderScale.toFixed(3),
+            pixelW,
+            pixelH
+        ].join('\u001f');
+
+        const cache = this._getTextRasterCache(editor);
+        let entry = cache.get(key);
+        if (entry) {
+            cache.delete(key);
+            cache.set(key, entry);
+        } else {
+            const canvas = this._createTextRasterCanvas(pixelW, pixelH);
+            const rctx = canvas?.getContext?.('2d', { alpha: true });
+            if (!canvas || !rctx) {
+                return false;
+            }
+            if (typeof editor.configureCanvasQuality === 'function') {
+                editor.configureCanvasQuality(rctx, { smoothing: true });
+            } else {
+                rctx.imageSmoothingEnabled = true;
+                if ('imageSmoothingQuality' in rctx) rctx.imageSmoothingQuality = 'high';
+                rctx.lineJoin = 'round';
+                rctx.lineCap = 'round';
+            }
+            rctx.clearRect(0, 0, pixelW, pixelH);
+            rctx.setTransform(renderScale, 0, 0, renderScale, -box.x * renderScale, -box.y * renderScale);
+            this._paintTextVectorContent(editor, rctx, text, paint);
+            entry = { canvas, box, pixels };
+            cache.set(key, entry);
+            this._pruneTextRasterCache(cache);
+        }
+
+        editor.ctx.save();
+        if (typeof editor.configureCanvasQuality === 'function') {
+            editor.configureCanvasQuality(editor.ctx, { smoothing: true });
+        } else {
+            editor.ctx.imageSmoothingEnabled = true;
+            if ('imageSmoothingQuality' in editor.ctx) editor.ctx.imageSmoothingQuality = 'high';
+        }
+        editor.ctx.drawImage(entry.canvas, entry.box.x, entry.box.y, entry.box.w, entry.box.h);
+        editor.ctx.restore();
+        return true;
+    },
+
+    /**
+     * Draw the 8 visible resize dot-handles for a text box (corners as
+     * squares, edge-midpoints as circles). Mirrors the shape resize handle
+     * style in topology-shape-drawing.js so multi-select with mixed shapes
+     * and text boxes reads consistently.
+     *
+     *   - Caller is in the rotated, centred local frame of the text box
+     *     (0,0 == centre of bbox, +x right, +y down, axis-aligned).
+     *   - `halfW`/`halfH` are HALF the bbox width/height in world units.
+     *   - `zoomScale` = 1 / editor.zoom -- used to keep dot dimensions
+     *     constant in CSS pixels regardless of canvas zoom (devices and
+     *     shapes use the same trick so handles never become microscopic
+     *     at zoom-out or absurdly huge at zoom-in).
+     *
+     * Hit-test: see findTextHandle (topology-object-detection.js); the dot
+     * test runs FIRST and the 5-px edge-zone band is the fallback for
+     * forgiving "drag anywhere on the border" gestures.
+     */
+    _drawTextResizeDots(ctx, halfW, halfH, zoomScale) {
+        const cornerSize = 12 * zoomScale;
+        const edgeSize   = 12 * zoomScale;
+        const dots = [
+            { x: -halfW, y: -halfH, isCorner: true  }, // nw
+            { x:  halfW, y: -halfH, isCorner: true  }, // ne
+            { x: -halfW, y:  halfH, isCorner: true  }, // sw
+            { x:  halfW, y:  halfH, isCorner: true  }, // se
+            { x:  0,     y: -halfH, isCorner: false }, // n
+            { x:  0,     y:  halfH, isCorner: false }, // s
+            { x: -halfW, y:  0,     isCorner: false }, // w
+            { x:  halfW, y:  0,     isCorner: false }  // e
+        ];
+        ctx.save();
+        for (const d of dots) {
+            ctx.shadowColor = 'rgba(52, 152, 219, 0.6)';
+            ctx.shadowBlur = 8 * zoomScale;
+            if (d.isCorner) {
+                const hs = cornerSize / 2;
+                ctx.fillStyle = '#3498db';
+                ctx.fillRect(d.x - hs, d.y - hs, cornerSize, cornerSize);
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2 * zoomScale;
+                ctx.strokeRect(d.x - hs, d.y - hs, cornerSize, cornerSize);
+            } else {
+                ctx.fillStyle = '#3498db';
+                ctx.beginPath();
+                ctx.arc(d.x, d.y, edgeSize / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2 * zoomScale;
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
+    },
+
     drawText(editor, text) {
         // Skip drawing if text is being edited inline (input shows it instead)
         if (text._editing) {
             return;
         }
+
+        // Generated diagrams can contain many evidence/detail labels. At low
+        // zoom those labels collapse into sub-pixel noise and make the whole
+        // topology look blurry. Keep the architecture readable by culling
+        // generated micro-detail first; users can zoom in for link evidence.
+        if (text._generatedTopologyLabel) {
+            const z = Number(editor.zoom) || 1;
+            const isGeneratedDetail = text._afChip
+                || text.position === 'device1'
+                || text.position === 'device2'
+                || text._generatedLayer === 'identity'
+                || text._labelLayer === 'identity';
+            if (z < 0.95 && isGeneratedDetail) return;
+            if (z < 0.72 && text._linkDataLabel && !text._generatedServiceLabel) return;
+        }
         
         const isSelected = editor.selectedObject === text || editor.selectedObjects.includes(text);
         
         editor.ctx.save();
-        editor.ctx.translate(text.x, text.y);
+        // Sub-pixel position snap: world (text.x, text.y) is multiplied by
+        // (zoom * dpr) when it lands on the backing store. If text.x is e.g.
+        // 100.7 the glyph centre lands at .7 of a physical pixel which makes
+        // the rasterizer blur the stroke horizontally. We snap the world
+        // translate so (text.x * zoom * dpr) is a whole physical pixel.
+        // The shift is at most 0.5 physical pixels (< 0.25 CSS pixels even
+        // on DPR=2) -- visually invisible but the glyph contour stops
+        // straddling pixel boundaries. Hit detection still uses raw
+        // text.x/y; the sub-pixel offset is well below pointer accuracy.
+        const tZoom = editor.zoom || 1;
+        const tDpr = editor.dpr || 1;
+        const tSnap = Math.max(tZoom * tDpr, 0.05);
+        const snappedTx = Math.round((text.x || 0) * tSnap) / tSnap;
+        const snappedTy = Math.round((text.y || 0) * tSnap) / tSnap;
+        editor.ctx.translate(snappedTx, snappedTy);
         
         // Determine rotation: per-TB override > global setting > stored rotation
         // - If text.alwaysFaceUser is explicitly true → force 0°
@@ -781,9 +1529,28 @@ window.CanvasDrawing = {
         // Build font string with style, weight and family
         // Canvas font format: [font-style] [font-weight] font-size font-family
         const fontStyle = text.fontStyle || 'normal'; // italic, oblique, or normal
-        const fontWeight = text.fontWeight || 'normal';
+        const fontWeight = text.fontWeight || (text._generatedTopologyLabel ? '700' : 'normal');
         const fontFamily = text.fontFamily || 'Arial, sans-serif';
-        editor.ctx.font = `${fontStyle} ${fontWeight} ${text.fontSize}px ${fontFamily}`;
+        // TB text-boxes are USER-PLACED world content -- they MUST scale
+        // proportionally with zoom (just like devices, links, shapes). Do
+        // NOT inflate the world size with a screen-pixel floor; that breaks
+        // proportions at extreme zoom-out (a previous attempt to floor at
+        // 10 screen px made TBs look 10x larger than the rest of the canvas
+        // at zoom <= 0.1). getDprSnappedFontSize is historical naming: it now
+        // applies the smooth soft-floor only, with no physical-pixel font-size
+        // rounding. Phase 2 sharpness comes from high-DPI prerasterizing the
+        // TB paint pass while leaving geometry and handles in world units.
+        const requestedFontSize = Number(text.fontSize) || 14;
+        const generatedMinScreenPx = text._generatedServiceLabel ? 13
+            : text._linkDataLabel ? 12
+                : text._afChip ? 10
+                    : 11;
+        const displayFontSize = text._generatedTopologyLabel
+            ? this._getGeneratedLabelFontSize(editor, requestedFontSize, generatedMinScreenPx)
+            : (editor.getDprSnappedFontSize
+                ? editor.getDprSnappedFontSize(requestedFontSize)
+                : requestedFontSize);
+        editor.ctx.font = `${fontStyle} ${fontWeight} ${displayFontSize}px ${fontFamily}`;
         editor.ctx.textAlign = 'center';
         editor.ctx.textBaseline = 'middle';
         
@@ -791,6 +1558,11 @@ window.CanvasDrawing = {
         // This hides the link body through the text while grid shows through char gaps
         const isAttachedToLink = text.linkId && text._onLinkLine === true;
         const isInterfaceLabel = text._interfaceLabel === true;
+        const isGeneratedLinkLabel = isAttachedToLink && (
+            text._generatedTopologyLabel === true
+            || text._linkDataLabel === true
+            || !!text._generatedProtocol
+        );
         
         // For interface labels on links: use grid-matching background color
         // This creates the "transparent" illusion where link is hidden but grid shows through
@@ -800,7 +1572,7 @@ window.CanvasDrawing = {
         // Determine background color
         // FIXED: Attached text boxes can use their custom bgColor if set
         let bgColor;
-        if (isInterfaceLabel) {
+        if (isInterfaceLabel || isGeneratedLinkLabel) {
             // Interface labels always use grid color for seamless appearance
             bgColor = gridBgColor;
         } else if (isAttachedToLink && text.showBackground !== false) {
@@ -814,20 +1586,78 @@ window.CanvasDrawing = {
             bgColor = text.bgColor || text.backgroundColor || defaultBgColor;
         }
         
-        // MULTILINE SUPPORT: Split text into lines and measure all
-        const textContent = text.text || 'Text';
-        const lines = textContent.split('\n');
-        const fontSize = parseInt(text.fontSize) || 14;
-        const lineHeight = fontSize * 1.3; // Match hitbox calculation
-        
-        // Measure maximum width across all lines
-        let maxWidth = 0;
-        for (const line of lines) {
-            const metrics = editor.ctx.measureText(line || ' ');
-            maxWidth = Math.max(maxWidth, metrics.width);
+        // MULTILINE SUPPORT: Split text into lines and measure all.
+        // Use the SAME displayFontSize set above on ctx.font so the
+        // measured width and line-height match what's painted. Hit
+        // detection mirrors this exact computation.
+        //
+        // EDGE-STRETCH + REFLOW MODE (text-box edges, 2026-05-12):
+        //
+        //   * If the user dragged a side or corner, `text.width` is
+        //     persisted and we treat it as the WIDTH constraint; lines
+        //     are word-wrapped to fit.
+        //
+        //   * Height behaviour:
+        //
+        //       - Default (auto-grow):   the painted bbox always contains
+        //         every wrapped line. `text.height` may or may not be set,
+        //         but unless `text._heightLocked` is true we recompute h
+        //         from the wrapped lines on every paint. This is the
+        //         containment invariant -- text never bleeds past the
+        //         visible rectangle, no matter what the user types.
+        //
+        //       - Locked  (`_heightLocked === true`): the user explicitly
+        //         dragged a vertical edge or corner, so we honour
+        //         `text.height` and clip overflow lines with an ellipsis
+        //         on the last visible line. A small "..." chevron is
+        //         painted at the bottom-right by the selection block to
+        //         signal the clip.
+        //
+        // Auto-size mode (legacy text without width) keeps the prior
+        // behaviour: split on \n only, no wrapping, w/h derive from content.
+        // That mode is already containment-safe by construction.
+        const textContent = text.text == null ? 'Text' : String(text.text);
+        const fontSize = parseInt(displayFontSize) || 14;
+        const lineHeight = fontSize * 1.3;
+        const hasManualWidth = Number.isFinite(text.width) && text.width > 0;
+
+        let lines;
+        let w;
+        let h;
+        let isClippedByHeight = false;
+        if (hasManualWidth) {
+            const wrapped = this._wrapTextLinesToWidth(editor.ctx, textContent, text.width);
+            w = text.width;
+
+            const naturalH = Math.max(20, wrapped.length * lineHeight);
+            const heightLocked = text._heightLocked === true && Number.isFinite(text.height);
+            if (heightLocked) {
+                h = Math.max(20, text.height);
+                const maxLines = Math.max(1, Math.floor(h / lineHeight));
+                if (wrapped.length > maxLines) {
+                    const visible = wrapped.slice(0, maxLines);
+                    const lastIdx = visible.length - 1;
+                    visible[lastIdx] = this._truncateToWidthWithEllipsis(
+                        editor.ctx, visible[lastIdx], text.width);
+                    lines = visible;
+                    isClippedByHeight = true;
+                } else {
+                    lines = wrapped;
+                }
+            } else {
+                lines = wrapped;
+                h = naturalH;
+            }
+        } else {
+            lines = textContent.split('\n');
+            let maxWidth = 0;
+            for (const line of lines) {
+                const metrics = editor.ctx.measureText(line || ' ');
+                maxWidth = Math.max(maxWidth, metrics.width);
+            }
+            w = maxWidth;
+            h = lines.length * lineHeight;
         }
-        const w = maxWidth;
-        const h = lines.length * lineHeight;
         
         // Draw background for:
         // - Regular text with showBackground enabled
@@ -835,88 +1665,85 @@ window.CanvasDrawing = {
         // - Interface labels attached to links (always, to hide link body)
         const shouldDrawBackground = (text.showBackground !== false && bgColor !== 'transparent') ||
                                      isInterfaceLabel;
+        const defaultPadding = isAttachedToLink ? 4 : 8;
+        const padding = text.backgroundPadding !== undefined ? text.backgroundPadding : defaultPadding;
+        const backgroundOpacity = this._normalizeTextBackgroundOpacity(text.backgroundOpacity);
         
-        if (shouldDrawBackground) {
-            // TIGHTER padding for link-attached text to reduce visual gap
-            const defaultPadding = isAttachedToLink ? 4 : 8;
-            const padding = text.backgroundPadding !== undefined ? text.backgroundPadding : defaultPadding;
-        
-            // Apply opacity if set
-            editor.ctx.save();
-            // backgroundOpacity can be 0-1 or 0-100, normalize to 0-1
-            let opacity = text.backgroundOpacity;
-            if (opacity === undefined) {
-                opacity = 0.95;
-            } else if (opacity > 1) {
-                opacity = opacity / 100; // Convert from 0-100 to 0-1
-            }
-            editor.ctx.globalAlpha = opacity;
-            
-            // Draw background rectangle (now correctly sized for multiline)
-            editor.ctx.fillStyle = bgColor;
-            editor.ctx.fillRect(-w/2 - padding, -h/2 - padding, w + padding * 2, h + padding * 2);
-            
-            editor.ctx.restore();
+        const startY = -h/2 + lineHeight/2; // Center the block vertically
+        const paint = {
+            textContent,
+            lines,
+            font: `${fontStyle} ${fontWeight} ${displayFontSize}px ${fontFamily}`,
+            fontSize: displayFontSize,
+            w,
+            h,
+            lineHeight,
+            startY,
+            padding,
+            bgColor,
+            backgroundOpacity,
+            shouldDrawBackground,
+            isClippedByHeight,
+            textColorOverride: isGeneratedLinkLabel && !editor.darkMode && ['#ffffff', '#fff', '#e0e0e0', 'white'].includes(String(text.color || '').toLowerCase())
+                ? '#111827'
+                : null
+        };
+        const paintedInScreenSpace = (Number(editor.zoom) || 1) < 1.05
+            && this._paintTextScreenContent(editor, text, paint, effectiveRotation, snappedTx, snappedTy);
+        if (!paintedInScreenSpace && !this._drawTextRasterContent(editor, text, paint)) {
+            this._paintTextVectorContent(editor, editor.ctx, text, paint);
         }
         
-        // Draw each line of text with stroke outline
-        const startY = -h/2 + lineHeight/2; // Center the block vertically
-        lines.forEach((line, index) => {
-            const y = startY + index * lineHeight;
-            
-            // Draw text border/stroke outline first (if enabled)
-            // Border = per-character stroke outline (not background box border)
-            if (text.showBorder && text.borderWidth > 0) {
-                editor.ctx.strokeStyle = text.borderColor || '#0066FA';
-                editor.ctx.lineWidth = text.borderWidth || 2;
-                editor.ctx.lineJoin = 'round'; // Smooth corners on stroke
-                editor.ctx.miterLimit = 2;
-                editor.ctx.strokeText(line || ' ', 0, y);
-            } else if (text.strokeWidth && text.strokeWidth > 0) {
-                // Legacy stroke support (for old text objects)
-                editor.ctx.strokeStyle = text.strokeColor || '#000000';
-                editor.ctx.lineWidth = text.strokeWidth || 2;
-                editor.ctx.lineJoin = 'round';
-                editor.ctx.miterLimit = 2;
-                editor.ctx.strokeText(line || ' ', 0, y);
-            }
-            
-            // Auto-adjust text color for visibility:
-            // If TB has a visible background, contrast against that instead of the canvas mode
-            if (shouldDrawBackground && bgColor && bgColor !== 'transparent') {
-                editor.ctx.fillStyle = this._contrastColorForBg(editor, text.color, bgColor);
-            } else {
-                editor.ctx.fillStyle = editor.adjustColorForMode(text.color);
-            }
-            editor.ctx.fillText(line || ' ', 0, y);
-        });
-        
-        // Draw selection highlight when text is selected (regardless of mode)
-        // Use the calculated multiline w and h from above
+        // Draw selection highlight when text is selected (regardless of mode).
+        // Halo style matches the shape selection halo (canonical app style):
+        // semi-transparent blue stroke, 6/4 dash pattern, 4-px outline offset.
+        // Polish + QA pass 2026-05-12 -- aligns text-box halo with shape halo
+        // so multi-select containing both element types renders consistently.
         if (isSelected) {
-            editor.ctx.strokeStyle = '#3498db';
+            const haloOffset = 4;
+            editor.ctx.strokeStyle = 'rgba(52, 152, 219, 0.8)';
             editor.ctx.lineWidth = 2;
-            editor.ctx.setLineDash([5, 5]);
-            editor.ctx.strokeRect(-w/2 - 5, -h/2 - 5, w + 10, h + 10);
+            editor.ctx.setLineDash([6, 4]);
+            // Smoothness pass 2026-05-12: square line-cap on the dashed
+            // halo prevents sub-pixel feathering at non-integer zoom
+            // levels (e.g. 0.83x) where the default round caps render
+            // each dash with a half-pixel anti-aliased rim that bleeds
+            // into the next dash. Square caps keep dashes crisp at any
+            // zoom. Restored to 'butt' (canvas default) after stroke so
+            // we don't leak state into other halo / link strokes painted
+            // later in the frame.
+            const _prevCap = editor.ctx.lineCap;
+            editor.ctx.lineCap = 'square';
+            editor.ctx.strokeRect(
+                -w / 2 - haloOffset,
+                -h / 2 - haloOffset,
+                w + haloOffset * 2,
+                h + haloOffset * 2
+            );
+            editor.ctx.lineCap = _prevCap;
             editor.ctx.setLineDash([]);
-            
-            // Draw GROUP indicator if text belongs to a group
-            if (text.groupId) {
-                const groupDotSize = 6;
-                const groupDotX = w/2 + 10;
-                const groupDotY = -h/2 - 10;
-                
-                // Purple dot indicator for grouped objects
+
+            // Clip indicator (containment invariant, 2026-05-12). When the
+            // user has height-locked the box and the wrapped content does
+            // not fit, drawText already truncated the last visible line
+            // with an ellipsis. Paint a small down-chevron at the inside
+            // bottom-right corner so the operator knows there is more
+            // content below the visible area.
+            if (isClippedByHeight) {
+                const zoomScaleClip = 1 / (editor.zoom || 1);
+                const chevSize = 6 * zoomScaleClip;
+                const chevPad = 4 * zoomScaleClip;
+                const cx = w / 2 - chevPad - chevSize;
+                const cy = h / 2 - chevPad - chevSize;
+                editor.ctx.save();
+                editor.ctx.fillStyle = 'rgba(52, 152, 219, 0.85)';
                 editor.ctx.beginPath();
-                editor.ctx.arc(groupDotX, groupDotY, groupDotSize, 0, Math.PI * 2);
-                const groupGradient = editor.ctx.createRadialGradient(groupDotX, groupDotY, 0, groupDotX, groupDotY, groupDotSize);
-                groupGradient.addColorStop(0, 'rgba(155, 89, 182, 1)');
-                groupGradient.addColorStop(1, 'rgba(142, 68, 173, 1)');
-                editor.ctx.fillStyle = groupGradient;
+                editor.ctx.moveTo(cx,                cy);
+                editor.ctx.lineTo(cx + chevSize * 2, cy);
+                editor.ctx.lineTo(cx + chevSize,     cy + chevSize);
+                editor.ctx.closePath();
                 editor.ctx.fill();
-                editor.ctx.strokeStyle = '#ffffff';
-                editor.ctx.lineWidth = 1.5;
-                editor.ctx.stroke();
+                editor.ctx.restore();
             }
             
             // Draw LOCK indicator if text is locked
@@ -964,130 +1791,138 @@ window.CanvasDrawing = {
                 editor.ctx.restore();
                 return; // Skip handles in multi-select mode
             }
-            
-            // ENHANCED: Better sized handles that scale with zoom
-            const handleSize = Math.max(6, Math.min(10, 8 / editor.zoom)); // Consistent size regardless of zoom
-            const handleOffset = 8; // Distance from text edge
-            
-            // Draw corner handles for size control and rotation
-            const corners = [
-                { x: -w/2 - handleOffset, y: -h/2 - handleOffset, type: 'resize', cursor: 'nwse-resize' },  // Top-left
-                { x: w/2 + handleOffset, y: -h/2 - handleOffset, type: 'rotation', cursor: 'grab' },  // Top-right (rotation)
-                { x: w/2 + handleOffset, y: h/2 + handleOffset, type: 'resize', cursor: 'nwse-resize' },     // Bottom-right
-                { x: -w/2 - handleOffset, y: h/2 + handleOffset, type: 'resize', cursor: 'nesw-resize' }     // Bottom-left
-            ];
-            
-            corners.forEach(corner => {
-                if (corner.type === 'rotation') {
-                    // ROTATION HANDLE - Green with rotation icon (use effective rotation)
-                    const rotationRadians = effectiveRotation * Math.PI / 180;
-                    const arcRadius = handleSize + 4;
-                    
-                    // Draw progress arc showing current rotation
-                    if (Math.abs(rotationRadians) > 0.05) {
-                        editor.ctx.beginPath();
-                        editor.ctx.arc(corner.x, corner.y, arcRadius, -Math.PI/2, -Math.PI/2 + rotationRadians);
-                        editor.ctx.strokeStyle = '#2ecc71';
-                        editor.ctx.lineWidth = 2.5;
-                        editor.ctx.lineCap = 'round';
-                        editor.ctx.stroke();
-                    }
-                    
-                    // Main rotation handle - filled circle
+
+            // RESIZE HANDLES (text-box, 2026-05-12 dots+edge-zone coexist)
+            // -----------------------------------------------------------------
+            // Text boxes draw BOTH visible 8 dot-handles AND retain the
+            // edge-zone stretch band. Two-track design:
+            //
+            //   * Visible dots (4 corners + 4 edge-midpoints) at the SAME
+            //     style/colour/size as shape dot-handles -- pure visual
+            //     affordance and discoverability. Clicking a dot is hit-tested
+            //     FIRST in findTextHandle (object-detection) and routes to
+            //     the matching `nw`/`ne`/`sw`/`se`/`n`/`s`/`e`/`w` handler.
+            //   * Edge-zone band (existing 5-px world-space band hugging
+            //     each side, in findTextHandle as the fallback). Lets the
+            //     user start a resize anywhere along the edge -- they do
+            //     not need pixel-perfect aim on a tiny dot.
+            //
+            // The dashed selection halo is still drawn (above) for parity
+            // with shapes; the dots sit on its corners/midpoints. The
+            // separate green rotation handle stays at the top-right
+            // outside the bbox -- it pre-dates resize handles entirely.
+            //
+            // While a drag is in flight, a thin --dn-cyan highlight is
+            // painted on the active edge so the operator sees exactly
+            // which side is moving.
+            const halfW = w / 2;
+            const halfH = h / 2;
+            const zoomScale = 1 / editor.zoom;
+
+            // (1) ROTATION HANDLE -- separate, outside the top-right corner.
+            // Same offset shapes use, drawn in the rotated context. The
+            // green colour + arc + curved-arrow icon match the legacy text
+            // rotation handle so users see no regression.
+            {
+                const rotHandleOffset = 15 * zoomScale;
+                const rotX = halfW + rotHandleOffset;
+                const rotY = -(halfH + rotHandleOffset);
+                const rotHandleSize = Math.max(6, Math.min(10, 8 / editor.zoom));
+                const rotationRadians = effectiveRotation * Math.PI / 180;
+                const arcRadius = rotHandleSize + 4;
+
+                if (Math.abs(rotationRadians) > 0.05) {
                     editor.ctx.beginPath();
-                    editor.ctx.arc(corner.x, corner.y, handleSize, 0, Math.PI * 2);
-                    
-                    // Gradient fill for 3D effect
-                    const gradient = editor.ctx.createRadialGradient(
-                        corner.x - handleSize/3, corner.y - handleSize/3, 0,
-                        corner.x, corner.y, handleSize
-                    );
-                    gradient.addColorStop(0, '#58d68d');
-                    gradient.addColorStop(1, '#27ae60');
-                    editor.ctx.fillStyle = gradient;
-                    editor.ctx.fill();
-                    
-                    // White border
-                    editor.ctx.strokeStyle = 'white';
-                    editor.ctx.lineWidth = 2;
-                    editor.ctx.stroke();
-                    
-                    // Rotation icon (curved arrow)
-                    editor.ctx.save();
-                    editor.ctx.translate(corner.x, corner.y);
-                    editor.ctx.beginPath();
-                    editor.ctx.arc(0, 0, handleSize * 0.5, -Math.PI * 0.8, Math.PI * 0.3);
-                    editor.ctx.strokeStyle = 'white';
-                    editor.ctx.lineWidth = 1.5;
+                    editor.ctx.arc(rotX, rotY, arcRadius, -Math.PI / 2, -Math.PI / 2 + rotationRadians);
+                    editor.ctx.strokeStyle = '#2ecc71';
+                    editor.ctx.lineWidth = 2.5 * zoomScale;
                     editor.ctx.lineCap = 'round';
                     editor.ctx.stroke();
-                    // Arrow head
-                    const arrowAngle = Math.PI * 0.3;
-                    const arrowX = Math.cos(arrowAngle) * handleSize * 0.5;
-                    const arrowY = Math.sin(arrowAngle) * handleSize * 0.5;
-                    editor.ctx.beginPath();
-                    editor.ctx.moveTo(arrowX, arrowY);
-                    editor.ctx.lineTo(arrowX + 3, arrowY - 1);
-                    editor.ctx.lineTo(arrowX + 1, arrowY + 3);
-                    editor.ctx.fillStyle = 'white';
-                    editor.ctx.fill();
-                    editor.ctx.restore();
-                } else {
-                    // RESIZE HANDLES - Cyan/blue squares for better distinction
-                    const squareSize = handleSize * 1.6;
-                    
-                    // Rounded square
-                    const radius = 2;
-                    editor.ctx.beginPath();
-                    editor.ctx.moveTo(corner.x - squareSize/2 + radius, corner.y - squareSize/2);
-                    editor.ctx.lineTo(corner.x + squareSize/2 - radius, corner.y - squareSize/2);
-                    editor.ctx.arcTo(corner.x + squareSize/2, corner.y - squareSize/2, corner.x + squareSize/2, corner.y - squareSize/2 + radius, radius);
-                    editor.ctx.lineTo(corner.x + squareSize/2, corner.y + squareSize/2 - radius);
-                    editor.ctx.arcTo(corner.x + squareSize/2, corner.y + squareSize/2, corner.x + squareSize/2 - radius, corner.y + squareSize/2, radius);
-                    editor.ctx.lineTo(corner.x - squareSize/2 + radius, corner.y + squareSize/2);
-                    editor.ctx.arcTo(corner.x - squareSize/2, corner.y + squareSize/2, corner.x - squareSize/2, corner.y + squareSize/2 - radius, radius);
-                    editor.ctx.lineTo(corner.x - squareSize/2, corner.y - squareSize/2 + radius);
-                    editor.ctx.arcTo(corner.x - squareSize/2, corner.y - squareSize/2, corner.x - squareSize/2 + radius, corner.y - squareSize/2, radius);
-                    editor.ctx.closePath();
-                    
-                    // Gradient fill
-                    const gradient = editor.ctx.createRadialGradient(
-                        corner.x - squareSize/4, corner.y - squareSize/4, 0,
-                        corner.x, corner.y, squareSize
-                    );
-                    gradient.addColorStop(0, '#5dade2');
-                    gradient.addColorStop(1, '#3498db');
-                    editor.ctx.fillStyle = gradient;
-                    editor.ctx.fill();
-                    
-                    // White border
-                    editor.ctx.strokeStyle = 'white';
-                    editor.ctx.lineWidth = 1.5;
-                    editor.ctx.stroke();
                 }
-            });
-        }
-        
-        // Draw GROUP indicator if text belongs to a group
-        if (text.groupId) {
-            const groupDotSize = 6;
-            // Position at bottom-left of text box
-            const dotX = -w/2 - 10;
-            const dotY = h/2 + 10;
-            
-            // Purple dot indicator
-            editor.ctx.beginPath();
-            editor.ctx.arc(dotX, dotY, groupDotSize, 0, Math.PI * 2);
-            const groupGradient = editor.ctx.createRadialGradient(dotX, dotY, 0, dotX, dotY, groupDotSize);
-            groupGradient.addColorStop(0, 'rgba(155, 89, 182, 0.95)');
-            groupGradient.addColorStop(1, 'rgba(142, 68, 173, 0.95)');
-            editor.ctx.fillStyle = groupGradient;
-            editor.ctx.fill();
-            
-            // White border
-            editor.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-            editor.ctx.lineWidth = 1.5;
-            editor.ctx.stroke();
+
+                editor.ctx.beginPath();
+                editor.ctx.arc(rotX, rotY, rotHandleSize, 0, Math.PI * 2);
+                const rotGrad = editor.ctx.createRadialGradient(
+                    rotX - rotHandleSize / 3, rotY - rotHandleSize / 3, 0,
+                    rotX, rotY, rotHandleSize
+                );
+                rotGrad.addColorStop(0, '#58d68d');
+                rotGrad.addColorStop(1, '#27ae60');
+                editor.ctx.fillStyle = rotGrad;
+                editor.ctx.fill();
+                editor.ctx.strokeStyle = 'white';
+                editor.ctx.lineWidth = 2 * zoomScale;
+                editor.ctx.stroke();
+
+                editor.ctx.save();
+                editor.ctx.translate(rotX, rotY);
+                editor.ctx.beginPath();
+                editor.ctx.arc(0, 0, rotHandleSize * 0.5, -Math.PI * 0.8, Math.PI * 0.3);
+                editor.ctx.strokeStyle = 'white';
+                editor.ctx.lineWidth = 1.5 * zoomScale;
+                editor.ctx.lineCap = 'round';
+                editor.ctx.stroke();
+                const arrowAngle = Math.PI * 0.3;
+                const arrowX = Math.cos(arrowAngle) * rotHandleSize * 0.5;
+                const arrowY = Math.sin(arrowAngle) * rotHandleSize * 0.5;
+                editor.ctx.beginPath();
+                editor.ctx.moveTo(arrowX, arrowY);
+                editor.ctx.lineTo(arrowX + 3 * zoomScale, arrowY - 1 * zoomScale);
+                editor.ctx.lineTo(arrowX + 1 * zoomScale, arrowY + 3 * zoomScale);
+                editor.ctx.fillStyle = 'white';
+                editor.ctx.fill();
+                editor.ctx.restore();
+            }
+
+            // (2) DOT-HANDLES (8 positions, shape-style, 2026-05-12).
+            // Re-introduced alongside the edge-zone band so users SEE the
+            // resize affordance. Visual style mirrors shape resize handles
+            // (topology-shape-drawing.js): square dots at the 4 corners,
+            // circle dots at the 4 edge midpoints, --dn brand blue
+            // (#3498db) fill with a white stroke and a soft blue glow.
+            // Sizes are zoom-corrected so the dots stay 12 CSS-px regardless
+            // of canvas zoom. Hit-tested in findTextHandle FIRST (before
+            // edge-zone fallback) so a click on a dot routes deterministically
+            // to the matching handle id.
+            this._drawTextResizeDots(editor.ctx, halfW, halfH, zoomScale);
+
+            // (3) ACTIVE-EDGE HIGHLIGHT during a drag. Cyan stroke, 1 CSS
+            // px wide (zoom-corrected), drawn over the dashed halo AND on
+            // top of the dots so the operator sees exactly which side is
+            // moving. Only painted while THIS text is being resized;
+            // never on hover.
+            const activeHandle = (editor.resizingText && editor.selectedObject === text)
+                ? editor.textResizeHandle
+                : null;
+            if (activeHandle) {
+                const cyan = (typeof getComputedStyle === 'function' && document.documentElement)
+                    ? (getComputedStyle(document.documentElement).getPropertyValue('--dn-cyan').trim() || '#22d3ee')
+                    : '#22d3ee';
+                editor.ctx.save();
+                editor.ctx.strokeStyle = cyan;
+                editor.ctx.lineWidth = Math.max(1 * zoomScale, 1 / (editor.zoom * (editor.dpr || 1)));
+                editor.ctx.lineCap = 'round';
+                editor.ctx.beginPath();
+                if (activeHandle.includes('w') || activeHandle === 'nw' || activeHandle === 'sw') {
+                    editor.ctx.moveTo(-halfW, -halfH);
+                    editor.ctx.lineTo(-halfW,  halfH);
+                }
+                if (activeHandle.includes('e') || activeHandle === 'ne' || activeHandle === 'se') {
+                    editor.ctx.moveTo( halfW, -halfH);
+                    editor.ctx.lineTo( halfW,  halfH);
+                }
+                if (activeHandle === 'n' || activeHandle === 'nw' || activeHandle === 'ne') {
+                    editor.ctx.moveTo(-halfW, -halfH);
+                    editor.ctx.lineTo( halfW, -halfH);
+                }
+                if (activeHandle === 's' || activeHandle === 'sw' || activeHandle === 'se') {
+                    editor.ctx.moveTo(-halfW,  halfH);
+                    editor.ctx.lineTo( halfW,  halfH);
+                }
+                editor.ctx.stroke();
+                editor.ctx.restore();
+            }
+
         }
         
         editor.ctx.restore();
@@ -1099,17 +1934,18 @@ window.CanvasDrawing = {
             if (degrees > 180) degrees -= 360;
             if (degrees < -180) degrees += 360;
             const normalizedDegrees = degrees;
-            
-            editor.ctx.save();
-            const fontFamily = text.fontFamily || 'Arial';
-            const fontWeight = text.fontWeight || 'normal';
-            const fontStyle = text.fontStyle || 'normal';
-            const fontSize = parseInt(text.fontSize) || 14;
-            editor.ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
-            const metrics = editor.ctx.measureText(text.text || 'Text');
-            const w = metrics.width;
-            const h = fontSize;
-            editor.ctx.restore();
+
+            // Anchor the meter label off the same effective bounding box that
+            // drawText painted: width/height honour the manual edge-stretch
+            // values + word-wrap when the user has resized the box. Without
+            // this fallback the meter floats over the un-stretched glyph
+            // width and visibly drifts after a horizontal stretch.
+            // Polish + QA pass 2026-05-12.
+            const metricBounds = (window.ObjectDetection && window.ObjectDetection.getTextEffectiveBounds)
+                ? window.ObjectDetection.getTextEffectiveBounds(editor, text)
+                : null;
+            const w = metricBounds ? metricBounds.w : 0;
+            const h = metricBounds ? metricBounds.h : (parseInt(text.fontSize) || 14);
             
             const angle = meterRotation * Math.PI / 180;
             
@@ -1210,9 +2046,11 @@ window.CanvasDrawing = {
         const devMode = device._deviceMode || '';
         const isConsole = lastMethod === 'console' || lastMethod === 'virsh_console'
             || devMode === 'GI' || devMode === 'RECOVERY';
+        const hasSSH = sshCfg.host || sshCfg.hostBackup || device.deviceSerial
+            || (device.deviceAddress && device.deviceAddress.trim() !== '');
 
-        const fillNormal = isConsole ? '#e67e22' : '#27ae60';
-        const fillHover  = isConsole ? '#f39c12' : '#2ecc71';
+        const fillNormal = !hasSSH ? '#7f8c8d' : (isConsole ? '#e67e22' : '#27ae60');
+        const fillHover  = !hasSSH ? '#95a5a6' : (isConsole ? '#f39c12' : '#2ecc71');
 
         editor.ctx.save();
 
@@ -1287,7 +2125,13 @@ window.CanvasDrawing = {
         config:       { fill: '#27ae60', glow: '39,174,96'   },
         upgrade:      { fill: '#e67e22', glow: '230,126,34'  },
         upgradeFail:  { fill: '#e74c3c', glow: '231,76,60'   },
-        mismatch:     { fill: '#8e44ad', glow: '142,68,173'  }
+        mismatch:     { fill: '#8e44ad', glow: '142,68,173'  },
+        // Amber "credentials saved without verification" badge -- painted
+        // when the operator clicked "Save anyway" in the SSH dialog
+        // because verify-credentials returned a non-OK reason. Cleared
+        // automatically on the next successful verify (handled by the
+        // SSH dialog: it strips _unverifiedSave from sshConfig on ok).
+        unverified:   { fill: '#f39c12', glow: '243,156,18'  }
     },
 
     _getDeviceBadges(device) {
@@ -1302,6 +2146,9 @@ window.CanvasDrawing = {
         }
         if (device._hostnameMismatch) {
             badges.push({ type: 'mismatch', dismissed: !!device._mismatchDismissed });
+        }
+        if (device.sshConfig && device.sshConfig._unverifiedSave) {
+            badges.push({ type: 'unverified' });
         }
         return badges;
     },
@@ -1324,7 +2171,8 @@ window.CanvasDrawing = {
         this._startJobWatcher(editor);
         const devices = (editor.objects || []).filter(o => {
             if (o.type !== 'device' || o._hidden) return false;
-            return o._activeConfigJob || o._activeUpgradeJob || o._upgradeInProgress || o._upgradeFailedJob || o._hostnameMismatch;
+            const unverified = !!(o.sshConfig && o.sshConfig._unverifiedSave);
+            return o._activeConfigJob || o._activeUpgradeJob || o._upgradeInProgress || o._upgradeFailedJob || o._hostnameMismatch || unverified;
         });
         if (devices.length === 0) {
             if (editor._badgePulseTimer) {
@@ -1478,21 +2326,53 @@ window.CanvasDrawing = {
                 break;
             }
             case 'upgrade': {
-                editor.ctx.strokeStyle = color;
-                editor.ctx.lineWidth = 1.3 / z;
+                // Looping "rising arrow" animation: 3 arrows of different
+                // ages travel upward inside the badge in a continuous loop,
+                // reading unmistakably as "uploading / installing in
+                // progress" -- much clearer than the previous bounce that
+                // could be mistaken for an idle decoration.
+                //
+                // Each arrow has a phase offset (0, 1/3, 2/3 of the cycle).
+                // For each phase ``t in [0,1)``:
+                //   - y position: travels from +travel (below center) to
+                //     -travel (above center), so it sweeps UPWARD.
+                //   - alpha: fades in during the first 25%, holds full
+                //     opacity in the middle 50%, fades out in the last 25%.
+                //     This produces the "stream of arrows rising" effect
+                //     without hard pop-in/pop-out at the edges.
                 editor.ctx.lineCap = 'round';
                 editor.ctx.lineJoin = 'round';
-                const aH = r * 0.42;
-                const aW = r * 0.38;
-                editor.ctx.beginPath();
-                editor.ctx.moveTo(bx - aW, by + aH * 0.15);
-                editor.ctx.lineTo(bx, by - aH);
-                editor.ctx.lineTo(bx + aW, by + aH * 0.15);
-                editor.ctx.stroke();
-                editor.ctx.beginPath();
-                editor.ctx.moveTo(bx, by - aH);
-                editor.ctx.lineTo(bx, by + aH);
-                editor.ctx.stroke();
+                const aH = r * 0.34;          // arrow half-height
+                const aW = r * 0.32;          // arrow chevron half-width
+                const travel = r * 0.65;      // vertical sweep range
+                const cycleMs = 1400;         // one full rise = 1.4s
+                const tNow = (Date.now() % cycleMs) / cycleMs;
+                const arrowCount = 3;
+                const baseAlpha = editor.ctx.globalAlpha;
+                for (let i = 0; i < arrowCount; i++) {
+                    let t = (tNow + i / arrowCount) % 1;
+                    // Fade envelope: 0..0.25 fade-in, 0.25..0.75 hold,
+                    // 0.75..1 fade-out.
+                    let alpha;
+                    if (t < 0.25) alpha = t / 0.25;
+                    else if (t > 0.75) alpha = (1 - t) / 0.25;
+                    else alpha = 1;
+                    const cy = by + travel - t * (travel * 2);
+                    editor.ctx.globalAlpha = baseAlpha * alpha;
+                    editor.ctx.strokeStyle = color;
+                    editor.ctx.lineWidth = 1.3 / z;
+                    editor.ctx.beginPath();
+                    editor.ctx.moveTo(bx - aW, cy + aH * 0.4);
+                    editor.ctx.lineTo(bx, cy - aH * 0.6);
+                    editor.ctx.lineTo(bx + aW, cy + aH * 0.4);
+                    editor.ctx.stroke();
+                }
+                editor.ctx.globalAlpha = baseAlpha;
+                // Continuous redraw is already driven by
+                // `editor._badgePulseTimer` (~60 fps via rAF) at the top
+                // of `_drawBadges`, started whenever any device has an
+                // active upgrade/config/mismatch badge -- no extra rAF
+                // needed here.
                 break;
             }
             case 'upgradeFail': {
@@ -1511,6 +2391,26 @@ window.CanvasDrawing = {
                 editor.ctx.moveTo(bx, by - ufH);
                 editor.ctx.lineTo(bx, by + ufH);
                 editor.ctx.stroke();
+                break;
+            }
+            case 'unverified': {
+                // Draw a small "?" -- credentials saved without a
+                // verification handshake. Stays until the next
+                // successful verifyCredentials call wipes the flag.
+                const fs = Math.round(11 / z);
+                editor.ctx.font = `800 ${fs}px -apple-system, BlinkMacSystemFont, sans-serif`;
+                editor.ctx.textAlign = 'center';
+                editor.ctx.textBaseline = 'middle';
+                if (!dismissed) {
+                    editor.ctx.shadowColor = 'rgba(0,0,0,0.35)';
+                    editor.ctx.shadowBlur = 2 / z;
+                    editor.ctx.shadowOffsetY = 0.6 / z;
+                }
+                editor.ctx.fillStyle = color;
+                editor.ctx.fillText('?', bx, by + 0.5 / z);
+                editor.ctx.shadowColor = 'transparent';
+                editor.ctx.shadowBlur = 0;
+                editor.ctx.shadowOffsetY = 0;
                 break;
             }
         }
@@ -1616,6 +2516,14 @@ window.CanvasDrawing = {
             case 'upgradeFail':
                 this._openFailedUpgradeDetails(editor, device);
                 break;
+            case 'unverified':
+                // Re-open the SSH dialog so the operator can re-run the
+                // credential verification handshake. Uses the canonical
+                // entry point exposed by `topology-ssh-dialog.js`.
+                if (typeof window.showSSHAddressDialog === 'function') {
+                    try { window.showSSHAddressDialog(editor, device); } catch (_) {}
+                }
+                break;
         }
     },
 
@@ -1628,6 +2536,28 @@ window.CanvasDrawing = {
                 upgradeSshHosts: job.sshHosts || {},
             });
         }
+        // Dismiss EVERY currently-known failed upgrade job for this device, not only the
+        // one being displayed. Devices like PE4 accumulate several historical failed jobs;
+        // dismissing only the visible one would let the watcher's next poll surface another
+        // failed jobId for the same device, leaving the red badge "stuck" forever.
+        const label = device.label || '';
+        const knownForDevice = (editor && editor._failedUpgradeJobsByDevice && editor._failedUpgradeJobsByDevice[label]) || [];
+        const jobIdsToDismiss = new Set();
+        if (job.jobId) jobIdsToDismiss.add(job.jobId);
+        for (const k of knownForDevice) {
+            if (k && k.jobId) jobIdsToDismiss.add(k.jobId);
+        }
+        try {
+            const raw = localStorage.getItem('scaler_dismissed_upgrade_failures');
+            const arr = JSON.parse(raw || '[]');
+            const set = new Set(Array.isArray(arr) ? arr : []);
+            for (const jid of jobIdsToDismiss) {
+                if (label) set.add(`${jid}:${label}`);
+            }
+            localStorage.setItem('scaler_dismissed_upgrade_failures', JSON.stringify([...set]));
+        } catch (_) {}
+        device._upgradeFailedJob = null;
+        if (editor.requestDraw) editor.requestDraw();
     },
 
     _startJobWatcher(editor) {
@@ -1639,7 +2569,48 @@ window.CanvasDrawing = {
         const BASE_INTERVAL = 3000;
         const MAX_INTERVAL = 30000;
 
+        // Listen for login so the watcher resumes promptly after user switch.
+        // (When logged out we skip fetches entirely; on login we wake the loop.)
+        if (!editor._jobWatcherAuthBound) {
+            editor._jobWatcherAuthBound = true;
+            const self = this;
+            window.addEventListener('topology:auth-login', function () {
+                if (ScalerAPI) {
+                    ScalerAPI._bridgeUp = true;
+                    ScalerAPI._bridgeRetryAfter = 0;
+                }
+                if (self._jobWatcherTimeout) {
+                    clearTimeout(self._jobWatcherTimeout);
+                    self._jobWatcherTimeout = setTimeout(function () { poll(); }, 50);
+                }
+            });
+            window.addEventListener('topology:auth-logout', function () {
+                for (const obj of (editor.objects || [])) {
+                    if (obj.type !== 'device') continue;
+                    obj._activeConfigJob = null;
+                    obj._activeUpgradeJob = null;
+                    obj._upgradeFailedJob = null;
+                }
+                if (editor.requestDraw) editor.requestDraw();
+            });
+        }
+
         const poll = async () => {
+            if (window.TopologyAuth && !window.TopologyAuth.isAuthenticated()) {
+                this._jobWatcherTimeout = setTimeout(poll, BASE_INTERVAL * 2);
+                return;
+            }
+            // During an announced backend restart, skip the fetch entirely
+            // so DevTools doesn't fill with ERR_CONNECTION_REFUSED. The
+            // GracefulRestart coordinator polls /api/health and clears the
+            // window once the backend is back, at which point we resume
+            // immediately at BASE_INTERVAL.
+            if (window.GracefulRestart && window.GracefulRestart.isInWindow()) {
+                const wait = Math.min(MAX_INTERVAL, Math.max(BASE_INTERVAL,
+                    (window.GracefulRestart.secondsRemaining() + 1) * 1000));
+                this._jobWatcherTimeout = setTimeout(poll, wait);
+                return;
+            }
             try {
                 const data = await ScalerAPI.getJobs();
                 failCount = 0;
@@ -1699,6 +2670,34 @@ window.CanvasDrawing = {
                         }
                     }
                 }
+                // Build per-device list of ALL currently failed jobs (not just the last one
+                // written into failedDevMap). The dismiss handler uses this to suppress every
+                // outstanding failed job for a device, not only the one displayed -- previously
+                // dismissing left the badge "stuck" on devices like PE4 that had multiple
+                // historical failed upgrade attempts: dismissing one simply exposed the next.
+                const allFailedByDevice = {};
+                for (const job of failed) {
+                    const jid = job.job_id || '';
+                    if (!jid) continue;
+                    const dids = [];
+                    if (job.device_id) dids.push(job.device_id);
+                    if (Array.isArray(job.devices)) {
+                        for (const d of job.devices) { if (d && !dids.includes(d)) dids.push(d); }
+                    }
+                    for (const did of dids) {
+                        if (!did) continue;
+                        if (!allFailedByDevice[did]) allFailedByDevice[did] = [];
+                        if (!allFailedByDevice[did].some(j => j.jobId === jid)) {
+                            allFailedByDevice[did].push({
+                                jobId: jid,
+                                name: job.job_name || 'Upgrade',
+                                devices: job.devices || [],
+                                sshHosts: job.ssh_hosts || {},
+                            });
+                        }
+                    }
+                }
+                editor._failedUpgradeJobsByDevice = allFailedByDevice;
                 let changed = false;
                 for (const obj of (editor.objects || [])) {
                     if (obj.type !== 'device') continue;
@@ -1747,15 +2746,57 @@ window.CanvasDrawing = {
     _openUpgradeWizard(editor, device) {
         if (!device._activeUpgradeJob) return;
         const job = device._activeUpgradeJob;
-        if (typeof ScalerGUI !== 'undefined' && ScalerGUI._showRunningUpgradeProgress) {
-            ScalerGUI._showRunningUpgradeProgress({
+        if (typeof ScalerGUI === 'undefined') return;
+
+        // When the user closes the upgrade progress popup and re-opens it
+        // from the device's Upgrade badge, we previously passed a synthetic
+        // `{job_id, job_name, devices, ssh_hosts}` dict that lacked the
+        // accumulated `terminal_lines`. The reopened panel therefore came
+        // back empty until the next SSE frame (and even then, only
+        // showed lines produced AFTER the reopen).
+        //
+        // Fix: fetch the full job from the bridge -- `_sanitize_job` keeps
+        // `terminal_lines`, `percent`, `phase`, `device_state`, so the panel
+        // can pre-populate its terminal cards, progress bar, and per-device
+        // rows. The SSE reconnect uses `terminalOffset` to skip the lines
+        // we already rendered, preventing duplicates.
+        const buildSeed = (fullJob) => {
+            const base = {
                 job_id: job.jobId,
                 job_name: job.name,
                 devices: job.devices || [],
                 ssh_hosts: job.sshHosts || {},
-            });
-        } else if (typeof ScalerGUI !== 'undefined' && ScalerGUI.showProgress) {
-            ScalerGUI.showProgress(job.jobId, job.name);
+            };
+            if (!fullJob) return base;
+            // Prefer backend-authoritative fields but fall back to the
+            // synthetic seed we already have.
+            return {
+                ...fullJob,
+                job_id: fullJob.job_id || base.job_id,
+                job_name: fullJob.job_name || base.job_name,
+                devices: fullJob.devices || base.devices,
+                ssh_hosts: fullJob.ssh_hosts || base.ssh_hosts,
+            };
+        };
+
+        const show = (seed) => {
+            if (ScalerGUI._showRunningUpgradeProgress) {
+                ScalerGUI._showRunningUpgradeProgress(seed);
+            } else if (ScalerGUI.showProgress) {
+                ScalerGUI.showProgress(seed.job_id, seed.job_name, {
+                    upgradeDevices: seed.devices || [],
+                    upgradeSshHosts: seed.ssh_hosts || {},
+                    _initialJobData: seed,
+                });
+            }
+        };
+
+        if (typeof ScalerAPI !== 'undefined' && typeof ScalerAPI.getJob === 'function') {
+            ScalerAPI.getJob(job.jobId)
+                .then((fullJob) => show(buildSeed(fullJob)))
+                .catch(() => show(buildSeed(null)));
+        } else {
+            show(buildSeed(null));
         }
     },
 

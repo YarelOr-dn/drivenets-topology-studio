@@ -892,7 +892,26 @@ window.LinkUtils = {
                 repairCount++;
             }
         });
-        
+
+        // HEAL: any link without a valid color string. Legacy autosaves
+        // occasionally have `color: undefined`, which then crashes
+        // getLinkSelectionColors/darken/lighten on every draw frame.
+        // Fill in the theme-appropriate default instead of deleting anything.
+        const defaultColor = editor.defaultLinkColor
+            || (editor.darkMode ? '#ffffff' : '#666666');
+        let colorHealCount = 0;
+        editor.objects.forEach(link => {
+            if (link.type !== 'link' && link.type !== 'unbound') return;
+            if (typeof link.color !== 'string' || link.color.length === 0) {
+                link.color = defaultColor;
+                colorHealCount++;
+            }
+        });
+        if (colorHealCount > 0) {
+            console.log(`[LinkRepair] Healed ${colorHealCount} link(s) with missing color -> ${defaultColor}`);
+            repairCount += colorHealCount;
+        }
+
         if (repairCount > 0) {
             console.log(`[OK] Repaired ${repairCount} corrupted links`);
             editor.updateAllConnectionPoints();

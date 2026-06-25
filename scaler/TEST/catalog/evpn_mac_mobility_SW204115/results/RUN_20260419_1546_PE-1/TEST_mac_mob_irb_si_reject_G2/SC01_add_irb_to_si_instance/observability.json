@@ -1,0 +1,460 @@
+{
+  "meta": {
+    "test_id": "TEST_mac_mob_irb_si_reject_G2",
+    "scenario_id": "SC01_add_irb_to_si_instance",
+    "device": "PE-1",
+    "started_at": "2026-04-19T15:46:58.523+00:00",
+    "completed_at": "2026-04-19T15:47:11.054+00:00",
+    "total_duration_sec": 2.21,
+    "total_commands": 13,
+    "total_anomalies": 0,
+    "phase_count": 5
+  },
+  "phases": [
+    {
+      "phase_name": "snapshot",
+      "started_at": "2026-04-19T15:46:58.524+00:00",
+      "completed_at": "2026-04-19T15:46:58.624+00:00",
+      "duration_sec": 0.1,
+      "command_count": 1,
+      "commands": [
+        {
+          "command": "show config network-services evpn instance {si_instance_name} | no-more",
+          "timestamp": "2026-04-19T15:46:58.524+00:00",
+          "duration_ms": 100,
+          "phase": "snapshot",
+          "output_length": 119,
+          "output_preview": "---------------------------------------------------------------------------^\nERROR: Unknown word: '{si_instance_name}'."
+        }
+      ],
+      "parsed_values": {},
+      "anomalies": []
+    },
+    {
+      "phase_name": "mac_cleanup",
+      "started_at": "2026-04-19T15:46:58.675+00:00",
+      "completed_at": "2026-04-19T15:46:59.026+00:00",
+      "duration_sec": 0.351,
+      "command_count": 2,
+      "commands": [
+        {
+          "command": "clear evpn mac-table",
+          "timestamp": "2026-04-19T15:46:58.675+00:00",
+          "duration_ms": 50,
+          "phase": "mac_cleanup",
+          "output_length": 78,
+          "output_preview": "-------------------------------------------^\nERROR: Unknown word: 'mac-table'."
+        },
+        {
+          "command": "clear evpn mac-table instance HA_TEST_ELAN",
+          "timestamp": "2026-04-19T15:46:58.725+00:00",
+          "duration_ms": 50,
+          "phase": "mac_cleanup",
+          "output_length": 100,
+          "output_preview": "--------------------------------------------------------------^\nERROR: Unknown word: 'HA_TEST_ELAN'."
+        }
+      ],
+      "parsed_values": {},
+      "anomalies": []
+    },
+    {
+      "phase_name": "trigger",
+      "started_at": "2026-04-19T15:46:59.027+00:00",
+      "completed_at": "2026-04-19T15:46:59.982+00:00",
+      "duration_sec": 0.955,
+      "command_count": 7,
+      "commands": [
+        {
+          "command": "end",
+          "timestamp": "2026-04-19T15:46:59.027+00:00",
+          "duration_ms": 50,
+          "phase": "trigger",
+          "output_length": 61,
+          "output_preview": "--------------------------------^\nERROR: Unknown word: 'end'."
+        },
+        {
+          "command": "configure",
+          "timestamp": "2026-04-19T15:46:59.077+00:00",
+          "duration_ms": 150,
+          "phase": "trigger",
+          "output_length": 67,
+          "output_preview": "---------------------------------------------^\nERROR: Unknown word."
+        },
+        {
+          "command": "interfaces {test_irb_name} admin-state enabled",
+          "timestamp": "2026-04-19T15:46:59.228+00:00",
+          "duration_ms": 50,
+          "phase": "trigger",
+          "output_length": 88,
+          "output_preview": "-----------------------------------------------^\nERROR: Unknown word: '{test_irb_name}'."
+        },
+        {
+          "command": "network-services evpn instance {si_instance_name} router-interface {test_irb_name}",
+          "timestamp": "2026-04-19T15:46:59.278+00:00",
+          "duration_ms": 50,
+          "phase": "trigger",
+          "output_length": 144,
+          "output_preview": "-------------------------------------------------------------------------------------------------------^\nERROR: Unknown word: '{test_irb_name}'."
+        },
+        {
+          "command": "commit check",
+          "timestamp": "2026-04-19T15:46:59.329+00:00",
+          "duration_ms": 200,
+          "phase": "trigger",
+          "output_length": 75,
+          "output_preview": "NOTICE: commit action is not applicable. no configuration changes were made"
+        },
+        {
+          "command": "rollback 0",
+          "timestamp": "2026-04-19T15:46:59.529+00:00",
+          "duration_ms": 200,
+          "phase": "trigger",
+          "output_length": 0,
+          "output_preview": ""
+        },
+        {
+          "command": "end",
+          "timestamp": "2026-04-19T15:46:59.830+00:00",
+          "duration_ms": 150,
+          "phase": "trigger",
+          "output_length": 61,
+          "output_preview": "--------------------------------^\nERROR: Unknown word: 'end'."
+        }
+      ],
+      "parsed_values": {
+        "trigger_duration_sec": 0.955
+      },
+      "anomalies": []
+    },
+    {
+      "phase_name": "verify",
+      "started_at": "2026-04-19T15:47:10.250+00:00",
+      "completed_at": "2026-04-19T15:47:11.054+00:00",
+      "duration_sec": 0.804,
+      "command_count": 3,
+      "commands": [
+        {
+          "command": "show config network-services evpn instance {si_instance_name} | no-more",
+          "timestamp": "2026-04-19T15:47:10.250+00:00",
+          "duration_ms": 50,
+          "phase": "verify",
+          "output_length": 119,
+          "output_preview": "---------------------------------------------------------------------------^\nERROR: Unknown word: '{si_instance_name}'."
+        },
+        {
+          "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:DE:AD:00:01:01 | no-more",
+          "timestamp": "2026-04-19T15:47:10.300+00:00",
+          "duration_ms": 502,
+          "phase": "verify",
+          "output_length": 0,
+          "output_preview": ""
+        },
+        {
+          "command": "show bgp l2vpn evpn summary | no-more",
+          "timestamp": "2026-04-19T15:47:10.803+00:00",
+          "duration_ms": 250,
+          "phase": "verify",
+          "output_length": 582,
+          "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 2\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 6d01h35m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      13530      14018    0     0       0 08:21:37   Active          \n\nTotal number of est"
+        }
+      ],
+      "parsed_values": {
+        "after_mac_count": 0
+      },
+      "anomalies": []
+    },
+    {
+      "phase_name": "auto_diagnose",
+      "started_at": "2026-04-19T15:47:11.054+00:00",
+      "completed_at": "2026-04-19T15:47:11.054+00:00",
+      "duration_sec": 0.0,
+      "command_count": 0,
+      "commands": [],
+      "parsed_values": {},
+      "anomalies": []
+    }
+  ],
+  "diffs": [
+    {
+      "label": "mac_count",
+      "command": "show evpn mac-table",
+      "before": 0,
+      "after": 0,
+      "delta": 0,
+      "assessment": "stable"
+    }
+  ],
+  "traffic_snapshots": [],
+  "timeline": [
+    {
+      "timestamp": "2026-04-19T15:46:58.524+00:00",
+      "event_type": "phase_start",
+      "message": "Phase 'snapshot' started"
+    },
+    {
+      "timestamp": "2026-04-19T15:46:58.524+00:00",
+      "event_type": "command",
+      "message": "[snapshot] show config network-services evpn instance {si_instance_name} | no-more (100ms, 119 chars)",
+      "data": {
+        "command": "show config network-services evpn instance {si_instance_name} | no-more",
+        "duration_ms": 100,
+        "output_length": 119
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:58.624+00:00",
+      "event_type": "phase_end",
+      "message": "Phase 'snapshot' completed (0.10s, 1 commands)",
+      "data": {
+        "duration_sec": 0.10000014305114746,
+        "command_count": 1
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:58.675+00:00",
+      "event_type": "counter_snapshot",
+      "message": "Counter snapshot 'before_trigger' recorded",
+      "data": {
+        "label": "before_trigger",
+        "counter_count": 1
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:58.675+00:00",
+      "event_type": "phase_start",
+      "message": "Phase 'mac_cleanup' started"
+    },
+    {
+      "timestamp": "2026-04-19T15:46:58.675+00:00",
+      "event_type": "command",
+      "message": "[mac_cleanup] clear evpn mac-table (50ms, 78 chars)",
+      "data": {
+        "command": "clear evpn mac-table",
+        "duration_ms": 50,
+        "output_length": 78
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:58.725+00:00",
+      "event_type": "command",
+      "message": "[mac_cleanup] clear evpn mac-table instance HA_TEST_ELAN (50ms, 100 chars)",
+      "data": {
+        "command": "clear evpn mac-table instance HA_TEST_ELAN",
+        "duration_ms": 50,
+        "output_length": 100
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:59.026+00:00",
+      "event_type": "mac_cleanup",
+      "message": "Cleared MAC table for HA_TEST_ELAN",
+      "data": {
+        "test_mac": "00:DE:AD:00:01:01",
+        "poll_elapsed_sec": 0.251
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:59.026+00:00",
+      "event_type": "phase_end",
+      "message": "Phase 'mac_cleanup' completed (0.35s, 2 commands)",
+      "data": {
+        "duration_sec": 0.3510000705718994,
+        "command_count": 2
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:59.027+00:00",
+      "event_type": "phase_start",
+      "message": "Phase 'trigger' started"
+    },
+    {
+      "timestamp": "2026-04-19T15:46:59.027+00:00",
+      "event_type": "trigger",
+      "message": "Action=attempt_irb_config, mapped=commit_check_assert, method=manual",
+      "data": {
+        "action": "attempt_irb_config",
+        "mapped": "commit_check_assert",
+        "mac_count": 1
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:59.027+00:00",
+      "event_type": "command",
+      "message": "[trigger] end (50ms, 61 chars)",
+      "data": {
+        "command": "end",
+        "duration_ms": 50,
+        "output_length": 61
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:59.077+00:00",
+      "event_type": "command",
+      "message": "[trigger] configure (150ms, 67 chars)",
+      "data": {
+        "command": "configure",
+        "duration_ms": 150,
+        "output_length": 67
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:59.228+00:00",
+      "event_type": "command",
+      "message": "[trigger] interfaces {test_irb_name} admin-state enabled (50ms, 88 chars)",
+      "data": {
+        "command": "interfaces {test_irb_name} admin-state enabled",
+        "duration_ms": 50,
+        "output_length": 88
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:59.278+00:00",
+      "event_type": "command",
+      "message": "[trigger] network-services evpn instance {si_instance_name} router-interface {test_irb_name} (50ms, 144 chars)",
+      "data": {
+        "command": "network-services evpn instance {si_instance_name} router-interface {test_irb_name}",
+        "duration_ms": 50,
+        "output_length": 144
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:59.329+00:00",
+      "event_type": "command",
+      "message": "[trigger] commit check (200ms, 75 chars)",
+      "data": {
+        "command": "commit check",
+        "duration_ms": 200,
+        "output_length": 75
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:59.529+00:00",
+      "event_type": "command",
+      "message": "[trigger] rollback 0 (200ms, 0 chars)",
+      "data": {
+        "command": "rollback 0",
+        "duration_ms": 200,
+        "output_length": 0
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:59.830+00:00",
+      "event_type": "command",
+      "message": "[trigger] end (150ms, 61 chars)",
+      "data": {
+        "command": "end",
+        "duration_ms": 150,
+        "output_length": 61
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:59.982+00:00",
+      "event_type": "phase_end",
+      "message": "Phase 'trigger' completed (0.96s, 7 commands)",
+      "data": {
+        "duration_sec": 0.9550001621246338,
+        "command_count": 7
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:46:59.982+00:00",
+      "event_type": "wait",
+      "message": "Polling MAC table (up to 10s, persistent SSH)"
+    },
+    {
+      "timestamp": "2026-04-19T15:47:10.250+00:00",
+      "event_type": "propagation_done",
+      "message": "MAC poll completed in -10.267s"
+    },
+    {
+      "timestamp": "2026-04-19T15:47:10.250+00:00",
+      "event_type": "phase_start",
+      "message": "Phase 'verify' started"
+    },
+    {
+      "timestamp": "2026-04-19T15:47:10.250+00:00",
+      "event_type": "command",
+      "message": "[verify] show config network-services evpn instance {si_instance_name} | no-more (50ms, 119 chars)",
+      "data": {
+        "command": "show config network-services evpn instance {si_instance_name} | no-more",
+        "duration_ms": 50,
+        "output_length": 119
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:47:10.300+00:00",
+      "event_type": "command",
+      "message": "[verify] show evpn mac-table instance HA_TEST_ELAN mac 00:DE:AD:00:01:01 | no-more (502ms, 0 chars)",
+      "data": {
+        "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:DE:AD:00:01:01 | no-more",
+        "duration_ms": 502,
+        "output_length": 0
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:47:10.803+00:00",
+      "event_type": "diff",
+      "message": "Diff 'mac_count': 0 -> 0 (stable)",
+      "data": {
+        "label": "mac_count",
+        "command": "show evpn mac-table",
+        "before": 0,
+        "after": 0,
+        "delta": 0,
+        "assessment": "stable"
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:47:10.803+00:00",
+      "event_type": "command",
+      "message": "[verify] show bgp l2vpn evpn summary | no-more (250ms, 582 chars)",
+      "data": {
+        "command": "show bgp l2vpn evpn summary | no-more",
+        "duration_ms": 250,
+        "output_length": 582
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:47:11.054+00:00",
+      "event_type": "phase_end",
+      "message": "Phase 'verify' completed (0.80s, 3 commands)",
+      "data": {
+        "duration_sec": 0.8039999008178711,
+        "command_count": 3
+      }
+    },
+    {
+      "timestamp": "2026-04-19T15:47:11.054+00:00",
+      "event_type": "phase_start",
+      "message": "Phase 'auto_diagnose' started"
+    },
+    {
+      "timestamp": "2026-04-19T15:47:11.054+00:00",
+      "event_type": "auto_diagnose_skip",
+      "message": "Skipped trace greps (infra fail, MAC never learned)"
+    },
+    {
+      "timestamp": "2026-04-19T15:47:11.054+00:00",
+      "event_type": "phase_end",
+      "message": "Phase 'auto_diagnose' completed (0.00s, 0 commands)",
+      "data": {
+        "duration_sec": 0.0,
+        "command_count": 0
+      }
+    }
+  ],
+  "engine_data": {
+    "counters_before_trigger": {
+      "label": "before_trigger",
+      "timestamp": "2026-04-19T15:46:58.625+00:00",
+      "counters": {
+        "ghost_mac_count": {
+          "value": 1,
+          "timestamp": "2026-04-19T15:46:58.625+00:00",
+          "duration_ms": 50,
+          "error": null
+        }
+      }
+    }
+  }
+}

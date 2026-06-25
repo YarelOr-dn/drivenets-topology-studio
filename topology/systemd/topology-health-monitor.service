@@ -1,0 +1,42 @@
+[Unit]
+Description=Topology Studio external health monitor (probes 8080/8765/8766)
+Documentation=file:///home/dn/drivenets-topology-studio/topology/systemd/README.md
+# Only run when the main app unit is up (or has been started); we still
+# probe even if it later fails -- that is the whole point.
+After=topology-app.service
+Wants=topology-app.service
+
+[Service]
+Type=oneshot
+# WorkingDirectory keeps relative imports happy if anyone extends the
+# script. The script itself uses absolute paths for state, so this is
+# defensive only.
+WorkingDirectory=/home/dn/CURSOR
+# Auto-restart is enabled here. Recovery is gated inside the script by
+# fail-threshold + cooldown + burst limits, so this still won't spam.
+# Edit /home/dn/.config/systemd/user/topology-health-monitor.service to
+# remove --auto-restart if you want monitoring without recovery.
+ExecStart=/usr/bin/python3 /home/dn/CURSOR/health_monitor.py --once --auto-restart \
+    --fail-threshold=3 \
+    --restart-cooldown=600 \
+    --restart-burst=3 \
+    --restart-window=1800 \
+    --timeout=4
+Environment=HOME=/home/dn
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/dn/.local/bin
+Environment=TOPOLOGY_HEALTH_DIR=/home/dn/.topology_health
+# Don't let a single broken probe cycle block subsequent timer firings.
+TimeoutStartSec=45
+# We deliberately do NOT set Restart= here -- this is a oneshot driven
+# by the timer.
+# exit 1 from the script means "at least one critical probe failed" and is
+# useful when run manually from a shell. Systemd should NOT paint the unit
+# red for that -- the failing probe is already captured in
+# /home/dn/.topology_health/status.json and the journal. Only treat
+# exit 2+ (real script error) as failure.
+SuccessExitStatus=0 1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

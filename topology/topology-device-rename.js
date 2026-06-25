@@ -345,6 +345,7 @@ function showRenamePopup(editor, device) {
  */
 function applyRename(editor, device, newLabel, fontSettings = null) {
     if (device && device.type === 'device') {
+        const prevLabel = device.label || '';
         if (editor.saveState) editor.saveState();
         device.label = newLabel.trim() || device.label;
         
@@ -358,6 +359,17 @@ function applyRename(editor, device, newLabel, fontSettings = null) {
         
         checkDeviceMismatchLive(device);
         editor.draw();
+
+        try {
+            if (window.TopologySync && window.TopologySync.recordOp
+                    && prevLabel !== device.label) {
+                window.TopologySync.recordOp('device.renamed', {
+                    device_id: device.id,
+                    from: prevLabel,
+                    to: device.label,
+                });
+            }
+        } catch (_) { /* swallow -- logging must not break rename */ }
     }
 }
 
@@ -377,12 +389,23 @@ function checkDeviceMismatchLive(device) {
         return;
     }
     const label = (device.label || '').trim();
-    const mismatch = label !== '' && cfgHost !== label;
+    const helper = window.TopologyDeviceIdentity || null;
+    const giMode = helper?.isGiMode
+        ? helper.isGiMode(device)
+        : [device._deviceMode, device._modeRawState, device._identity?.device_state]
+            .map(v => String(v || '').trim().toUpperCase())
+            .some(v => v === 'GI' || v === 'BASEOS_SHELL');
+    const serialIdentity = helper?.isSerialLike
+        ? helper.isSerialLike(cfgHost)
+        : /^[A-Z0-9]{8,}$/i.test(String(cfgHost || '').trim());
+    const suppressGiSerialMismatch = giMode && serialIdentity;
+    const mismatch = !suppressGiSerialMismatch && label !== '' && cfgHost !== label;
     const prev = device._hostnameMismatch;
     device._hostnameMismatch = mismatch;
     if (device._identity) {
         device._identity.hostname_mismatch = mismatch;
         device._identity.canvas_label = label;
+        device._identity.gi_serial_identity = suppressGiSerialMismatch;
     }
     if (!mismatch) {
         device._mismatchDismissed = false;

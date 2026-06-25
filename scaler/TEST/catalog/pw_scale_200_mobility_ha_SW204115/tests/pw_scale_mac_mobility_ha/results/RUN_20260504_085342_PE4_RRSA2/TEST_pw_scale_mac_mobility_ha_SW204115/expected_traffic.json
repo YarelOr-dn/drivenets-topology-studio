@@ -1,0 +1,742 @@
+{
+  "S001_PE4": {
+    "dst_mac": "02:aa:ad:01:00:01",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "YOR_CL_PE-4",
+      "flag": "L>",
+      "instance": "EVPN_PW_S001"
+    },
+    "expected_remote": {
+      "device": "RR-SA-2",
+      "flag": "v>",
+      "instance": "EVPN_PW_S001"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=219, dut=YOR_CL_PE-4, inner_vlan=3101)",
+    "inner_vlan": 3101,
+    "label": "PE-4 ingress for EVPN_PW_S001; RR-SA-2 must learn via PW",
+    "outer_vlan": 219,
+    "ownership_tag": "[STC-PE4-S001-i3101]",
+    "spirent_flags": [
+      "--vlan",
+      "219",
+      "--inner-vlan",
+      "3101"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "src_mac_base": "00:de:ad:01:00:01",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S001 mac 00:de:ad:01:00:01 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S001 mac 00:de:ad:01:00:01 | no-more"
+    },
+    "via_ac": "ge100-18/0/0.3101",
+    "via_device": "YOR_CL_PE-4"
+  },
+  "S001_RR": {
+    "dst_mac": "02:aa:be:01:00:01",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "RR-SA-2",
+      "flag": "L>",
+      "instance": "EVPN_PW_S001"
+    },
+    "expected_remote": {
+      "device": "YOR_CL_PE-4",
+      "flag": "v>",
+      "instance": "EVPN_PW_S001"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=215, dut=RR-SA-2, inner_vlan=3101)",
+    "inner_vlan": 3101,
+    "label": "RR-SA-2 ingress for EVPN_PW_S001; PE-4 must learn via PW",
+    "outer_vlan": 4,
+    "ownership_tag": "[STC-RRSA2-S001-i3101]",
+    "rewrite_note": "B-15 rewrites Spirent outer 215 to DUT wire outer 4; inner tag is preserved.",
+    "spirent_flags": [
+      "--vlan",
+      "215",
+      "--inner-vlan",
+      "3101"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "spirent_outer_vlan": 215,
+    "src_mac_base": "00:de:be:01:00:01",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S001 mac 00:de:be:01:00:01 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S001 mac 00:de:be:01:00:01 | no-more"
+    },
+    "via_ac": "bundle-100.3101",
+    "via_device": "RR-SA-2"
+  },
+  "S002_PE4": {
+    "dst_mac": "02:aa:ad:01:00:02",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "YOR_CL_PE-4",
+      "flag": "L>",
+      "instance": "EVPN_PW_S002"
+    },
+    "expected_remote": {
+      "device": "RR-SA-2",
+      "flag": "v>",
+      "instance": "EVPN_PW_S002"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=219, dut=YOR_CL_PE-4, inner_vlan=3102)",
+    "inner_vlan": 3102,
+    "label": "PE-4 ingress for EVPN_PW_S002; RR-SA-2 must learn via PW",
+    "outer_vlan": 219,
+    "ownership_tag": "[STC-PE4-S002-i3102]",
+    "spirent_flags": [
+      "--vlan",
+      "219",
+      "--inner-vlan",
+      "3102"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "src_mac_base": "00:de:ad:01:00:02",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S002 mac 00:de:ad:01:00:02 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S002 mac 00:de:ad:01:00:02 | no-more"
+    },
+    "via_ac": "ge100-18/0/0.3102",
+    "via_device": "YOR_CL_PE-4"
+  },
+  "S002_RR": {
+    "dst_mac": "02:aa:be:01:00:02",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "RR-SA-2",
+      "flag": "L>",
+      "instance": "EVPN_PW_S002"
+    },
+    "expected_remote": {
+      "device": "YOR_CL_PE-4",
+      "flag": "v>",
+      "instance": "EVPN_PW_S002"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=215, dut=RR-SA-2, inner_vlan=3102)",
+    "inner_vlan": 3102,
+    "label": "RR-SA-2 ingress for EVPN_PW_S002; PE-4 must learn via PW",
+    "outer_vlan": 4,
+    "ownership_tag": "[STC-RRSA2-S002-i3102]",
+    "rewrite_note": "B-15 rewrites Spirent outer 215 to DUT wire outer 4; inner tag is preserved.",
+    "spirent_flags": [
+      "--vlan",
+      "215",
+      "--inner-vlan",
+      "3102"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "spirent_outer_vlan": 215,
+    "src_mac_base": "00:de:be:01:00:02",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S002 mac 00:de:be:01:00:02 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S002 mac 00:de:be:01:00:02 | no-more"
+    },
+    "via_ac": "bundle-100.3102",
+    "via_device": "RR-SA-2"
+  },
+  "S003_PE4": {
+    "dst_mac": "02:aa:ad:01:00:03",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "YOR_CL_PE-4",
+      "flag": "L>",
+      "instance": "EVPN_PW_S003"
+    },
+    "expected_remote": {
+      "device": "RR-SA-2",
+      "flag": "v>",
+      "instance": "EVPN_PW_S003"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=219, dut=YOR_CL_PE-4, inner_vlan=3103)",
+    "inner_vlan": 3103,
+    "label": "PE-4 ingress for EVPN_PW_S003; RR-SA-2 must learn via PW",
+    "outer_vlan": 219,
+    "ownership_tag": "[STC-PE4-S003-i3103]",
+    "spirent_flags": [
+      "--vlan",
+      "219",
+      "--inner-vlan",
+      "3103"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "src_mac_base": "00:de:ad:01:00:03",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S003 mac 00:de:ad:01:00:03 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S003 mac 00:de:ad:01:00:03 | no-more"
+    },
+    "via_ac": "ge100-18/0/0.3103",
+    "via_device": "YOR_CL_PE-4"
+  },
+  "S003_RR": {
+    "dst_mac": "02:aa:be:01:00:03",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "RR-SA-2",
+      "flag": "L>",
+      "instance": "EVPN_PW_S003"
+    },
+    "expected_remote": {
+      "device": "YOR_CL_PE-4",
+      "flag": "v>",
+      "instance": "EVPN_PW_S003"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=215, dut=RR-SA-2, inner_vlan=3103)",
+    "inner_vlan": 3103,
+    "label": "RR-SA-2 ingress for EVPN_PW_S003; PE-4 must learn via PW",
+    "outer_vlan": 4,
+    "ownership_tag": "[STC-RRSA2-S003-i3103]",
+    "rewrite_note": "B-15 rewrites Spirent outer 215 to DUT wire outer 4; inner tag is preserved.",
+    "spirent_flags": [
+      "--vlan",
+      "215",
+      "--inner-vlan",
+      "3103"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "spirent_outer_vlan": 215,
+    "src_mac_base": "00:de:be:01:00:03",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S003 mac 00:de:be:01:00:03 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S003 mac 00:de:be:01:00:03 | no-more"
+    },
+    "via_ac": "bundle-100.3103",
+    "via_device": "RR-SA-2"
+  },
+  "S004_PE4": {
+    "dst_mac": "02:aa:ad:01:00:04",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "YOR_CL_PE-4",
+      "flag": "L>",
+      "instance": "EVPN_PW_S004"
+    },
+    "expected_remote": {
+      "device": "RR-SA-2",
+      "flag": "v>",
+      "instance": "EVPN_PW_S004"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=219, dut=YOR_CL_PE-4, inner_vlan=3104)",
+    "inner_vlan": 3104,
+    "label": "PE-4 ingress for EVPN_PW_S004; RR-SA-2 must learn via PW",
+    "outer_vlan": 219,
+    "ownership_tag": "[STC-PE4-S004-i3104]",
+    "spirent_flags": [
+      "--vlan",
+      "219",
+      "--inner-vlan",
+      "3104"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "src_mac_base": "00:de:ad:01:00:04",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S004 mac 00:de:ad:01:00:04 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S004 mac 00:de:ad:01:00:04 | no-more"
+    },
+    "via_ac": "ge100-18/0/0.3104",
+    "via_device": "YOR_CL_PE-4"
+  },
+  "S004_RR": {
+    "dst_mac": "02:aa:be:01:00:04",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "RR-SA-2",
+      "flag": "L>",
+      "instance": "EVPN_PW_S004"
+    },
+    "expected_remote": {
+      "device": "YOR_CL_PE-4",
+      "flag": "v>",
+      "instance": "EVPN_PW_S004"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=215, dut=RR-SA-2, inner_vlan=3104)",
+    "inner_vlan": 3104,
+    "label": "RR-SA-2 ingress for EVPN_PW_S004; PE-4 must learn via PW",
+    "outer_vlan": 4,
+    "ownership_tag": "[STC-RRSA2-S004-i3104]",
+    "rewrite_note": "B-15 rewrites Spirent outer 215 to DUT wire outer 4; inner tag is preserved.",
+    "spirent_flags": [
+      "--vlan",
+      "215",
+      "--inner-vlan",
+      "3104"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "spirent_outer_vlan": 215,
+    "src_mac_base": "00:de:be:01:00:04",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S004 mac 00:de:be:01:00:04 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S004 mac 00:de:be:01:00:04 | no-more"
+    },
+    "via_ac": "bundle-100.3104",
+    "via_device": "RR-SA-2"
+  },
+  "S005_PE4": {
+    "dst_mac": "02:aa:ad:01:00:05",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "YOR_CL_PE-4",
+      "flag": "L>",
+      "instance": "EVPN_PW_S005"
+    },
+    "expected_remote": {
+      "device": "RR-SA-2",
+      "flag": "v>",
+      "instance": "EVPN_PW_S005"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=219, dut=YOR_CL_PE-4, inner_vlan=3105)",
+    "inner_vlan": 3105,
+    "label": "PE-4 ingress for EVPN_PW_S005; RR-SA-2 must learn via PW",
+    "outer_vlan": 219,
+    "ownership_tag": "[STC-PE4-S005-i3105]",
+    "spirent_flags": [
+      "--vlan",
+      "219",
+      "--inner-vlan",
+      "3105"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "src_mac_base": "00:de:ad:01:00:05",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S005 mac 00:de:ad:01:00:05 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S005 mac 00:de:ad:01:00:05 | no-more"
+    },
+    "via_ac": "ge100-18/0/0.3105",
+    "via_device": "YOR_CL_PE-4"
+  },
+  "S005_RR": {
+    "dst_mac": "02:aa:be:01:00:05",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "RR-SA-2",
+      "flag": "L>",
+      "instance": "EVPN_PW_S005"
+    },
+    "expected_remote": {
+      "device": "YOR_CL_PE-4",
+      "flag": "v>",
+      "instance": "EVPN_PW_S005"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=215, dut=RR-SA-2, inner_vlan=3105)",
+    "inner_vlan": 3105,
+    "label": "RR-SA-2 ingress for EVPN_PW_S005; PE-4 must learn via PW",
+    "outer_vlan": 4,
+    "ownership_tag": "[STC-RRSA2-S005-i3105]",
+    "rewrite_note": "B-15 rewrites Spirent outer 215 to DUT wire outer 4; inner tag is preserved.",
+    "spirent_flags": [
+      "--vlan",
+      "215",
+      "--inner-vlan",
+      "3105"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "spirent_outer_vlan": 215,
+    "src_mac_base": "00:de:be:01:00:05",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S005 mac 00:de:be:01:00:05 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S005 mac 00:de:be:01:00:05 | no-more"
+    },
+    "via_ac": "bundle-100.3105",
+    "via_device": "RR-SA-2"
+  },
+  "S006_PE4": {
+    "dst_mac": "02:aa:ad:01:00:06",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "YOR_CL_PE-4",
+      "flag": "L>",
+      "instance": "EVPN_PW_S006"
+    },
+    "expected_remote": {
+      "device": "RR-SA-2",
+      "flag": "v>",
+      "instance": "EVPN_PW_S006"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=219, dut=YOR_CL_PE-4, inner_vlan=3106)",
+    "inner_vlan": 3106,
+    "label": "PE-4 ingress for EVPN_PW_S006; RR-SA-2 must learn via PW",
+    "outer_vlan": 219,
+    "ownership_tag": "[STC-PE4-S006-i3106]",
+    "spirent_flags": [
+      "--vlan",
+      "219",
+      "--inner-vlan",
+      "3106"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "src_mac_base": "00:de:ad:01:00:06",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S006 mac 00:de:ad:01:00:06 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S006 mac 00:de:ad:01:00:06 | no-more"
+    },
+    "via_ac": "ge100-18/0/0.3106",
+    "via_device": "YOR_CL_PE-4"
+  },
+  "S006_RR": {
+    "dst_mac": "02:aa:be:01:00:06",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "RR-SA-2",
+      "flag": "L>",
+      "instance": "EVPN_PW_S006"
+    },
+    "expected_remote": {
+      "device": "YOR_CL_PE-4",
+      "flag": "v>",
+      "instance": "EVPN_PW_S006"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=215, dut=RR-SA-2, inner_vlan=3106)",
+    "inner_vlan": 3106,
+    "label": "RR-SA-2 ingress for EVPN_PW_S006; PE-4 must learn via PW",
+    "outer_vlan": 4,
+    "ownership_tag": "[STC-RRSA2-S006-i3106]",
+    "rewrite_note": "B-15 rewrites Spirent outer 215 to DUT wire outer 4; inner tag is preserved.",
+    "spirent_flags": [
+      "--vlan",
+      "215",
+      "--inner-vlan",
+      "3106"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "spirent_outer_vlan": 215,
+    "src_mac_base": "00:de:be:01:00:06",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S006 mac 00:de:be:01:00:06 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S006 mac 00:de:be:01:00:06 | no-more"
+    },
+    "via_ac": "bundle-100.3106",
+    "via_device": "RR-SA-2"
+  },
+  "S007_PE4": {
+    "dst_mac": "02:aa:ad:01:00:07",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "YOR_CL_PE-4",
+      "flag": "L>",
+      "instance": "EVPN_PW_S007"
+    },
+    "expected_remote": {
+      "device": "RR-SA-2",
+      "flag": "v>",
+      "instance": "EVPN_PW_S007"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=219, dut=YOR_CL_PE-4, inner_vlan=3107)",
+    "inner_vlan": 3107,
+    "label": "PE-4 ingress for EVPN_PW_S007; RR-SA-2 must learn via PW",
+    "outer_vlan": 219,
+    "ownership_tag": "[STC-PE4-S007-i3107]",
+    "spirent_flags": [
+      "--vlan",
+      "219",
+      "--inner-vlan",
+      "3107"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "src_mac_base": "00:de:ad:01:00:07",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S007 mac 00:de:ad:01:00:07 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S007 mac 00:de:ad:01:00:07 | no-more"
+    },
+    "via_ac": "ge100-18/0/0.3107",
+    "via_device": "YOR_CL_PE-4"
+  },
+  "S007_RR": {
+    "dst_mac": "02:aa:be:01:00:07",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "RR-SA-2",
+      "flag": "L>",
+      "instance": "EVPN_PW_S007"
+    },
+    "expected_remote": {
+      "device": "YOR_CL_PE-4",
+      "flag": "v>",
+      "instance": "EVPN_PW_S007"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=215, dut=RR-SA-2, inner_vlan=3107)",
+    "inner_vlan": 3107,
+    "label": "RR-SA-2 ingress for EVPN_PW_S007; PE-4 must learn via PW",
+    "outer_vlan": 4,
+    "ownership_tag": "[STC-RRSA2-S007-i3107]",
+    "rewrite_note": "B-15 rewrites Spirent outer 215 to DUT wire outer 4; inner tag is preserved.",
+    "spirent_flags": [
+      "--vlan",
+      "215",
+      "--inner-vlan",
+      "3107"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "spirent_outer_vlan": 215,
+    "src_mac_base": "00:de:be:01:00:07",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S007 mac 00:de:be:01:00:07 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S007 mac 00:de:be:01:00:07 | no-more"
+    },
+    "via_ac": "bundle-100.3107",
+    "via_device": "RR-SA-2"
+  },
+  "S008_PE4": {
+    "dst_mac": "02:aa:ad:01:00:08",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "YOR_CL_PE-4",
+      "flag": "L>",
+      "instance": "EVPN_PW_S008"
+    },
+    "expected_remote": {
+      "device": "RR-SA-2",
+      "flag": "v>",
+      "instance": "EVPN_PW_S008"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=219, dut=YOR_CL_PE-4, inner_vlan=3108)",
+    "inner_vlan": 3108,
+    "label": "PE-4 ingress for EVPN_PW_S008; RR-SA-2 must learn via PW",
+    "outer_vlan": 219,
+    "ownership_tag": "[STC-PE4-S008-i3108]",
+    "spirent_flags": [
+      "--vlan",
+      "219",
+      "--inner-vlan",
+      "3108"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "src_mac_base": "00:de:ad:01:00:08",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S008 mac 00:de:ad:01:00:08 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S008 mac 00:de:ad:01:00:08 | no-more"
+    },
+    "via_ac": "ge100-18/0/0.3108",
+    "via_device": "YOR_CL_PE-4"
+  },
+  "S008_RR": {
+    "dst_mac": "02:aa:be:01:00:08",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "RR-SA-2",
+      "flag": "L>",
+      "instance": "EVPN_PW_S008"
+    },
+    "expected_remote": {
+      "device": "YOR_CL_PE-4",
+      "flag": "v>",
+      "instance": "EVPN_PW_S008"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=215, dut=RR-SA-2, inner_vlan=3108)",
+    "inner_vlan": 3108,
+    "label": "RR-SA-2 ingress for EVPN_PW_S008; PE-4 must learn via PW",
+    "outer_vlan": 4,
+    "ownership_tag": "[STC-RRSA2-S008-i3108]",
+    "rewrite_note": "B-15 rewrites Spirent outer 215 to DUT wire outer 4; inner tag is preserved.",
+    "spirent_flags": [
+      "--vlan",
+      "215",
+      "--inner-vlan",
+      "3108"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "spirent_outer_vlan": 215,
+    "src_mac_base": "00:de:be:01:00:08",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S008 mac 00:de:be:01:00:08 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S008 mac 00:de:be:01:00:08 | no-more"
+    },
+    "via_ac": "bundle-100.3108",
+    "via_device": "RR-SA-2"
+  },
+  "S009_PE4": {
+    "dst_mac": "02:aa:ad:01:00:09",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "YOR_CL_PE-4",
+      "flag": "L>",
+      "instance": "EVPN_PW_S009"
+    },
+    "expected_remote": {
+      "device": "RR-SA-2",
+      "flag": "v>",
+      "instance": "EVPN_PW_S009"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=219, dut=YOR_CL_PE-4, inner_vlan=3109)",
+    "inner_vlan": 3109,
+    "label": "PE-4 ingress for EVPN_PW_S009; RR-SA-2 must learn via PW",
+    "outer_vlan": 219,
+    "ownership_tag": "[STC-PE4-S009-i3109]",
+    "spirent_flags": [
+      "--vlan",
+      "219",
+      "--inner-vlan",
+      "3109"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "src_mac_base": "00:de:ad:01:00:09",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S009 mac 00:de:ad:01:00:09 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S009 mac 00:de:ad:01:00:09 | no-more"
+    },
+    "via_ac": "ge100-18/0/0.3109",
+    "via_device": "YOR_CL_PE-4"
+  },
+  "S009_RR": {
+    "dst_mac": "02:aa:be:01:00:09",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "RR-SA-2",
+      "flag": "L>",
+      "instance": "EVPN_PW_S009"
+    },
+    "expected_remote": {
+      "device": "YOR_CL_PE-4",
+      "flag": "v>",
+      "instance": "EVPN_PW_S009"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=215, dut=RR-SA-2, inner_vlan=3109)",
+    "inner_vlan": 3109,
+    "label": "RR-SA-2 ingress for EVPN_PW_S009; PE-4 must learn via PW",
+    "outer_vlan": 4,
+    "ownership_tag": "[STC-RRSA2-S009-i3109]",
+    "rewrite_note": "B-15 rewrites Spirent outer 215 to DUT wire outer 4; inner tag is preserved.",
+    "spirent_flags": [
+      "--vlan",
+      "215",
+      "--inner-vlan",
+      "3109"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "spirent_outer_vlan": 215,
+    "src_mac_base": "00:de:be:01:00:09",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S009 mac 00:de:be:01:00:09 | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S009 mac 00:de:be:01:00:09 | no-more"
+    },
+    "via_ac": "bundle-100.3109",
+    "via_device": "RR-SA-2"
+  },
+  "S010_PE4": {
+    "dst_mac": "02:aa:ad:01:00:0a",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "YOR_CL_PE-4",
+      "flag": "L>",
+      "instance": "EVPN_PW_S010"
+    },
+    "expected_remote": {
+      "device": "RR-SA-2",
+      "flag": "v>",
+      "instance": "EVPN_PW_S010"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=219, dut=YOR_CL_PE-4, inner_vlan=3110)",
+    "inner_vlan": 3110,
+    "label": "PE-4 ingress for EVPN_PW_S010; RR-SA-2 must learn via PW",
+    "outer_vlan": 219,
+    "ownership_tag": "[STC-PE4-S010-i3110]",
+    "spirent_flags": [
+      "--vlan",
+      "219",
+      "--inner-vlan",
+      "3110"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "src_mac_base": "00:de:ad:01:00:0a",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S010 mac 00:de:ad:01:00:0a | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S010 mac 00:de:ad:01:00:0a | no-more"
+    },
+    "via_ac": "ge100-18/0/0.3110",
+    "via_device": "YOR_CL_PE-4"
+  },
+  "S010_RR": {
+    "dst_mac": "02:aa:be:01:00:0a",
+    "dst_mac_role": "unknown unicast destination; must not be learned before the phase starts",
+    "encapsulation": "double-tagged",
+    "expected_local": {
+      "device": "RR-SA-2",
+      "flag": "L>",
+      "instance": "EVPN_PW_S010"
+    },
+    "expected_remote": {
+      "device": "YOR_CL_PE-4",
+      "flag": "v>",
+      "instance": "EVPN_PW_S010"
+    },
+    "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=215, dut=RR-SA-2, inner_vlan=3110)",
+    "inner_vlan": 3110,
+    "label": "RR-SA-2 ingress for EVPN_PW_S010; PE-4 must learn via PW",
+    "outer_vlan": 4,
+    "ownership_tag": "[STC-RRSA2-S010-i3110]",
+    "rewrite_note": "B-15 rewrites Spirent outer 215 to DUT wire outer 4; inner tag is preserved.",
+    "spirent_flags": [
+      "--vlan",
+      "215",
+      "--inner-vlan",
+      "3110"
+    ],
+    "spirent_forbidden_flags": [
+      "--no-qinq"
+    ],
+    "spirent_outer_vlan": 215,
+    "src_mac_base": "00:de:be:01:00:0a",
+    "verification_commands": {
+      "local": "show evpn mac-table instance EVPN_PW_S010 mac 00:de:be:01:00:0a | no-more",
+      "remote": "show evpn mac-table instance EVPN_PW_S010 mac 00:de:be:01:00:0a | no-more"
+    },
+    "via_ac": "bundle-100.3110",
+    "via_device": "RR-SA-2"
+  }
+}

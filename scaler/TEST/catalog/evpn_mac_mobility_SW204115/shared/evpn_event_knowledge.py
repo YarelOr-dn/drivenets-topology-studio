@@ -124,16 +124,16 @@ EVPN_COUNTER_COMMANDS: List[Dict[str, str]] = [
         "description": "BGP L2VPN EVPN peer summary with prefix counts",
     },
     {
-        "label": "mobility_counter",
-        "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+        "label": "mac_summary",
+        "command": "show evpn mac summary | no-more",
         "parser": "key_value",
-        "description": "MAC mobility redis counter (total moves)",
+        "description": "Per-EVI MAC counts (replaces legacy redis-count which is invalid on DNOS 26.x).",
     },
     {
         "label": "ghost_mac_count",
-        "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more",
-        "parser": "line_count",
-        "description": "Ghost MAC entries (should be 0 normally)",
+        "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+        "parser": "ghost_mac_count",
+        "description": "Real ghost/suppression entries from the mac-table-ghost detail view; active selected MACs in that diagnostic output do not count.",
     },
     {
         "label": "fwd_table_count",
@@ -260,10 +260,7 @@ EVPN_HEALTH_CONFIG: Dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 EVPN_CLEANUP_COMMANDS: List[str] = [
-    "no debug evpn mac-mobility",
-    "no debug evpn mac-learning",
-    "no debug evpn mac-table",
-    "no set logging terminal",
+    "unset logging terminal",
 ]
 
 
@@ -274,7 +271,7 @@ EVPN_CLEANUP_COMMANDS: List[str] = [
 EVPN_CONFIG_BASELINE: Dict[str, Any] = {
     "sections": [
         "network-services evpn",
-        "protocols bgp",
+        "protocols bgp {asn}",
         "network-services bridge-domain",
     ],
     "full_config": False,

@@ -1,0 +1,298 @@
+{
+  "name": "2spine-4leaf-anycast-gw",
+  "protocol": "evpn-vxlan",
+  "scale": "medium",
+  "summary": "EVPN-VXLAN DC fabric: 2 spines + 4 leaves with anycast-gateway IRB. eBGP underlay (Juniper / Arista / Cisco style), BGP-EVPN overlay.",
+  "tags": [
+    "evpn",
+    "vxlan",
+    "spine-leaf",
+    "anycast-gw",
+    "clos-3-stage"
+  ],
+  "layout_hint": "clos-3-stage",
+  "objects": [
+    {
+      "id": "fabric",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 960,
+      "y": 520,
+      "width": 1600,
+      "height": 560,
+      "fillColor": "#1abc9c",
+      "fillEnabled": true,
+      "fillOpacity": 0.06,
+      "strokeColor": "#1abc9c",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 16,
+      "label": "EVPN-VXLAN Fabric (AS 65100)"
+    },
+    {
+      "id": "s1",
+      "type": "device",
+      "label": "Spine-1",
+      "x": 660,
+      "y": 320,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "s2",
+      "type": "device",
+      "label": "Spine-2",
+      "x": 1260,
+      "y": 320,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "leaf1",
+      "type": "device",
+      "label": "Leaf-1",
+      "x": 360,
+      "y": 720,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "leaf2",
+      "type": "device",
+      "label": "Leaf-2",
+      "x": 760,
+      "y": 720,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "leaf3",
+      "type": "device",
+      "label": "Leaf-3",
+      "x": 1160,
+      "y": 720,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "leaf4",
+      "type": "device",
+      "label": "Leaf-4",
+      "x": 1560,
+      "y": 720,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "lu_leaf1_s1",
+      "type": "link",
+      "device1": "leaf1",
+      "device2": "s1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP underlay"
+    },
+    {
+      "id": "lu_leaf1_s2",
+      "type": "link",
+      "device1": "leaf1",
+      "device2": "s2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP underlay"
+    },
+    {
+      "id": "lu_leaf2_s1",
+      "type": "link",
+      "device1": "leaf2",
+      "device2": "s1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP underlay"
+    },
+    {
+      "id": "lu_leaf2_s2",
+      "type": "link",
+      "device1": "leaf2",
+      "device2": "s2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP underlay"
+    },
+    {
+      "id": "lu_leaf3_s1",
+      "type": "link",
+      "device1": "leaf3",
+      "device2": "s1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP underlay"
+    },
+    {
+      "id": "lu_leaf3_s2",
+      "type": "link",
+      "device1": "leaf3",
+      "device2": "s2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP underlay"
+    },
+    {
+      "id": "lu_leaf4_s1",
+      "type": "link",
+      "device1": "leaf4",
+      "device2": "s1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP underlay"
+    },
+    {
+      "id": "lu_leaf4_s2",
+      "type": "link",
+      "device1": "leaf4",
+      "device2": "s2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP underlay"
+    },
+    {
+      "id": "lo_leaf1_s1",
+      "type": "link",
+      "device1": "leaf1",
+      "device2": "s1",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN overlay"
+    },
+    {
+      "id": "lo_leaf1_s2",
+      "type": "link",
+      "device1": "leaf1",
+      "device2": "s2",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN overlay"
+    },
+    {
+      "id": "lo_leaf2_s1",
+      "type": "link",
+      "device1": "leaf2",
+      "device2": "s1",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN overlay"
+    },
+    {
+      "id": "lo_leaf2_s2",
+      "type": "link",
+      "device1": "leaf2",
+      "device2": "s2",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN overlay"
+    },
+    {
+      "id": "lo_leaf3_s1",
+      "type": "link",
+      "device1": "leaf3",
+      "device2": "s1",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN overlay"
+    },
+    {
+      "id": "lo_leaf3_s2",
+      "type": "link",
+      "device1": "leaf3",
+      "device2": "s2",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN overlay"
+    },
+    {
+      "id": "lo_leaf4_s1",
+      "type": "link",
+      "device1": "leaf4",
+      "device2": "s1",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN overlay"
+    },
+    {
+      "id": "lo_leaf4_s2",
+      "type": "link",
+      "device1": "leaf4",
+      "device2": "s2",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN overlay"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "EVPN-VXLAN DC Fabric (2 spine / 4 leaf) - Anycast Gateway",
+      "x": 960,
+      "y": 140,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_vni",
+      "type": "text",
+      "text": "Anycast Gateway IRB\nVNI 10010 (Tenant A)\nVNI 10020 (Tenant B)",
+      "x": 260,
+      "y": 400,
+      "fontSize": 11,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#1abc9c",
+      "borderWidth": 1
+    },
+    {
+      "id": "t_encap",
+      "type": "text",
+      "text": "VXLAN UDP/4789 encapsulation\nBGP-EVPN AF (Type-2/3/5) control plane",
+      "x": 1660,
+      "y": 400,
+      "fontSize": 11,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#1abc9c",
+      "borderWidth": 1
+    }
+  ]
+}

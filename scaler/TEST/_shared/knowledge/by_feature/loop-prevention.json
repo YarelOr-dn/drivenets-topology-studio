@@ -1,0 +1,10 @@
+{
+  "commands": {
+    "show evpn local-loop-prevention": {
+      "last_seen_iso": "2026-04-30T14:38:42Z",
+      "protocol": "evpn",
+      "valid": false
+    }
+  },
+  "feature": "loop-prevention"
+}

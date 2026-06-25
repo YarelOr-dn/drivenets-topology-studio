@@ -61,14 +61,102 @@ def parse_evpn_mac_count(output: str) -> int:
     return count
 
 
+@dataclass
+class MacTableEntry:
+    """One MAC from 'show evpn mac-table instance <name> | no-more'.
+
+    The table has 6 pipe-delimited columns:
+      Flags | MAC address | ESI | Nexthop | Label/VNI | Resolution
+    The ESI column is often empty (spaces only) for single-homed entries.
+    NEVER filter out empty columns -- use positional indexing.
+    """
+    mac: str
+    flags: str = ""
+    esi: str = ""
+    nexthop: str = ""
+    label: str = ""
+    resolution: str = ""
+
+    @property
+    def is_local(self) -> bool:
+        return "L" in self.flags
+
+    @property
+    def is_remote_evpn(self) -> bool:
+        return "B" in self.flags and "v" not in self.flags
+
+    @property
+    def is_pw(self) -> bool:
+        return "v" in self.flags
+
+    @property
+    def is_sticky(self) -> bool:
+        return "K" in self.flags
+
+    @property
+    def is_selected(self) -> bool:
+        return ">" in self.flags
+
+    @property
+    def is_suppressed(self) -> bool:
+        return "P" in self.flags or "I" in self.flags
+
+    @property
+    def source(self) -> str:
+        if self.is_pw:
+            return "pw"
+        if self.is_remote_evpn:
+            return "bgp"
+        if self.is_local:
+            return "local"
+        return "unknown"
+
+
+def parse_mac_table_piped(output: str, mac_filter: Optional[str] = None) -> List[MacTableEntry]:
+    """Parse 'show evpn mac-table instance <name> | no-more' (6-col pipe format).
+
+    Handles the standard DNOS pipe-delimited MAC table output correctly,
+    including empty ESI, Label, and Resolution columns.
+    """
+    text = strip_ansi(output)
+    entries: List[MacTableEntry] = []
+    for line in text.splitlines():
+        parts = line.split("|")
+        if len(parts) < 4:
+            continue
+        mac_field = parts[1].strip() if len(parts) > 1 else ""
+        if not MAC_ADDR_RE.fullmatch(mac_field):
+            continue
+        if mac_filter and mac_filter.lower() not in mac_field.lower():
+            continue
+        entries.append(MacTableEntry(
+            mac=mac_field.lower(),
+            flags=parts[0].strip(),
+            esi=parts[2].strip() if len(parts) > 2 else "",
+            nexthop=parts[3].strip() if len(parts) > 3 else "",
+            label=parts[4].strip() if len(parts) > 4 else "",
+            resolution=parts[5].strip() if len(parts) > 5 else "",
+        ))
+    return entries
+
+
+def find_mac(output: str, mac: str) -> Optional[MacTableEntry]:
+    """Find a specific MAC in the piped table output. Returns None if not found."""
+    entries = parse_mac_table_piped(output, mac_filter=mac)
+    return entries[0] if entries else None
+
+
 def parse_evpn_mac_entries(output: str) -> List[Dict[str, str]]:
     """
     Best-effort parse of MAC table lines into dicts with mac, source hints.
 
-    DNOS column layout varies; we capture MAC and keywords (Local, BGP, PW, sticky).
+    Handles two DNOS output formats:
+    - List format: flags column before pipe (L>, B>, Lv) + 'via local/remote' in Resolution
+    - Per-MAC detail format: 'Protocol: Local/BGP' on the line following the MAC line
     """
     entries: List[Dict[str, str]] = []
-    for line in strip_ansi(output).splitlines():
+    lines = strip_ansi(output).splitlines()
+    for i, line in enumerate(lines):
         m = MAC_ADDR_RE.search(line)
         if not m:
             continue
@@ -81,20 +169,66 @@ def parse_evpn_mac_entries(output: str) -> List[Dict[str, str]]:
             source = "bgp"
         if "PW" in upper or "PSEUDO" in upper or "VPLS" in upper:
             source = "pw"
+
+        if source == "unknown" and "|" in line:
+            flags_part = line.split("|")[0].strip()
+            if flags_part and len(flags_part) <= 8:
+                if "v" in flags_part:
+                    source = "pw"
+                elif "B" in flags_part.upper():
+                    source = "bgp"
+                elif "L" in flags_part.upper():
+                    source = "local"
+
+        if source == "unknown":
+            for j in range(i + 1, min(i + 5, len(lines))):
+                ctx_stripped = lines[j].strip().upper()
+                if ctx_stripped.startswith("PROTOCOL:"):
+                    proto = ctx_stripped.split(":", 1)[1].strip()
+                    if "LOCAL" in proto:
+                        source = "local"
+                    elif "BGP" in proto or "REMOTE" in proto:
+                        source = "bgp"
+                    elif "PW" in proto or "PSEUDO" in proto or "VPLS" in proto:
+                        source = "pw"
+                    break
+                if not lines[j].strip() or MAC_ADDR_RE.search(lines[j]):
+                    break
+
         sticky = "sticky" in line.lower() or "STICKY" in upper
-        # source_aliases: recipes may use "ac" to mean "local AC-learned"
+        if not sticky and "|" in line:
+            flags_part = line.split("|")[0].strip()
+            if "K" in flags_part:
+                sticky = True
+        seq_num = None
+        if not sticky or seq_num is None:
+            for j in range(i + 1, min(i + 12, len(lines))):
+                ctx_line = lines[j].strip().lower()
+                if not sticky and ctx_line.startswith("sticky:") and "true" in ctx_line:
+                    sticky = True
+                if seq_num is None and "sequence" in ctx_line:
+                    seq_m = re.search(r"(\d+)", ctx_line)
+                    if seq_m:
+                        seq_num = int(seq_m.group(1))
+                if not lines[j].strip() or MAC_ADDR_RE.search(lines[j]):
+                    break
         source_aliases = [source]
         if source == "local":
-            source_aliases.append("ac")
-        entries.append(
-            {
-                "mac": mac,
-                "line": line.strip(),
-                "source_hint": source,
-                "source_aliases": source_aliases,
-                "sticky": str(sticky).lower(),
-            }
-        )
+            source_aliases.extend(["ac", "l", "l>"])
+        if source == "bgp":
+            source_aliases.extend(["evpn", "remote", "b", "b>"])
+        if source == "pw":
+            source_aliases.extend(["pseudo", "vpls", "v", "v>"])
+        entry = {
+            "mac": mac,
+            "line": line.strip(),
+            "source_hint": source,
+            "source_aliases": source_aliases,
+            "sticky": str(sticky).lower(),
+        }
+        if seq_num is not None:
+            entry["sequence"] = seq_num
+        entries.append(entry)
     return entries
 
 
@@ -255,12 +389,22 @@ def parse_mac_detail(output: str) -> List[MacDetailEntry]:
                 flags.append(flag_char)
 
         source = "unknown"
-        if "local" in lower and "remote" not in lower:
-            source = "local"
-        elif any(kw in lower for kw in ("bgp", "evpn", "remote")):
-            source = "bgp"
-        elif any(kw in lower for kw in ("pw", "pseudo", "vpls")):
-            source = "pw"
+        proto_m = re.search(r"protocol\s*:\s*(\S+)", lower)
+        if proto_m:
+            proto_val = proto_m.group(1)
+            if proto_val in ("local", "static"):
+                source = "local"
+            elif proto_val in ("bgp", "evpn", "remote"):
+                source = "bgp"
+            elif proto_val in ("pw", "pseudo", "vpls"):
+                source = "pw"
+        else:
+            if "local" in lower and "remote" not in lower:
+                source = "local"
+            elif any(kw in lower for kw in ("bgp", "evpn", "remote")):
+                source = "bgp"
+            elif any(kw in lower for kw in ("pw", "pseudo", "vpls")):
+                source = "pw"
 
         entries.append(MacDetailEntry(
             mac=mac,
@@ -467,26 +611,47 @@ def parse_loop_prevention_interface(output: str) -> List[LoopPreventionIfEntry]:
 def parse_loop_prevention_local(output: str) -> Dict[str, Any]:
     """Parse 'show evpn instance <name> loop-prevention local | no-more'.
 
-    Returns dict with admin_state, detection counts, and per-MAC data
-    if the output contains MAC-level local loop info.
+    Returns dict with admin_state, detection counts, and per-MAC data with move counts.
+    DUT output format:
+        | 00:de:ad:00:01:01 | 0 / 5 |
+        where 0 = current moves in window, 5 = threshold
     """
     text = strip_ansi(output)
     result: Dict[str, Any] = {
         "admin_state": "unknown",
         "total_local_loops": 0,
+        "threshold": 0,
+        "window_sec": 0,
         "macs": [],
+        "mac_moves": {},
     }
 
     for line in text.splitlines():
         lower = line.lower().strip()
-        if "admin" in lower and ("enabled" in lower or "disabled" in lower):
+        if "loop prevention" in lower and ("enabled" in lower or "disabled" in lower):
             result["admin_state"] = "enabled" if "enabled" in lower else "disabled"
-        cnt_m = re.search(r"total[\s:-]+(\d+)", lower)
-        if cnt_m:
-            result["total_local_loops"] = int(cnt_m.group(1))
+        if "loop detection threshold" in lower:
+            tm = re.search(r"(\d+)\s*$", lower)
+            if tm:
+                result["threshold"] = int(tm.group(1))
+        if "loop detection window" in lower:
+            wm = re.search(r"(\d+)", lower)
+            if wm:
+                result["window_sec"] = int(wm.group(1))
+        if "number of shutdown" in lower:
+            sm = re.search(r"(\d+)\s*$", lower)
+            if sm:
+                result["total_local_loops"] = int(sm.group(1))
         m = MAC_ADDR_RE.search(line)
         if m:
-            result["macs"].append(m.group(0).lower())
+            mac = m.group(0).lower()
+            result["macs"].append(mac)
+            move_m = re.search(r"(\d+)\s*/\s*(\d+)", line[m.end():])
+            if move_m:
+                result["mac_moves"][mac] = {
+                    "moves": int(move_m.group(1)),
+                    "threshold": int(move_m.group(2)),
+                }
 
     return result
 
@@ -568,14 +733,32 @@ def parse_ghost_macs(output: str) -> List[str]:
     """Parse 'show dnos-internal routing evpn instance <name>
     mac-table-ghost | no-more'.
 
-    Returns list of ghost MAC addresses.
+    Returns only MAC addresses that look like real ghost/suppression entries.
+
+    DNOS implements the ghost detail command as an "also include ghosts" view:
+    selected active MACs are printed too. A plain MAC-address count therefore
+    produces false failures for healthy L>, B>, or v> entries.
     """
     text = strip_ansi(output)
     ghosts: List[str] = []
-    for line in text.splitlines():
-        m = MAC_ADDR_RE.search(line)
-        if m:
-            ghosts.append(m.group(0).lower())
+    chunks = re.split(r"(?=^MAC address:\s*)", text, flags=re.MULTILINE)
+    for chunk in chunks:
+        m = re.search(r"^MAC address:\s*(" + MAC_ADDR_RE.pattern + r")", chunk, re.MULTILINE)
+        if not m:
+            continue
+        mac = m.group(1).lower()
+        lower = chunk.lower()
+        has_selected_protocol = "protocol:" in lower
+        has_suppression = (
+            "suppression: suppressed" in lower
+            or "suppression: indefinitely" in lower
+            or "traffic handling: drop" in lower
+        )
+        has_stale_protocol = re.search(r"protocol:\s+\S+,\s*stale", lower) is not None
+        has_no_bestpath = not has_selected_protocol
+
+        if has_suppression or has_stale_protocol or has_no_bestpath:
+            ghosts.append(mac)
     return ghosts
 
 

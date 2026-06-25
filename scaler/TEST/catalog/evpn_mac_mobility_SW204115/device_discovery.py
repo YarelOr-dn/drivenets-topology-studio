@@ -10,12 +10,16 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict
 
 _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+# sys.path setup above is required so the shared/ subpackage resolves when
+# this module is invoked directly. ruff E402 is suppressed for the rest of
+# the imports in this file.
+# ruff: noqa: E402
 from shared.mac_parsers import (
     parse_bgp_l2vpn_evpn_summary,
     parse_evpn_instance_names,
@@ -210,7 +214,7 @@ def discover_device_context(device: str, run_show: RunShowFn) -> Dict[str, Any]:
 
     # BGP address-family config (separate from EVPN instance config)
     try:
-        bgp_cfg = run_show(device, "show config protocols bgp | no-more")
+        bgp_cfg = run_show(device, "show config | flatten | no-more")
         ctx["raw_snippets"]["show_config_protocols_bgp"] = bgp_cfg[:12000]
         ctx["bgp_l2vpn_evpn_af_configured"] = "address-family l2vpn-evpn" in strip_ansi(bgp_cfg).lower()
         ctx["bgp_l2vpn_vpls_af_configured"] = "address-family l2vpn-vpls" in strip_ansi(bgp_cfg).lower()
@@ -218,7 +222,7 @@ def discover_device_context(device: str, run_show: RunShowFn) -> Dict[str, Any]:
         ctx["discovery_errors"] = ctx.get("discovery_errors", []) + [f"show config bgp: {exc}"]
 
     try:
-        bd = run_show(device, "show bridge-domain instance | no-more")
+        bd = run_show(device, "show bridge-domain summary | no-more")
         ctx["raw_snippets"]["show_bridge_domain"] = bd[:4000]
         ctx["bridge_domain_hint"] = True if strip_ansi(bd).strip() else False
     except Exception:

@@ -1,0 +1,12 @@
+{
+  "data": {
+    "failed_services": 0,
+    "iteration": 1,
+    "passed_services": 200,
+    "sample_failures": [],
+    "total_services": 200
+  },
+  "detail": "all service MACs learned on both sides",
+  "ok": true,
+  "phase": "multi_mobility_cycle_1_baseline_verify"
+}

@@ -1,0 +1,222 @@
+{
+  "description": "Infrastructure mode definitions for EVPN MAC Mobility test suite (SW-204115). Determines which tests are valid based on the DUT's EVPN configuration and lab topology.",
+
+  "modes": {
+    "si_mode": {
+      "label": "Seamless Integration Active",
+      "detection": {
+        "command": "show config network-services evpn instance {evpn_name} | flatten | include seamless-integration",
+        "present_means": "SI is active",
+        "function": "check_si_mode"
+      },
+      "pw_state": "BNI (Best but Not Installed)",
+      "pw_data_plane": false,
+      "pw_control_plane": true,
+      "valid_test_groups": ["basic_learning", "ac_ac", "ac_evpn", "aging_timers", "withdraw_flush", "ha_mac_mobility"],
+      "blocked_test_groups": ["ac_pw", "evpn_pw", "pw_pw"],
+      "partial_test_groups": {
+        "sticky_modes": {
+          "valid_scenarios": ["SC01", "SC02", "SC05"],
+          "blocked_scenarios": ["SC03", "SC04", "SC06"],
+          "reason": "SC03/SC04/SC06 require PW data-plane MAC learning"
+        }
+      },
+      "spirent_capabilities": {
+        "ac_l2_traffic": true,
+        "evpn_rt2_injection": true,
+        "evpn_rt2_withdrawal": true,
+        "evpn_rt2_sticky": true,
+        "pw_data_plane_traffic": false,
+        "reason": "PW is BNI; Spirent cannot inject MPLS-tunneled L2 frames into a PW anyway"
+      }
+    },
+
+    "spirent_vpls_cp": {
+      "label": "Spirent VPLS BGP Peer (non-SI instance, PW active)",
+      "description": "Create a second EVPN instance WITHOUT seamless-integration on PE-1. Spirent establishes l2vpn-vpls BGP peering. PW comes up with active data plane (not BNI). Spirent sends MPLS-labeled L2 frames via vpls-stream using the PW ingress label. PE-1 processes MPLS, pops label, learns source MAC from inner L2 frame.",
+      "detection": {
+        "method": "Check for non-SI EVPN instance + Spirent VPLS BGP peer",
+        "commands": [
+          "show config network-services evpn instance {pw_test_evpn_name} | flatten | include seamless-integration",
+          "show evpn vpls-pw | no-more",
+          "show bgp l2vpn vpls summary | no-more"
+        ]
+      },
+      "pw_state": "Active (forwarding via Spirent VPLS peer)",
+      "pw_data_plane": true,
+      "pw_control_plane": true,
+      "valid_test_groups": ["ac_pw", "evpn_pw", "sticky_modes(SC03-SC06)"],
+      "valid_with_two_spirent_peers": ["pw_pw"],
+      "spirent_capabilities": {
+        "ac_l2_traffic": true,
+        "evpn_rt2_injection": true,
+        "pw_data_plane_traffic": true,
+        "vpls_bgp_peer": true,
+        "vpls_stream_mpls": true
+      },
+      "setup_steps": [
+        "1. Ensure VPLS label block allocated: show mpls label-allocation tables | no-more (look for bgp-vpls row != 0). If missing: routing-options bgp-vpls-label-block-size 130",
+        "2. Enable BGP l2vpn-vpls AF on PE-1 (UNVALIDATED: verify 'show config protocols bgp {asn} | flatten | include l2vpn-vpls' returns data before assuming syntax)",
+        "3. Create non-SI EVPN instance (e.g., PW_TEST_ELAN) with AC on DNAAS path",
+        "4. Spirent: bgp-peer --negotiate-afi l2vpn-vpls --vpls-rd <rd> --vpls-rt <rt> --vpls-ve-id <id>",
+        "5. Verify PW up: show evpn vpls-pw | no-more (grep/filter for PW_TEST_ELAN; state != BNI)",
+        "6. Get ingress label: show evpn vpls-pw | no-more (grep/filter for PW_TEST_ELAN row)",
+        "7. Spirent: vpls-stream --mpls-label <ingress_label> --inner-src-mac <mac>"
+      ],
+      "prerequisites_auto_fix": {
+        "vpls_label_pool": {
+          "check_command": "show mpls label-allocation tables | no-more",
+          "expect": "bgp-vpls row with non-zero label count",
+          "alt_check": "show config routing-options | flatten | include bgp-vpls-label-block-size",
+          "alt_check_2": "show mpls label-allocation shared-pool | no-more",
+          "fix_config": "routing-options bgp-vpls-label-block-size 130",
+          "known_bug": "SW-253359: on cluster devices, label pool may show 0 labels even after config+restart due to FIB preservation. See known-dnos-bugs.mdc.",
+          "validated_show_commands": {
+            "show mpls label-allocation shared-pool | no-more": "PE-1 2026-04-02 -- shows shared pool ranges + per-protocol counts (ldp, rsvp, bgp, sr). No bgp-vpls row here.",
+            "show mpls label-allocation tables | no-more": "SW-253359 evidence -- shows all label tables including bgp-vpls block if configured"
+          }
+        },
+        "bgp_l2vpn_vpls_af": {
+          "check_command": "show config protocols bgp {asn} | flatten | include l2vpn-vpls",
+          "expect": "address-family l2vpn-vpls",
+          "fix_config": "protocols bgp {asn} address-family l2vpn-vpls",
+          "validated": true,
+          "validation_note": "VALIDATED on PE-1 2026-04-02: command works, returns expected output"
+        },
+        "non_si_evpn_instance": {
+          "check_command": "show config network-services evpn instance {pw_test_evpn_name} | no-more",
+          "expect": "instance {pw_test_evpn_name}",
+          "fix_config_template": "config_knowledge.py -> get_non_si_evpn_config()"
+        },
+        "spirent_vpls_peer": {
+          "check_command": "show bgp l2vpn vpls summary | no-more",
+          "expect": "Established",
+          "fix_via": "spirent_tool.py bgp-peer --negotiate-afi l2vpn-vpls --vpls-rd {rd} --vpls-rt {rt} --vpls-ve-id {ve_id}",
+          "validated": true,
+          "validation_note": "VALIDATED on PE-1 2026-04-02: command works, returns expected output"
+        },
+        "pw_active_not_bni": {
+          "check_command": "show evpn vpls-pw | no-more",
+          "expect": "forwarding state != BNI",
+          "depends_on": ["non_si_evpn_instance", "spirent_vpls_peer"]
+        }
+      },
+      "runtime_parameters": {
+        "pw_test_evpn_name": {"default": "PW_TEST_ELAN", "description": "Non-SI EVPN instance for PW testing"},
+        "pw_test_evi": {"default": 9990, "description": "EVI for PW test instance"},
+        "pw_test_ac": {"default": "ge400-0/0/5.1010", "description": "AC interface on DNAAS path"},
+        "vpls_rd": {"default": "1.1.1.1:9990", "description": "RD for VPLS BGP routes"},
+        "vpls_rt": {"default": "9990:9990", "description": "RT import/export for VPLS instance"},
+        "vpls_ve_id": {"default": 1, "description": "Spirent VE-ID (must be >= 1; PE-1 local site-id must be within label block range)"},
+        "pe1_site_id": {"default": 2, "description": "PE-1 local site-id (MUST be within Spirent label block range: offset 1, block 8 = VE-IDs 1-8)"},
+        "vpls_label_block_size": {"default": 8},
+        "vpls_peer_loopback": {"default": "3.3.3.3", "description": "Spirent loopback (ISIS/LDP advertised, used as BGP nexthop)"},
+        "vpls_peer_connected_ip": {"default": "17.17.17.2", "description": "Spirent connected IP (BGP TCP source)"},
+        "vpls_peer_gw": {"default": "17.17.17.1", "description": "PE-1 connected IP (gateway for Spirent)"},
+        "vpls_bgp_update_source": {"default": "ge400-0/0/5.3", "description": "PE-1 sub-interface for BGP update-source"}
+      },
+      "validated_on_pe1": {
+        "date": "2026-04-02",
+        "vpls_pw_state": "Installed",
+        "ingress_label": 1032271,
+        "egress_label": 17,
+        "remote_site_id": 1,
+        "local_site_id": 2,
+        "bgp_state": "Established",
+        "ac_state": "up / forwarding-all"
+      },
+      "session_discoveries": [
+        "STC ISIS: NetworkType='P2P' not 'POINT_TO_POINT'; Area1= not AreaId=; hex format '490001' not '49.0001'",
+        "STC LDP: No RouterId attribute; use DutIp + TransportTlvMode='TLTV_ADDR'",
+        "STC VPLS: --vpls-nexthop forces BGP nexthop to loopback (required for LDP label resolution)",
+        "DNOS: update-source REQUIRED even for directly connected iBGP neighbors",
+        "DNOS: site-id N site-interface IF is ONE-LINER (site-interface is arg, not subcommand)",
+        "DNOS: show evpn vpls-pw has NO instance filter; parse programmatically",
+        "DNOS: VE-ID must fall within remote peer label block range (offset+block_size)",
+        "dnos_session.py: | no-more breaks config commands; _CFG_PREFIXES detection added"
+      ]
+    },
+
+    "spirent_vpls_cp_dual": {
+      "label": "Spirent VPLS Dual Peer (PW <-> PW data plane)",
+      "description": "Same SI EVPN instance + ISIS+LDP+BGP transport as spirent_vpls_cp, but with TWO Spirent VPLS BGP peers (different VE-IDs and source IPs on the same Spirent port). The DUT sees two distinct PWs against the SI instance and can resolve PW-to-PW MAC moves. Requires the EVI's VPLS label block to cover both VE-IDs (block-size + offset).",
+      "detection": {
+        "method": "Two distinct VPLS PWs Installed against the same EVI",
+        "commands": [
+          "show evpn vpls-pw | no-more",
+          "show bgp summary | include 17.17.17"
+        ]
+      },
+      "pw_state": "Two PWs Installed (forwarding)",
+      "pw_data_plane": true,
+      "pw_control_plane": true,
+      "valid_test_groups": ["pw_pw"],
+      "spirent_capabilities": {
+        "ac_l2_traffic": true,
+        "evpn_rt2_injection": true,
+        "pw_data_plane_traffic": true,
+        "vpls_bgp_peer": true,
+        "vpls_stream_mpls": true,
+        "two_concurrent_vpls_peers": true
+      },
+      "provisioner": "spirent_vpls_provisioner.provision_spirent_vpls_cp_dual()",
+      "convergence_budget_seconds": 120,
+      "runtime_parameters": {
+        "pw_test_evpn_name": {"default": "PW_TEST_ELAN"},
+        "vpls_ve_id_1": {"default": 1, "description": "First Spirent peer VE-ID = PW1"},
+        "vpls_ve_id_2": {"default": 3, "description": "Second Spirent peer VE-ID = PW2"},
+        "vpls_label_block_size": {"default": 8, "description": "Must cover both VE-IDs"},
+        "vpls_peer_loopback": {"default": "6.6.6.6"},
+        "vpls_peer_connected_ip_1": {"default": "17.17.17.2"},
+        "vpls_peer_connected_ip_2": {"default": "17.17.17.4"}
+      },
+      "notes": [
+        "Single ISIS+LDP+BGP chain shared between both peers (STC port-level).",
+        "Each PW gets its own ingress label -- recipes resolve them as pw1_ingress_label and pw2_ingress_label.",
+        "PW-to-PW move: send same inner-src-mac on PW1 label, then PW2 label."
+      ]
+    },
+
+    "dual_pe_mode": {
+      "label": "Dual-PE Topology",
+      "detection": {
+        "method": "Check if a second PE has VPLS PW to the DUT",
+        "commands": [
+          "show evpn vpls-pw | no-more",
+          "show bgp l2vpn vpls summary | no-more"
+        ]
+      },
+      "pw_state": "Active (real PE-to-PE PW)",
+      "pw_data_plane": true,
+      "valid_test_groups": "ALL including multihoming",
+      "setup": "Requires second PE (PE-4) with VPLS peering and DNAAS path from Spirent",
+      "spirent_role": "Send L2 traffic to PE-2 AC via DNAAS. PE-2 forwards over PW to PE-1. PE-1 learns MAC from PW.",
+      "dnaas_requirement": "Bridge domain from Spirent leaf (B-14) to PE-2's leaf"
+    }
+  },
+
+  "pw_mac_learning_facts": {
+    "from_jira_SW191136": "The source MAC received on packets from VPLS PW must be learnt and aged out.",
+    "mechanism": "DATA PLANE. DUT inspects L2 frames arriving on PW, extracts source MAC, adds to MAC table.",
+    "not_control_plane": "EVPN RT-2 is control plane signaling. PW MAC learning is fundamentally different -- it requires actual traffic on the PW tunnel.",
+    "bni_impact": "When PW is BNI (Best but Not Installed), no traffic flows on the PW. Therefore no MAC learning from PW is possible.",
+    "common_mistake": "Replacing PW triggers with EVPN RT-2 injection tests a DIFFERENT functionality (control-plane MAC mobility, not data-plane PW MAC learning)."
+  },
+
+  "mh_dnaas_workaround": {
+    "description": "Multi-homing via DNAAS dual-PE path",
+    "approach": "Spirent port on B-14 sends L2 traffic through two different DNAAS BD paths to two different PEs. Both PEs have same ESI on their ACs.",
+    "requirements": [
+      "Two PEs (e.g., PE-1 and PE-4) with EVPN instances sharing the same ESI",
+      "DNAAS BD from B-14 to PE-1's leaf (D-16) -- already exists",
+      "DNAAS BD from B-14 to PE-4's leaf -- needs creation",
+      "VPLS peering between PE-1 and PE-4"
+    ],
+    "control_plane_alternative": {
+      "description": "Spirent BGP injects EVPN RT-1 (per-EVI/per-ES) and RT-4 (ES route) to simulate a remote PE in the same Ethernet Segment",
+      "what_it_tests": "DF election, mass-withdraw, split-horizon filtering",
+      "what_it_cannot_test": "Actual dual-homed CE traffic forwarding",
+      "spirent_objects": ["BgpEvpnEthernetAutoDiscoveryRouteConfig (RT-1)", "BgpEvpnEthernetSegmentRouteConfig (RT-4)"]
+    }
+  }
+}

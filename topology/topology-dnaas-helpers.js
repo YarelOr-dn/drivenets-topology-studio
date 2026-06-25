@@ -14,6 +14,13 @@ window.DnaasHelpers = {
         return this._editor || window.app;
     },
 
+    _authFetch(url, options = {}) {
+        if (window.TopologyAuth && typeof window.TopologyAuth.authFetch === 'function') {
+            return window.TopologyAuth.authFetch(url, options);
+        }
+        return fetch(url, options);
+    },
+
     _findActiveNcc(inventory, deviceKey) {
         if (!deviceKey || !inventory?.devices) return null;
         const deviceName = deviceKey.split('(')[0].trim();
@@ -72,25 +79,117 @@ window.DnaasHelpers = {
     async _ensureDnaasSection() {
         if (this._dnaasSectionId) return this._dnaasSectionId;
         try {
-            const resp = await fetch('/api/sections');
+            const authFetch = (window.TopologyAuth && window.TopologyAuth.authFetch)
+                ? window.TopologyAuth.authFetch
+                : (url, opts) => fetch(url, opts);
+            const resp = await authFetch('/api/sections');
             const data = await resp.json();
             const sections = data.sections || [];
-            const existing = sections.find(s => s.name === 'DNAAS');
+            const existing = sections.find(s => s.id === '__dnaas' || s.name === 'DNAAS');
             if (existing) {
                 this._dnaasSectionId = existing.id;
                 return existing.id;
             }
-            const createResp = await fetch('/api/sections', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: 'DNAAS', icon: '🔗', color: '#FF5E1F' })
-            });
-            const result = await createResp.json();
-            this._dnaasSectionId = result.section.id;
-            return result.section.id;
+            this._dnaasSectionId = '__dnaas';
+            return '__dnaas';
         } catch (err) {
             console.error('[DNAAS] Failed to ensure section:', err);
             throw err;
+        }
+    },
+
+    /**
+     * Silently stage a DNAAS-discovered topology into the user's DNAAS
+     * domain so the rest of the app behaves identically to opening any
+     * saved topology: the topbar shows an orange "DNAAS / <name>" pill,
+     * the auto-save loop targets the right slot, and the Topologies
+     * modal lists the entry under the DNAAS section.
+     *
+     * Multi-user safe: every backend hop (`/api/sections`,
+     * `/api/sections/<id>/save`) is JWT-scoped via the auth-fetch shim,
+     * so two simultaneous users land in their own per-user state file
+     * (`~/.topology_users/<user>/sections/<DNAAS_section_id>/<name>.json`).
+     *
+     * Returns { sectionId, name, sectionMeta } on success, or null on
+     * failure (the canvas is already loaded; we just skip the indicator).
+     */
+    async _autoStageDnaasTopology(editor, data, sourceLabel) {
+        if (!data || !editor) return null;
+        try {
+            const sectionId = await this._ensureDnaasSection();
+
+            // Build a stable default name. Mirror the format the explicit
+            // "Save" dialog uses (`<source>_dnaas_<YYYYMMDD>`) plus a short
+            // HHmm suffix so re-discovering the same DUT in the same day
+            // doesn't silently overwrite the previous run.
+            const now = new Date();
+            const dateStr = now.getFullYear().toString()
+                + String(now.getMonth() + 1).padStart(2, '0')
+                + String(now.getDate()).padStart(2, '0');
+            const timeStr = String(now.getHours()).padStart(2, '0')
+                + String(now.getMinutes()).padStart(2, '0');
+            const seed = (sourceLabel
+                || data.metadata?.source
+                || 'discovery').toString().trim() || 'discovery';
+            const defaultName = `${seed}_dnaas_${dateStr}_${timeStr}`;
+
+            // Snapshot current canvas state via the editor so the saved
+            // payload includes the layout we just applied.
+            let payload;
+            try {
+                payload = editor.generateTopologyData();
+            } catch (e) {
+                payload = { objects: editor.objects || [], metadata: {} };
+            }
+            payload.metadata = payload.metadata || {};
+            payload.metadata.isDnaas = true;
+            payload.metadata.dnaasName = defaultName;
+            payload.metadata.savedAt = Date.now();
+            payload.metadata.deviceCount = (editor.objects || [])
+                .filter(o => o.type === 'device').length;
+            payload.metadata.linkCount = (editor.objects || [])
+                .filter(o => o.type === 'link' || o.type === 'unbound').length;
+            if (data.metadata?.bridge_domains?.length) {
+                payload.metadata.bridge_domains = data.metadata.bridge_domains;
+            }
+            if (data.metadata?.device_bd_mapping) {
+                payload.metadata.device_bd_mapping = data.metadata.device_bd_mapping;
+            }
+            if (data.metadata?.source) {
+                payload.metadata.source = data.metadata.source;
+            }
+
+            const resp = await this._authFetch(`/api/sections/${sectionId}/save`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: defaultName, topology: payload })
+            });
+            const result = await resp.json();
+            if (result.error) throw new Error(result.error);
+
+            // Resolve the section's display metadata so the topbar pill
+            // matches the Topologies modal exactly.
+            let sectionMeta = (editor._customSections || [])
+                .find(s => s.id === sectionId);
+            if (!sectionMeta) {
+                sectionMeta = { id: sectionId, name: 'DNAAS', color: '#FF5E1F' };
+            }
+
+            if (typeof FileOps !== 'undefined' && FileOps.updateTopologyIndicator) {
+                FileOps.updateTopologyIndicator(
+                    defaultName,
+                    sectionMeta.name || 'DNAAS',
+                    sectionMeta.color || '#FF5E1F',
+                    sectionId
+                );
+            }
+            if (editor.loadCustomSections) {
+                try { editor.loadCustomSections(); } catch (_) { /* non-fatal */ }
+            }
+            return { sectionId, name: defaultName, sectionMeta };
+        } catch (err) {
+            console.warn('[DNAAS] auto-stage into DNAAS domain failed:', err);
+            return null;
         }
     },
     
@@ -262,8 +361,40 @@ window.DnaasHelpers = {
         const startBtn = document.getElementById('dnaas-start-discovery');
         const resultActions = document.getElementById('dnaas-result-actions');
         const cancelBtn = document.getElementById('dnaas-cancel-discovery');
-        
-        // Reset cancellation state
+
+        // Mode-gate: DNAAS discovery requires DNOS CLI on the device.
+        // Try to find the canvas device that matches this serial/IP/label so
+        // we can call the central gate (DeviceMonitor's cached
+        // _deviceMode + a quick live probe). If we cannot find the device on
+        // canvas (e.g. the user typed a brand-new IP) we fall through and
+        // let the backend decide -- the backend probe is the single source
+        // of truth and will report GI / RECOVERY anyway.
+        if (typeof window.DeviceModeGate !== 'undefined' && editor && editor.objects) {
+            const target = (serial || '').trim();
+            const lc = target.toLowerCase();
+            const candidate = editor.objects.find(o =>
+                o && o.type === 'device' && (
+                    (o.label || '').toLowerCase() === lc ||
+                    (o.deviceSerial || '').toLowerCase() === lc ||
+                    (o.serial || '').toLowerCase() === lc ||
+                    (o.sshConfig?.host || '').toLowerCase() === lc ||
+                    (o.sshConfig?.hostBackup || '').toLowerCase() === lc
+                )
+            );
+            if (candidate) {
+                const decision = await window.DeviceModeGate.require(
+                    candidate, 'dnaas_discovery', { live: false }
+                );
+                if (!decision) {
+                    if (statusSpan) {
+                        statusSpan.textContent = 'Blocked';
+                        statusSpan.style.background = 'rgba(231,76,60,0.5)';
+                    }
+                    return;
+                }
+            }
+        }
+
         editor._discoveryAbortController = new AbortController();
         editor._currentDiscoveryJobId = null;
         
@@ -358,7 +489,14 @@ window.DnaasHelpers = {
                     } catch (pollErr) {
                         // Check if this is a discovery failure or a transient error
                         if (pollErr.message.includes('not found')) {
-                            // Job not ready yet, wait and retry
+                            if (ScalerAPI.findDnaasDiscovery) {
+                                const found = await ScalerAPI.findDnaasDiscovery(serial).catch(() => null);
+                                if (found && found.job_id && found.status !== 'none') {
+                                    jobId = found.job_id;
+                                    editor._currentDiscoveryJobId = jobId;
+                                    if (outputDiv) outputDiv.textContent += `Reattached to discovery job: ${jobId}\n`;
+                                }
+                            }
                             await new Promise(r => setTimeout(r, 500));
                         } else if (pollErr.message.includes('Connection failed') || 
                                    pollErr.message.includes('Discovery failed') ||
@@ -379,7 +517,7 @@ window.DnaasHelpers = {
                 
                 if (outputDiv) outputDiv.textContent += `Calling discovery API...\n`;
                 
-                const response = await fetch('/api/dnaas/discovery/start', {
+                const response = await this._authFetch('/api/dnaas/discovery/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ serial1: serial })
@@ -410,7 +548,7 @@ window.DnaasHelpers = {
                     await new Promise(r => setTimeout(r, 1000));
                     attempts++;
                     
-                    const statusResp = await fetch(`/api/dnaas/discovery/status?job_id=${encodeURIComponent(jobId)}`);
+                    const statusResp = await this._authFetch(`/api/dnaas/discovery/status?job_id=${encodeURIComponent(jobId)}`);
                     if (statusResp.ok) {
                         const status = await statusResp.json();
                         
@@ -481,7 +619,7 @@ window.DnaasHelpers = {
                             if (typeof ScalerAPI !== 'undefined') {
                                 data = await ScalerAPI.getDnaasFile(filename);
                             } else {
-                                const resp = await fetch(`/api/dnaas/discovery/file/${encodeURIComponent(filename)}`);
+                                const resp = await this._authFetch(`/api/dnaas/discovery/file/${encodeURIComponent(filename)}`);
                                 data = await resp.json();
                             }
                             
@@ -591,7 +729,7 @@ window.DnaasHelpers = {
                     await ScalerAPI.cancelDnaasDiscovery(jobId);
                 } else {
                     // Fallback: direct API call to appropriate endpoint
-                    await fetch(cancelEndpoint, {
+                    await this._authFetch(cancelEndpoint, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ job_id: jobId })
@@ -794,9 +932,17 @@ window.DnaasHelpers = {
                     try {
                         status = await ScalerAPI.getMultiBDDiscoveryStatus(jobId);
                     } catch (statusErr) {
-                        // If job not found, the server was likely restarted - abort polling
                         if (statusErr.message && statusErr.message.includes('not found')) {
-                            throw new Error('Discovery job lost - server may have restarted. Please try again.');
+                            if (ScalerAPI.findMultiBDDiscovery) {
+                                const found = await ScalerAPI.findMultiBDDiscovery(serial).catch(() => null);
+                                if (found && found.job_id && found.status !== 'none') {
+                                    jobId = found.job_id;
+                                    editor._currentDiscoveryJobId = jobId;
+                                    if (outputDiv) outputDiv.textContent += `Reattached to Multi-BD job: ${jobId}\n`;
+                                    continue;
+                                }
+                            }
+                            throw new Error('Discovery job lost - server may have restarted and no durable job was found.');
                         }
                         continue;
                     }
@@ -848,7 +994,7 @@ window.DnaasHelpers = {
                 // Fallback: Direct API call
                 if (outputDiv) outputDiv.textContent += `Using direct API...\n`;
                 
-                const response = await fetch('/api/dnaas/multi-bd/start', {
+                const response = await this._authFetch('/api/dnaas/multi-bd/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ serial: serial })
@@ -901,7 +1047,7 @@ window.DnaasHelpers = {
                     if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getMultiBDFile) {
                         data = await ScalerAPI.getMultiBDFile(filename);
                     } else {
-                        const resp = await fetch(`/api/dnaas/multi-bd/file/${encodeURIComponent(filename)}`);
+                        const resp = await this._authFetch(`/api/dnaas/multi-bd/file/${encodeURIComponent(filename)}`);
                         data = await resp.json();
                     }
                     return await editor.enrichTerminationDevicesWithManagedConfig(data);
@@ -910,28 +1056,53 @@ window.DnaasHelpers = {
                 const loadBtn = document.getElementById('dnaas-load-result');
                 if (loadBtn) {
                     loadBtn.onclick = async () => {
+                        const originalLabel = loadBtn.textContent;
+                        loadBtn.disabled = true;
+                        loadBtn.textContent = 'Loading...';
                         try {
                             const data = await _fetchDiscoveryData();
-                            
+
                             window._dnaasDiscoveryData = data;
-                            console.log('[Multi-BD] Discovery data cached for Link Table auto-fill:', 
+                            console.log('[Multi-BD] Discovery data cached for Link Table auto-fill:',
                                         data.metadata?.bridge_domains?.length || 0, 'BDs',
                                         Object.keys(data.metadata?.device_bd_mapping || {}).length, 'devices');
-                            
+
+                            // Render onto the canvas first (sets layout +
+                            // editor.objects), then stage into the user's
+                            // DNAAS domain so the topbar/auto-save behaves
+                            // like any other open topology.
                             editor.loadDnaasData(data);
-                            editor.showToast(`Multi-BD topology loaded with ${data.metadata?.bridge_domains?.length || '?'} Bridge Domains!`, 'success');
-                            
+                            const staged = await DnaasHelpers._autoStageDnaasTopology(
+                                editor, data, serial
+                            );
+
+                            const bdCount = data.metadata?.bridge_domains?.length || '?';
+                            if (staged?.name) {
+                                editor.showToast(
+                                    `DNAAS topology "${staged.name}" loaded (${bdCount} Bridge Domains)`,
+                                    'success'
+                                );
+                            } else {
+                                editor.showToast(
+                                    `Multi-BD topology loaded with ${bdCount} Bridge Domains`,
+                                    'success'
+                                );
+                            }
+
                             if (dnaasBtn) dnaasBtn.classList.remove('dnaas-complete');
                             const dnaasPanel = document.getElementById('dnaas-panel');
                             if (dnaasPanel) dnaasPanel.style.display = 'none';
-                            
+
                         } catch (loadErr) {
                             console.error('[Multi-BD] Failed to load topology:', loadErr);
                             editor.showToast(`Failed to load topology: ${loadErr.message}`, 'error');
+                        } finally {
+                            loadBtn.disabled = false;
+                            loadBtn.textContent = originalLabel;
                         }
                     };
                 }
-                
+
                 const saveBtn = document.getElementById('dnaas-save-as-dnaas');
                 if (saveBtn) {
                     saveBtn.onclick = async () => {
@@ -940,21 +1111,35 @@ window.DnaasHelpers = {
                                 const data = await _fetchDiscoveryData();
                                 window._dnaasDiscoveryData = data;
                             }
-                            
+
                             // Always load discovery data onto canvas before saving
                             editor.loadDnaasData(window._dnaasDiscoveryData);
-                            
+
                             if (dnaasBtn) dnaasBtn.classList.remove('dnaas-complete');
                             const dnaasPanel = document.getElementById('dnaas-panel');
                             if (dnaasPanel) dnaasPanel.style.display = 'none';
-                            
+
                             const deviceName = window._dnaasDiscoveryData?.metadata?.source
+                                || serial
                                 || '';
                             editor.saveAsDnaasTopology(deviceName);
                         } catch (saveErr) {
                             console.error('[Multi-BD] Failed to save topology:', saveErr);
                             editor.showToast(`Failed to save: ${saveErr.message}`, 'error');
                         }
+                    };
+                }
+
+                // Wire the previously-orphaned Dismiss button so it
+                // closes the panel cleanly without nuking the cached
+                // discovery data (the user can still re-open the
+                // panel and click Load/Save later).
+                const dismissBtn = document.getElementById('dnaas-dismiss-result');
+                if (dismissBtn) {
+                    dismissBtn.onclick = () => {
+                        if (dnaasBtn) dnaasBtn.classList.remove('dnaas-complete');
+                        const dnaasPanel = document.getElementById('dnaas-panel');
+                        if (dnaasPanel) dnaasPanel.style.display = 'none';
                     };
                 }
             }
@@ -1207,36 +1392,144 @@ to help discover DNAAS neighbors.
             // Use serve.py proxy so LLDP works from any browser (local or remote)
             const lldpBase = '/api/dnaas';
             
+            const targetDevice = this._editor?.objects?.find(d =>
+                d && d.type === 'device' && (d.label === serial || d.deviceSerial === serial || d.serial === serial)
+            );
+            const explicitSshHost = window.TopologySshTarget?.pick
+                ? window.TopologySshTarget.pick(targetDevice || null, { serial, sshConfig }).host
+                : [
+                    sshConfig.hostBackup,
+                    sshConfig.host,
+                    sshConfig._snVerifiedHost,
+                    sshConfig._activeNccIp,
+                    sshConfig._activeNccHost,
+                    sshConfig._enrichedMgmtIp
+                ].map(value => (value || '').trim()).find(value => value && value !== serial) || '';
+
+            let backendResolvedHost = explicitSshHost;
+            try {
+                if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDeviceContext) {
+                    const ctx = await ScalerAPI.getDeviceContext(serial, false, explicitSshHost);
+                    const resolved = (ctx?.resolved_ip || ctx?.mgmt_ip || ctx?.ip || '').trim();
+                    if (resolved && /^\d+\.\d+\.\d+\.\d+$/.test(resolved)) {
+                        backendResolvedHost = resolved;
+                    }
+                }
+            } catch (_) {
+                // Keep the original host; the LLDP API will return a clear
+                // actionable error if discovery_api cannot resolve it.
+            }
+
             const requestBody = {
                 serial,
-                ssh_host: sshConfig.host || serial,
+                ssh_host: backendResolvedHost && backendResolvedHost !== serial ? backendResolvedHost : '',
                 username: sshConfig.user || 'dnroot',
                 password: sshConfig.password || 'dnroot',
                 skipHostKey: sshConfig.skipHostKey || false
             };
-            
-            // Start the LLDP enable job (10s timeout -- if API is down, fail fast)
-            const _lldpCtrl = new AbortController();
-            const _lldpTimer = setTimeout(() => _lldpCtrl.abort(), 10000);
-            const startResponse = await fetch(`${lldpBase}/enable-lldp`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody),
-                signal: _lldpCtrl.signal
-            }).finally(() => clearTimeout(_lldpTimer));
-            
-            if (!startResponse.ok) {
-                const err = await startResponse.json();
-                throw new Error(err.error || 'API error');
-            }
-            
-            const startResult = await startResponse.json();
-            const jobId = startResult.job_id;
-            
-            if (!jobId) {
-                throw new Error('No job ID returned');
-            }
-            
+
+            const responseErrorMessage = async (resp, fallback) => {
+                try {
+                    const j = await resp.json();
+                    return j.error || j.detail || j.message || fallback;
+                } catch (_) {
+                    return fallback;
+                }
+            };
+
+            // Helper: POST /enable-lldp with short bounded retry on 502 /
+            // network blips (discovery_api may be restarting). Returns the
+            // server-assigned job_id. Throws on persistent failure.
+            const submitJob = async () => {
+                let lastErr = null;
+                for (let tries = 0; tries < 3; tries++) {
+                    const ctrl = new AbortController();
+                    const timer = setTimeout(() => ctrl.abort(), 10000);
+                    let resp;
+                    try {
+                        resp = await this._authFetch(`${lldpBase}/enable-lldp`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(requestBody),
+                            signal: ctrl.signal,
+                        }).finally(() => clearTimeout(timer));
+                    } catch (e) {
+                        lastErr = e;
+                        // Network-level error (abort / disconnected) -- retry.
+                        await new Promise(r => setTimeout(r, 800));
+                        continue;
+                    }
+                    if (resp.ok) {
+                        let body = null;
+                        try { body = await resp.json(); } catch (_) {}
+                        if (body && body.job_id) return body.job_id;
+                        lastErr = new Error('No job ID returned');
+                        continue;
+                    }
+                    if (resp.status === 409) {
+                        let body = {};
+                        try { body = await resp.json(); } catch (_) {}
+                        if (body && body.conflict && body.existing_job_id) {
+                            const watchExisting = window.confirm(
+                                `LLDP is already running for this device.\n\nOK: watch the current job\nCancel: queue a new job after it finishes`
+                            );
+                            const actionBody = { ...requestBody, conflict_action: watchExisting ? 'watch' : 'queue' };
+                            const retryResp = await this._authFetch(`${lldpBase}/enable-lldp`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(actionBody),
+                            });
+                            if (retryResp.ok) {
+                                const retryBody = await retryResp.json();
+                                if (retryBody.job_id) return retryBody.job_id;
+                            }
+                            const retryMsg = await responseErrorMessage(retryResp, `HTTP ${retryResp.status}`);
+                            throw new Error(retryMsg);
+                        }
+                    }
+                    // 5xx upstream blip -- treat as transient and retry.
+                    if (resp.status >= 500 && resp.status < 600) {
+                        const msg = await responseErrorMessage(resp, `HTTP ${resp.status}`);
+                        lastErr = new Error(msg);
+                        await new Promise(r => setTimeout(r, 800));
+                        continue;
+                    }
+                    // 4xx -- surface the server's error and stop retrying.
+                    let errMsg = await responseErrorMessage(resp, `HTTP ${resp.status}`);
+                    throw new Error(errMsg);
+                }
+                throw new Error((lastErr && lastErr.message) || 'Could not submit LLDP job');
+            };
+
+            // Reconnect path: if discovery_api already has a recent LLDP
+            // job for (this user, this serial), attach to it instead of
+            // starting a duplicate. Solves:
+            //   * user refreshed the tab mid-run,
+            //   * another LLDP click while the previous one is still in
+            //     flight,
+            //   * serve.py was restarted but the job completed before
+            //     the restart killed discovery_api.
+            let jobId = null;
+            try {
+                const fCtrl = new AbortController();
+                const fTimer = setTimeout(() => fCtrl.abort(), 3000);
+                const findResp = await this._authFetch(
+                    `${lldpBase}/enable-lldp/find?serial=${encodeURIComponent(serial)}`,
+                    { signal: fCtrl.signal }
+                ).finally(() => clearTimeout(fTimer));
+                if (findResp && findResp.ok) {
+                    const f = await findResp.json();
+                    // Only reuse if the job is still running -- completed
+                    // jobs shouldn't shadow a fresh user click.
+                    if (f && f.job_id && ['running', 'queued', 'interrupted'].includes(f.status)) {
+                        jobId = f.job_id;
+                        console.log(`[LLDP] Reattaching to in-flight job ${jobId}`);
+                    }
+                }
+            } catch (_) { /* find is best-effort; fall through to submit */ }
+
+            if (!jobId) jobId = await submitJob();
+
             // Get output div for real-time feedback
             const outputDiv = document.getElementById('dnaas-output');
             let lastLineCount = 0;
@@ -1245,9 +1538,13 @@ to help discover DNAAS neighbors.
             // Backend can take 2-3 minutes for devices with many interfaces (60+ interfaces)
             const maxAttempts = 480; // 4 minutes max (480 x 500ms)
             let consecutive404 = 0;
-            const MAX_404 = 10;
-            let consecutiveErrors = 0;
-            const MAX_ERRORS = 6;
+            const MAX_404 = 10;       // 10 x 500ms = 5s grace before we resubmit
+            let consecutive5xx = 0;
+            const MAX_5XX = 20;       // 20 x 500ms = 10s grace for upstream restart
+            let consecutiveNetErr = 0;
+            const MAX_NETERR = 10;    // 10 x 500ms = 5s grace for network flaps
+            let resubmitsLeft = 1;    // at most one transparent resubmit per call
+            let reconnectToastShown = false;
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
                 await new Promise(resolve => setTimeout(resolve, 500));
                 
@@ -1255,11 +1552,11 @@ to help discover DNAAS neighbors.
                 try {
                     const _sCtrl = new AbortController();
                     const _sTimer = setTimeout(() => _sCtrl.abort(), 5000);
-                    statusResponse = await fetch(`${lldpBase}/enable-lldp/status?job_id=${encodeURIComponent(jobId)}`, { signal: _sCtrl.signal }).finally(() => clearTimeout(_sTimer));
+                    statusResponse = await this._authFetch(`${lldpBase}/enable-lldp/status?job_id=${encodeURIComponent(jobId)}`, { signal: _sCtrl.signal }).finally(() => clearTimeout(_sTimer));
                 } catch (fetchErr) {
-                    consecutiveErrors++;
-                    if (consecutiveErrors >= MAX_ERRORS) {
-                        throw new Error(`LLDP status check failed ${MAX_ERRORS} times (network error). Discovery API may be down.`);
+                    consecutiveNetErr++;
+                    if (consecutiveNetErr >= MAX_NETERR) {
+                        throw new Error(`LLDP status check failed ${MAX_NETERR} times (network error). Discovery API may be down.`);
                     }
                     continue;
                 }
@@ -1267,18 +1564,54 @@ to help discover DNAAS neighbors.
                     if (statusResponse.status === 404) {
                         consecutive404++;
                         if (consecutive404 >= MAX_404) {
+                            // Discovery API restart should normally rehydrate jobs.
+                            // If a very old/incomplete job is still missing, try find
+                            // first and only then submit one replacement.
+                            if (resubmitsLeft > 0) {
+                                resubmitsLeft--;
+                                if (!reconnectToastShown && typeof window !== 'undefined' && window.topologyEditor && window.topologyEditor.showToast) {
+                                    try { window.topologyEditor.showToast('Reconnecting to LLDP job…', 'info'); } catch (_) {}
+                                    reconnectToastShown = true;
+                                }
+                                try {
+                                    const findResp = await this._authFetch(
+                                        `${lldpBase}/enable-lldp/find?serial=${encodeURIComponent(serial)}`
+                                    );
+                                    if (findResp.ok) {
+                                        const found = await findResp.json();
+                                        if (found && found.job_id && found.status !== 'none') {
+                                            jobId = found.job_id;
+                                            consecutive404 = 0;
+                                            continue;
+                                        }
+                                    }
+                                    jobId = await submitJob();
+                                    console.log(`[LLDP] Resubmitted after discovery_api restart -> new job ${jobId}`);
+                                    consecutive404 = 0;
+                                    consecutive5xx = 0;
+                                    consecutiveNetErr = 0;
+                                    continue;
+                                } catch (resubmitErr) {
+                                    throw new Error(`LLDP reconnect failed: ${resubmitErr.message}`);
+                                }
+                            }
                             throw new Error('LLDP job not found on server (discovery API may have restarted). Try again.');
                         }
-                    } else {
-                        consecutiveErrors++;
-                        if (consecutiveErrors >= MAX_ERRORS) {
-                            throw new Error(`LLDP status check failed ${MAX_ERRORS} times (HTTP ${statusResponse.status}). Discovery API may be down.`);
+                    } else if (statusResponse.status >= 500 && statusResponse.status < 600) {
+                        consecutive5xx++;
+                        if (consecutive5xx >= MAX_5XX) {
+                            throw new Error(`LLDP status check failed ${MAX_5XX} times (HTTP ${statusResponse.status}). Discovery API may be down.`);
                         }
+                    } else {
+                        // Other 4xx (403, 401, 400) -- don't loop, surface immediately.
+                        let msg = await responseErrorMessage(statusResponse, `HTTP ${statusResponse.status}`);
+                        throw new Error(`LLDP status error: ${msg}`);
                     }
                     continue;
                 }
                 consecutive404 = 0;
-                consecutiveErrors = 0;
+                consecutive5xx = 0;
+                consecutiveNetErr = 0;
                 
                 const status = await statusResponse.json();
                 
@@ -1297,7 +1630,11 @@ to help discover DNAAS neighbors.
                     outputDiv.scrollTop = outputDiv.scrollHeight;
                 }
                 
-                if (status.status === 'completed') {
+                if (status.status === 'queued') {
+                    continue;
+                } else if (status.status === 'interrupted') {
+                    throw new Error(status.error || 'LLDP job was interrupted by discovery API restart');
+                } else if (status.status === 'completed') {
                     return {
                         success: true,
                         interfaces_enabled: status.interfaces_enabled,
@@ -1336,7 +1673,7 @@ to help discover DNAAS neighbors.
         console.log(`[LLDP] Cancelling job ${jobId}`);
         
         try {
-            const response = await fetch(`/api/dnaas/enable-lldp/cancel?job_id=${jobId}`);
+            const response = await this._authFetch(`/api/dnaas/enable-lldp/cancel?job_id=${jobId}`);
             const result = await response.json();
             
             if (result.status === 'cancelled' || result.error === 'Job not found') {
@@ -1376,6 +1713,7 @@ to help discover DNAAS neighbors.
      */
     async enableLldpBackground(editor, device, serial, sshConfig = {}) {
         this._editor = editor; // Store for internal methods
+        const topologyGeneration = editor?._topologyGeneration || 0;
         
         // Check if already running on this device
         if (device._lldpRunning) {
@@ -1418,6 +1756,11 @@ to help discover DNAAS neighbors.
         
         try {
             const result = await this._enableLldpOnDevice(serial, sshConfig);
+            if (editor?.isTopologySwitchCurrent && !editor.isTopologySwitchCurrent(topologyGeneration)) {
+                clearTimeout(animSafetyTimer);
+                this._stopLldpAnimation(editor, device);
+                return;
+            }
             
             clearTimeout(animSafetyTimer);
             this._stopLldpAnimation(editor, device);
@@ -1440,6 +1783,7 @@ to help discover DNAAS neighbors.
                 
                 // Auto-open LLDP table after successful enable (forceRefresh avoids toggle-close)
                 setTimeout(() => {
+                    if (editor?.isTopologySwitchCurrent && !editor.isTopologySwitchCurrent(topologyGeneration)) return;
                     if (window.LldpDialog) {
                         window.LldpDialog.showLldpTableDialog(editor, device, serial, { forceRefresh: true });
                     } else {
@@ -1456,6 +1800,7 @@ to help discover DNAAS neighbors.
         } catch (error) {
             clearTimeout(animSafetyTimer);
             this._stopLldpAnimation(editor, device);
+            if (editor?.isTopologySwitchCurrent && !editor.isTopologySwitchCurrent(topologyGeneration)) return;
             device._lldpRunning = false;
             device._lldpStatus = 'failed';
             
@@ -2655,7 +3000,13 @@ to help discover DNAAS neighbors.
                     obj.sshConfig = obj.sshConfig || {};
                     if (matchedDevice.ip) {
                         obj.sshConfig._enrichedMgmtIp = matchedDevice.ip;
-                        if (!obj.sshConfig.host) {
+                        // SN host-lock: if the device already verified an
+                        // SN-based path, do not auto-fill `sshConfig.host`
+                        // with the DNAAS mgmt IP -- even if the slot is
+                        // empty. The operator's verified SN/console host
+                        // is the source of truth; the discovered IP is
+                        // recorded in `_enrichedMgmtIp` only.
+                        if (!obj.sshConfig.host && !obj.sshConfig._snVerified) {
                             obj.sshConfig.host = matchedDevice.ip;
                         }
                     }
@@ -2671,7 +3022,7 @@ to help discover DNAAS neighbors.
             if (unresolvedNames.length > 0) {
                 console.log(`[DNAAS] ${unresolvedNames.length} devices need Network Mapper resolution:`, unresolvedNames);
                 try {
-                    const resp = await fetch('/api/dnaas/devices/resolve-batch', {
+                    const resp = await this._authFetch('/api/dnaas/devices/resolve-batch', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ names: unresolvedNames })
@@ -2685,7 +3036,11 @@ to help discover DNAAS neighbors.
                             if (match.mgmt_ip) {
                                 obj.sshConfig = obj.sshConfig || {};
                                 obj.sshConfig._enrichedMgmtIp = match.mgmt_ip;
-                                if (!obj.sshConfig.host) {
+                                // SN host-lock: respect the operator's
+                                // verified SN-based path; never overwrite
+                                // host with the NM-resolved mgmt IP for
+                                // SN-locked devices.
+                                if (!obj.sshConfig.host && !obj.sshConfig._snVerified) {
                                     obj.sshConfig.host = match.mgmt_ip;
                                 }
                                 obj.sshConfig.enrichedFromNM = true;
@@ -2829,7 +3184,10 @@ to help discover DNAAS neighbors.
             try {
                 let sectionId = await DnaasHelpers._ensureDnaasSection();
                 
-                const resp = await fetch(`/api/sections/${sectionId}/save`, {
+                const authFetch = (window.TopologyAuth && window.TopologyAuth.authFetch)
+                    ? window.TopologyAuth.authFetch
+                    : (url, opts) => fetch(url, opts);
+                const resp = await authFetch(`/api/sections/${sectionId}/save`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name, topology: data })
@@ -2863,37 +3221,115 @@ to help discover DNAAS neighbors.
     },
 
     /**
-     * Correct device credentials - extracted from topology.js
+     * Lazy-loaded shared lab credential profiles.
+     *
+     * The defaults match the Python `_LAB_PROFILE_DEFAULTS` in
+     * topology/routes/bridge_helpers.py so behavior is identical whether
+     * SSH is initiated from the canvas or from the backend Discover endpoint.
+     *
+     * On first call we replace the seeds with whatever the backend returns
+     * from /api/xray/config (which already merges per-user overrides on top
+     * of the global defaults). Cached for the lifetime of the page.
      */
-    correctDeviceCredentials(editor) {
+    _labCreds: null,
+    _labCredsLoading: null,
+
+    async _loadLabCreds() {
+        if (this._labCreds) return this._labCreds;
+        if (this._labCredsLoading) return this._labCredsLoading;
+
+        const seeds = {
+            dut:    { user: 'dnroot',  password: 'dnroot'      },
+            dnaas:  { user: 'sisaev',  password: 'Drive1234!'  },
+            arista: { user: 'dn',      password: 'drive1234!'  },
+        };
+
+        this._labCredsLoading = (async () => {
+            try {
+                const resp = await this._authFetch('/api/xray/config', { credentials: 'include' });
+                if (resp.ok) {
+                    const cfg = await resp.json();
+                    const dut = cfg && cfg.credentials || {};
+                    const dnaas = cfg && cfg.dnaas_credentials || {};
+                    if (dut.device_user && dut.device_password) {
+                        seeds.dut = { user: dut.device_user, password: dut.device_password };
+                    }
+                    if (dut.arista_user && dut.arista_password) {
+                        seeds.arista = { user: dut.arista_user, password: dut.arista_password };
+                    }
+                    if (dnaas.user && dnaas.password) {
+                        seeds.dnaas = { user: dnaas.user, password: dnaas.password };
+                    }
+                }
+            } catch (err) {
+                console.warn('[Credentials] /api/xray/config unavailable, using bundled defaults:', err);
+            }
+            this._labCreds = seeds;
+            return this._labCreds;
+        })();
+        return this._labCredsLoading;
+    },
+
+    /**
+     * Classify a device label to pick the right credential profile.
+     * Mirrors `_classify_device_profile()` in routes/bridge_helpers.py so the
+     * frontend pre-fill agrees with the backend's first-pick profile.
+     */
+    classifyDeviceProfile(label) {
+        const name = (label || '').toUpperCase();
+        if (!name) return 'dut';
+        if (name.includes('LEAF') || name.includes('SPINE') ||
+            name.includes('SUPERSPINE') || name.includes('DNAAS') ||
+            name.includes('FABRIC')) return 'dnaas';
+        // SS-13 / B-14 / D-16 / C-2 short DNAAS-naming patterns.
+        const dnaasShort = /^(SS|B|D|C)-\d{1,3}$/;
+        if (dnaasShort.test(name)) return 'dnaas';
+        if (name.includes('ARISTA') || name.startsWith('EOS-') || name.includes('DCS-')) return 'arista';
+        return 'dut';
+    },
+
+    /**
+     * Pre-fill SSH credentials on every canvas device that doesn't already
+     * have its own user/password set. Uses the shared lab profiles so DNAAS
+     * fabric devices (LEAF/SPINE) get the DNAAS service account and DUT
+     * devices get the DNOS default. Per-user overrides loaded from
+     * /api/xray/config win over bundled defaults.
+     *
+     * Devices that the user has manually credentialed are NEVER overwritten.
+     */
+    async correctDeviceCredentials(editor) {
         const devices = editor.objects.filter(o => o.type === 'device');
         if (devices.length === 0) return;
-        
+
+        const creds = await this._loadLabCreds();
         let setDefaults = 0;
-        
+
         devices.forEach(device => {
             if (!device.sshConfig) device.sshConfig = {};
-            
-            if (!device.sshConfig.user && !device.sshConfig.password) {
-                const label = (device.label || '').toUpperCase();
-                const isDnaasFabric = label.includes('LEAF') || label.includes('SPINE') || 
-                                      label.includes('SUPERSPINE') || label.includes('SS-');
-                
-                if (isDnaasFabric) {
-                    device.sshConfig.user = 'sisaev';
-                    device.sshConfig.password = 'Drive1234!';
-                } else {
-                    device.sshConfig.user = 'dnroot';
-                    device.sshConfig.password = 'dnroot';
-                }
-                setDefaults++;
-            }
+            if (device.sshConfig.user || device.sshConfig.password) return;
+
+            const profile = this.classifyDeviceProfile(device.label);
+            const fill = creds[profile] || creds.dut;
+            device.sshConfig.user = fill.user;
+            device.sshConfig.password = fill.password;
+            device.sshConfig.profile = profile;
+            setDefaults++;
         });
-        
+
         if (setDefaults > 0) {
-            console.log(`[Credentials] Set default credentials for ${setDefaults} device(s)`);
+            console.log(`[Credentials] Pre-filled SSH creds for ${setDefaults} device(s) using shared lab profiles`);
         }
     }
 };
 
 console.log('[topology-dnaas-helpers.js] DnaasHelpers loaded');
+
+// Warm the lab-credentials cache eagerly so canvas devices get pre-filled
+// SSH creds without a network round-trip on first interaction. Failures
+// are silent -- correctDeviceCredentials() will still work with bundled
+// defaults if the request fails.
+try {
+    if (window.DnaasHelpers && typeof window.DnaasHelpers._loadLabCreds === 'function') {
+        window.DnaasHelpers._loadLabCreds();
+    }
+} catch (_e) { /* cache warm-up is best-effort */ }

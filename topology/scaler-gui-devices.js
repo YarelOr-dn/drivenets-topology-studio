@@ -37,6 +37,18 @@
                     _nccMgmtIp: (o.sshConfig?._nccMgmtIp || '').trim(),
                     _isCluster: !!o.sshConfig?._isCluster,
                     _platform: (o.platform || '').trim(),
+                    // The monitor (`topology-device-monitor.js`) writes
+                    // these onto the canvas object whenever a device
+                    // context fetch returns a system_type. Without
+                    // exposing them here the wizard chain only saw
+                    // `_platform` (often empty for monitored-but-never-
+                    // edited devices) and rendered the red "sys-type?"
+                    // dropdown for chassis it already knew about.
+                    // User report 2026-04-24: PE-1 was Ready/monitored,
+                    // RR-SA-2 had a pre-delete saved value in
+                    // `_deploySystemType`, both painted red anyway.
+                    _systemType: (o._systemType || '').trim(),
+                    _deploySystemType: (o._deploySystemType || '').trim(),
                 }));
         },
         _getCanvasDevices(includeDnaas = false) {
@@ -63,9 +75,41 @@
                     : (cd.sshHost || '');
                 const cached = this._deviceContexts?.[cd.label];
                 const cachedSysType = cached?.system_type || '';
+                const cachedDeploySysType = cached?.deploy_system_type || '';
+                // Source priority for `platform`:
+                //   1. wizard cache (most recent successful fetch)
+                //   2. deploy snapshot from cache (last-known-good before
+                //      delete; survives `request system delete` because
+                //      operational.json is wiped but devices.json keeps it)
+                //   3. canvas `_systemType` (live monitor write)
+                //   4. canvas `_deploySystemType` (last successful deploy)
+                //   5. canvas `_platform` (legacy field)
+                // Anything else and the wizard will paint the red
+                // "sys-type?" dropdown.
                 const plat = this._sanitizeWizardSystemType(cachedSysType)
+                    || this._sanitizeWizardSystemType(cachedDeploySysType)
+                    || this._sanitizeWizardSystemType(cd._systemType)
+                    || this._sanitizeWizardSystemType(cd._deploySystemType)
                     || this._sanitizeWizardSystemType(cd._platform)
                     || '';
+                // Cluster signals the Image Upgrade wizard honours
+                // (`_buildClientPlan` + row renderer). Ordered by trust:
+                //   1. `sshConfig._isCluster`  -- live probe found NCC VMs
+                //   2. `sshConfig._virshInfo`  -- virsh metadata exists
+                //   3. `sshConfig._nccMgmtIp` populated  -- cluster NCC IP
+                //   4. hostname convention  -- `*_CL_*` / `*-CL-*` / `CL-*`
+                // User report 2026-04-24 (YOR_CL_PE-4): operational snapshot
+                // returned `SA-40C8CD` (the NCP-1 chassis code) and the
+                // wizard painted the row as a standalone, losing the NCC
+                // selector and running the SA-style deploy path. A cluster
+                // device must never slip through as SA -- see
+                // `DEVELOPMENT_GUIDELINES.md` "Cluster vs SA sys-type guard".
+                const _nameHintsCluster = /(^|[_\-])CL([_\-]|$)/i.test(cd.label || '');
+                const _isClusterHint = !!(
+                    cd._isCluster
+                    || cd._nccMgmtIp
+                    || _nameHintsCluster
+                );
                 return {
                     id: cd.label,
                     hostname: cd.label,
@@ -77,6 +121,23 @@
                     _deviceMode: cd._deviceMode || '',
                     _scalerId: '',
                     platform: plat,
+                    // Surface the raw monitor values too -- the upgrade
+                    // wizard's `_buildClientPlan` reads `d._systemType`
+                    // / `d._deploySystemType` as a final safety net even
+                    // after `_sanitizeWizardSystemType` strips a value
+                    // it didn't recognise.
+                    _systemType: cd._systemType || '',
+                    _deploySystemType: cd._deploySystemType || '',
+                    // Cluster flag propagated from the canvas so the
+                    // upgrade wizard can refuse to show a CL-* device as
+                    // SA even if the system_type resolved to an SA chassis.
+                    _isCluster: _isClusterHint,
+                    _nccMgmtIp: cd._nccMgmtIp || '',
+                    _clusterHintSource: cd._isCluster
+                        ? 'probe'
+                        : (cd._nccMgmtIp
+                            ? 'ncc_mgmt_ip'
+                            : (_nameHintsCluster ? 'hostname' : '')),
                 };
             });
         },

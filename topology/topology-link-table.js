@@ -23,8 +23,12 @@ window.LinkTableManager = {
         
         const updateWidthMode = () => {
             const width = modalContent.offsetWidth;
+            const contentHeight = modalContent.querySelector('.link-table-scroll')?.clientHeight
+                || modalContent.querySelector('.lt-live-telemetry-panel')?.clientHeight
+                || 0;
             const mode = width > WIDE_THRESHOLD ? 'wide' : 'narrow';
             modalContent.dataset.width = mode;
+            modalContent.dataset.height = (modalContent.offsetHeight > 560 || contentHeight > 380) ? 'tall' : 'short';
         };
         
         updateWidthMode();
@@ -38,11 +42,64 @@ window.LinkTableManager = {
         }
     },
 
+    ensureDynamicRoot(scroll) {
+        if (!scroll) return null;
+        let dynamic = document.getElementById('lt-dynamic-link-table');
+        if (!dynamic) {
+            dynamic = document.createElement('div');
+            dynamic.id = 'lt-dynamic-link-table';
+            dynamic.className = 'lt-dynamic-link-table';
+            dynamic.innerHTML = '<div class="lt-live-empty">Live device correlation will appear here after refresh.</div>';
+            scroll.insertBefore(dynamic, scroll.firstChild);
+        }
+        return dynamic;
+    },
+
+    bindFieldListener(field, type, handler, key) {
+        if (!field) return;
+        const storeKey = `_lt_${key || type}`;
+        if (field[storeKey]) {
+            field.removeEventListener(type, field[storeKey]);
+        }
+        field[storeKey] = handler;
+        field.addEventListener(type, handler);
+    },
+
+    setupLiveTelemetryTabs(editor) {
+        const tabs = document.getElementById('lt-modal-tabs');
+        const columns = document.querySelector('#link-details-modal .link-table-columns');
+        const scroll = document.querySelector('#link-details-modal .link-table-scroll');
+        const live = document.getElementById('lt-live-telemetry-panel');
+        if (!tabs || !columns || !scroll || !live) return;
+        this.ensureDynamicRoot(scroll);
+        if (tabs._liveTelemetrySetup) return;
+        tabs._liveTelemetrySetup = true;
+        const staticTab = tabs.querySelector('[data-lt-tab="static"]');
+        if (staticTab) staticTab.textContent = 'Dynamic';
+        const activate = (tabName) => {
+            tabs.querySelectorAll('.lt-modal-tab').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.ltTab === tabName);
+            });
+            const isLive = tabName === 'live';
+            scroll.classList.toggle('lt-dynamic-mode', !isLive);
+            columns.style.display = isLive ? 'none' : '';
+            scroll.style.display = isLive ? 'none' : '';
+            live.style.display = isLive ? 'block' : 'none';
+        };
+        tabs.addEventListener('click', (event) => {
+            const btn = event.target.closest('.lt-modal-tab');
+            if (!btn) return;
+            activate(btn.dataset.ltTab || 'static');
+        });
+        tabs._activate = activate;
+    },
+
     /**
      * Populate Link Table fields from link data
      */
     populateFields(editor, link, device1InterfaceName, device2InterfaceName) {
         console.log('[LinkTableManager] Populating fields for link:', link.id);
+        this.setupLiveTelemetryTabs(editor);
         
         // MODEL FIRST approach - detect Model, then derive Category
         let platformModelA = link.device1Platform || '';
@@ -264,6 +321,7 @@ window.LinkTableManager = {
         // Update visibility
         this.updateIpAddressFieldVisibility(editor);
         this.updateVlanFieldsVisibility(editor);
+        this.renderDiscoveryEvidence(link);
     },
 
     /**
@@ -353,7 +411,7 @@ window.LinkTableManager = {
             return editor.linkEditor.setFieldValue(elementId, value);
         }
         const el = document.getElementById(elementId);
-        if (el) el.value = value || '';
+        if (el) el.value = value ?? '';
     },
 
     /**
@@ -363,6 +421,51 @@ window.LinkTableManager = {
         if (editor.linkEditor && typeof editor.linkEditor.showDnaasAutoFillIndicator === 'function') {
             return editor.linkEditor.showDnaasAutoFillIndicator();
         }
+    },
+
+    /**
+     * Show discovery evidence and manual-conflict suggestions inside the Link Table modal.
+     */
+    renderDiscoveryEvidence(link) {
+        const modal = document.getElementById('link-table-modal') || document.querySelector('.link-table-modal')?.closest('.modal');
+        const content = document.querySelector('.link-table-modal') || modal;
+        if (!content) return;
+        const old = content.querySelector('#lt-discovery-evidence');
+        if (old) old.remove();
+        const evidence = (link.linkDetails && link.linkDetails.discoveryEvidence) || [];
+        const suggestions = (link.linkDetails && link.linkDetails.discoverySuggestions) || {};
+        if (!evidence.length && !Object.keys(suggestions).length) return;
+        const panel = document.createElement('div');
+        panel.id = 'lt-discovery-evidence';
+        panel.style.cssText = 'margin:10px 0;padding:10px 12px;border:1px solid rgba(14,165,233,.35);border-radius:10px;background:rgba(14,165,233,.08);font-size:12px;line-height:1.45;';
+        const title = document.createElement('div');
+        title.style.cssText = 'font-weight:700;margin-bottom:4px;color:#0ea5e9;';
+        title.textContent = 'Discovery auto-fill evidence';
+        panel.appendChild(title);
+        if (evidence.length) {
+            const e = evidence[0] || {};
+            const line = document.createElement('div');
+            line.textContent = [
+                e.source || e.protocol || 'discovery',
+                e.interfaceA || '',
+                e.ipAddressA || '',
+                e.interfaceB || '',
+                e.ipAddressB || ''
+            ].filter(Boolean).join(' | ');
+            panel.appendChild(line);
+        }
+        const suggestionKeys = Object.keys(suggestions);
+        if (suggestionKeys.length) {
+            const s = document.createElement('div');
+            s.style.marginTop = '6px';
+            s.textContent = 'Suggestions (manual values preserved): ' + suggestionKeys
+                .map(k => `${k}=${suggestions[k].value}`)
+                .join(', ');
+            panel.appendChild(s);
+        }
+        const header = content.querySelector('.link-table-header');
+        if (header && header.parentNode) header.parentNode.insertBefore(panel, header.nextSibling);
+        else content.insertBefore(panel, content.firstChild);
     },
 
     /**
@@ -427,114 +530,90 @@ window.LinkTableManager = {
         const platformCatB = document.getElementById('lt-platform-cat-b');
         const platformModelA = document.getElementById('lt-platform-model-a');
         const platformModelB = document.getElementById('lt-platform-model-b');
-        
-        if (platformCatA) {
-            platformCatA.addEventListener('change', () => {
-                editor.populateModelsForCategory('lt-platform-model-a', platformCatA.value);
-                editor.autoSaveLinkTable();
-            });
-        }
-        if (platformCatB) {
-            platformCatB.addEventListener('change', () => {
-                editor.populateModelsForCategory('lt-platform-model-b', platformCatB.value);
-                editor.autoSaveLinkTable();
-            });
-        }
-        
-        if (platformModelA) {
-            platformModelA.addEventListener('change', () => {
-                const category = editor.deriveCategoryFromModel(platformModelA.value);
-                if (category && platformCatA && !platformCatA.value) {
-                    this.setFieldValue(editor, 'lt-platform-cat-a', category);
-                }
-                editor.populateInterfaces('lt-interface-a', platformModelA.value);
-                editor.autoSaveLinkTable();
-            });
-        }
-        if (platformModelB) {
-            platformModelB.addEventListener('change', () => {
-                const category = editor.deriveCategoryFromModel(platformModelB.value);
-                if (category && platformCatB && !platformCatB.value) {
-                    this.setFieldValue(editor, 'lt-platform-cat-b', category);
-                }
-                editor.populateInterfaces('lt-interface-b', platformModelB.value);
-                editor.autoSaveLinkTable();
-            });
-        }
+
+        this.bindFieldListener(platformCatA, 'change', () => {
+            editor.populateModelsForCategory('lt-platform-model-a', platformCatA.value);
+            editor.autoSaveLinkTable();
+        }, 'platform-cat-a-change');
+        this.bindFieldListener(platformCatB, 'change', () => {
+            editor.populateModelsForCategory('lt-platform-model-b', platformCatB.value);
+            editor.autoSaveLinkTable();
+        }, 'platform-cat-b-change');
+
+        this.bindFieldListener(platformModelA, 'change', () => {
+            const category = editor.deriveCategoryFromModel(platformModelA.value);
+            if (category && platformCatA && !platformCatA.value) {
+                this.setFieldValue(editor, 'lt-platform-cat-a', category);
+            }
+            editor.populateInterfaces('lt-interface-a', platformModelA.value);
+            editor.autoSaveLinkTable();
+        }, 'platform-model-a-change');
+        this.bindFieldListener(platformModelB, 'change', () => {
+            const category = editor.deriveCategoryFromModel(platformModelB.value);
+            if (category && platformCatB && !platformCatB.value) {
+                this.setFieldValue(editor, 'lt-platform-cat-b', category);
+            }
+            editor.populateInterfaces('lt-interface-b', platformModelB.value);
+            editor.autoSaveLinkTable();
+        }, 'platform-model-b-change');
         
         const interfaceA = document.getElementById('lt-interface-a');
         const interfaceB = document.getElementById('lt-interface-b');
         
-        if (interfaceA) {
-            interfaceA.addEventListener('change', () => {
-                if (interfaceA.value === '__custom__') {
-                    editor.handleCustomInterfaceInput('lt-interface-a');
-                } else {
-                    editor.autoSaveLinkTable();
-                }
-            });
-        }
-        if (interfaceB) {
-            interfaceB.addEventListener('change', () => {
-                if (interfaceB.value === '__custom__') {
-                    editor.handleCustomInterfaceInput('lt-interface-b');
-                } else {
-                    editor.autoSaveLinkTable();
-                }
-            });
-        }
+        this.bindFieldListener(interfaceA, 'change', () => {
+            if (interfaceA.value === '__custom__') {
+                editor.handleCustomInterfaceInput('lt-interface-a');
+            } else {
+                editor.autoSaveLinkTable();
+            }
+        }, 'interface-a-change');
+        this.bindFieldListener(interfaceB, 'change', () => {
+            if (interfaceB.value === '__custom__') {
+                editor.handleCustomInterfaceInput('lt-interface-b');
+            } else {
+                editor.autoSaveLinkTable();
+            }
+        }, 'interface-b-change');
         
         const ipTypeA = document.getElementById('lt-ip-type-a');
         const ipTypeB = document.getElementById('lt-ip-type-b');
         
-        if (ipTypeA) {
-            ipTypeA.addEventListener('change', () => {
-                this.updateIpAddressFieldVisibility(editor);
-                editor.validateIpField('lt-ip-addr-a', ipTypeA.value);
-                editor.autoSaveLinkTable();
-            });
-        }
-        if (ipTypeB) {
-            ipTypeB.addEventListener('change', () => {
-                this.updateIpAddressFieldVisibility(editor);
-                editor.validateIpField('lt-ip-addr-b', ipTypeB.value);
-                editor.autoSaveLinkTable();
-            });
-        }
+        this.bindFieldListener(ipTypeA, 'change', () => {
+            this.updateIpAddressFieldVisibility(editor);
+            editor.validateIpField('lt-ip-addr-a', ipTypeA.value);
+            editor.autoSaveLinkTable();
+        }, 'ip-type-a-change');
+        this.bindFieldListener(ipTypeB, 'change', () => {
+            this.updateIpAddressFieldVisibility(editor);
+            editor.validateIpField('lt-ip-addr-b', ipTypeB.value);
+            editor.autoSaveLinkTable();
+        }, 'ip-type-b-change');
         
         const ipAddrA = document.getElementById('lt-ip-addr-a');
         const ipAddrB = document.getElementById('lt-ip-addr-b');
         
-        if (ipAddrA) {
-            ipAddrA.addEventListener('blur', () => {
-                const ipType = document.getElementById('lt-ip-type-a')?.value || '';
-                editor.validateIpField('lt-ip-addr-a', ipType);
-                editor.autoSaveLinkTable();
-            });
-        }
-        if (ipAddrB) {
-            ipAddrB.addEventListener('blur', () => {
-                const ipType = document.getElementById('lt-ip-type-b')?.value || '';
-                editor.validateIpField('lt-ip-addr-b', ipType);
-                editor.autoSaveLinkTable();
-            });
-        }
+        this.bindFieldListener(ipAddrA, 'blur', () => {
+            const ipType = document.getElementById('lt-ip-type-a')?.value || '';
+            editor.validateIpField('lt-ip-addr-a', ipType);
+            editor.autoSaveLinkTable();
+        }, 'ip-addr-a-blur');
+        this.bindFieldListener(ipAddrB, 'blur', () => {
+            const ipType = document.getElementById('lt-ip-type-b')?.value || '';
+            editor.validateIpField('lt-ip-addr-b', ipType);
+            editor.autoSaveLinkTable();
+        }, 'ip-addr-b-blur');
         
         const vlanModeA = document.getElementById('lt-vlan-mode-a');
         const vlanModeB = document.getElementById('lt-vlan-mode-b');
         
-        if (vlanModeA) {
-            vlanModeA.addEventListener('change', () => {
-                this.updateVlanFieldsVisibility(editor);
-                editor.autoSaveLinkTable();
-            });
-        }
-        if (vlanModeB) {
-            vlanModeB.addEventListener('change', () => {
-                this.updateVlanFieldsVisibility(editor);
-                editor.autoSaveLinkTable();
-            });
-        }
+        this.bindFieldListener(vlanModeA, 'change', () => {
+            this.updateVlanFieldsVisibility(editor);
+            editor.autoSaveLinkTable();
+        }, 'vlan-mode-a-change');
+        this.bindFieldListener(vlanModeB, 'change', () => {
+            this.updateVlanFieldsVisibility(editor);
+            editor.autoSaveLinkTable();
+        }, 'vlan-mode-b-change');
         
         this.updateVlanFieldsVisibility(editor);
         
@@ -542,13 +621,11 @@ window.LinkTableManager = {
                           'lt-inner-tag-a', 'lt-inner-tag-b', 'lt-dnaas-vlan-a', 'lt-dnaas-vlan-b'];
         vlanFields.forEach(fieldId => {
             const field = document.getElementById(fieldId);
-            if (field) {
-                field.addEventListener('blur', () => {
-                    editor.validateVlanField(fieldId);
-                    editor.autoSaveLinkTable();
-                });
-                field.addEventListener('input', () => editor.validateVlanField(fieldId));
-            }
+            this.bindFieldListener(field, 'blur', () => {
+                editor.validateVlanField(fieldId);
+                editor.autoSaveLinkTable();
+            }, `${fieldId}-blur`);
+            this.bindFieldListener(field, 'input', () => editor.validateVlanField(fieldId), `${fieldId}-input`);
         });
         
         const allFields = [
@@ -560,9 +637,7 @@ window.LinkTableManager = {
         ];
         allFields.forEach(fieldId => {
             const field = document.getElementById(fieldId);
-            if (field) {
-                field.addEventListener('change', () => editor.autoSaveLinkTable());
-            }
+            this.bindFieldListener(field, 'change', () => editor.autoSaveLinkTable(), `${fieldId}-change`);
         });
         
         this.setupSubInterfaceVlanValidation(editor);
@@ -618,25 +693,21 @@ window.LinkTableManager = {
             }
         };
         
-        if (subInterfaceA) {
-            subInterfaceA.addEventListener('input', validateVlanMatch);
-            subInterfaceA.addEventListener('blur', () => {
-                validateVlanMatch();
-                editor.autoSaveLinkTable();
-            });
-        }
-        if (subInterfaceB) {
-            subInterfaceB.addEventListener('input', validateVlanMatch);
-            subInterfaceB.addEventListener('blur', () => {
-                validateVlanMatch();
-                editor.autoSaveLinkTable();
-            });
-        }
+        this.bindFieldListener(subInterfaceA, 'input', validateVlanMatch, 'subinterface-a-input');
+        this.bindFieldListener(subInterfaceA, 'blur', () => {
+            validateVlanMatch();
+            editor.autoSaveLinkTable();
+        }, 'subinterface-a-blur');
+        this.bindFieldListener(subInterfaceB, 'input', validateVlanMatch, 'subinterface-b-input');
+        this.bindFieldListener(subInterfaceB, 'blur', () => {
+            validateVlanMatch();
+            editor.autoSaveLinkTable();
+        }, 'subinterface-b-blur');
         
         const bundleA = document.getElementById('lt-bundle-a');
         const bundleB = document.getElementById('lt-bundle-b');
-        if (bundleA) bundleA.addEventListener('blur', () => editor.autoSaveLinkTable());
-        if (bundleB) bundleB.addEventListener('blur', () => editor.autoSaveLinkTable());
+        this.bindFieldListener(bundleA, 'blur', () => editor.autoSaveLinkTable(), 'bundle-a-blur');
+        this.bindFieldListener(bundleB, 'blur', () => editor.autoSaveLinkTable(), 'bundle-b-blur');
         
         validateVlanMatch();
     },

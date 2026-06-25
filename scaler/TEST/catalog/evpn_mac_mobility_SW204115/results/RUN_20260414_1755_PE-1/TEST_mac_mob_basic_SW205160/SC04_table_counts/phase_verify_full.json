@@ -1,0 +1,128 @@
+[
+  {
+    "command": "show evpn summary | no-more",
+    "timestamp": "2026-04-14T17:59:25.570+00:00",
+    "duration_ms": 100,
+    "phase": "verify",
+    "output_length": 716,
+    "output_preview": "Global EVPN parameters\nMAC table limit per EVI : 64000\nMAC table aging time    : 320s\nControl Word            : enabled\nFAT Label               : disabled\nE-Tree Leaf Label       : 1032383\n\nNumber of EVPN instances       : 3\nTotal local MAC addresses      : 2\nTotal local MAC-IPs            : 0\nTotal remote MAC addresses     : 2\nTotal remote MAC-IPs           : 0\nTotal VPLS MAC addresses       : 0\nTotal MAC addresses            : 4\nTotal MAC-IPs                  : 0\nTotal suppressed MAC addresses",
+    "output_full": "Global EVPN parameters\nMAC table limit per EVI : 64000\nMAC table aging time    : 320s\nControl Word            : enabled\nFAT Label               : disabled\nE-Tree Leaf Label       : 1032383\n\nNumber of EVPN instances       : 3\nTotal local MAC addresses      : 2\nTotal local MAC-IPs            : 0\nTotal remote MAC addresses     : 2\nTotal remote MAC-IPs           : 0\nTotal VPLS MAC addresses       : 0\nTotal MAC addresses            : 4\nTotal MAC-IPs                  : 0\nTotal suppressed MAC addresses : 0\nTotal number of interfaces/up  : 9/9\nTotal number of EVPN neighbors : 1\nTotal number of VPLS neighbors : 0\nTotal Local MH ESIs            : 0\nTotal Local MH ACs             : 0\nTotal Local MH VPLS ACs        : 0"
+  },
+  {
+    "command": "show bridge-domain instance | no-more",
+    "timestamp": "2026-04-14T17:59:25.671+00:00",
+    "duration_ms": 50,
+    "phase": "verify",
+    "output_length": 26,
+    "output_preview": "ERROR: Incomplete command.",
+    "output_full": "ERROR: Incomplete command."
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:00:02:02 | no-more",
+    "timestamp": "2026-04-14T17:59:25.721+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 288,
+    "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:02:02\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 19.19.19.2\n          MAC label: 21\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 14-Apr-2026-20:56:49",
+    "output_full": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:02:02\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 19.19.19.2\n          MAC label: 21\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 14-Apr-2026-20:56:49"
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-14T17:59:25.972+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 1122,
+    "output_preview": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ------------------",
+    "output_full": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ----------------------------------------------------------------------------------------------------------------------------\n    L>        | 00:de:ad:00:01:01    |                               | ge400-0/0/5.1000       |             |                   \n    B>        | 00:de:ad:00:02:02    |                               | 19.19.19.2             | 21          | Single-homed      \n    B>        | 00:de:ad:00:99:99    |                               | 19.19.19.2             | 18          | Single-homed      \n    L>        | 00:de:ad:ff:ff:01    |                               | ge400-0/0/5.1000       |             |                   "
+  },
+  {
+    "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-14T17:59:26.223+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 802,
+    "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 14-Apr-2026-20:55:45\nMAC address: 00:de:ad:00:02:02\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 19.19.19.2\n          MAC label: 21\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 14-Apr-2026-20:56:49\nMAC address: 00:de:ad:00:99:99\n  Protocol: bgp\n      ESI: N/A\n      Encapsu",
+    "output_full": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 14-Apr-2026-20:55:45\nMAC address: 00:de:ad:00:02:02\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 19.19.19.2\n          MAC label: 21\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 14-Apr-2026-20:56:49\nMAC address: 00:de:ad:00:99:99\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 19.19.19.2\n          MAC label: 18\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 14-Apr-2026-20:34:20\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 14-Apr-2026-20:55:24"
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-14T17:59:26.474+00:00",
+    "duration_ms": 100,
+    "phase": "verify",
+    "output_length": 1264,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 4\n\n| MacAddress   ",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 4\n\n| MacAddress              | Interface              | Egress-Encapsulation           | Timestamp              | Flags            |\n+-------------------------+------------------------+--------------------------------+------------------------+------------------+\n| (*)00:de:ad:00:01:01    | ge400-0/0/5.1000       |                                | 14-Apr-2026-20:55:45   | L                |\n| (*)00:de:ad:00:02:02    | ge400-0/0/5.5          | M{21}                          | 14-Apr-2026-20:56:49   | R                |\n| (*)00:de:ad:00:99:99    | ge400-0/0/5.5          | M{18}                          | 14-Apr-2026-20:34:20   | R                |\n| (*)00:de:ad:ff:ff:01    | ge400-0/0/5.1000       |                                | 14-Apr-2026-20:55:24   | L                |"
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-14T17:59:26.575+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 1122,
+    "output_preview": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ------------------",
+    "output_full": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ----------------------------------------------------------------------------------------------------------------------------\n    L>        | 00:de:ad:00:01:01    |                               | ge400-0/0/5.1000       |             |                   \n    B>        | 00:de:ad:00:02:02    |                               | 19.19.19.2             | 21          | Single-homed      \n    B>        | 00:de:ad:00:99:99    |                               | 19.19.19.2             | 18          | Single-homed      \n    L>        | 00:de:ad:ff:ff:01    |                               | ge400-0/0/5.1000       |             |                   "
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:00:02:02 | no-more",
+    "timestamp": "2026-04-14T17:59:26.826+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 288,
+    "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:02:02\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 19.19.19.2\n          MAC label: 21\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 14-Apr-2026-20:56:49",
+    "output_full": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:02:02\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 19.19.19.2\n          MAC label: 21\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 14-Apr-2026-20:56:49"
+  },
+  {
+    "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-14T17:59:27.077+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 802,
+    "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 14-Apr-2026-20:55:45\nMAC address: 00:de:ad:00:02:02\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 19.19.19.2\n          MAC label: 21\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 14-Apr-2026-20:56:49\nMAC address: 00:de:ad:00:99:99\n  Protocol: bgp\n      ESI: N/A\n      Encapsu",
+    "output_full": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:00:01:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 14-Apr-2026-20:55:45\nMAC address: 00:de:ad:00:02:02\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 19.19.19.2\n          MAC label: 21\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 14-Apr-2026-20:56:49\nMAC address: 00:de:ad:00:99:99\n  Protocol: bgp\n      ESI: N/A\n      Encapsulation: mpls\n      (1) Nexthop: 19.19.19.2\n          MAC label: 18\n      Resolution: Single-homed (Single-homed MAC without ESI)\n      Timestamp: 14-Apr-2026-20:34:20\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 14-Apr-2026-20:55:24"
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-14T17:59:27.328+00:00",
+    "duration_ms": 150,
+    "phase": "verify",
+    "output_length": 1264,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 4\n\n| MacAddress   ",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 4\n\n| MacAddress              | Interface              | Egress-Encapsulation           | Timestamp              | Flags            |\n+-------------------------+------------------------+--------------------------------+------------------------+------------------+\n| (*)00:de:ad:00:01:01    | ge400-0/0/5.1000       |                                | 14-Apr-2026-20:55:45   | L                |\n| (*)00:de:ad:00:02:02    | ge400-0/0/5.5          | M{21}                          | 14-Apr-2026-20:56:49   | R                |\n| (*)00:de:ad:00:99:99    | ge400-0/0/5.5          | M{18}                          | 14-Apr-2026-20:34:20   | R                |\n| (*)00:de:ad:ff:ff:01    | ge400-0/0/5.1000       |                                | 14-Apr-2026-20:55:24   | L                |"
+  },
+  {
+    "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-14T17:59:27.478+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 258,
+    "output_preview": "evi_id=1, eth_tag=0, mac=00:de:ad:00:01:01, interface=, dp_index=13624, action_type=New, Type=Add, neighbor_keys_size=0\nevi_id=1, eth_tag=0, mac=00:de:ad:ff:ff:01, interface=, dp_index=13624, action_type=New, Type=Add, neighbor_keys_size=0\nEvpnMacs [size: 2]",
+    "output_full": "evi_id=1, eth_tag=0, mac=00:de:ad:00:01:01, interface=, dp_index=13624, action_type=New, Type=Add, neighbor_keys_size=0\nevi_id=1, eth_tag=0, mac=00:de:ad:ff:ff:01, interface=, dp_index=13624, action_type=New, Type=Add, neighbor_keys_size=0\nEvpnMacs [size: 2]"
+  },
+  {
+    "command": "show evpn arp-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-14T17:59:27.729+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 35,
+    "output_preview": "  ETH TAG: 0\n    ARP table is empty",
+    "output_full": "  ETH TAG: 0\n    ARP table is empty"
+  },
+  {
+    "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+    "timestamp": "2026-04-14T17:59:27.980+00:00",
+    "duration_ms": 50,
+    "phase": "verify",
+    "output_length": 26,
+    "output_preview": "ERROR: Incomplete command.",
+    "output_full": "ERROR: Incomplete command."
+  },
+  {
+    "command": "show bgp l2vpn evpn summary | no-more",
+    "timestamp": "2026-04-14T17:59:28.031+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 583,
+    "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 3\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 1d03h47m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11891      12267    0     0       4 00:34:21                   4\n\nTotal number of es",
+    "output_full": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 3\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 1d03h47m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      11891      12267    0     0       4 00:34:21                   4\n\nTotal number of established neighbors with L2vpn EVPN 1/3\n\nTotal number of NSR capable BGP sessions 0"
+  }
+]

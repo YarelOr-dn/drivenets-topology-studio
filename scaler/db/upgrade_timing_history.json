@@ -242,6 +242,31 @@
       "target_version": "",
       "device_mode": "DNOS",
       "success": false
+    },
+    {
+      "timestamp": "2026-06-23T18:02:26.719847",
+      "device": "PE-1",
+      "upgrade_type": "gi_deploy",
+      "components": [
+        "DNOS",
+        "GI",
+        "BaseOS"
+      ],
+      "component_count": 3,
+      "actual_time": 1062.3,
+      "stage_times": {
+        "connect": 3.2,
+        "load_DNOS": 92.1,
+        "load_GI": 26.4,
+        "load_BaseOS": 48.3,
+        "deploy": 13.6,
+        "post_deploy_verify": 812.0
+      },
+      "current_version": "",
+      "target_version": "",
+      "device_mode": "DNOS",
+      "success": false,
+      "system_type": "SA-36CD-S"
     }
   ],
   "averages": {

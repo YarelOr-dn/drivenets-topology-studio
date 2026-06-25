@@ -1,0 +1,139 @@
+{
+  "phase_name": "auto_diagnose",
+  "started_at": "2026-04-03T09:33:51.046+00:00",
+  "completed_at": "2026-04-03T09:35:50.008+00:00",
+  "duration_sec": 118.962,
+  "command_count": 16,
+  "commands": [
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:31 | include MAC | no-more",
+      "timestamp": "2026-04-03T09:33:51.046+00:00",
+      "duration_ms": 8661,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:31 | include EVPN | no-more",
+      "timestamp": "2026-04-03T09:33:59.708+00:00",
+      "duration_ms": 10363,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:31 | include withdraw | no-more",
+      "timestamp": "2026-04-03T09:34:10.072+00:00",
+      "duration_ms": 8711,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:31 | include announce | no-more",
+      "timestamp": "2026-04-03T09:34:18.784+00:00",
+      "duration_ms": 7560,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:31 | include seq | no-more",
+      "timestamp": "2026-04-03T09:34:26.344+00:00",
+      "duration_ms": 5356,
+      "phase": "auto_diagnose",
+      "output_length": 604,
+      "output_preview": "2026-04-02T23:09:31.441072 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2045376:1048344:  input got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 1.1.1.1 remote addr: 5.5.5.5 local port: 43205 remote port: 179) seq:3477091831 ack:2213863445 flags:FA msgSize:0\n2026-04-03T09:31:33.928334 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2141627:1106939:  input got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 1.1.1.1 "
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:31 | include duplicate | no-more",
+      "timestamp": "2026-04-03T09:34:31.701+00:00",
+      "duration_ms": 5607,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:31 | include suppress | no-more",
+      "timestamp": "2026-04-03T09:34:37.309+00:00",
+      "duration_ms": 11164,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 09:31 | include MAC | no-more",
+      "timestamp": "2026-04-03T09:34:48.474+00:00",
+      "duration_ms": 21077,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 09:31 | include evpn | no-more",
+      "timestamp": "2026-04-03T09:35:09.552+00:00",
+      "duration_ms": 20026,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 09:31 | include FIB | no-more",
+      "timestamp": "2026-04-03T09:35:29.578+00:00",
+      "duration_ms": 19275,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+      "timestamp": "2026-04-03T09:35:48.854+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 35,
+      "output_preview": "  ETH TAG: 0\n    MAC table is empty"
+    },
+    {
+      "command": "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+      "timestamp": "2026-04-03T09:35:49.105+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 207,
+      "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+    },
+    {
+      "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+      "timestamp": "2026-04-03T09:35:49.355+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 42,
+      "output_preview": "Number of MAC-Mobility entries in redis: 0"
+    },
+    {
+      "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+      "timestamp": "2026-04-03T09:35:49.606+00:00",
+      "duration_ms": 50,
+      "phase": "auto_diagnose",
+      "output_length": 26,
+      "output_preview": "ERROR: Incomplete command."
+    },
+    {
+      "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-03T09:35:49.656+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 18,
+      "output_preview": "EvpnMacs [size: 0]"
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-03T09:35:49.907+00:00",
+      "duration_ms": 100,
+      "phase": "auto_diagnose",
+      "output_length": 442,
+      "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+    }
+  ],
+  "parsed_values": {},
+  "anomalies": []
+}

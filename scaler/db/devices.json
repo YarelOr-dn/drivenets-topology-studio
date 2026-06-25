@@ -3,42 +3,39 @@
     {
       "id": "pe1",
       "hostname": "PE-1",
-      "ip": "100.64.3.9",
+      "aliases": ["YOR_PE-1", "YOR-PE-1"],
+      "ip": "100.64.4.200",
       "username": "dnroot",
       "password": "ZG5yb290",
       "platform": "NCP",
-      "last_sync": "2026-03-11T10:58:17.794692+02:00",
+      "last_sync": "2026-03-29T02:00:43.678601+03:00",
       "description": "PE-1 Router",
       "connection_method": "SSH\u2192MGMT"
     },
     {
       "id": "rr_sa_2",
       "hostname": "RR-SA-2",
-      "ip": "100.64.4.205",
+      "ip": "100.64.11.75",
       "username": "dnroot",
       "password": "ZG5yb290",
       "platform": "NCP",
-      "last_sync": "2026-03-11T10:58:17.812082+02:00",
+      "system_type": "SA-36CD-S",
+      "system_type_source": "pre_upgrade_backup_recovery",
+      "last_sync": "2026-03-29T02:00:43.756869+03:00",
       "description": "RR-SA-2",
       "connection_method": "SSH\u2192MGMT"
     },
     {
       "id": "yor_cl_pe_4",
       "hostname": "YOR_CL_PE-4",
-      "ip": "100.64.4.36",
+      "ip": "100.64.7.197",
       "username": "dnroot",
       "password": "ZG5yb290",
       "platform": "CL-86",
       "system_type": "CL-86",
-      "last_sync": "2026-03-23T09:50:00.000000+02:00",
+      "last_sync": "2026-03-29T02:00:43.774692+03:00",
       "description": "PE-4 Cluster",
-      "connection_method": "SSH\u2192MGMT",
-      "ncc_ips": {
-        "ncc0": "100.64.11.96",
-        "ncc1": "100.64.4.122"
-      },
-      "kvm_host": "kvm108-cl408d-ncc0",
-      "mgmt_note": "DHCP assigned - use 'show interfaces management' to get current IP"
+      "connection_method": "SSH\u2192MGMT"
     }
   ],
   "settings": {

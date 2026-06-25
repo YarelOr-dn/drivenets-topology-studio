@@ -1,0 +1,21 @@
+{
+  "phase_name": "trigger",
+  "started_at": "2026-04-18T20:12:39.073+00:00",
+  "completed_at": "2026-04-18T20:12:55.968+00:00",
+  "duration_sec": 16.895,
+  "command_count": 1,
+  "commands": [
+    {
+      "command": "show evpn vpls-pw | no-more",
+      "timestamp": "2026-04-18T20:12:39.073+00:00",
+      "duration_ms": 100,
+      "phase": "trigger",
+      "output_length": 746,
+      "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------"
+    }
+  ],
+  "parsed_values": {
+    "trigger_duration_sec": 16.894
+  },
+  "anomalies": []
+}

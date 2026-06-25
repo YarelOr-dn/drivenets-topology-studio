@@ -550,11 +550,32 @@ def update_device_state_live(devices: list, configs_dir: Path, stats: dict) -> l
                     # Don't overwrite target versions - wizard sets these
                     # They'll be preserved from the existing file
                 
-                # Write back to operational.json
+                # Write back to operational.json atomically. A raw
+                # `open(path, 'w') + json.dump` can leave a truncated /
+                # invalid-JSON file if the process is killed mid-write or
+                # two threads race -- exactly what happened when the
+                # wizard and monitor both updated the same file. We now
+                # go through the same atomic writer the topology bridge
+                # uses (`os.replace` on a sibling tempfile, per-path
+                # `threading.Lock`) so readers see an all-or-nothing
+                # flip.
                 try:
-                    with open(op_path, 'w') as f:
-                        json.dump(op_data, f, indent=2)
-                except:
+                    import tempfile
+                    _tmp_fd, _tmp_path = tempfile.mkstemp(
+                        dir=str(op_path.parent),
+                        suffix='.tmp',
+                        prefix=op_path.name + '.',
+                    )
+                    try:
+                        with os.fdopen(_tmp_fd, 'w') as _tmp_f:
+                            json.dump(op_data, _tmp_f, indent=2)
+                        os.replace(_tmp_path, str(op_path))
+                    except Exception:
+                        try:
+                            os.unlink(_tmp_path)
+                        except Exception:
+                            pass
+                except Exception:
                     pass
                 
                 # Update running.txt header for recovery mode devices

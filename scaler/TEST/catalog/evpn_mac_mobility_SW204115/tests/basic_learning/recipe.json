@@ -1,151 +1,881 @@
 {
   "id": "TEST_mac_mob_basic_SW205160",
-  "name": "MAC Mobility | Basic Learning",
+  "name": "MAC Mobility | Basic Learning (rewritten 2026-05-01)",
   "type": "functional",
   "feature": "evpn-mac-mobility",
   "source": "jira:SW-204115 / SW-205160",
   "jira_key": "SW-205160",
   "parent_category": "SW-204115",
-  "created": "2026-03-20",
+  "created": "2026-05-01",
+  "knowledge_revision": "2026-05-01-pe4-untagged-ac-correct-shared-service-pw-learn",
+  "infra_required": "si_mode",
+  "default_cleanup_scope": "test_mac",
+  "infra_detail": "Shared-service mode: EVPN_SI_VPLS_1 already has a real PW peer (RR-SA-2 at 2.2.2.2) and a real EVPN peer (PE-1 at 1.1.1.1). DO NOT provision a Spirent VPLS BGP peer or an extra synthetic EVPN instance. SC01 sources Spirent traffic to PE-4's untagged port-mode AC. SC02 sources Spirent traffic to PE-1's Q-in-Q AC; PE-1 advertises RT-2 to PE-4. SC03 sources Spirent Q-in-Q 215/3001 traffic to RR-SA-2's bundle-100.2001 AC through DNAAS; RR-SA-2 forwards to PE-4 via the existing PW (label 1032269).",
+  "rewrite_rationale": [
+    "Old recipe relied on auto-discovered evpn_name + auto-picked si_outer_vlan; on PE-4 this resolved to EVPN_SI_AC_PW_test (VPLS_SI_ONLY, ge100-18/0/0.4006) and VLAN 219, which is the wrong service.",
+    "Correct topology: EVPN_SI_VPLS_1 is the cross-PE service shared by PE-1 (ge400-0/0/5.4001 Q-in-Q 214/4001), PE-4 (ge100-18/0/1 untagged port-mode, fabric VLAN 211), RR-SA-2 (bundle-100.2001 reached through Spirent Q-in-Q 215/3001; B-15 swaps to DUT wire outer 4 inner 3001).",
+    "PW learning is tested by sending traffic to RR-SA-2's AC; the VPLS PW (label 1032269, peer 2.2.2.2) carries it to PE-4 -- PE-4 sees it as v>. No need for a synthetic VPLS stream on PE-4 itself.",
+    "Every show command and Spirent stream is validated up-front via dnos_cmd_search + dnos_dnaas_teach_plan. No auto-discovery surprises at runtime."
+  ],
   "device_requirements": {
     "type": "any",
-    "features": ["evpn", "bgp-l2vpn-evpn", "seamless-integration"],
+    "features": ["evpn", "bgp-l2vpn-evpn", "seamless-integration", "vpls-pw"],
     "min_ncp_count": 1
   },
+  "e2e": {
+    "_comment": "Declarative mapping consumed by scaler/TEST/shared/recipe_to_dnos_e2e.py to emit a cheetah dnos_e2e (mcDNOS) pytest. The lab recipe (DNAAS/Q-in-Q/VPLS-PW label 1032269/Spirent) cannot be replicated verbatim on containers; this block declares the BEHAVIORAL equivalent that proves the same L>/B>/v> learning + RT-2 + no-suppression + no-ghost outcomes on mcDNOS in CI. Modeled 1:1 on tests/suites/dnos_e2e/tests/test_bgp_evpn_mcdnos.py.",
+    "ci_target": "mcdnos",
+    "suite_path": "tests/suites/dnos_e2e/tests/evpn",
+    "test_module": "test_mac_mobility_basic_mcdnos.py",
+    "test_class": "TestMacMobilityBasicMcdnos",
+    "owner": "youruser",
+    "jira_component": "ROUTING",
+    "evi_name": "mob-evpn",
+    "bgp_as": 100,
+    "vlan_ac": 1500,
+    "topology": {
+      "nodes": [
+        {"name": "SA1", "role": "dut", "type": "sa", "router_id": "2.1.1.1", "loopback": null},
+        {"name": "mcdnos1", "role": "host_local_ac", "type": "mcdnos", "router_id": "2.1.1.2"},
+        {"name": "mcdnos2", "role": "remote_pe", "type": "mcdnos", "router_id": "3.1.1.2"}
+      ],
+      "links": [
+        {"a": "SA1", "a_if": "{sa_interface1}", "b": "mcdnos1", "b_if": "ge100-0/0/0", "ac": true},
+        {"a": "SA1", "a_if": "{sa_interface2}", "b": "mcdnos2", "b_if": "ge100-0/0/0", "bgp_control": true}
+      ],
+      "ip_plan": {
+        "mcdnos1_to_sa1_v4": "2.1.1.2/24",
+        "sa1_router_id": "2.1.1.1",
+        "sa1_to_mcdnos2_v4": "3.1.1.1/24",
+        "mcdnos2_to_sa1_v4": "3.1.1.2/24"
+      }
+    },
+    "scenarios": [
+      {
+        "recipe_scenario": "SC01_L_local_ac",
+        "kind": "local_learn",
+        "ci_target": "mcdnos",
+        "source_node": "mcdnos1",
+        "learn_on": "SA1",
+        "test_mac": "00:de:ad:00:01:01",
+        "expected_flag": "L>",
+        "assert_rt2_advertised": true,
+        "forbidden_flags": ["F", "D"],
+        "note": "Software ArpPingFloodDNOS from mcdnos1 floods SA1 local AC; SA1 must learn L> on the AC interface and advertise RT-2 to mcdnos2."
+      },
+      {
+        "recipe_scenario": "SC02_B_remote_evpn",
+        "kind": "remote_evpn_learn",
+        "ci_target": "mcdnos",
+        "source_node": "mcdnos2",
+        "remote_pe": "mcdnos2",
+        "learn_on": "SA1",
+        "test_mac": "00:de:ad:00:02:01",
+        "expected_flag": "B>",
+        "assert_rt2_received": true,
+        "forbidden_flags": ["F", "D", "L>", "v>"],
+        "note": "mcdnos2 learns the MAC locally and advertises RT-2; SA1 (DUT) must install it with B> source and remote-PE nexthop."
+      },
+      {
+        "recipe_scenario": "SC03_v_pw_via_rrsa2_ac",
+        "kind": "vpls_pw_learn",
+        "ci_target": "lab_only",
+        "reason": "VPLS-PW Seamless-Integration depends on bgp-vpls label-block carving (see known bug SW-253359 on clusters) and a real PW peer; not faithfully reproducible on a single-container mcDNOS. Cover v> via the CDNOS SI suite (src/tests/cdnos/tests/test_bgp_evpn_seamless_integration.py) or keep lab-only via Spirent."
+      },
+      {
+        "recipe_scenario": "SC04_counts_and_stability",
+        "kind": "coexistence_stability",
+        "ci_target": "mcdnos",
+        "asserts": ["all_present_flags:L>,B>", "no_forbidden_flags:F,D", "no_ghost", "no_suppression", "bgp_established"],
+        "note": "On mcDNOS the coexistence check covers L>+B> (v> is lab_only); same no-ghost / no-suppression / BGP-stable gates apply."
+      }
+    ],
+    "traffic": {
+      "backend": "arpping",
+      "rationale": "backend=arpping -> ArpPingFloodDNOS (software, mcDNOS/CI). backend=otg -> ArpPingFloodSpirent + traffic_generator_config (SA+Spirent lab). Same validations either way.",
+      "count": 200,
+      "arp_mac": "aa:bb:cc:dd:ee:ff",
+      "rx_min_frames": 20,
+      "tx_min_frames": 200,
+      "counter_timeout_sec": 90
+    },
+    "validations": {
+      "mac_table": "ValidateEvpnMacTable",
+      "bgp_routes": "ValidateBGPevpnRoutes",
+      "counters": "ValidateInterfaceCounters"
+    }
+  },
+  "service_capabilities": {
+    "requires": ["native_evpn_rt", "seamless_integration", "seamless_integration_rt"],
+    "preferred_instance": "EVPN_SI_VPLS_1",
+    "rationale": "EVPN_SI_VPLS_1 is BOTH_RTS on PE-4 (export-l2vpn-evpn + export-l2vpn-vpls), shared with PE-1 via EVPN RT and RR-SA-2 via VPLS-SI RT. The other instances on PE-4 are partial (VPLS_SI_ONLY or NO_RTS) and would fail rt2_advertised on SC01."
+  },
+  "topology_anchor": {
+    "evpn_instance": "EVPN_SI_VPLS_1",
+    "dut": "YOR_CL_PE-4",
+    "dut_short": "PE-4",
+    "dut_loopback": "4.4.4.4",
+    "dut_local_site_id": 4001,
+    "dut_evi_id": 2,
+    "dut_ac": {
+      "interface": "ge100-18/0/1",
+      "encapsulation": "untagged",
+      "port_mode": true,
+      "fabric_vlan": 211,
+      "spirent_ingress_leaf": "DNAAS-LEAF-B14",
+      "spirent_ingress_physical": "ge100-0/0/15.211",
+      "spirent_ingress_bd": "g_yor_v211_CL-TO-STC_Port_mode",
+      "egress_leaf": "DNAAS-LEAF-B10",
+      "egress_leaf_port": "ge100-0/0/4",
+      "egress_leaf_bd": "g_yor_v211_STC-TO-CL_port-mode",
+      "interface_description": "EVPN_SI_VPLS_1 PW-source AC port-mode (Spirent->B14.211->fab211->B10.4->PE4)",
+      "detect_via": "shared.spirent_preflight.detect_ac_encapsulation(device, ac_interface, run_show)",
+      "auto_detect_signature": {
+        "dut_config_must_have": ["l2-service enabled"],
+        "dut_config_must_not_have": ["vlan-id", "vlan-tags"],
+        "interface_name_must_not_have": [".N suffix"],
+        "egress_leaf_bd_must_have": ["mac-handling mac-learning disabled", "untagged ACs"]
+      }
+    },
+    "evpn_remote_pe": {
+      "device": "YOR_PE-1",
+      "loopback": "1.1.1.1",
+      "ac_interface": "ge400-0/0/5.4001",
+      "encapsulation": "double-tagged",
+      "outer_vlan": 214,
+      "inner_vlan": 4001
+    },
+    "vpls_pw_peer": {
+      "device": "RR-SA-2",
+      "loopback": "2.2.2.2",
+      "ac_interface": "bundle-100.2001",
+      "encapsulation": "double-tagged",
+      "fabric_vlan": 215,
+      "outer_vlan": 4,
+      "inner_vlan": 3001,
+      "spirent_outer_vlan": 215,
+      "remote_site_id": 2001,
+      "ingress_label_on_pe4": 1032269,
+      "egress_label_on_pe4": 1032335
+    }
+  },
+  "expected_traffic": {
+    "L": {
+      "label": "L> Local AC source on DUT (PORT-MODE / UNTAGGED)",
+      "via_device": "YOR_CL_PE-4",
+      "via_ac": "ge100-18/0/1",
+      "encapsulation": "untagged",
+      "port_mode": true,
+      "fabric_vlan": 211,
+      "fabric_vlan_role": "DNAAS transport tag (NOT injected by Spirent; fabric prepends/strips it on uplinks)",
+      "src_mac_base": "00:de:ad:00:01:01",
+      "ownership_tag": "[STC-PE-4-211-L]",
+      "spirent_flags": ["--no-qinq"],
+      "spirent_forbidden_flags": ["--vlan", "--inner-vlan"],
+      "spirent_proven_command": "spirent_tool.py create-stream --protocol l2 --src-mac 00:DE:AD:00:01:01 --dst-mac e8:c5:7a:39:b6:6e --rate-mbps 5 --frame-size 128 --no-qinq --name pe4_untagged_L_test",
+      "spirent_proof_2026_05_01": "TX 726365 frames @ 5.19 Mbps untagged; PE-4 learned L> 00:de:ad:00:01:01 -> ge100-18/0/1 within 8s (timestamp 16:54:25)",
+      "expected_dut_flag": "L>",
+      "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=211, dut=YOR_CL_PE-4) MUST return encap='untagged' send-as='UNTAGGED (port-mode AC)'",
+      "verification_command_on_dut": "show evpn mac-table mac 00:de:ad:00:01:01 | no-more",
+      "knowledge_anchor": "~/.cursor/spirent-reference/dnaas-port-mode-untagged-ac.md"
+    },
+    "B": {
+      "label": "B> BGP-EVPN remote source via PE-1",
+      "via_device": "YOR_PE-1",
+      "via_ac": "ge400-0/0/5.4001",
+      "encapsulation": "double-tagged",
+      "outer_vlan": 214,
+      "inner_vlan": 4001,
+      "src_mac_base": "00:de:ad:00:02:01",
+      "ownership_tag": "[STC-PE-1-214-i4001-B]",
+      "spirent_flags": ["--vlan", "214", "--inner-vlan", "4001"],
+      "expected_dut_flag": "B>",
+      "evpn_peer_on_dut": "1.1.1.1",
+      "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=214, dut=YOR_PE-1)",
+      "verification_command_on_dut": "show evpn mac-table mac 00:de:ad:00:02:01 | no-more"
+    },
+    "v": {
+      "label": "v> VPLS PW source via RR-SA-2 AC -> PW -> PE-4",
+      "via_device": "RR-SA-2",
+      "via_ac": "bundle-100.2001",
+      "encapsulation": "double-tagged",
+      "fabric_vlan": 215,
+      "outer_vlan": 4,
+      "inner_vlan": 3001,
+      "spirent_outer_vlan": 215,
+      "src_mac_base": "00:de:ad:00:03:01",
+      "ownership_tag": "[STC-RRSA2-215-i3001-v]",
+      "spirent_flags": ["--vlan", "215", "--inner-vlan", "3001"],
+      "expected_dut_flag": "v>",
+      "pw_peer_on_dut": "2.2.2.2",
+      "pw_label_on_dut": 1032269,
+      "frame_recipe_source": "dnos_dnaas_teach_plan(vlan=215, dut=RR-SA-2, inner_vlan=3001)",
+      "verification_command_on_dut": "show evpn mac-table mac 00:de:ad:00:03:01 | no-more",
+      "pw_proof_command": "show evpn instance EVPN_SI_VPLS_1 vpls-pw | no-more"
+    }
+  },
+  "mac_flag_legend": {
+    "expected_in_basic_learning": {
+      "L>": "Locally learned via this AC (egress = local AC interface). Source for SC01.",
+      "B>": "Remotely learned via BGP EVPN RT-2 from a remote PE. Source for SC02.",
+      "v>": "Remotely learned via VPLS PW (Seamless-Integration). Source for SC03.",
+      "M": "Seamless-Integration MAC (informational, not a fail flag)",
+      "C": "Control-word enabled on PW (informational)"
+    },
+    "forbidden_in_basic_learning": {
+      "F": "Frozen / suppressed (loop-prevention triggered) -- never expected on a clean SC01-SC04",
+      "D": "Down / blackhole -- never expected; indicates AC blocking-all or sticky LLP shutdown",
+      "s": "Stale -- only acceptable transiently during BGP convergence; fail if persistent"
+    },
+    "info_only_no_fail": ["M", "C", "I"],
+    "rationale": "Source flags (L> / B> / v>) prove WHO learned the MAC. Status flags (F/D/s) prove HEALTH. Forbidden flags failing the test indicates a real problem (suppression, blocking-all, or stale state)."
+  },
   "prerequisites": [
-    {"id": "bgp_evpn", "check": "bgp_l2vpn_evpn_established", "fix_via": "Manual BGP L2VPN EVPN"},
-    {"id": "evpn_instance", "check": "evpn_instance_exists", "fix_via": "config_generator + validate_config"},
-    {"id": "mac_learned", "check": "traffic_or_spirent", "fix_via": "/SPIRENT or DNAAS path"}
+    {
+      "id": "evpn_instance",
+      "check": "evpn_instance_exists",
+      "check_command": "show evpn instance {evpn_name} detail | no-more",
+      "expect_pattern": "EVI ID",
+      "fix_via": "config_generator.build_minimal_si_evpn_snippet + dnos_atomic_commit"
+    },
+    {
+      "id": "evpn_si_rt_complete",
+      "check": "evpn_si_rt_classification",
+      "expect": "BOTH_RTS for {evpn_name}",
+      "rationale": "EVPN_ONLY would fail SC03 (no VPLS RT, no PW). VPLS_SI_ONLY would fail SC01 (no native EVPN RT, no RT-2 advertised)."
+    },
+    {
+      "id": "associated_ac_present",
+      "check": "ac_interface_in_evpn_instance",
+      "check_command": "show evpn instance {evpn_name} detail | no-more",
+      "expect_pattern": "Associated interfaces.*ge100-18/0/1",
+      "rationale": "PE-4's AC for EVPN_SI_VPLS_1 must be ge100-18/0/1 (the untagged port-mode AC). Other instances (e.g. EVPN_SI_AC_PW_test using ge100-18/0/0.4006) are NOT this test."
+    },
+    {
+      "id": "bgp_l2vpn_evpn_established",
+      "check": "bgp_l2vpn_evpn_established",
+      "check_command": "show bgp l2vpn evpn summary | no-more",
+      "expect_pattern": "1.1.1.1.*Established",
+      "rationale": "PE-1 EVPN session is the source for SC02 (B>)."
+    },
+    {
+      "id": "vpls_pw_installed",
+      "check": "vpls_pw_installed",
+      "check_command": "show evpn instance {evpn_name} vpls-pw | no-more",
+      "expect_pattern": "2.2.2.2.*Installed",
+      "rationale": "RR-SA-2 PW must be Installed for SC03 (v>) to work."
+    },
+    {
+      "id": "spirent_ac_teach_plan_pe4",
+      "check": "mcp_dnaas_teach_plan",
+      "fix_via_mcp": {
+        "tool": "dnos_dnaas_teach_plan",
+        "args": {"vlan": 211, "dut": "YOR_CL_PE-4", "test_mac": "{test_mac}"}
+      },
+      "pass_when": "frame_recipe.recipe_blockers == [] and frame_recipe.encapsulation == 'untagged'",
+      "feeds": "active_test_session.expected_traffic.L"
+    },
+    {
+      "id": "spirent_ac_teach_plan_pe1",
+      "check": "mcp_dnaas_teach_plan",
+      "fix_via_mcp": {
+        "tool": "dnos_dnaas_teach_plan",
+        "args": {"vlan": 214, "dut": "YOR_PE-1", "test_mac": "{test_mac}", "inner_vlan": 4001}
+      },
+      "pass_when": "frame_recipe.recipe_blockers == [] and frame_recipe.encapsulation == 'double-tagged'",
+      "feeds": "active_test_session.expected_traffic.B"
+    },
+    {
+      "id": "spirent_ac_teach_plan_rrsa2",
+      "check": "mcp_dnaas_teach_plan",
+      "fix_via_mcp": {
+        "tool": "dnos_dnaas_teach_plan",
+        "args": {"vlan": 215, "dut": "RR-SA-2", "test_mac": "{test_mac}", "inner_vlan": 3001}
+      },
+      "pass_when": "frame_recipe.recipe_blockers == [] and frame_recipe.encapsulation == 'double-tagged'",
+      "feeds": "active_test_session.expected_traffic.v"
+    },
+    {
+      "id": "spirent_session_alive",
+      "check": "spirent_session_reachable",
+      "expect": "session 'dn_spirent_main' reservable on port //100.64.3.238/6/13"
+    }
   ],
   "show_commands_validated": {
-    "show bgp l2vpn evpn summary | no-more": "BGP L2VPN EVPN neighbors",
-    "show evpn summary | no-more": "EVPN instance list",
-    "show evpn mac-table instance {evpn_name} | no-more": "MAC entries",
-    "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more": "Single MAC",
-    "show bridge-domain instance | no-more": "BD operational state",
-    "show evpn mac-table detail instance {evpn_name} | no-more": "Detailed MAC with sequence/flags (note: 'detail' keyword comes BEFORE 'instance')",
-    "show evpn instance {evpn_name} detail | no-more": "VALID - detailed instance info (corrected: this command IS valid)",
-    "show evpn mac summary | no-more": "Global MAC count summary",
-    "show evpn mac-table instance {evpn_name} local | no-more": "Only locally-learned MACs",
-    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "Datapath MAC entries (NCP-level)",
-    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more": "Ghost MAC detection",
-    "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
+    "show evpn summary | no-more": "Global EVPN instance list",
+    "show evpn instance {evpn_name} detail | no-more": "Per-instance detail (RD, RT, ACs, neighbors, VPLS PW table)",
+    "show evpn instance {evpn_name} vpls-pw | no-more": "VPLS PW status only (RR-SA-2 must be Installed)",
+    "show evpn mac-table instance {evpn_name} | no-more": "Per-instance MAC table",
+    "show evpn mac-table detail instance {evpn_name} | no-more": "Per-instance MAC table with flags + sequence (note: 'detail' BEFORE 'instance')",
+    "show evpn mac-table mac {test_mac} | no-more": "Single MAC global view (source-qualified)",
+    "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more": "Single MAC inside instance",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} mac {test_mac} | no-more": "NCP-level forwarding entry for MAC (proves datapath programming)",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "Full NCP forwarding entries for instance",
+    "show evpn mac summary | no-more": "Global MAC count",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more": "Ghost MAC detection (must stay 0 throughout)",
+    "show bgp l2vpn evpn summary | no-more": "EVPN BGP neighbor states",
+    "show bgp l2vpn evpn route-type 2 | include {test_mac} | no-more": "RT-2 entries for a specific MAC (whoever owns it)",
+    "show bgp l2vpn vpls summary | no-more": "VPLS BGP neighbor states (Seamless-Integration neighbor must be Established for PW)",
+    "show interfaces ge100-18/0/1 | no-more": "PE-4 untagged port-mode AC; expect admin/oper UP, RX counter increments during SC01"
   },
   "invalid_commands": {
-    "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use: show evpn mac-table instance {name}",
-    "show interfaces brief": "DOES NOT EXIST. Use: show interfaces description"
+    "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use 'show evpn mac-table instance {name}'",
+    "show evpn mac-table instance {name} detail": "WRONG order. Use 'show evpn mac-table detail instance {name}'",
+    "show interfaces brief": "DOES NOT EXIST. Use 'show interfaces description' or 'show interfaces <if>'",
+    "show bgp l2vpn evpn mac-address {mac}": "DOES NOT EXIST. Use 'show bgp l2vpn evpn route-type 2 | include {mac}'",
+    "show bgp l2vpn evpn route mac-address {mac}": "DOES NOT EXIST"
   },
   "scenarios": [
     {
-      "id": "SC01_learn_local_ac",
-      "name": "Learn MAC from local AC; expect Type-2 advertised",
+      "id": "SC01_L_local_ac",
+      "name": "SC01: L> Local AC -- PE-4 learns MAC from its own untagged AC and advertises RT-2",
+      "expected_source_flag": "L>",
+      "test_mac_override": "00:de:ad:00:01:01",
+      "traffic_source_key": "L",
       "phases": {
         "snapshot": {
           "show_commands": [
-            "show evpn mac-table instance {evpn_name} | no-more",
-            "show bgp l2vpn evpn summary | no-more"
+            "show evpn instance {evpn_name} detail | no-more",
+            "show evpn mac-table mac 00:de:ad:00:01:01 | no-more",
+            "show interfaces ge100-18/0/1 | no-more"
           ]
         },
-        "trigger": {"action": "traffic_on_ac1", "method": "spirent_or_manual"},
+        "trigger": {
+          "action": "traffic_on_ac1",
+          "method": "spirent_or_manual",
+          "cleanup_scope": "all",
+          "encapsulation": "untagged",
+          "port_mode": true,
+          "spirent_flags_pinned": ["--no-qinq"],
+          "spirent_flags_forbidden": ["--vlan", "--inner-vlan"],
+          "spirent_dst_mac_source": "DUT interface MAC of ge100-18/0/1 (e8:c5:7a:39:b6:6e); use unicast NOT broadcast",
+          "spirent_rate_mbps": 5,
+          "spirent_frame_size": 128,
+          "smoke_poll_timeout_sec": 25,
+          "smoke_poll_rationale": "DNAAS LLP filters first-time-seen source MACs for ~12-15s; bare 10s polling window is unreliable for fresh sessions",
+          "duration_sec": 5,
+          "ownership_tag": "[STC-PE-4-211-L]"
+        },
         "verify": {
           "show_commands": [
-            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more"
+            "show evpn mac-table mac 00:de:ad:00:01:01 | no-more",
+            "show evpn mac-table detail instance {evpn_name} | no-more",
+            "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:01:01 | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} mac 00:de:ad:00:01:01 | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+            "show interfaces ge100-18/0/1 | no-more"
           ],
           "expect": {
-            "source_contains": ["local", "ac"],
+            "source_contains": ["L>", "ge100-18/0/1"],
             "rt2_advertised": true,
             "check_mac_flags": true,
+            "expected_flag": "L>",
             "forbidden_flags": ["F", "D"],
             "check_forwarding": true,
-            "check_ghost_macs": true
+            "check_ghost_macs": true,
+            "no_stuck_blackhole": true,
+            "ac_rx_must_increase": true
           }
         }
-      }
+      },
+      "step_table": [
+        {
+          "step": 1,
+          "name": "snapshot_pre",
+          "action": "Snapshot DUT state before any traffic for SC01",
+          "command": "show evpn instance {evpn_name} detail | no-more",
+          "expect": "Associated interfaces row containing ge100-18/0/1, Local entries count visible",
+          "on_fail": "abort -- service not present, fix via prerequisite_engine"
+        },
+        {
+          "step": 2,
+          "name": "snapshot_mac_pre",
+          "action": "Verify SC01 MAC not yet present (must learn fresh)",
+          "command": "show evpn mac-table mac 00:de:ad:00:01:01 | no-more",
+          "expect_pattern_absent": "00:de:ad:00:01:01",
+          "on_fail": "clear evpn mac-table instance {evpn_name} mac 00:de:ad:00:01:01 -- only as setup, not workaround"
+        },
+        {
+          "step": 3,
+          "name": "snapshot_ac_counters_pre",
+          "action": "Capture baseline AC RX counter for proof Spirent reaches the AC",
+          "command": "show interfaces ge100-18/0/1 | no-more",
+          "extract": "Input.*frames",
+          "on_fail": "warn -- counters might be cleared, retry once"
+        },
+        {
+          "step": 4,
+          "name": "trigger_spirent_l_stream",
+          "action": "Apply teach_plan-derived Spirent stream and start traffic",
+          "spirent_command": "spirent_tool.py create-stream --protocol l2 --src-mac 00:de:ad:00:01:01 --dst-mac ff:ff:ff:ff:ff:ff --frame-size 128 --rate-mbps 1 --no-qinq --name sc01_pe4_l_untagged_[STC-PE-4-211-L]",
+          "spirent_flags_pinned": ["--no-qinq"],
+          "spirent_flags_forbidden": ["--vlan", "--inner-vlan"],
+          "duration_sec": 5,
+          "on_fail": "infra_issue -- DNAAS path or Spirent reservation broken; do NOT escalate to /debug-dnos"
+        },
+        {
+          "step": 5,
+          "name": "verify_ac_rx_increased",
+          "action": "Confirm Spirent traffic actually reaches PE-4 ge100-18/0/1",
+          "command": "show interfaces ge100-18/0/1 | no-more",
+          "expect": "Input frames counter increased >= 1000 from step 3 baseline",
+          "on_fail": "infra_issue -- traffic did not reach AC; check DNAAS path with dnos_dnaas_diagnose(vlan=211)"
+        },
+        {
+          "step": 6,
+          "name": "verify_mac_local",
+          "action": "Confirm MAC learned with source flag L> on the expected AC",
+          "command": "show evpn mac-table mac 00:de:ad:00:01:01 | no-more",
+          "expect_pattern": "L>.*ge100-18/0/1",
+          "expect_flags_present": ["L>"],
+          "expect_flags_absent": ["F", "D", "s"],
+          "on_fail": "BUG_FINDING_GUARD -- traffic reached AC but MAC not learned as L> => /debug-dnos with feature=evpn-vpls-si"
+        },
+        {
+          "step": 7,
+          "name": "verify_rt2_advertised",
+          "action": "Confirm PE-4 advertises RT-2 for this MAC to PE-1",
+          "command": "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:01:01 | no-more",
+          "expect_pattern": "00:de:ad:00:01:01",
+          "on_fail": "BUG_FINDING_GUARD -- L> learned but RT-2 not advertised => /debug-dnos with epic=SW-178648 dp_enabler=SW-183400"
+        },
+        {
+          "step": 8,
+          "name": "verify_forwarding_local",
+          "action": "Confirm NCP datapath programs the MAC towards local AC",
+          "command": "show evpn forwarding-table mac-address-table instance {evpn_name} mac 00:de:ad:00:01:01 | no-more",
+          "expect_pattern": "ge100-18/0/1",
+          "on_fail": "BUG_FINDING_GUARD -- control plane has L> but datapath not programmed => /debug-dnos NCP layer"
+        },
+        {
+          "step": 9,
+          "name": "verify_no_ghost",
+          "action": "Confirm no ghost MAC entries appeared",
+          "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+          "expect_pattern_absent": "00:de:ad:00:01:01",
+          "on_fail": "BUG_FINDING_GUARD -- ghost MAC indicates inconsistent state => /debug-dnos"
+        }
+      ]
     },
     {
-      "id": "SC02_learn_remote_evpn",
-      "name": "Learn MAC from remote EVPN RT-2",
+      "id": "SC02_B_remote_evpn",
+      "name": "SC02: B> Remote EVPN -- PE-1 learns MAC locally; PE-4 receives via RT-2",
+      "expected_source_flag": "B>",
+      "test_mac_override": "00:de:ad:00:02:01",
+      "traffic_source_key": "B",
+      "remote_pe_device": "YOR_PE-1",
       "phases": {
-        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
-        "trigger": {"action": "remote_pe_traffic"},
+        "snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} detail | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:02:01 | no-more",
+            "show evpn mac-table mac 00:de:ad:00:02:01 | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "remote_pe_traffic",
+          "remote_device": "YOR_PE-1",
+          "spirent_flags_pinned": ["--vlan", "214", "--inner-vlan", "4001"],
+          "duration_sec": 5,
+          "ownership_tag": "[STC-PE-1-214-i4001-B]"
+        },
         "verify": {
-          "show_commands": ["show evpn mac-table instance {evpn_name} | no-more"],
+          "show_commands": [
+            "show evpn mac-table mac 00:de:ad:00:02:01 | no-more",
+            "show evpn mac-table detail instance {evpn_name} | no-more",
+            "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:02:01 | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} mac 00:de:ad:00:02:01 | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more"
+          ],
           "expect": {
-            "source_contains": ["bgp", "evpn", "remote"],
+            "source_contains": ["B>", "1.1.1.1"],
+            "rt2_advertised": true,
             "check_mac_flags": true,
-            "forbidden_flags": ["F", "D"],
+            "expected_flag": "B>",
+            "forbidden_flags": ["F", "D", "L>", "v>"],
             "check_forwarding": true,
-            "check_ghost_macs": true
+            "check_ghost_macs": true,
+            "no_stuck_blackhole": true
           }
         }
-      }
+      },
+      "step_table": [
+        {
+          "step": 1,
+          "name": "snapshot_pre",
+          "action": "Snapshot PE-4 EVPN state before SC02 traffic",
+          "command": "show evpn instance {evpn_name} detail | no-more",
+          "on_fail": "skip"
+        },
+        {
+          "step": 2,
+          "name": "snapshot_pe1_session_up",
+          "action": "Verify PE-4 sees PE-1 BGP EVPN session as Established",
+          "command": "show bgp l2vpn evpn summary | no-more",
+          "expect_pattern": "1.1.1.1.*Established",
+          "on_fail": "abort -- /BGP fix on PE-1 needed"
+        },
+        {
+          "step": 3,
+          "name": "trigger_spirent_b_stream",
+          "action": "Apply teach_plan-derived Spirent stream to PE-1's Q-in-Q AC",
+          "spirent_command": "spirent_tool.py create-stream --protocol l2 --src-mac 00:de:ad:00:02:01 --dst-mac ff:ff:ff:ff:ff:ff --frame-size 128 --rate-mbps 1 --vlan 214 --inner-vlan 4001 --name sc02_pe1_b_qinq_[STC-PE-1-214-i4001-B]",
+          "spirent_flags_pinned": ["--vlan", "214", "--inner-vlan", "4001"],
+          "duration_sec": 5,
+          "on_fail": "infra_issue"
+        },
+        {
+          "step": 4,
+          "name": "verify_pe1_local_learn",
+          "action": "Confirm PE-1 learned MAC locally first (sanity, on the remote PE)",
+          "device_override": "YOR_PE-1",
+          "command": "show evpn mac-table mac 00:de:ad:00:02:01 | no-more",
+          "expect_pattern": "L>.*ge400-0/0/5.4001",
+          "on_fail": "infra_issue -- PE-1 didn't learn locally; SC02 cannot proceed"
+        },
+        {
+          "step": 5,
+          "name": "verify_pe1_rt2_advertised",
+          "action": "Confirm PE-1 advertises RT-2 for MAC towards PE-4",
+          "device_override": "YOR_PE-1",
+          "command": "show bgp l2vpn evpn neighbors 4.4.4.4 advertised-routes | include 00:de:ad:00:02:01 | no-more",
+          "expect_pattern": "00:de:ad:00:02:01",
+          "on_fail": "BUG_FINDING_GUARD -- PE-1 learned L> but did not advertise RT-2 to PE-4 => /debug-dnos on PE-1"
+        },
+        {
+          "step": 6,
+          "name": "verify_dut_b_received",
+          "action": "Confirm PE-4 mac-table shows MAC with B> source flag and PE-1 nexthop",
+          "command": "show evpn mac-table mac 00:de:ad:00:02:01 | no-more",
+          "expect_pattern": "B>.*1.1.1.1",
+          "expect_flags_present": ["B>"],
+          "expect_flags_absent": ["L>", "v>", "F", "D"],
+          "on_fail": "BUG_FINDING_GUARD -- /debug-dnos with move=ac_to_pw expected_source=remote_evpn"
+        },
+        {
+          "step": 7,
+          "name": "verify_dut_rt2_received",
+          "action": "Confirm DUT received RT-2 from PE-1 in BGP table",
+          "command": "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:02:01 | no-more",
+          "expect_pattern": "00:de:ad:00:02:01",
+          "on_fail": "BUG_FINDING_GUARD"
+        },
+        {
+          "step": 8,
+          "name": "verify_dut_forwarding_remote",
+          "action": "Confirm NCP datapath programs MAC towards PE-1 (MPLS NH)",
+          "command": "show evpn forwarding-table mac-address-table instance {evpn_name} mac 00:de:ad:00:02:01 | no-more",
+          "expect_pattern": "1.1.1.1",
+          "on_fail": "BUG_FINDING_GUARD -- control plane has B> but datapath not programmed => /debug-dnos NCP layer"
+        }
+      ]
     },
     {
-      "id": "SC03_learn_vpls_pw",
-      "name": "Learn MAC from VPLS PW (dynamic)",
+      "id": "SC03_v_pw_via_rrsa2_ac",
+      "name": "SC03: v> VPLS PW -- RR-SA-2 learns MAC locally on its AC; PE-4 sees it via VPLS PW (label 1032269)",
+      "expected_source_flag": "v>",
+      "test_mac_override": "00:de:ad:00:03:01",
+      "traffic_source_key": "v",
+      "remote_pe_device": "RR-SA-2",
+      "test_design_note": "PE-4's PW peer (2.2.2.2) is RR-SA-2. We send Spirent Q-in-Q 215/3001 traffic to RR-SA-2's bundle-100.2001 AC through DNAAS; RR-SA-2 learns L> locally and the EVPN_SI_VPLS_1 service uses Seamless-Integration BGP-VPLS to forward the MAC to PE-4 via PW (not RT-2). PE-4 sees v>. This avoids the brittle 'send MPLS-labeled VPLS stream' approach and exercises the real PW datapath.",
       "phases": {
-        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
-        "trigger": {"action": "traffic_via_pw"},
+        "snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} vpls-pw | no-more",
+            "show evpn instance {evpn_name} detail | no-more",
+            "show bgp l2vpn vpls summary | no-more",
+            "show evpn mac-table mac 00:de:ad:00:03:01 | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "remote_pe_traffic",
+          "remote_device": "RR-SA-2",
+          "spirent_flags_pinned": ["--vlan", "215", "--inner-vlan", "3001"],
+          "duration_sec": 8,
+          "ownership_tag": "[STC-RRSA2-215-i3001-v]"
+        },
         "verify": {
-          "show_commands": ["show evpn mac-table instance {evpn_name} | no-more"],
+          "show_commands": [
+            "show evpn mac-table mac 00:de:ad:00:03:01 | no-more",
+            "show evpn mac-table detail instance {evpn_name} | no-more",
+            "show evpn instance {evpn_name} vpls-pw | no-more",
+            "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:03:01 | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} mac 00:de:ad:00:03:01 | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more"
+          ],
           "expect": {
-            "source_contains": ["pw", "pseudo", "vpls"],
+            "source_contains": ["v>", "2.2.2.2"],
+            "rt2_withdrawn": true,
             "check_mac_flags": true,
-            "forbidden_flags": ["F", "D"],
+            "expected_flag": "v>",
+            "forbidden_flags": ["F", "D", "L>", "B>"],
             "check_forwarding": true,
-            "check_ghost_macs": true
+            "check_ghost_macs": true,
+            "no_stuck_blackhole": true
           }
         }
-      }
+      },
+      "step_table": [
+        {
+          "step": 1,
+          "name": "snapshot_pw_installed",
+          "action": "Verify VPLS PW peer 2.2.2.2 is Installed on PE-4 before SC03 traffic",
+          "command": "show evpn instance {evpn_name} vpls-pw | no-more",
+          "expect_pattern": "2.2.2.2.*Installed",
+          "on_fail": "abort -- /HA or /BGP needed to bring PW back"
+        },
+        {
+          "step": 2,
+          "name": "snapshot_pw_neighbor_row",
+          "action": "Snapshot PW neighbor row in instance detail (label-base, control-flags)",
+          "command": "show evpn instance {evpn_name} detail | no-more",
+          "extract_pattern": "2001\\s+4001\\s+2.2.2.2\\s+\\d+\\s+(\\d+)\\s+(\\S+)",
+          "on_fail": "skip"
+        },
+        {
+          "step": 3,
+          "name": "trigger_spirent_v_stream",
+          "action": "Apply Spirent stream to RR-SA-2 bundle-100.2001 AC (Spirent Q-in-Q 215/3001; B-15 swaps outer 215 to DUT wire outer 4)",
+          "spirent_command": "spirent_tool.py create-stream --protocol l2 --src-mac 00:de:ad:00:03:01 --dst-mac ff:ff:ff:ff:ff:ff --frame-size 128 --rate-mbps 1 --vlan 215 --inner-vlan 3001 --name sc03_rrsa2_v_qinq_[STC-RRSA2-215-i3001-v]",
+          "spirent_flags_pinned": ["--vlan", "215", "--inner-vlan", "3001"],
+          "duration_sec": 8,
+          "on_fail": "infra_issue"
+        },
+        {
+          "step": 4,
+          "name": "verify_rrsa2_local_learn",
+          "action": "Confirm RR-SA-2 learned MAC L> on bundle-100.2001 first",
+          "device_override": "RR-SA-2",
+          "command": "show evpn mac-table mac 00:de:ad:00:03:01 | no-more",
+          "expect_pattern": "L>.*bundle-100.2001",
+          "on_fail": "infra_issue -- RR-SA-2 didn't learn locally"
+        },
+        {
+          "step": 5,
+          "name": "verify_dut_v_source",
+          "action": "Confirm PE-4 sees MAC with v> source flag and PW peer 2.2.2.2",
+          "command": "show evpn mac-table mac 00:de:ad:00:03:01 | no-more",
+          "expect_pattern": "v>.*2.2.2.2",
+          "expect_flags_present": ["v>"],
+          "expect_flags_absent": ["L>", "B>", "F", "D"],
+          "on_fail": "BUG_FINDING_GUARD -- /debug-dnos with feature=evpn-vpls-si pw_peer=2.2.2.2 expected_source=pw"
+        },
+        {
+          "step": 6,
+          "name": "verify_dut_no_rt2_advertised_for_pw_mac",
+          "action": "Confirm PE-4 does NOT advertise RT-2 for v-learned MAC (PW source must not leak as EVPN)",
+          "command": "show bgp l2vpn evpn route-type 2 | include 00:de:ad:00:03:01 | no-more",
+          "expect_pattern_absent": "00:de:ad:00:03:01",
+          "on_fail": "BUG_FINDING_GUARD -- v-learned MAC leaked into EVPN RT-2 advertisement; SI MAC handling design violation"
+        },
+        {
+          "step": 7,
+          "name": "verify_dut_forwarding_pw_label",
+          "action": "Confirm NCP datapath programs MAC towards PW peer using PW label 1032269",
+          "command": "show evpn forwarding-table mac-address-table instance {evpn_name} mac 00:de:ad:00:03:01 | no-more",
+          "expect_pattern": "2.2.2.2",
+          "expect_pattern_present": "label.*1032269|pw.*1032269",
+          "on_fail": "BUG_FINDING_GUARD -- v> in mac-table but datapath not programmed via PW => /debug-dnos NCP layer"
+        }
+      ]
     },
     {
-      "id": "SC04_table_counts",
-      "name": "Verify MAC table counts and forwarding continuity",
+      "id": "SC04_counts_and_stability",
+      "name": "SC04: Counts + stability -- all three sources coexist (L+B+v), no suppression, no ghosts, BGP stable",
+      "test_mac_override": null,
       "phases": {
-        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac-table detail instance {evpn_name} | no-more",
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show evpn instance {evpn_name} detail | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show bgp l2vpn vpls summary | no-more"
+          ]
+        },
         "verify": {
           "show_commands": [
             "show evpn summary | no-more",
-            "show bridge-domain instance | no-more"
+            "show evpn instance {evpn_name} detail | no-more",
+            "show evpn mac-table detail instance {evpn_name} | no-more",
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show bgp l2vpn vpls summary | no-more",
+            "show file traces routing_engine/bgpd_traces | include NOTIFICATION | no-more"
           ],
           "expect": {
             "mac_count_stable_or_grows": true,
+            "all_three_sources_present": ["L>", "B>", "v>"],
+            "source_mac_flags": [
+              {"label": "SC01 local AC", "mac": "00:de:ad:00:01:01", "flag": "L>", "source": "local"},
+              {"label": "SC02 remote EVPN", "mac": "00:de:ad:00:02:01", "flag": "B>", "source": "bgp"},
+              {"label": "SC03 VPLS PW", "mac": "00:de:ad:00:03:01", "flag": "v>", "source": "pw"}
+            ],
             "check_mac_flags": true,
             "forbidden_flags": ["F", "D"],
             "check_forwarding": true,
-            "check_ghost_macs": true
+            "check_ghost_macs": true,
+            "no_stuck_blackhole": true,
+            "bgp_session_stable": true,
+            "no_bgp_notification_in_traces": true,
+            "bgp_notification_neighbors": ["1.1.1.1", "2.2.2.2"]
           }
         }
-      }
+      },
+      "step_table": [
+        {
+          "step": 1,
+          "name": "verify_all_three_sources_present",
+          "action": "Confirm SC01/SC02/SC03 MACs are all in PE-4 mac-table simultaneously",
+          "command": "show evpn mac-table detail instance {evpn_name} | no-more",
+          "expect_patterns_all": [
+            "00:de:ad:00:01:01.*L>",
+            "00:de:ad:00:02:01.*B>",
+            "00:de:ad:00:03:01.*v>"
+          ],
+          "on_fail": "BUG_FINDING_GUARD -- one of the source flags went missing during SC04 verification"
+        },
+        {
+          "step": 2,
+          "name": "verify_mac_count_three",
+          "action": "Confirm at least 3 unique MAC entries (L + B + v + any pre-existing local)",
+          "command": "show evpn mac-table instance {evpn_name} | no-more",
+          "extract": "count >= 3",
+          "on_fail": "skip"
+        },
+        {
+          "step": 3,
+          "name": "verify_no_forbidden_flags_anywhere",
+          "action": "Confirm no MAC has forbidden flags F, D, or persistent s",
+          "command": "show evpn mac-table detail instance {evpn_name} | no-more",
+          "expect_no_pattern": "(00:de:ad:.*[FD]>|00:de:ad:.*\\(s\\))",
+          "on_fail": "BUG_FINDING_GUARD -- forbidden flag appeared on a test MAC"
+        },
+        {
+          "step": 4,
+          "name": "verify_no_ghost_macs",
+          "action": "Confirm ghost MAC table is empty",
+          "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+          "expect_pattern_absent": "00:de:ad:00:0[123]:01",
+          "on_fail": "BUG_FINDING_GUARD"
+        },
+        {
+          "step": 5,
+          "name": "verify_no_suppression_event",
+          "action": "Confirm Number of suppressed entries stayed at 0",
+          "command": "show evpn instance {evpn_name} detail | no-more",
+          "expect_pattern": "Number of suppressed entries\\s+:\\s+0",
+          "on_fail": "BUG_FINDING_GUARD -- mobility suppression triggered unexpectedly"
+        },
+        {
+          "step": 6,
+          "name": "verify_bgp_stable",
+          "action": "Confirm BGP L2VPN EVPN + L2VPN VPLS sessions still Established",
+          "commands": [
+            "show bgp l2vpn evpn summary | no-more",
+            "show bgp l2vpn vpls summary | no-more"
+          ],
+          "expect_pattern": "Established",
+          "on_fail": "BUG_FINDING_GUARD -- session flapped during basic_learning"
+        },
+        {
+          "step": 7,
+          "name": "verify_no_bgp_notification_in_traces",
+          "action": "Confirm no BGP NOTIFICATION sent/received during SC01-SC04",
+          "command": "show file traces routing_engine/bgpd_traces | include NOTIFICATION | no-more",
+          "expect_pattern_absent": "NOTIFICATION sent",
+          "on_fail": "BUG_FINDING_GUARD"
+        }
+      ]
     }
   ],
+  "traffic_config": {
+    "rate_mbps": 1,
+    "frame_size": 128,
+    "duration_per_scenario_sec": 5,
+    "note": "1 Mbps avoids storm-control / DNAAS rate limits; 5s is enough to learn 1 MAC + sample counters"
+  },
   "runtime_parameters": {
-    "evpn_name": {"resolve": "runtime", "from": "show evpn summary"},
-    "test_mac": {"resolve": "runtime", "from": "show evpn mac-table"},
+    "evpn_name": {"resolve": "runtime", "from": "recipe.service_capabilities.preferred_instance OR ctx.evpn_name_primary OR --evpn-instance flag"},
+    "test_mac": {"resolve": "per_scenario", "from": "scenario.test_mac_override"},
     "active_ncc_id": {"resolve": "runtime", "from": "show system"}
   },
-  "verdict": {"layers": 8, "stop_on_fail": false},
+  "verdict": {
+    "layers": 14,
+    "stop_on_fail": true,
+    "scenario_pass_definition": "All step_table entries return their expected pattern OR are explicitly skip/warn"
+  },
+  "bug_finding_guard": {
+    "enabled": true,
+    "stop_after_first_functional_fail": true,
+    "infrastructure_correct_checklist": [
+      "Spirent stream uses spirent_flags_pinned exactly as listed in expected_traffic.{L,B,v}",
+      "DNAAS path verified up-front via dnos_dnaas_teach_plan(recipe_blockers == [])",
+      "DUT AC RX counter increased between snapshot_pre and verify (proves traffic reached AC)",
+      "Verifier uses source-qualified DNOS state (L> / B> / v>), not Spirent TX/Active flags"
+    ],
+    "invoke_debug_dnos_context": {
+      "feature": "evpn-vpls-si",
+      "epic": "SW-178648",
+      "dp_enabler": "SW-183400",
+      "jira": "SW-205160"
+    }
+  },
+  "debug_layers": {
+    "enabled": true,
+    "mode": "on_fail",
+    "feature_context": "evpn-vpls-si",
+    "knowledge_bootstrap": [
+      "search-company-knowledge: EVPN VPLS seamless integration HLD component BGP Zebra FIB Manager NCP MAC mobility AC PW",
+      "SW-178648",
+      "SW-183400"
+    ],
+    "trace_plan": [
+      {"layer": "bgpd", "commands": ["show file traces routing_engine/bgpd_traces | include {test_mac} | no-more"]},
+      {"layer": "rib-manager", "commands": ["show file traces routing_engine/rib-manager_traces | include {test_mac} | no-more"]},
+      {"layer": "fib-manager", "commands": ["show file traces routing_engine/fibmgrd_traces | include {test_mac} | no-more"]},
+      {"layer": "ncp_wb_agent", "commands": ["show file ncp 0 traces datapath/wb_agent.evpn | include {test_mac} | no-more"]}
+    ],
+    "bug_evidence": {"save_session_log": true, "invoke_debug_dnos": true}
+  },
   "counter_commands": [
-    {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
-    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+    {"label": "mac_count", "command": "show evpn mac-table instance {evpn_name} | no-more", "parser": "count_lines_with_pattern", "pattern": "^(L>|B>|v>|M)", "description": "Total MAC entries in instance"},
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more", "parser": "ghost_mac_count", "description": "Real ghost/suppression count -- active selected MACs printed by the diagnostic view do not count"},
+    {"label": "suppressed_count", "command": "show evpn instance {evpn_name} detail | no-more", "parser": "regex_capture", "pattern": "Number of suppressed entries\\s+:\\s+(\\d+)", "description": "Suppressed entries -- must stay 0"},
+    {"label": "fwd_table_count", "command": "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more", "parser": "line_count", "description": "NCP datapath MAC entries"}
   ],
   "counter_expectations": [
     {"label": "mac_count", "rule": "no_decrease", "description": "MAC count must not drop"},
-    {"label": "ghost_mac_count", "rule": "zero", "description": "No ghost MACs after scenario"}
+    {"label": "ghost_mac_count", "rule": "zero", "description": "No ghost MACs at any point"},
+    {"label": "suppressed_count", "rule": "zero", "description": "No mobility suppression on basic learning"}
   ],
   "event_expectations": [
-    {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "No BGP notifications"},
-    {"event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED", "expect": "absent", "description": "No suppression on normal operations"}
+    {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "No BGP notifications during basic_learning"},
+    {"event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED", "expect": "absent", "description": "No suppression on basic learning"}
   ],
   "health_checks": {
-    "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager", "neighbour_manager"],
+    "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager", "neighbour_manager", "wb_agent"],
     "check_crashes": true,
     "check_alarms": true
   },
-  "cleanup_commands": ["no debug evpn mac-mobility", "no set logging terminal"],
+  "cleanup_commands": [
+    "unset logging terminal"
+  ],
   "config_baseline": {
-    "sections": ["network-services evpn", "protocols bgp"],
+    "sections": ["network-services evpn", "protocols bgp {asn}"],
     "full_config": false,
-    "ignore_patterns": ["last-modified", "commit-id"]
+    "ignore_patterns": ["last-modified", "commit-id"],
+    "must_be_pristine_after_run": true
+  },
+  "traceability": {
+    "source_user_story": "SW-205160",
+    "source_epic": "SW-204115",
+    "linked_epics": ["SW-178648", "SW-183400"],
+    "rewrite_session": "e76ec681-2d1d-42d9-8ba5-b85c9f233858 + a28f92fc-6703-4ac9-b6a2-8440ac2df5fe (handoff chain)",
+    "knowledge_revision": "2026-05-01-pe4-untagged-ac-correct-shared-service-pw-learn"
   }
 }

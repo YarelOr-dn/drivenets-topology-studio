@@ -1,0 +1,184 @@
+{
+  "name": "single-area-5",
+  "protocol": "ospf",
+  "scale": "small",
+  "summary": "OSPF single-area (Area 0) baseline. Five routers all speaking OSPF in the backbone area -- the starting point before partitioning into multi-area.",
+  "tags": [
+    "ospf",
+    "single-area",
+    "area-0",
+    "5-node"
+  ],
+  "objects": [
+    {
+      "id": "area0",
+      "type": "shape",
+      "shapeType": "ellipse",
+      "x": 960,
+      "y": 540,
+      "width": 1280,
+      "height": 620,
+      "fillColor": "#95a5a6",
+      "fillEnabled": true,
+      "fillOpacity": 0.1,
+      "strokeColor": "#95a5a6",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "label": "OSPF Area 0 (backbone)"
+    },
+    {
+      "id": "r1",
+      "type": "device",
+      "label": "R1",
+      "x": 420,
+      "y": 400,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e",
+      "ip": "10.0.0.1"
+    },
+    {
+      "id": "r2",
+      "type": "device",
+      "label": "R2",
+      "x": 740,
+      "y": 320,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e",
+      "ip": "10.0.0.2"
+    },
+    {
+      "id": "r3",
+      "type": "device",
+      "label": "R3",
+      "x": 1180,
+      "y": 320,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e",
+      "ip": "10.0.0.3"
+    },
+    {
+      "id": "r4",
+      "type": "device",
+      "label": "R4",
+      "x": 1500,
+      "y": 400,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e",
+      "ip": "10.0.0.4"
+    },
+    {
+      "id": "r5",
+      "type": "device",
+      "label": "R5",
+      "x": 960,
+      "y": 740,
+      "role": "p",
+      "visualStyle": "classic",
+      "color": "#34495e",
+      "ip": "10.0.0.5"
+    },
+    {
+      "id": "l_r1_r2",
+      "type": "link",
+      "device1": "r1",
+      "device2": "r2",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "OSPF a0"
+    },
+    {
+      "id": "l_r2_r3",
+      "type": "link",
+      "device1": "r2",
+      "device2": "r3",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "OSPF a0"
+    },
+    {
+      "id": "l_r3_r4",
+      "type": "link",
+      "device1": "r3",
+      "device2": "r4",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "OSPF a0"
+    },
+    {
+      "id": "l_r1_r5",
+      "type": "link",
+      "device1": "r1",
+      "device2": "r5",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "OSPF a0"
+    },
+    {
+      "id": "l_r2_r5",
+      "type": "link",
+      "device1": "r2",
+      "device2": "r5",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "OSPF a0"
+    },
+    {
+      "id": "l_r3_r5",
+      "type": "link",
+      "device1": "r3",
+      "device2": "r5",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "OSPF a0"
+    },
+    {
+      "id": "l_r4_r5",
+      "type": "link",
+      "device1": "r4",
+      "device2": "r5",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "OSPF a0"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "OSPF Single Area (backbone)",
+      "x": 960,
+      "y": 160,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_note",
+      "type": "text",
+      "text": "All routers in Area 0\nDR/BDR elected per broadcast link",
+      "x": 960,
+      "y": 900,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#334155",
+      "borderWidth": 1
+    }
+  ]
+}

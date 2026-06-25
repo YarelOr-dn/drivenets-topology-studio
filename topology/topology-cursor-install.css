@@ -1,0 +1,144 @@
+.cursor-install-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(2, 6, 23, 0.62);
+    backdrop-filter: blur(10px);
+}
+
+.cursor-install-modal {
+    width: min(760px, calc(100vw - 36px));
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+    color: var(--dn-cloud, #f8fafc);
+    background: rgba(15, 23, 42, 0.94);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 18px;
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.45);
+}
+
+.cursor-install-modal header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 18px 20px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.cursor-install-modal h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.cursor-install-modal .cursor-install-body {
+    padding: 18px 20px 20px;
+}
+
+.cursor-install-panel {
+    padding: 14px;
+    margin: 0 0 14px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 14px;
+    background: rgba(30, 41, 59, 0.72);
+}
+
+.cursor-install-panel-title {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 700;
+    color: rgba(248, 250, 252, 0.92);
+}
+
+.cursor-install-panel p {
+    margin: 0 0 10px;
+    color: rgba(226, 232, 240, 0.82);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.cursor-install-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.cursor-install-btn {
+    border: 1px solid rgba(148, 163, 184, 0.32);
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.72);
+    color: rgba(248, 250, 252, 0.94);
+    padding: 9px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.cursor-install-btn.primary {
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.92), rgba(37, 99, 235, 0.92));
+    border-color: rgba(125, 211, 252, 0.45);
+}
+
+.cursor-install-btn.danger {
+    border-color: rgba(248, 113, 113, 0.38);
+    color: #fecaca;
+}
+
+.cursor-install-close {
+    border: 0;
+    background: transparent;
+    color: rgba(226, 232, 240, 0.8);
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
+}
+
+.cursor-install-prompt {
+    display: block;
+    width: 100%;
+    min-height: 230px;
+    box-sizing: border-box;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    resize: vertical;
+    background: rgba(2, 6, 23, 0.78);
+    color: rgba(248, 250, 252, 0.92);
+    font-family: "JetBrains Mono", "IBM Plex Mono", monospace;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.cursor-install-status {
+    margin-top: 10px;
+    min-height: 18px;
+    font-size: 12px;
+    color: rgba(125, 211, 252, 0.9);
+}
+
+body.light-mode .cursor-install-modal {
+    background: rgba(255, 255, 255, 0.96);
+    color: #0f172a;
+    border-color: rgba(15, 23, 42, 0.14);
+}
+
+body.light-mode .cursor-install-panel {
+    background: rgba(248, 250, 252, 0.92);
+    border-color: rgba(15, 23, 42, 0.12);
+}
+
+body.light-mode .cursor-install-panel-title,
+body.light-mode .cursor-install-panel p {
+    color: #0f172a;
+}
+
+body.light-mode .cursor-install-prompt {
+    background: #f8fafc;
+    color: #0f172a;
+}
+

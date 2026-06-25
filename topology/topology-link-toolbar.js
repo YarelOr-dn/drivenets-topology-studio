@@ -220,7 +220,11 @@ function showLinkSelectionToolbar(editor, link, clickPos = null) {
         badge.onclick = (e) => {
             e.stopPropagation(); e.preventDefault();
             if (dropdown) { closeDropdown(); return; }
+            if (window.SelectionPopups?.closeObjectToolbarPopups) {
+                window.SelectionPopups.closeObjectToolbarPopups(editor, 'link-layer-dropdown');
+            }
             dropdown = document.createElement('div');
+            dropdown.id = 'link-layer-dropdown';
             dropdown.style.cssText = `position: fixed; z-index: 100002; min-width: 160px; background: ${glassBgDrop}; border: 1px solid ${glassBorderDrop}; border-radius: 10px; padding: 4px 0; box-shadow: ${glassShadowDrop}; backdrop-filter: blur(24px) saturate(200%); -webkit-backdrop-filter: blur(24px) saturate(200%);`;
             items.forEach((item) => {
                 if (!item) { const sep = document.createElement('div'); sep.style.cssText = `height: 1px; background: ${isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)'}; margin: 4px 6px;`; dropdown.appendChild(sep); return; }
@@ -288,9 +292,44 @@ function showLinkSelectionToolbar(editor, link, clickPos = null) {
             const rect = linkTb ? linkTb.getBoundingClientRect() : xrayBtn.getBoundingClientRect();
             const centerX = rect.left + rect.width / 2;
             const bottomY = rect.bottom;
-            window.XrayPopup.show(editor, link, { x: centerX, y: bottomY, anchor: 'center' });
+            const xrayContext = window.LinkTelemetry?.getXrayContextForLink?.(
+                link,
+                window.XrayPopup?._lastState?.pov || ''
+            ) || {};
+            window.XrayPopup.show(editor, link, { x: centerX, y: bottomY, anchor: 'center' }, xrayContext);
         };
         toolbar.appendChild(xrayBtn);
+        if (window.LinkLiveDrawer) {
+            const liveBtn = document.createElement('button');
+            liveBtn.className = 'link-tb-btn';
+            liveBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16"/><path d="M4 12h16"/><path d="M4 19h16"/><path d="M8 5v14"/><path d="M16 5v14"/></svg>`;
+            liveBtn.style.cssText = `
+                width: 30px; height: 30px; border: none;
+                background: #1abc9c; color: #fff;
+                cursor: pointer; border-radius: 6px;
+                display: flex; align-items: center; justify-content: center;
+                transition: all 0.12s ease;
+            `;
+            liveBtn.onmouseenter = () => {
+                liveBtn.style.transform = 'scale(1.12)';
+                liveBtn.style.opacity = '0.9';
+                if (editor._showToolbarTooltip) editor._showToolbarTooltip(liveBtn, 'Open Link Table');
+            };
+            liveBtn.onmouseleave = () => {
+                liveBtn.style.transform = 'scale(1)';
+                liveBtn.style.opacity = '1';
+                if (editor._hideToolbarTooltip) editor._hideToolbarTooltip();
+            };
+            liveBtn.onmousedown = (e) => { e.stopPropagation(); e.preventDefault(); };
+            liveBtn.onclick = (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                editor.showLinkDetails(link);
+                const tabs = document.getElementById('lt-modal-tabs');
+                if (tabs && typeof tabs._activate === 'function') tabs._activate('live');
+            };
+            toolbar.appendChild(liveBtn);
+        }
         toolbar.appendChild(createSeparator());
     }
     
@@ -298,6 +337,23 @@ function showLinkSelectionToolbar(editor, link, clickPos = null) {
     toolbar.appendChild(createButton('text', 'Add Text', () => {
         hideLinkSelectionToolbar(editor);
         if (editor.showAdjacentTextMenu) editor.showAdjacentTextMenu(link);
+    }));
+    
+    // Add Layered Packet button (compact protocol-stack chip attached to link)
+    toolbar.appendChild(createButton('packet', 'Add Packet', () => {
+        hideLinkSelectionToolbar(editor);
+        if (editor.createPacket) {
+            editor.saveState && editor.saveState();
+            const packet = editor.createPacket({ linkId: link.id });
+            if (packet) {
+                editor.selectedObject = packet;
+                editor.selectedObjects = [packet];
+                editor.scheduleDraw && editor.scheduleDraw();
+                if (editor.showPacketSelectionToolbar) {
+                    setTimeout(() => editor.showPacketSelectionToolbar(packet), 60);
+                }
+            }
+        }
     }));
     
     toolbar.appendChild(createSeparator());
@@ -499,7 +555,22 @@ function showLinkSelectionToolbar(editor, link, clickPos = null) {
     }));
     
     toolbar.appendChild(createLayerWidget(link));
-    
+
+    // Group button -- open the canonical floating Groups panel.
+    if (window.GroupsPanel) {
+        const _linkGroupBtn = createButton('group', 'Groups', () => {
+            try {
+                window.GroupsPanel.toggle(editor);
+            } catch (err) {
+                console.error('[link-toolbar] Failed to toggle Groups panel:', err);
+                if (editor.showToast) editor.showToast('Groups panel failed to open. Check console.', 'error');
+            }
+        });
+        _linkGroupBtn.setAttribute('aria-label', 'Open Groups panel');
+        _linkGroupBtn.setAttribute('title', 'Groups panel');
+        toolbar.appendChild(_linkGroupBtn);
+    }
+
     toolbar.appendChild(createSeparator());
     
     // Delete button — if part of a BUL chain, offer single-UL deletion
@@ -590,6 +661,9 @@ function hideLinkSelectionToolbar(editor) {
     if (stylePopup) stylePopup.remove();
     const curvePopup = document.getElementById('link-curve-options-popup');
     if (curvePopup) curvePopup.remove();
+    if (window.SelectionPopups?.closeObjectToolbarPopups) {
+        window.SelectionPopups.closeObjectToolbarPopups(editor);
+    }
     // Sync XRAY popup -- hide it when its parent toolbar hides (unless panning)
     if (window.XrayPopup && !window.XrayPopup._temporarilyHidden) {
         window.XrayPopup.hide();

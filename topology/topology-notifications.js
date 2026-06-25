@@ -68,39 +68,155 @@ window.NotificationManager = {
         this._openCenter();
     },
 
+    // Remember the last active tab so the user's choice survives across
+    // consecutive opens; default to the topology activity log whenever a
+    // topology is currently open (which is what the Log button users
+    // expect).
+    _lastTab: null,
+    _logState: { q: '', actor: '', event_type: '', since: '', until: '', limit: 200, offset: 0 },
+
+    /** Activity log panel: theme rules must track body.dark-mode (not the
+     *  theme frozen at first open). */
+    _ensureNotifCenterCss() {
+        let s = document.getElementById('notif-center-styles');
+        if (s) s.remove();
+        s = document.createElement('style');
+        s.id = 'notif-center-styles';
+        s.textContent = `
+                @keyframes ncSlideIn { 0% { opacity:0; transform:translateY(12px); } 100% { opacity:1; transform:translateY(0); } }
+                @keyframes ncSlideOut { 0% { opacity:1; transform:translateY(0); } 100% { opacity:0; transform:translateY(12px); } }
+                #notification-center-panel::-webkit-scrollbar { width: 4px; }
+                #notification-center-panel::-webkit-scrollbar-track { background: transparent; }
+                body.dark-mode #notification-center-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 4px; }
+                body:not(.dark-mode) #notification-center-panel::-webkit-scrollbar-thumb { background: rgba(15,23,42,0.22); border-radius: 4px; }
+                .nc-entry { transition: background 0.12s ease; }
+                body.dark-mode #notification-center-panel .nc-entry:hover { background: rgba(255,255,255,0.05) !important; }
+                body:not(.dark-mode) #notification-center-panel .nc-entry:hover { background: rgba(0,0,0,0.04) !important; }
+                #notification-center-panel .nc-tab { cursor: pointer; padding: 6px 10px; border-radius: 7px;
+                    font-size: 11.5px; font-weight: 500; transition: all 0.14s ease;
+                    border: 1px solid transparent; user-select: none; }
+                body.dark-mode #notification-center-panel .nc-tab:not(.is-active) { color: rgba(248, 250, 252, 0.78); }
+                body:not(.dark-mode) #notification-center-panel .nc-tab:not(.is-active) { color: rgba(15, 23, 42, 0.78); }
+                body.dark-mode #notification-center-panel .nc-tab.is-active { background: rgba(96,165,250,0.14);
+                    border-color: rgba(96,165,250,0.35); color: #93c5fd; }
+                body:not(.dark-mode) #notification-center-panel .nc-tab.is-active { background: rgba(96,165,250,0.12);
+                    border-color: rgba(96,165,250,0.3); color: #1d4ed8; }
+                body.dark-mode #notification-center-panel .nc-tab:not(.is-active):hover { background: rgba(255,255,255,0.05); }
+                body:not(.dark-mode) #notification-center-panel .nc-tab:not(.is-active):hover { background: rgba(0,0,0,0.04); }
+                body.dark-mode #notification-center-panel .nc-input,
+                body.dark-mode #notification-center-panel .nc-select { background: rgba(255,255,255,0.05);
+                    border: 1px solid rgba(255,255,255,0.08); color: rgba(255,255,255,0.88); }
+                body:not(.dark-mode) #notification-center-panel .nc-input,
+                body:not(.dark-mode) #notification-center-panel .nc-select { background: rgba(0,0,0,0.04);
+                    border: 1px solid rgba(0,0,0,0.08); color: rgba(0,0,0,0.82); }
+                #notification-center-panel .nc-input, #notification-center-panel .nc-select {
+                    border-radius: 7px; padding: 6px 9px; font-size: 11px; font-family: inherit; outline: none; }
+                body.dark-mode #notification-center-panel .nc-input:focus,
+                body.dark-mode #notification-center-panel .nc-select:focus { border-color: rgba(96,165,250,0.5); }
+                body:not(.dark-mode) #notification-center-panel .nc-input:focus,
+                body:not(.dark-mode) #notification-center-panel .nc-select:focus { border-color: rgba(59,130,246,0.5); }
+                body.dark-mode #notification-center-panel .nc-btn { cursor: pointer; border: 1px solid rgba(255,255,255,0.1);
+                    background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.82); }
+                body:not(.dark-mode) #notification-center-panel .nc-btn { cursor: pointer; border: 1px solid rgba(0,0,0,0.08);
+                    background: rgba(0,0,0,0.03); color: rgba(0,0,0,0.72); }
+                #notification-center-panel .nc-btn { border-radius: 7px; padding: 6px 10px; font-size: 11px; font-family: inherit; transition: all 0.12s ease; }
+                body.dark-mode #notification-center-panel .nc-btn:hover { background: rgba(255,255,255,0.08); }
+                body:not(.dark-mode) #notification-center-panel .nc-btn:hover { background: rgba(0,0,0,0.06); }
+                #notification-center-panel .nc-log-row { display:flex; gap:8px; align-items:flex-start;
+                    padding: 8px 10px; border-radius: 8px; border: 1px solid transparent;
+                    transition: background 0.12s ease, border-color 0.12s ease; }
+                body.dark-mode #notification-center-panel .nc-log-row:hover { background: rgba(255,255,255,0.04);
+                    border-color: rgba(255,255,255,0.06); }
+                body:not(.dark-mode) #notification-center-panel .nc-log-row:hover { background: rgba(0,0,0,0.03);
+                    border-color: rgba(0,0,0,0.06); }
+                body.dark-mode #notification-center-panel .nc-log-details { color: rgba(255,255,255,0.55);
+                    background: rgba(0,0,0,0.25); }
+                body:not(.dark-mode) #notification-center-panel .nc-log-details { color: rgba(15,23,42,0.55);
+                    background: rgba(0,0,0,0.04); }
+                #notification-center-panel .nc-log-details { font-family: 'SF Mono',Menlo,Consolas,monospace; font-size: 10px;
+                    margin-top: 4px; white-space: pre-wrap; word-break: break-all;
+                    padding: 6px 8px; border-radius: 6px; max-height: 120px; overflow: auto; }
+            `;
+        document.head.appendChild(s);
+    },
+
+    /** Re-apply shell + body when light/dark toggles while the panel is open. */
+    restyleOpenCenter() {
+        const panel = document.getElementById('notification-center-panel');
+        if (!panel || typeof panel._ncApplyShell !== 'function' || typeof panel._ncActivate !== 'function') return;
+        try {
+            panel._ncApplyShell();
+            panel._ncActivate(this._lastTab || 'topology');
+        } catch (_) {}
+    },
+
     _openCenter() {
         this._centerOpen = true;
         const badge = document.getElementById('notif-badge');
         if (badge) badge.style.display = 'none';
 
-        const dk = document.body.classList.contains('dark-mode');
+        const isDm = () => document.body.classList.contains('dark-mode');
+        this._ensureNotifCenterCss();
         const panel = document.createElement('div');
         panel.id = 'notification-center-panel';
-
-        if (!document.getElementById('notif-center-styles')) {
-            const s = document.createElement('style');
-            s.id = 'notif-center-styles';
-            s.textContent = `
-                @keyframes ncSlideIn { 0% { opacity:0; transform:translateY(12px); } 100% { opacity:1; transform:translateY(0); } }
-                @keyframes ncSlideOut { 0% { opacity:1; transform:translateY(0); } 100% { opacity:0; transform:translateY(12px); } }
-                #notification-center-panel::-webkit-scrollbar { width: 4px; }
-                #notification-center-panel::-webkit-scrollbar-track { background: transparent; }
-                #notification-center-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
-                .nc-entry { transition: background 0.12s ease; }
-                .nc-entry:hover { background: ${dk ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)'} !important; }
-            `;
-            document.head.appendChild(s);
-        }
 
         const toolbar = document.getElementById('left-toolbar');
         const panelLeft = toolbar ? toolbar.getBoundingClientRect().right + 8 : 210;
 
-        panel.style.cssText = `
+        // Decide which tab opens first. A topology is "available" if
+        // TopologySync has registered an active (domain_id + topology_id).
+        const sync = window.TopologySync;
+        const active = (sync && sync.getActive) ? sync.getActive() : null;
+        const hasActive = !!(active && active.domain_id && active.topology_id);
+        const initialTab = this._lastTab || (hasActive ? 'topology' : 'session');
+
+        const header = document.createElement('div');
+        header.style.cssText = `
+            display:flex; align-items:center; justify-content:space-between;
+            padding: 12px 14px 10px;
+            border-bottom: 1px solid ${isDm() ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'};
+            gap: 8px;
+        `;
+        const title = document.createElement('div');
+        title.style.cssText = `display:flex;align-items:center;gap:8px;flex:1;min-width:0;`;
+        title.innerHTML = `
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="${isDm() ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)'}" stroke-width="2" stroke-linecap="round">
+                <path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/>
+            </svg>
+            <span style="font-size:13px;font-weight:600;color:${isDm() ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)'};letter-spacing:0.3px;">Activity Log</span>
+        `;
+        header.appendChild(title);
+
+        const tabWrap = document.createElement('div');
+        tabWrap.style.cssText = `display:flex;gap:4px;`;
+        const topoTab = document.createElement('div');
+        topoTab.className = 'nc-tab' + (initialTab === 'topology' ? ' is-active' : '');
+        topoTab.textContent = hasActive && active.name ? active.name : 'Topology';
+        topoTab.title = hasActive
+            ? 'Activity for the currently open topology'
+            : 'Open a topology to see its activity log';
+        tabWrap.appendChild(topoTab);
+        const sessionTab = document.createElement('div');
+        sessionTab.className = 'nc-tab' + (initialTab === 'session' ? ' is-active' : '');
+        sessionTab.textContent = 'Session';
+        sessionTab.title = 'Toasts + notifications from this browser session';
+        tabWrap.appendChild(sessionTab);
+        header.appendChild(tabWrap);
+        panel.appendChild(header);
+
+        const body = document.createElement('div');
+        body.id = 'nc-body';
+        body.style.cssText = 'flex:1; overflow:hidden; display:flex; flex-direction:column;';
+        panel.appendChild(body);
+
+        const applyNcShell = () => {
+            const dk = isDm();
+            panel.style.cssText = `
             position: fixed;
             bottom: 60px;
             left: ${panelLeft}px;
-            width: 340px;
-            max-height: 420px;
+            width: 440px;
+            max-height: 560px;
             z-index: 10001;
             border-radius: 16px;
             overflow: hidden;
@@ -119,51 +235,517 @@ window.NotificationManager = {
                 inset 0 1px 0 ${dk ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)'};
             font-family: 'Poppins', -apple-system, sans-serif;
         `;
+            header.style.borderBottom = `1px solid ${dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`;
+            const svg = title.querySelector('svg');
+            const sp = title.querySelector('span');
+            if (svg) svg.setAttribute('stroke', dk ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)');
+            if (sp) sp.style.color = dk ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)';
+        };
+        applyNcShell();
 
-        const header = document.createElement('div');
-        header.style.cssText = `
-            display:flex; align-items:center; justify-content:space-between;
-            padding: 14px 16px 10px;
-            border-bottom: 1px solid ${dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'};
+        const self = this;
+        const activate = (tab) => {
+            self._lastTab = tab;
+            topoTab.classList.toggle('is-active', tab === 'topology');
+            sessionTab.classList.toggle('is-active', tab === 'session');
+            body.innerHTML = '';
+            const dkLive = isDm();
+            if (tab === 'topology') {
+                self._renderTopologyLog(body, dkLive, hasActive, active);
+            } else {
+                self._renderSessionLog(body, dkLive);
+            }
+        };
+        topoTab.onclick = () => activate('topology');
+        sessionTab.onclick = () => activate('session');
+        activate(initialTab);
+
+        document.body.appendChild(panel);
+
+        panel._ncApplyShell = applyNcShell;
+        panel._ncActivate = activate;
+
+        // Listen for live topology events and refresh the log in place
+        // (only while the panel is open). Cheap: the endpoint caps at
+        // 200 rows per page, so a re-fetch is ~20kb.
+        const liveRefresh = (ev) => {
+            const detail = (ev && ev.detail) || {};
+            const cur = (sync && sync.getActive) ? sync.getActive() : null;
+            if (!cur) return;
+            if (detail.topology_id && detail.topology_id !== cur.topology_id) return;
+            if (self._lastTab === 'topology') {
+                self._refreshTopologyLog(body, isDm(), cur);
+            }
+        };
+        window.addEventListener('topology:event:topology_event', liveRefresh);
+
+        const closeOnClick = (e) => {
+            if (!panel.contains(e.target) && !e.target.closest('#btn-notification-center')) {
+                self._closeCenter();
+                document.removeEventListener('mousedown', closeOnClick);
+                window.removeEventListener('topology:event:topology_event', liveRefresh);
+            }
+        };
+        setTimeout(() => document.addEventListener('mousedown', closeOnClick), 50);
+    },
+
+    // ------------------------------------------------------------------
+    // Topology tab: per-file activity log backed by /api/domains/.../events
+    // ------------------------------------------------------------------
+    _renderTopologyLog(container, dk, hasActive, active) {
+        if (!hasActive) {
+            container.innerHTML = `
+                <div style="text-align:center;padding:40px 18px;color:${dk ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'};">
+                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="margin-bottom:8px;opacity:0.7;">
+                        <path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/>
+                    </svg>
+                    <div style="font-size:12px;font-weight:500;margin-bottom:4px;">No topology open</div>
+                    <div style="font-size:11px;opacity:0.7;">Open a topology to see its collaboration history.</div>
+                </div>
+            `;
+            return;
+        }
+
+        const self = this;
+        const state = this._logState;
+
+        // Current user (for the "Mine" chip). The Activity Log lives
+        // inside the authenticated app so TopologyAuth is always ready.
+        const currentUser = (window.TopologyAuth && window.TopologyAuth.getUsername)
+            ? (window.TopologyAuth.getUsername() || '') : '';
+
+        // ---- Simplified filter bar ----
+        // Row 1: single unified search box (plain text OR smart tokens:
+        //        @actor, #type, >1d for "since last day").
+        // Row 2: quick-filter chips (All / Mine / Saves / Last 24h) and
+        //        an "Advanced" toggle that reveals the full pickers
+        //        (actor dropdown, type dropdown, since, until) for power
+        //        users who still want them. The state object keeps the
+        //        full set of filters exactly like before.
+        const filters = document.createElement('div');
+        filters.style.cssText = `
+            padding: 10px 12px 4px;
+            border-bottom: 1px solid ${dk ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'};
+            display: flex; flex-direction: column; gap: 6px;
         `;
-        header.innerHTML = `
-            <div style="display:flex;align-items:center;gap:8px;">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="${dk ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)'}" stroke-width="2" stroke-linecap="round">
-                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        filters.innerHTML = `
+            <div style="position:relative;">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none"
+                     stroke="${dk ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'}"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                     style="position:absolute;left:9px;top:50%;transform:translateY(-50%);pointer-events:none;">
+                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
                 </svg>
-                <span style="font-size:13px;font-weight:600;color:${dk ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)'};letter-spacing:0.3px;">Notification Center</span>
-                <span style="font-size:10px;color:${dk ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'};font-weight:500;">${this._history.length}</span>
+                <input class="nc-input" id="nc-q"
+                       placeholder="Search · try @alice, #saved, &gt;1d"
+                       value="${self._escapeHtml(state.q || '')}"
+                       style="padding-left:26px;width:100%;box-sizing:border-box;">
+            </div>
+            <div id="nc-chip-row" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+                <button class="nc-chip" data-preset="all">All</button>
+                <button class="nc-chip" data-preset="mine" title="Events you performed">Mine</button>
+                <button class="nc-chip" data-preset="saves" title="topology.saved + topology.created">Saves</button>
+                <button class="nc-chip" data-preset="24h" title="Last 24 hours">Last 24h</button>
+                <span style="flex:1;"></span>
+                <button class="nc-chip nc-chip-ghost" id="nc-advanced-toggle"
+                        title="Show detailed filters">Advanced</button>
+            </div>
+            <div id="nc-advanced" style="display:none;grid-template-columns:1fr 1fr;gap:6px;">
+                <select class="nc-select" id="nc-actor">
+                    <option value="">All users</option>
+                </select>
+                <select class="nc-select" id="nc-type">
+                    <option value="">All events</option>
+                    <option value="topology.created">Created</option>
+                    <option value="topology.saved">Saved</option>
+                    <option value="topology.renamed">Renamed</option>
+                    <option value="topology.deleted">Deleted</option>
+                    <option value="topology.shared">Shared</option>
+                    <option value="topology.unshared">Unshared</option>
+                    <option value="topology.permission_changed">Permission changed</option>
+                    <option value="client.micro_op">Canvas op</option>
+                </select>
+                <input class="nc-input" id="nc-since" type="datetime-local"
+                       title="Since" placeholder="Since">
+                <input class="nc-input" id="nc-until" type="datetime-local"
+                       title="Until" placeholder="Until">
             </div>
         `;
-        const clearBtn = document.createElement('button');
-        clearBtn.textContent = 'Clear';
-        clearBtn.style.cssText = `
-            background:none; border:none; cursor:pointer;
-            font-size:11px; font-weight:500; font-family:inherit;
-            color:${dk ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'};
-            padding:2px 6px; border-radius:4px;
-            transition: color 0.12s, background 0.12s;
+        // Inject chip styling once (idempotent -- picks a unique id so
+        // multiple re-mounts don't duplicate the stylesheet). Keeps the
+        // liquid-glass look consistent with the rest of the panel.
+        if (!document.getElementById('nc-chip-styles')) {
+            const st = document.createElement('style');
+            st.id = 'nc-chip-styles';
+            st.textContent = `
+                .nc-chip {
+                    font-family: inherit; font-size: 10.5px; font-weight: 500;
+                    padding: 3px 9px; border-radius: 999px; cursor: pointer;
+                    border: 1px solid ${dk ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'};
+                    background: ${dk ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'};
+                    color: ${dk ? 'rgba(255,255,255,0.72)' : 'rgba(0,0,0,0.65)'};
+                    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+                }
+                .nc-chip:hover {
+                    background: ${dk ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'};
+                    color: ${dk ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)'};
+                }
+                .nc-chip.is-active {
+                    background: ${dk ? 'rgba(96,165,250,0.22)' : 'rgba(59,130,246,0.14)'};
+                    border-color: ${dk ? 'rgba(96,165,250,0.45)' : 'rgba(59,130,246,0.45)'};
+                    color: ${dk ? '#93c5fd' : '#1d4ed8'};
+                }
+                .nc-chip-ghost {
+                    background: transparent;
+                    border-style: dashed;
+                }
+            `;
+            document.head.appendChild(st);
+        }
+        // Preselect advanced pickers from state
+        const typeSel = filters.querySelector('#nc-type');
+        if (state.event_type) typeSel.value = state.event_type;
+        const sinceInp = filters.querySelector('#nc-since');
+        if (state.since) sinceInp.value = state.since.slice(0, 16);
+        const untilInp = filters.querySelector('#nc-until');
+        if (state.until) untilInp.value = state.until.slice(0, 16);
+        // Restore Advanced panel visibility if any advanced filter is set
+        const advPanel = filters.querySelector('#nc-advanced');
+        const advToggle = filters.querySelector('#nc-advanced-toggle');
+        const hasAdvState = !!(state.actor || state.event_type || state.since || state.until);
+        if (hasAdvState) {
+            advPanel.style.display = 'grid';
+            advToggle.classList.add('is-active');
+        }
+        advToggle.addEventListener('click', () => {
+            const shown = advPanel.style.display !== 'none';
+            advPanel.style.display = shown ? 'none' : 'grid';
+            advToggle.classList.toggle('is-active', !shown);
+        });
+        container.appendChild(filters);
+
+        // ---- Toolbar (count + export) ----
+        const actions = document.createElement('div');
+        actions.style.cssText = `
+            padding: 6px 12px; display:flex; align-items:center; justify-content:space-between;
+            gap: 8px; font-size: 10px; color: ${dk ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'};
         `;
-        clearBtn.onmouseenter = () => { clearBtn.style.color = dk ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)'; clearBtn.style.background = dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'; };
-        clearBtn.onmouseleave = () => { clearBtn.style.color = dk ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'; clearBtn.style.background = 'none'; };
-        clearBtn.onclick = () => { this._history.length = 0; this._renderCenterEntries(list, dk); };
-        header.appendChild(clearBtn);
-        panel.appendChild(header);
+        actions.innerHTML = `
+            <span id="nc-log-count">Loading…</span>
+            <span style="display:flex;gap:6px;">
+                <button class="nc-btn" id="nc-export-json" title="Download as JSON">JSON</button>
+                <button class="nc-btn" id="nc-export-csv" title="Download as CSV">CSV</button>
+                <button class="nc-btn" id="nc-refresh" title="Refresh">Refresh</button>
+            </span>
+        `;
+        container.appendChild(actions);
+
+        // ---- List ----
+        const list = document.createElement('div');
+        list.id = 'nc-log-list';
+        list.style.cssText = 'flex:1; overflow-y:auto; padding: 4px 10px 12px; display:flex; flex-direction:column; gap:4px;';
+        container.appendChild(list);
+
+        // Parse smart tokens out of the unified search box. Supported:
+        //   @alice            -> actor filter
+        //   #topology.saved   -> full event type
+        //   #saved            -> shorthand for topology.saved (and a
+        //                        couple of common abbreviations)
+        //   >24h / >2d / >90m -> "since N time-units ago"
+        // Any remaining text becomes the free-text query.
+        const _typeShortcuts = {
+            saved: 'topology.saved', save: 'topology.saved',
+            created: 'topology.created', create: 'topology.created',
+            deleted: 'topology.deleted', delete: 'topology.deleted',
+            renamed: 'topology.renamed', rename: 'topology.renamed',
+            shared: 'topology.shared', share: 'topology.shared',
+            unshared: 'topology.unshared',
+            permission: 'topology.permission_changed', perm: 'topology.permission_changed',
+            canvas: 'client.micro_op', op: 'client.micro_op', micro: 'client.micro_op',
+        };
+        function _parseSmart(raw) {
+            const out = { q: '', actor: '', type: '', since: '' };
+            const words = [];
+            raw.split(/\s+/).forEach(tok => {
+                if (!tok) return;
+                if (tok.startsWith('@') && tok.length > 1) {
+                    out.actor = tok.slice(1);
+                } else if (tok.startsWith('#') && tok.length > 1) {
+                    const key = tok.slice(1).toLowerCase();
+                    out.type = _typeShortcuts[key] || tok.slice(1);
+                } else {
+                    const m = tok.match(/^>(\d+)([hdm])$/i);
+                    if (m) {
+                        const n = parseInt(m[1], 10);
+                        const unit = m[2].toLowerCase();
+                        const ms = unit === 'd' ? n * 86400000
+                                 : unit === 'h' ? n * 3600000
+                                 : n * 60000;
+                        out.since = new Date(Date.now() - ms).toISOString().slice(0, 19);
+                    } else {
+                        words.push(tok);
+                    }
+                }
+            });
+            out.q = words.join(' ');
+            return out;
+        }
+
+        // ---- Fetch / render ----
+        const fetchAndRender = async () => {
+            list.innerHTML = `<div style="padding:24px;text-align:center;font-size:11px;opacity:0.5;">Loading…</div>`;
+            const rawQ = filters.querySelector('#nc-q').value.trim();
+            const smart = _parseSmart(rawQ);
+            // Advanced pickers act as "override" when the user explicitly
+            // picked something there; the smart-token parse only fills
+            // the gap so simple pasted queries still work.
+            const advActor = filters.querySelector('#nc-actor').value;
+            const advType = filters.querySelector('#nc-type').value;
+            const advSince = filters.querySelector('#nc-since').value;
+            const advUntil = filters.querySelector('#nc-until').value;
+            // Preset state (chips) lives on `state._preset` so chip
+            // activation is stable across re-renders.
+            if (state._preset === 'mine' && currentUser) smart.actor = smart.actor || currentUser;
+            if (state._preset === 'saves' && !smart.type && !advType) smart.type = 'topology.saved';
+            if (state._preset === '24h' && !smart.since && !advSince) {
+                smart.since = new Date(Date.now() - 86400000).toISOString().slice(0, 19);
+            }
+
+            state.q = smart.q;
+            state.actor = advActor || smart.actor || '';
+            state.event_type = advType || smart.type || '';
+            state.since = advSince
+                ? (advSince.length === 16 ? advSince + ':00' : advSince)
+                : (smart.since || '');
+            state.until = advUntil
+                ? (advUntil.length === 16 ? advUntil + ':00' : advUntil)
+                : '';
+
+            // Reflect "active" chip visually based on current effective state.
+            filters.querySelectorAll('.nc-chip[data-preset]').forEach(chip => {
+                const p = chip.getAttribute('data-preset');
+                let on = false;
+                if (p === 'all') {
+                    on = !state.actor && !state.event_type && !state.since && !state.until && !state.q;
+                } else if (p === 'mine') {
+                    on = !!(currentUser && state.actor === currentUser);
+                } else if (p === 'saves') {
+                    on = state.event_type === 'topology.saved';
+                } else if (p === '24h') {
+                    on = !!(state.since && !advSince);
+                }
+                chip.classList.toggle('is-active', on);
+            });
+
+            let payload = { items: [], total: 0 };
+            try {
+                payload = await window.TopologySync.listEvents({
+                    q: state.q, actor: state.actor, event_type: state.event_type,
+                    since: state.since, until: state.until,
+                    limit: state.limit, offset: 0,
+                });
+            } catch (_) {}
+            const items = payload.items || [];
+
+            // Populate actor dropdown from the server's "actors" facet
+            // once (and keep the user's selection if still valid). We
+            // rebuild every fetch so newly-seen collaborators show up.
+            const sel = filters.querySelector('#nc-actor');
+            const prev = sel.value;
+            const actors = (payload.actors && payload.actors.length
+                ? payload.actors : Array.from(new Set(items.map(i => i.actor_user).filter(Boolean))));
+            sel.innerHTML = '<option value="">All users</option>'
+                + actors.map(a => {
+                    const disp = (payload.actor_display_names && payload.actor_display_names[a]) || a;
+                    return `<option value="${self._escapeHtml(a)}"${a === prev ? ' selected' : ''}>${self._escapeHtml(disp)}</option>`;
+                }).join('');
+
+            actions.querySelector('#nc-log-count').textContent =
+                (payload.total != null ? payload.total : items.length) + ' events';
+
+            if (items.length === 0) {
+                list.innerHTML = `
+                    <div style="text-align:center;padding:32px 12px;color:${dk ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'};font-size:11px;">
+                        No events recorded yet.
+                    </div>
+                `;
+                return;
+            }
+            list.innerHTML = '';
+            let lastDate = '';
+            items.forEach(evt => {
+                const ts = evt.created_at ? Date.parse(evt.created_at) : 0;
+                const dateStr = ts ? self._formatDate(ts) : '';
+                if (dateStr && dateStr !== lastDate) {
+                    lastDate = dateStr;
+                    const sep = document.createElement('div');
+                    sep.style.cssText = `font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;color:${dk ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'};padding:8px 4px 2px;`;
+                    sep.textContent = dateStr;
+                    list.appendChild(sep);
+                }
+                const row = document.createElement('div');
+                row.className = 'nc-log-row';
+                const color = self._logEventColor(evt.event_type);
+                const actorName = evt.actor_display_name || evt.actor_user || 'system';
+                const summary = self._escapeHtml(evt.summary || '(no summary)');
+                row.innerHTML = `
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:3px;opacity:0.9;">
+                        ${self._logEventIcon(evt.event_type)}
+                    </svg>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:11.5px;color:${dk ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.8)'};line-height:1.4;">${summary}</div>
+                        <div style="font-size:9.5px;color:${dk ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.35)'};margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                            <span style="color:${color};font-weight:600;opacity:0.85;">${self._escapeHtml(self._logEventLabel(evt.event_type))}</span>
+                            <span style="opacity:0.4;">·</span>
+                            <span>${self._escapeHtml(actorName)}</span>
+                            ${ts ? `<span style="opacity:0.4;">·</span><span>${self._formatTime(ts)}</span><span>${self._timeAgo(ts)}</span>` : ''}
+                        </div>
+                        ${evt.details && Object.keys(evt.details).length
+                            ? `<div class="nc-log-details" style="display:none;"></div>`
+                            : ''}
+                    </div>
+                `;
+                const detailsEl = row.querySelector('.nc-log-details');
+                if (detailsEl) {
+                    try { detailsEl.textContent = JSON.stringify(evt.details, null, 2); } catch (_) {}
+                    row.style.cursor = 'pointer';
+                    row.addEventListener('click', () => {
+                        detailsEl.style.display = detailsEl.style.display === 'none' ? 'block' : 'none';
+                    });
+                }
+                list.appendChild(row);
+            });
+        };
+
+        // ---- Events ----
+        let debounceT = null;
+        const debounced = () => {
+            clearTimeout(debounceT);
+            debounceT = setTimeout(fetchAndRender, 220);
+        };
+        filters.querySelector('#nc-q').addEventListener('input', debounced);
+        filters.querySelector('#nc-actor').addEventListener('change', fetchAndRender);
+        filters.querySelector('#nc-type').addEventListener('change', fetchAndRender);
+        filters.querySelector('#nc-since').addEventListener('change', fetchAndRender);
+        filters.querySelector('#nc-until').addEventListener('change', fetchAndRender);
+        actions.querySelector('#nc-refresh').addEventListener('click', fetchAndRender);
+        actions.querySelector('#nc-export-json').addEventListener('click', () => {
+            window.TopologySync.exportEvents('json', state);
+        });
+        actions.querySelector('#nc-export-csv').addEventListener('click', () => {
+            window.TopologySync.exportEvents('csv', state);
+        });
+
+        // Quick-filter chips. Each preset resets the relevant advanced
+        // pickers so the semantics stay unambiguous ("Saves" really means
+        // saves-only, even if the user had a stale type selected).
+        filters.querySelectorAll('.nc-chip[data-preset]').forEach(chip => {
+            chip.addEventListener('click', () => {
+                const p = chip.getAttribute('data-preset');
+                state._preset = p === 'all' ? '' : p;
+                if (p === 'all') {
+                    filters.querySelector('#nc-q').value = '';
+                    filters.querySelector('#nc-actor').value = '';
+                    filters.querySelector('#nc-type').value = '';
+                    filters.querySelector('#nc-since').value = '';
+                    filters.querySelector('#nc-until').value = '';
+                } else if (p === 'saves') {
+                    // Clear the dropdown so the preset's #saved takes effect
+                    // without a duplicate advanced selection confusing users.
+                    filters.querySelector('#nc-type').value = '';
+                } else if (p === '24h') {
+                    filters.querySelector('#nc-since').value = '';
+                    filters.querySelector('#nc-until').value = '';
+                }
+                fetchAndRender();
+            });
+        });
+
+        fetchAndRender();
+    },
+
+    _refreshTopologyLog(container, dk, active) {
+        // Simple re-mount; filter state is preserved in this._logState.
+        container.innerHTML = '';
+        this._renderTopologyLog(container, dk, !!active, active);
+    },
+
+    _logEventColor(t) {
+        t = t || '';
+        if (t.startsWith('topology.saved') || t === 'topology.created') return '#4ade80';
+        if (t === 'topology.deleted') return '#f87171';
+        if (t === 'topology.renamed') return '#fbbf24';
+        if (t === 'topology.shared') return '#a78bfa';
+        if (t === 'topology.unshared') return '#fb923c';
+        if (t === 'topology.permission_changed') return '#60a5fa';
+        if (t.startsWith('client.') || t.startsWith('canvas.')) return '#34d399';
+        return '#94a3b8';
+    },
+
+    _logEventLabel(t) {
+        t = t || '';
+        const map = {
+            'topology.created': 'Created',
+            'topology.saved': 'Saved',
+            'topology.renamed': 'Renamed',
+            'topology.deleted': 'Deleted',
+            'topology.shared': 'Shared',
+            'topology.unshared': 'Unshared',
+            'topology.permission_changed': 'Permission',
+            'client.micro_op': 'Canvas',
+        };
+        return map[t] || t.replace(/^topology\./, '').replace(/^client\./, 'canvas.');
+    },
+
+    _logEventIcon(t) {
+        // Tiny per-type glyphs. Keep the path markup minimal so the row
+        // height stays compact and the SVG reuses stroke color cleanly.
+        const icons = {
+            save:  '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+            del:   '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>',
+            edit:  '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>',
+            share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>',
+            lock:  '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+            canvas:'<rect x="4" y="4" width="16" height="16" rx="2"/><line x1="4" y1="10" x2="20" y2="10"/><line x1="10" y1="4" x2="10" y2="20"/>',
+            info:  '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+        };
+        t = t || '';
+        if (t === 'topology.saved' || t === 'topology.created') return icons.save;
+        if (t === 'topology.deleted') return icons.del;
+        if (t === 'topology.renamed') return icons.edit;
+        if (t === 'topology.shared') return icons.share;
+        if (t === 'topology.unshared') return icons.lock;
+        if (t === 'topology.permission_changed') return icons.lock;
+        if (t.startsWith('client.') || t.startsWith('canvas.')) return icons.canvas;
+        return icons.info;
+    },
+
+    // ------------------------------------------------------------------
+    // Session tab: the existing toast-history list. Preserves the
+    // pre-tabs behaviour so nothing the user relied on was lost.
+    // ------------------------------------------------------------------
+    _renderSessionLog(container, dk) {
+        const subheader = document.createElement('div');
+        subheader.style.cssText = `
+            display:flex; align-items:center; justify-content:space-between;
+            padding: 8px 14px; font-size:10px;
+            color:${dk ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'};
+            border-bottom: 1px solid ${dk ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'};
+        `;
+        subheader.innerHTML = `
+            <span>${this._history.length} notification${this._history.length === 1 ? '' : 's'} this session</span>
+        `;
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'nc-btn';
+        clearBtn.textContent = 'Clear';
+        clearBtn.onclick = () => { this._history.length = 0; this._renderCenterEntries(list, dk); subheader.firstElementChild.textContent = '0 notifications this session'; };
+        subheader.appendChild(clearBtn);
+        container.appendChild(subheader);
 
         const list = document.createElement('div');
         list.style.cssText = 'flex:1; overflow-y:auto; padding:6px 8px 10px;';
         this._renderCenterEntries(list, dk);
-        panel.appendChild(list);
-
-        document.body.appendChild(panel);
-
-        const closeOnClick = (e) => {
-            if (!panel.contains(e.target) && !e.target.closest('#btn-notification-center')) {
-                this._closeCenter();
-                document.removeEventListener('mousedown', closeOnClick);
-            }
-        };
-        setTimeout(() => document.addEventListener('mousedown', closeOnClick), 50);
+        container.appendChild(list);
     },
 
     _categoryMeta: {
@@ -661,10 +1243,50 @@ window.NotificationManager = {
     const _FRIENDLY_502_EXACT = ['/api/dnaas/device-gitcommit'];
     const _SILENT_BRIDGE_PREFIX = ['/api/config/', '/api/operations/', '/api/devices/'];
     const _BRIDGE_UNAVAIL_CODES = new Set([404, 501, 502, 503]);
+    // Paths where failure is part of the normal UX (optional
+    // enrichment, best-effort refresh, etc.). 5xx from these paths
+    // should not raise a toast. The matcher checks BOTH suffix
+    // (/lldp) and prefix (/api/dnaas/device/) so per-device LLDP
+    // fetches from any call site are silenced uniformly.
+    const _SILENT_ANY_STATUS = [
+        { prefix: '/api/dnaas/device/', suffix: '/lldp' },
+        { prefix: '/api/dnaas/device/', suffix: '/interfaces' },
+    ];
+
+    function _headerOf(input, init) {
+        try {
+            if (input instanceof Request && input.headers) {
+                const h = input.headers.get('X-Best-Effort');
+                if (h) return h;
+            }
+        } catch (_) { /* ignore */ }
+        try {
+            const h = init && init.headers;
+            if (!h) return '';
+            if (typeof h.get === 'function') return h.get('X-Best-Effort') || '';
+            if (typeof h === 'object') {
+                for (const k of Object.keys(h)) {
+                    if (k.toLowerCase() === 'x-best-effort') return h[k] || '';
+                }
+            }
+        } catch (_) { /* ignore */ }
+        return '';
+    }
+
+    function _matchesAnySilent(cleanUrl) {
+        for (const spec of _SILENT_ANY_STATUS) {
+            if (spec.prefix && !cleanUrl.startsWith(spec.prefix)) continue;
+            if (spec.suffix && !cleanUrl.endsWith(spec.suffix)) continue;
+            return true;
+        }
+        return false;
+    }
 
     window.fetch = async function(...args) {
         const input = args[0];
+        const init = args[1];
         const url = typeof input === 'string' ? input : (input?.url || '');
+        const bestEffort = !!_headerOf(input, init);
 
         let resp;
         try {
@@ -673,7 +1295,7 @@ window.NotificationManager = {
             if (API_PATTERN.test(url)) {
                 const cleanUrl = url.split('?')[0];
                 const isBridgePath = _SILENT_BRIDGE_PREFIX.some(p => cleanUrl.startsWith(p));
-                if (!isBridgePath) {
+                if (!isBridgePath && !bestEffort && !_matchesAnySilent(cleanUrl)) {
                     _showApiError(url, 0, `Network error: ${err.message}`);
                 }
             }
@@ -683,6 +1305,8 @@ window.NotificationManager = {
         if (!resp.ok && API_PATTERN.test(url)) {
             const cleanUrl = url.split('?')[0];
             const isSilent = (
+                bestEffort ||
+                _matchesAnySilent(cleanUrl) ||
                 (resp.status === 404 && (
                     _SILENT_404_EXACT.some(p => cleanUrl === p) ||
                     _SILENT_404_PREFIX.some(p => cleanUrl.startsWith(p))

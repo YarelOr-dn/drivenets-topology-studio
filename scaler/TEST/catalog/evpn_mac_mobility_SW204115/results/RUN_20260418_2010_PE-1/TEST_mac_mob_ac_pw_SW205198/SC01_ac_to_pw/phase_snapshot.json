@@ -1,0 +1,21 @@
+{
+  "phase_name": "snapshot",
+  "started_at": "2026-04-18T20:11:04.859+00:00",
+  "completed_at": "2026-04-18T20:11:05.110+00:00",
+  "duration_sec": 0.251,
+  "command_count": 1,
+  "commands": [
+    {
+      "command": "show evpn mac-table instance PW_TEST_ELAN mac 00:de:ad:ff:ff:01 | no-more",
+      "timestamp": "2026-04-18T20:11:04.859+00:00",
+      "duration_ms": 250,
+      "phase": "snapshot",
+      "output_length": 182,
+      "output_preview": "EVPN    : PW_TEST_ELAN\nEVI ID  : 6\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1010\n      Timestamp: 18-Apr-2026-23:10:17"
+    }
+  ],
+  "parsed_values": {
+    "before_mac_count": 1
+  },
+  "anomalies": []
+}

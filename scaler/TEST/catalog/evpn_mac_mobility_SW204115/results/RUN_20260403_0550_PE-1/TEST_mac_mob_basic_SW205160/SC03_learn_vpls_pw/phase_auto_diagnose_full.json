@@ -1,0 +1,146 @@
+[
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 05:57 | include MAC | no-more",
+    "timestamp": "2026-04-03T05:59:58.320+00:00",
+    "duration_ms": 8612,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 05:57 | include EVPN | no-more",
+    "timestamp": "2026-04-03T06:00:06.932+00:00",
+    "duration_ms": 5658,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 05:57 | include withdraw | no-more",
+    "timestamp": "2026-04-03T06:00:12.590+00:00",
+    "duration_ms": 5557,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 05:57 | include announce | no-more",
+    "timestamp": "2026-04-03T06:00:18.148+00:00",
+    "duration_ms": 5057,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 05:57 | include seq | no-more",
+    "timestamp": "2026-04-03T06:00:23.206+00:00",
+    "duration_ms": 8962,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 05:57 | include duplicate | no-more",
+    "timestamp": "2026-04-03T06:00:32.168+00:00",
+    "duration_ms": 4907,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 05:57 | include suppress | no-more",
+    "timestamp": "2026-04-03T06:00:37.075+00:00",
+    "duration_ms": 7660,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 05:57 | include MAC | no-more",
+    "timestamp": "2026-04-03T06:00:44.736+00:00",
+    "duration_ms": 18624,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 05:57 | include evpn | no-more",
+    "timestamp": "2026-04-03T06:01:03.361+00:00",
+    "duration_ms": 15470,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show file traces routing_engine/rib-manager_traces | include 05:57 | include FIB | no-more",
+    "timestamp": "2026-04-03T06:01:18.831+00:00",
+    "duration_ms": 15570,
+    "phase": "auto_diagnose",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+    "timestamp": "2026-04-03T06:01:34.401+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 35,
+    "output_preview": "  ETH TAG: 0\n    MAC table is empty",
+    "output_full": "  ETH TAG: 0\n    MAC table is empty"
+  },
+  {
+    "command": "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+    "timestamp": "2026-04-03T06:01:34.652+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 207,
+    "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------",
+    "output_full": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+  },
+  {
+    "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+    "timestamp": "2026-04-03T06:01:34.903+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 42,
+    "output_preview": "Number of MAC-Mobility entries in redis: 0",
+    "output_full": "Number of MAC-Mobility entries in redis: 0"
+  },
+  {
+    "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+    "timestamp": "2026-04-03T06:01:35.153+00:00",
+    "duration_ms": 50,
+    "phase": "auto_diagnose",
+    "output_length": 26,
+    "output_preview": "ERROR: Incomplete command.",
+    "output_full": "ERROR: Incomplete command."
+  },
+  {
+    "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T06:01:35.204+00:00",
+    "duration_ms": 250,
+    "phase": "auto_diagnose",
+    "output_length": 18,
+    "output_preview": "EvpnMacs [size: 0]",
+    "output_full": "EvpnMacs [size: 0]"
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T06:01:35.454+00:00",
+    "duration_ms": 150,
+    "phase": "auto_diagnose",
+    "output_length": 442,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+  }
+]

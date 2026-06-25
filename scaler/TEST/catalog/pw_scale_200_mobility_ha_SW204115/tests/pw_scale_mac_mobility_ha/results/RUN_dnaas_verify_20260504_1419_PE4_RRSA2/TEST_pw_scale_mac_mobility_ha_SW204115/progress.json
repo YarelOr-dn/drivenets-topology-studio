@@ -1,0 +1,10 @@
+{
+  "completed": 10,
+  "detail": "",
+  "failures": 0,
+  "phase": "dnaas_preflight_ready",
+  "status": "pass",
+  "step": "done",
+  "timestamp": "2026-05-04T11:34:48+0000",
+  "total": 10
+}

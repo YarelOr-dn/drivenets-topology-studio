@@ -1,16 +1,163 @@
 {
   "suite_id": "evpn_mac_mobility_SW204115",
   "parent_jira": "SW-204115",
+  "title": "QA | EVPN (ELAN) Seamless-integration | MAC Mobility",
+  "recipe_schema_version": 2,
+  "recipe_schema_doc": "scaler/TEST/shared/e2e_lite/RECIPE_SCHEMA.md",
+  "test_config_required": false,
+  "linked_user_stories": [
+    {"key": "SW-191944", "title": "Handling of MAC Move", "status": "Dev-Done"},
+    {"key": "SW-191136", "title": "Learn MAC Addresses from VPLS PWs", "status": "Dev-Done"},
+    {"key": "SW-192019", "title": "EVPN(ELAN)-VPLS: MAC Move Handling", "status": "Dev-Done"},
+    {"key": "SW-194578", "title": "EVPN(ELAN)-VPLS: MAC Move and Sticky MAC Handling", "status": "Dev-Done"}
+  ],
+
+  "infrastructure_modes": {
+    "si_mode": {
+      "label": "Seamless Integration (current PE-1 HA_TEST_ELAN)",
+      "description": "EVPN instance has seamless-integration enabled. VPLS PW control plane is active but data plane is BNI (Best but Not Installed). PW MAC learning CANNOT happen on THIS instance.",
+      "valid_tests": ["basic_learning", "ac_ac", "ac_evpn", "aging_timers", "withdraw_flush", "sticky_modes(SC01-SC02)"],
+      "note": "PW tests now unblocked via spirent_vpls_cp mode using a SEPARATE non-SI instance"
+    },
+    "spirent_vpls_cp": {
+      "label": "Spirent VPLS BGP Peer on SI-enabled instance (PW active via MPLS)",
+      "description": "EVPN instance PW_TEST_ELAN WITH seamless-integration enabled. VPLS RTs (export-l2vpn-vpls, import-l2vpn-vpls) are configured under the SI > protocols > bgp subtree -- this is the ONLY valid location in DNOS. Spirent establishes l2vpn-vpls BGP peering via full ISIS+LDP+BGP chain. PW is 'Installed' (not BNI) because only the Spirent peers via l2vpn-vpls for this EVI (no competing EVPN RT-2 routes). Spirent sends MPLS-labeled L2 frames via vpls-stream. PE-1 pops MPLS label, learns source MAC from inner L2 frame. DNAAS BD carries MPLS frames transparently (ethertype 0x8847 forwarded like any L2 frame).",
+      "valid_tests": ["ac_pw", "evpn_pw", "sticky_modes(SC03-SC06)"],
+      "valid_with_two_spirent_peers": ["pw_pw"],
+      "setup": "Auto-provisioned via spirent_vpls_provisioner.py. Full chain: label-pool -> BGP l2vpn-vpls AF -> EVPN instance + SI + VPLS RT (under SI subtree) -> AC sub-interface -> BGP neighbor -> Spirent ISIS + LDP + BGP l2vpn-vpls. See ~/.cursor/spirent-reference/vpls-pw-establishment.md for complete reference.",
+      "si_requirement": "MANDATORY. VPLS RTs (export-l2vpn-vpls, import-l2vpn-vpls) are ONLY valid under seamless-integration > protocols > bgp. Removing SI also removes all VPLS RT config and the PW disappears. See learned rule dnos-vpls-rt-must-be-under-seamless-integration.",
+      "convergence_budget_seconds": 90,
+      "convergence_chain": "ISIS L2 adj (30-45s) -> route to loopback (+5s) -> LDP OPERATIONAL (+10s) -> BGP ESTABLISHED (+10s) -> PW Installed (+5s)",
+      "tooling": {
+        "spirent_tool.py bgp-peer --negotiate-afi l2vpn-vpls": "VPLS BGP control plane",
+        "spirent_tool.py isis-peer --area-id 49.0001 --system-id 0000.0000.0003": "ISIS adjacency (area converted to STC hex 490001 internally)",
+        "spirent_tool.py ldp-peer --router-id 6.6.6.6": "LDP for MPLS label distribution",
+        "spirent_tool.py vpls-stream --mpls-label <label>": "MPLS-encapsulated PW data plane",
+        "mac_trigger.py spirent_create_vpls_stream()": "Python wrapper for vpls-stream",
+        "mac_trigger.py execute_mac_move_pw_to_pw()": "PW-to-PW move with MPLS labels"
+      },
+      "reference_doc": "~/.cursor/spirent-reference/vpls-pw-establishment.md"
+    },
+    "spirent_vpls_cp_dual": {
+      "label": "Two Spirent VPLS Peers (PW <-> PW data plane)",
+      "description": "Same SI instance as spirent_vpls_cp, but TWO Spirent VPLS BGP peers (different VE-IDs and source IPs on the same Spirent port) so that the DUT sees two distinct PWs. Required for PW-to-PW MAC moves: same inner-src-mac sent on PW1 ingress label first, then PW2 ingress label = PW-to-PW move event. Single ISIS+LDP+BGP chain is shared (STC devices on same port share ISIS instance); only the BGP VPLS sessions and their associated PWs are duplicated.",
+      "valid_tests": ["pw_pw"],
+      "setup": "Auto-provisioned via spirent_vpls_provisioner.provision_spirent_vpls_cp_dual(). Builds the single SI EVPN instance + label pool + BGP l2vpn-vpls AF, then creates two STC EmulatedDevice objects with VE-IDs 1 and 3 (or as configured), each with its own VPLS BGP route block and its own MPLS PW.",
+      "si_requirement": "MANDATORY -- same constraint as spirent_vpls_cp.",
+      "convergence_budget_seconds": 120,
+      "convergence_chain": "Same as spirent_vpls_cp + ~10-20s extra for the second BGP VPLS session and PW.",
+      "tooling": {
+        "spirent_tool.py bgp-peer --vpls-ve-id 1": "First Spirent VPLS peer = PW1",
+        "spirent_tool.py bgp-peer --vpls-ve-id 3": "Second Spirent VPLS peer = PW2",
+        "mac_trigger.py execute_mac_move_pw_to_pw()": "Sends inner MAC on PW1 label, then PW2 label, on the same Spirent port"
+      },
+      "reference_doc": "~/.cursor/spirent-reference/vpls-pw-establishment.md"
+    },
+    "dual_pe_mode": {
+      "label": "Dual-PE topology (MH + real PW traffic)",
+      "description": "Two PEs with VPLS peering. Spirent sends L2 traffic to PE-2 AC, PE-2 forwards over PW to PE-1. Real PW MAC learning.",
+      "valid_tests": "ALL including multihoming",
+      "setup": "Requires second PE (PE-4 or similar) with VPLS PW to PE-1"
+    },
+    "dual_pe_shared_rt_inner_vlan_divergence": {
+      "label": "Dual-PE shared-RT topology with per-PE inner-VLAN divergence",
+      "description": "PE-1 + RR-SA-2 share EVPN_SI_VPLS_1 via shared VPLS RT 1234567:2001. PE-1's AC stays at outer 214 / inner 4001; RR-SA-2's AC was moved to outer 214 / inner 2001 (committed 2026-05-01 via dnos_multi_device_commit). DNAAS fabric BD g_yor_v214 is single_tag on outer 214 and preserves inner end-to-end at every leaf+spine+super-spine hop. Q-in-Q AC classification at each PE selects exactly ONE PE per Spirent inner-VLAN choice -- PE-1 AC matches outer 214 / inner 4001 only; RR-SA-2 AC matches outer 214 / inner 2001 only. PE-1 has both EVPN RT-2 export AND VPLS PW; RR-SA-2 has VPLS PW only (no EVPN RT-2 export for this EVI), so a MAC learned on RR-SA-2's AC reaches PE-1 strictly via the VPLS PW (peer 2.2.2.2, ingress label 1032295). VPLS PW key is (EVI, site-id) and survived the AC swap.",
+      "valid_tests": ["basic_learning", "ac_pw_single_move"],
+      "setup": "RR-SA-2 must have bundle-100.2001 (outer 214 / inner 2001) bound to EVPN_SI_VPLS_1 as both interface AND seamless-integration site-interface. The full atomic commit is encoded in tests/basic_learning/recipe.json under topology.* and was applied permanently on 2026-05-01.",
+      "isolation_proof": "dnos_dnaas_path vlan=214 confirms every fabric hop is single_tag/preserve. dnos_dnaas_inverse_path on PE-1 ge400-0/0/5.4001 returns inner_vlan=4001; on RR-SA-2 bundle-100.2001 returns inner_vlan=2001. A Spirent stream's inner-VLAN choice is the deterministic per-PE selector.",
+      "tests_unblocked_vs_v1": "basic_learning SC03 PW source is now a REAL remote PE (RR-SA-2) instead of Spirent acting as a fake VPLS peer. No admin shut/unshut required to isolate PE-1 during PW learning.",
+      "convergence_budget_seconds": 30,
+      "tooling": {
+        "dnos_dnaas_path vlan=214": "fabric path discovery (5-hop chain with admin/oper + BD per hop)",
+        "dnos_dnaas_inverse_path device_name=<pe> port_or_subif=<ac>": "outer/inner VLAN per AC, full chain back to Spirent port",
+        "dnos_dnaas_diagnose vlan=214": "fault list + overall verdict for prerequisite gate",
+        "dnos_dnaas_teach_plan vlan=214 dut=<pe> test_mac=<mac>": "canonical Spirent frame_recipe + dut_target + verification_plan"
+      }
+    }
+  },
+
+  "reference_table_from_jira": {
+    "description": "SW-204115 authoritative MAC move matrix (9 combinations)",
+    "moves": [
+      {"old": "Local", "new": "Local", "rt2": "Update", "suppression": true, "local_loop": true, "infra": "si_mode"},
+      {"old": "Local", "new": "PW", "rt2": "Withdraw", "suppression": true, "local_loop": false, "infra": "spirent_vpls_cp"},
+      {"old": "Local", "new": "EVPN", "rt2": "Withdraw", "suppression": true, "local_loop": false, "infra": "si_mode"},
+      {"old": "PW", "new": "PW", "rt2": "None", "suppression": false, "local_loop": false, "infra": "spirent_vpls_cp"},
+      {"old": "PW", "new": "Local", "rt2": "Advertise", "suppression": true, "local_loop": false, "infra": "spirent_vpls_cp"},
+      {"old": "PW", "new": "EVPN", "rt2": "None", "suppression": false, "local_loop": false, "infra": "spirent_vpls_cp"},
+      {"old": "EVPN", "new": "EVPN", "rt2": "None", "suppression": false, "local_loop": false, "infra": "si_mode"},
+      {"old": "EVPN", "new": "Local", "rt2": "Advertise", "suppression": true, "local_loop": false, "infra": "si_mode"},
+      {"old": "EVPN", "new": "PW", "rt2": "None", "suppression": false, "local_loop": false, "infra": "spirent_vpls_cp"}
+    ]
+  },
+
+  "spirent_capability_matrix": {
+    "can_do": [
+      {"capability": "AC MAC learning (L2 traffic on AC)", "method": "spirent_tool.py create-device + create-stream --protocol l2"},
+      {"capability": "EVPN RT-2 injection (control plane MAC advertisement)", "method": "spirent_tool.py evpn-routes --mac XX"},
+      {"capability": "EVPN RT-2 with sticky flag", "method": "spirent_tool.py evpn-routes --sticky"},
+      {"capability": "EVPN RT-2 with sequence number", "method": "spirent_tool.py evpn-routes --seq N"},
+      {"capability": "EVPN RT-2 withdrawal", "method": "spirent_tool.py evpn-routes then protocol-stop"},
+      {"capability": "BGP VPLS peer (control plane only)", "method": "spirent_tool.py bgp-peer --negotiate-afi l2vpn-vpls"},
+      {"capability": "EVPN RT-1 Ethernet Auto-Discovery injection", "method": "spirent_tool.py evpn-rt1 (BgpEvpnAdRouteConfig, per_evi/per_es, ESI 9 hex-byte format)", "validated": "2026-04-01 on RR-SA-2 -> PE-1"},
+      {"capability": "EVPN RT-4 ES Route injection", "method": "spirent_tool.py evpn-rt4 (BgpEvpnEthernetSegmentRouteConfig, ESI 9 hex-byte format)", "validated": "2026-04-01 on RR-SA-2 -> PE-1"}
+    ],
+    "can_do_pw_via_vpls": [
+      {"capability": "PW MAC learning via MPLS-labeled frames (vpls-stream)", "method": "spirent_tool.py vpls-stream --mpls-label <ingress_label> --inner-src-mac <mac>", "prerequisite": "non-SI EVPN instance + Spirent VPLS BGP peer (l2vpn-vpls AF)", "validated": "spirent_tool.py has _configure_vpls_route() + cmd_vpls_stream()"},
+      {"capability": "PW-triggered MAC moves (AC<->PW, EVPN<->PW)", "method": "Learn on AC via L2 device, then send same MAC via vpls-stream on PW = MAC move detected by DUT"},
+      {"capability": "PW-to-PW MAC moves", "method": "Two Spirent VPLS peers with different VE-IDs, each gets a PW. Send same inner-src-mac on different PW labels = PW-to-PW move"}
+    ],
+    "cannot_do": [
+      {"capability": "Multi-homing data plane (dual-homed CE)", "reason": "Single Spirent port, one DNAAS path per DUT"},
+      {"capability": "PW via SI instance WITHOUT dedicated VPLS-only EVI", "reason": "SI mode with competing EVPN RT-2 routes sets PW to BNI. PW_TEST_ELAN uses SI + VPLS RTs but NO competing EVPN neighbors for this EVI, so PW is 'Installed'. If EVPN RT-2 routes appear for the same EVI, PW becomes 'Uninstalled' (BNI)."}
+    ]
+  },
+
+  "dnos_mh_config_validated": {
+    "validated_on": "PE-1 (YOR_PE-1) 2026-04-01",
+    "correct_path": "network-services multihoming interface <if> esi arbitrary value <9-hex-octets>",
+    "wrong_path_in_original_recipe": "network-services evpn instance {name} interface {if} ethernet-segment identifier type-0 {esi}",
+    "discovery_method": "Live ? completion on PE-1",
+    "key_finding": "ESI/multihoming is a SEPARATE top-level subtree under network-services, not under evpn instance",
+    "esi_types": {"arbitrary": "Type-0 (manual 9-byte value)", "lacp": "Type-1 (LACP remote-id)"},
+    "redundancy_modes": ["all-active", "single-active", "port-active"],
+    "df_algorithms": ["mod (RFC 7432 default)", "highest-preference (draft-ietf-bess-evpn-pref-df-10)"],
+    "existing_state_pe1": "ESI 00:00:aa:bb:cc:dd:ee:ff:00:01 visible via Spirent RT-4 injection (remote, not locally configured)"
+  },
+
   "tests": [
-    {"id": "TEST_mac_mob_basic_SW205160", "path": "tests/basic_learning/recipe.json"},
-    {"id": "TEST_mac_mob_ac_ac_SW205161", "path": "tests/ac_ac/recipe.json"},
-    {"id": "TEST_mac_mob_evpn_pw_SW205162", "path": "tests/evpn_pw/recipe.json"},
-    {"id": "TEST_mac_mob_flush_SW205163", "path": "tests/withdraw_flush/recipe.json"},
-    {"id": "TEST_mac_mob_aging_SW205164", "path": "tests/aging_timers/recipe.json"},
-    {"id": "TEST_mac_mob_ha_SW205165", "path": "tests/ha_mac_mobility/recipe.json"},
-    {"id": "TEST_mac_mob_mh_SW205195", "path": "tests/multihoming/recipe.json"},
-    {"id": "TEST_mac_mob_ac_evpn_SW205196", "path": "tests/ac_evpn/recipe.json"},
-    {"id": "TEST_mac_mob_ac_pw_SW205198", "path": "tests/ac_pw/recipe.json"},
-    {"id": "TEST_mac_mob_pw_pw_SW205199", "path": "tests/pw_pw/recipe.json"}
-  ]
+    {"id": "TEST_mac_mob_basic_SW205160", "path": "tests/basic_learning/recipe.json", "jira": "SW-205160", "infra_required": "dual_pe_shared_rt_inner_vlan_divergence", "version": 2, "rewritten": "2026-05-01",
+     "infra_detail": "v2 (2026-05-01) -- PE-1 + RR-SA-2 share EVPN_SI_VPLS_1 via shared VPLS RT 1234567:2001 with per-PE inner-VLAN divergence (PE-1 inner 4001, RR-SA-2 inner 2001 on shared outer 214). Single test_mac 00:de:ad:be:ef:01 across SC01->SC02->SC03 exercises basic mobility within basic_learning: SC01 Local AC on PE-1 -> SC02 Spirent BGP RT-2 inject (mobility +1, PE-1 re-advertises to RR-SA-2 -> PE-4) -> SC03 Spirent -> RR-SA-2 AC (PW source on PE-1 from REAL remote PE 2.2.2.2, mobility +1, RR-SA-2 doesn't export RT-2 so PE-1 stays withdrawn) -> SC04 stop+clear+verify zero. Verifier helpers fixed in this revision: verify_mac_flags + verify_forwarding_state now accept absent_is_pass (was TypeError); new verify_mac_per_view + verify_evi_moved_events_increment for positive/negative bug-catching assertions per scenario. RR-SA-2 AC committed 2026-05-01 via dnos_multi_device_commit: bundle-100.4001 -> bundle-100.2001."},
+    {"id": "TEST_mac_mob_ac_ac_SW205161", "path": "tests/ac_ac/recipe.json", "jira": "SW-205161", "infra_required": "si_mode"},
+    {"id": "TEST_mac_mob_evpn_pw_SW205162", "path": "tests/evpn_pw/recipe.json", "jira": "SW-205162", "infra_required": "spirent_vpls_cp"},
+    {"id": "TEST_mac_mob_flush_SW205163", "path": "tests/withdraw_flush/recipe.json", "jira": "SW-205163", "infra_required": "si_mode"},
+    {"id": "TEST_mac_mob_aging_SW205164", "path": "tests/aging_timers/recipe.json", "jira": "SW-205164", "infra_required": "si_mode"},
+    {"id": "TEST_mac_mob_ha_SW205165", "path": "tests/ha_mac_mobility/recipe.json", "jira": "SW-205165", "infra_required": "si_mode"},
+    {"id": "TEST_mac_mob_mh_SW205195", "path": "tests/multihoming/recipe.json", "jira": "SW-205195", "infra_required": "dual_pe_mode"},
+    {"id": "TEST_mac_mob_ac_evpn_SW205196", "path": "tests/ac_evpn/recipe.json", "jira": "SW-205196", "infra_required": "si_mode"},
+    {"id": "TEST_mac_mob_ac_pw_SW205198", "path": "tests/ac_pw/recipe.json", "jira": "SW-205198", "infra_required": "spirent_vpls_cp"},
+    {"id": "TEST_mac_mob_ac_pw_single_move_SW205198", "path": "tests/ac_pw_single_move/recipe.json", "jira": "SW-205198", "infra_required": "dual_pe_shared_rt_inner_vlan_divergence",
+     "infra_detail": "Real-topology AC<->PW single move derived from passed TEST_mac_mob_basic_SW205160. Uses the PE-4 untagged local AC and RR-SA-2 real PW source; move scenarios preserve prior MAC source state instead of clearing before trigger."},
+    {"id": "TEST_mac_mob_pw_pw_SW205199", "path": "tests/pw_pw/recipe.json", "jira": "SW-205199", "infra_required": "spirent_vpls_cp_dual"},
+    {"id": "TEST_mac_mob_sticky_modes_G6", "path": "tests/sticky_modes/recipe.json", "jira": "SW-194578", "infra_required": "mixed",
+     "infra_detail": "SC01-SC02: si_mode; SC03-SC04,SC06: spirent_vpls_cp (PW via Spirent VPLS); SC05: si_mode"},
+    {"id": "TEST_mac_mob_irb_si_reject_G2", "path": "tests/irb_si_rejection/recipe.json", "jira": "SW-204115", "infra_required": "si_mode",
+     "infra_detail": "Pure config-validation. Reuses any existing SI EVPN instance + a non-SI instance. No traffic. Always rolls back, never commits."},
+    {"id": "TEST_mac_mob_evpn_evpn_G1", "path": "tests/evpn_evpn/recipe.json", "jira": "SW-204115", "infra_required": "si_mode",
+     "infra_detail": "Remote-to-remote RT-2 sequence race via single Spirent BGP peer with differentiated next-hop values. Wired 2026-04-21 via Block 3 spirent_evpn_seq_race handler (recipe_type: move_matrix)."},
+    {"id": "TEST_mac_mob_scale_64k_G3", "path": "tests/scale_64k/recipe.json", "jira": "SW-204115", "infra_required": "si_mode",
+     "infra_detail": "Bulk RT-2 injection at 64K scale via spirent_inject_evpn_mac_route --count parameter. Wired 2026-04-21 via Block 3 spirent_bulk_learn_assert handler (recipe_type: bulk_learn, skip_cross_layer_check=True)."},
+    {"id": "TEST_mac_mob_pw_suppress_G4", "path": "tests/pw_suppression_sanctions/recipe.json", "jira": "SW-204115", "infra_required": "si_mode",
+     "infra_detail": "Cross-domain suppression sanctions (blackhole / shutdown / suppress). Wired 2026-04-21 via Block 3 cross_domain_sanction_assert handler (recipe_type: pw_suppression). Handler commits the sanction via persistent SSH then drives Spirent RT-2 flap. DNOS 26.2 validated: blackhole/shutdown/suppress (NOT drop/freeze)."},
+    {"id": "TEST_mac_mob_clear_ops_G5", "path": "tests/clear_operations/recipe.json", "jira": "SW-204115", "infra_required": "si_mode",
+     "infra_detail": "Clear commands (mac-suppression / mac-history / restore-cycles) as active triggers. Wired 2026-04-21 via Block 3 clear_assert_state handler (recipe_type: clear_matrix). Handler runs clear command + optional before/after show captures. PASSES if clear CLI returns clean output."}
+  ],
+
+  "experimental_tests": [],
+
+  "experimental_policy": {
+    "description": "Recipes under 'experimental_tests' are gap-analysis drafts authored alongside the suite redesign but not yet wired to the orchestrator's ACTION_TRIGGER_MAP. The linter relaxes trigger.action validation for these recipes (warnings only, not errors). They MUST stay schema-clean (valid JSON, jira_key present, infra mode known) so they remain promotable to the main 'tests' array as soon as their listed blockers are resolved.",
+    "promotion_rule": "When all blockers for an experimental test are resolved, move its entry from 'experimental_tests' to 'tests', remove the 'status' / 'status_note' fields from the recipe, and re-run the linter.",
+    "2026_04_21_batch_promotion": "G1/G3/G4/G5 promoted from experimental_tests to tests[] after Block 1/2/3 strategic refactor: (1) shared/recipe_profiles.py declarative profiles replace per-type if/else branches, (2) four generic handlers (spirent_evpn_seq_race, spirent_bulk_learn_assert, cross_domain_sanction_assert, clear_assert_state) wire recipe trigger verbs to orchestrator execution, (3) runtime_corrections.json captures DNOS 26.2 live-validated syntax (blackhole != drop, suppress != freeze, ordering rules) that every recipe and handler now references. experimental_tests is empty until new gap-analysis work lands."
+  }
 }

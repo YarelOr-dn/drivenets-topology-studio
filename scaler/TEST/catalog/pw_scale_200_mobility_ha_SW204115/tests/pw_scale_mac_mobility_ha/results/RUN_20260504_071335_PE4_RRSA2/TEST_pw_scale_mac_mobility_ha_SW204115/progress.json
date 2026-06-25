@@ -1,0 +1,9 @@
+{
+  "detail": "",
+  "failures": 5,
+  "phase": "prerequisite_gate",
+  "status": "fail",
+  "step": "done",
+  "timestamp": "2026-05-04T07:13:41+0000",
+  "warnings": 0
+}

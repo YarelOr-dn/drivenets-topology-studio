@@ -8,6 +8,30 @@
 'use strict';
 
 window.LinkDetailsHandlers = {
+    _authFetch(url, options = {}) {
+        if (window.TopologyAuth && typeof window.TopologyAuth.authFetch === 'function') {
+            return window.TopologyAuth.authFetch(url, options);
+        }
+        return fetch(url, options);
+    },
+
+    _deviceIdentityCandidates(device, fallback = '') {
+        return [...new Set([
+            device?._registeredDeviceId,
+            device?._registeredHostname,
+            device?.label,
+            device?.name,
+            device?.hostname,
+            device?.device_id,
+            device?.deviceSerial,
+            device?.serial,
+            fallback,
+            device?._registeredMgmtIp,
+            device?.sshConfig?.host,
+            device?.sshConfig?.hostBackup
+        ].map(v => String(v || '').trim()).filter(Boolean))];
+    },
+
     showLinkEditor(editor, link) {
         if (!link || (link.type !== 'link' && link.type !== 'unbound')) return;
         
@@ -338,6 +362,13 @@ window.LinkDetailsHandlers = {
         // Show the modal
         const modal = document.getElementById('link-details-modal');
         modal.classList.add('show');
+        if (window.LinkLiveDrawer && typeof window.LinkLiveDrawer.hide === 'function') {
+            window.LinkLiveDrawer.hide();
+        }
+        const tabs = document.getElementById('lt-modal-tabs');
+        if (tabs && typeof tabs._activate === 'function') {
+            tabs._activate('static');
+        }
         
         // Restore saved modal size and position if available
         const modalContent = modal.querySelector('.link-table-modal');
@@ -419,10 +450,33 @@ window.LinkDetailsHandlers = {
         // Set up real-time validation
         editor.setupLinkTableValidation();
         
-        // Try to load interfaces from device configs (async, non-blocking)
-        editor.loadInterfacesFromDeviceConfigs().catch(err => {
-            console.warn('Failed to load interfaces from configs:', err);
-        });
+        // Live Link Telemetry owns automatic Link Table fill. It replaces the
+        // old best-effort DNAAS autofill path when available, preventing
+        // discovery_api outages from producing noisy 502s in normal Link Table use.
+        if (window.LinkTelemetry && link.device1 && link.device2) {
+            window.LinkTelemetry.installAutoCorrelation?.(editor);
+            window.LinkTelemetry.startModalAutoRefresh?.(editor, link, 60000);
+            const cachedTelemetry = link.linkDetails?.live || window.LinkTelemetry.getCachedResult?.(link, editor);
+            if (cachedTelemetry) {
+                window.LinkTelemetry.renderTelemetry(link, cachedTelemetry);
+            } else {
+                window.LinkTelemetry.renderLoading?.(link);
+            }
+            window.LinkTelemetry.refreshLink(editor, link, { hint: 'auto-on-open' })
+                .then(() => {
+                    const needsCorrelation = !(link.device1Interface && link.device2Interface);
+                    if (needsCorrelation) {
+                        return window.LinkTelemetry.correlateAcrossCanvas(editor).catch(() => []);
+                    }
+                    return [];
+                })
+                .catch(err => console.warn('[LinkTelemetry] auto-fill failed:', err));
+        } else {
+            // Legacy fallback only when the live telemetry module is absent.
+            editor.loadInterfacesFromDeviceConfigs().catch(err => {
+                console.warn('Failed to load interfaces from configs:', err);
+            });
+        }
     },
 
     validateVlanInput(editor, value) {
@@ -678,15 +732,42 @@ window.LinkDetailsHandlers = {
         let filled = false;
 
         try {
-            const sshHost1 = device1.sshConfig?.host || device1.sshConfig?.hostBackup || '';
+            const sshHost1 = device1._registeredMgmtIp || device1.sshConfig?.host || device1.sshConfig?.hostBackup || '';
+            let neighbors = [];
+            if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDeviceContext) {
+                for (const deviceId of this._deviceIdentityCandidates(device1, name1)) {
+                    try {
+                        const ctx = await ScalerAPI.getDeviceContext(deviceId, false, sshHost1);
+                        neighbors = ctx?.lldp || ctx?.lldp_neighbors || [];
+                        if (Array.isArray(neighbors) && neighbors.length) break;
+                    } catch (_) {}
+                }
+            }
+
             const url = new URL(`/api/dnaas/device/${encodeURIComponent(name1)}/lldp`, window.location.origin);
             if (sshHost1 && /^\d+\.\d+\.\d+\.\d+$/.test(sshHost1)) {
                 url.searchParams.set('ssh_host', sshHost1);
             }
-            const resp = await fetch(url.toString());
-            if (!resp.ok) return false;
-            const data = await resp.json();
-            const neighbors = data.neighbors || data.lldp_neighbors || [];
+            // Mark the request as best-effort so `topology-notifications.js`
+            // suppresses the toast/log entry on 502 / 404. LLDP auto-fill
+            // is an OPTIONAL enrichment -- failure is completely normal
+            // (discovery API down, device unreachable, LLDP disabled on
+            // the remote side) and shouldn't pester the user.
+            if (!neighbors.length) {
+                const resp = await this._authFetch(url.toString(), {
+                    headers: { 'X-Best-Effort': 'lldp-autofill' },
+                });
+                if (!resp.ok) {
+                    if (editor.debugger) {
+                        editor.debugger.logInfo(
+                            `LLDP auto-fill skipped (${resp.status}) for ${name1} -- manual entry required`,
+                        );
+                    }
+                    return false;
+                }
+                const data = await resp.json();
+                neighbors = data.neighbors || data.lldp_neighbors || [];
+            }
 
             for (const n of neighbors) {
                 const nbrName = (n.neighbor || n.remote_device || '').trim();
@@ -721,7 +802,11 @@ window.LinkDetailsHandlers = {
                 }
             }
         } catch (err) {
-            console.warn('LLDP auto-fill failed:', err);
+            // Silent: LLDP auto-fill is best-effort. The debugger is
+            // still informed so devs can inspect if needed.
+            if (editor.debugger) {
+                editor.debugger.logInfo(`LLDP auto-fill swallowed error: ${err.message}`);
+            }
         }
         return filled;
     }

@@ -1,0 +1,9 @@
+{
+  "detail": "",
+  "logical_flows_per_side": 200,
+  "phase": "multi_mobility_cycle_1_baseline_activation",
+  "status": "running",
+  "step": "modifier_streams_started",
+  "stream_count": 2,
+  "timestamp": "2026-05-04T11:05:38+0000"
+}

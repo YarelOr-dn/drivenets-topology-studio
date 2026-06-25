@@ -30,7 +30,7 @@
     "show evpn mac-table instance {evpn_name} suppress | no-more": "Suppressed MACs after clear",
     "show evpn instance {evpn_name} loop-prevention mac-table | no-more": "Loop prevention MAC entries",
     "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding state and flags",
-    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more": "Ghost MAC detection",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more": "Ghost MAC detection",
     "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
   },
   "invalid_commands": {
@@ -78,7 +78,7 @@
   "verdict": {"layers": 6, "stop_on_fail": false},
   "counter_commands": [
     {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
-    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more", "parser": "line_count", "description": "Ghost MAC count"}
   ],
   "counter_expectations": [
     {"label": "mac_count", "rule": "no_increase", "description": "MAC count must not increase unexpectedly after flush"},
@@ -93,9 +93,9 @@
     "check_crashes": true,
     "check_alarms": true
   },
-  "cleanup_commands": ["no debug evpn mac-mobility", "no set logging terminal"],
+  "cleanup_commands": ["no debug evpn mac-mobility", "unset logging terminal"],
   "config_baseline": {
-    "sections": ["network-services evpn", "protocols bgp"],
+    "sections": ["network-services evpn", "protocols bgp {asn}"],
     "full_config": false,
     "ignore_patterns": ["last-modified", "commit-id"]
   }

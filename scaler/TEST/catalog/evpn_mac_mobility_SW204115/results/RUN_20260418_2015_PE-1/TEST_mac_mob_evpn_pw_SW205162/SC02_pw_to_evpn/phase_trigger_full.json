@@ -1,0 +1,20 @@
+[
+  {
+    "command": "show bgp l2vpn evpn summary | no-more",
+    "timestamp": "2026-04-18T20:16:58.129+00:00",
+    "duration_ms": 250,
+    "phase": "trigger",
+    "output_length": 583,
+    "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 4\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 5d06h05m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      12228      12653    0     0       3 00:01:11                   2\n\nTotal number of es",
+    "output_full": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 4\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     174943     175149    0     0       0 5d06h05m   Connect         \n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567      12228      12653    0     0       3 00:01:11                   2\n\nTotal number of established neighbors with L2vpn EVPN 1/3\n\nTotal number of NSR capable BGP sessions 0"
+  },
+  {
+    "command": "show evpn vpls-pw | no-more",
+    "timestamp": "2026-04-18T20:16:58.380+00:00",
+    "duration_ms": 100,
+    "phase": "trigger",
+    "output_length": 746,
+    "output_preview": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------",
+    "output_full": "   EVPN: HA_TEST_ELAN\n    EVI ID : 1\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PW table is empty\n  \n\n   EVPN: PW_TEST_ELAN\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------------+---------------+\n    | 6.6.6.6           | 3                | 1032265         | 2               | 17             | Installed     |\n  \n\n   EVPN: test_irb_reject\n    EVI ID : 3\n    Seamless-integration: disabled\n  \n    VPLS PW table is empty"
+  }
+]

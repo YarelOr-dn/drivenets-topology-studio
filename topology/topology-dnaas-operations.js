@@ -159,23 +159,24 @@ window.DnaasOperations = {
     },
 
     /**
-     * Save BD panel state to localStorage
-     * @param {Object} editor - TopologyEditor instance
+     * @deprecated The BD panel state writer lives in
+     * ``topology-bd-legend.js`` (single source of truth, key
+     * ``bd_panel_state``). This function used to write to a SECOND
+     * key (``topology_bd_panel_state``), which made the two paths
+     * race on every refresh and the panel appeared to "disappear"
+     * after a hard reload because whichever path wrote last won
+     * (often with ``visible: false``).
+     *
+     * Removed 2026-04-30 (groups-panel refactor) -- delegate to the
+     * editor binding so legacy callers inside this file still work
+     * without writing the stale key.
      */
     _saveBDPanelState(editor) {
-        if (!editor._bdVisibility) return;
-        
-        const state = {
-            visibility: editor._bdVisibility,
-            panelOpen: editor._bdPanelOpen !== false,
-            viewMode: editor._bdViewMode || 'normal'
-        };
-        
         try {
-            localStorage.setItem('topology_bd_panel_state', JSON.stringify(state));
-        } catch (e) {
-            console.warn('Could not save BD panel state:', e);
-        }
+            if (typeof editor._saveBDPanelState === 'function') {
+                editor._saveBDPanelState();
+            }
+        } catch (_) { /* best-effort */ }
     },
 
     /**
@@ -215,48 +216,17 @@ window.DnaasOperations = {
     },
 
     /**
-     * Hide the BD Legend panel
-     * @param {Object} editor - TopologyEditor instance
+     * @deprecated BD legend lifecycle lives in ``topology-bd-legend.js``;
+     * use ``editor.hideBDLegend()`` / ``editor.toggleBDLegendPanel()``.
+     * Kept as thin shims so legacy importers don't break.
+     * Removed full duplicate logic 2026-04-30 (groups-panel refactor)
+     * because it raced against the BD-legend writer.
      */
     hideBDLegend(editor) {
-        const existingPanel = document.getElementById('bd-legend-panel');
-        if (existingPanel) {
-            existingPanel.remove();
-        }
-        editor._bdPanelOpen = false;
-        this._saveBDPanelState(editor);
+        try { if (typeof editor.hideBDLegend === 'function') editor.hideBDLegend(); } catch (_) {}
     },
-
-    /**
-     * Toggle the BD Legend panel visibility
-     * @param {Object} editor - TopologyEditor instance
-     */
     toggleBDLegendPanel(editor) {
-        const panel = document.getElementById('bd-legend-panel');
-
-        if (panel) {
-            const isVisible = panel.style.display !== 'none';
-            if (isVisible) {
-                editor.hideBDLegend();
-            } else {
-                panel.style.display = 'block';
-                editor._bdPanelOpen = true;
-            }
-            editor._saveBDPanelState();
-            editor.updateBDHierarchyButton();
-            return;
-        }
-
-        if (!editor._multiBDMetadata || !editor._multiBDMetadata.bridge_domains || editor._multiBDMetadata.bridge_domains.length === 0) {
-            DnaasOperations._reconstructBDMetadataFromCanvas(editor);
-        }
-
-        if (editor._multiBDMetadata && editor._multiBDMetadata.bridge_domains && editor._multiBDMetadata.bridge_domains.length > 0) {
-            editor.showBDLegend(editor._multiBDMetadata.bridge_domains);
-            editor.updateBDHierarchyButton();
-        } else {
-            editor.showToast('No Bridge Domains on canvas. Run DNAAS discovery first.', 'warning');
-        }
+        try { if (typeof editor.toggleBDLegendPanel === 'function') editor.toggleBDLegendPanel(); } catch (_) {}
     },
 
     _reconstructBDMetadataFromCanvas(editor) {
@@ -660,11 +630,34 @@ window.DnaasOperations = {
                     if (!obj.radius) obj.radius = 50;
                     
                     if (obj.sshConfig) {
+                        // SN-as-source-of-truth preservation: a DNAAS reload
+                        // must NEVER silently overwrite state the operator
+                        // explicitly saved via the SSH dialog. The old code
+                        // rebuilt sshConfig as {host, hostBackup, user,
+                        // password} only, which dropped every sticky slot
+                        // (_userSavedHost, _userSavedUser, _userSavedPass,
+                        // _virshInfo, _lastWorkingMethod, _activeNccHost,
+                        // _activeNccIp, _nccMgmtIp, _enrichedMgmtIp,
+                        // _autoClearHostKeys, _ghostCleared, ...). The
+                        // openTerminalToDevice fast path reads
+                        // `_userSavedHost || host`, so losing _userSavedHost
+                        // silently reverts PE-1 to whatever `host` happened
+                        // to carry from the DNAAS JSON -- typically the
+                        // pre-upgrade stale mgmt IP. Preserve everything and
+                        // only fill in sane defaults for user/password when
+                        // BOTH user-saved and current slots are empty.
+                        const prev = obj.sshConfig;
+                        const preferredHost =
+                            prev._userSavedHost
+                            || prev.host
+                            || prev.hostBackup
+                            || '';
                         obj.sshConfig = {
-                            host: obj.sshConfig.host || obj.sshConfig.hostBackup || '',
-                            hostBackup: obj.sshConfig.hostBackup || '',
-                            user: obj.sshConfig.user || 'dnroot',
-                            password: obj.sshConfig.password || 'dnroot'
+                            ...prev,
+                            host: preferredHost,
+                            hostBackup: prev.hostBackup || '',
+                            user: prev._userSavedUser || prev.user || 'dnroot',
+                            password: prev._userSavedPass || prev.password || 'dnroot',
                         };
                     }
                 }

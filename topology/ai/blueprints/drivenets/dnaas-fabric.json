@@ -1,0 +1,281 @@
+{
+  "name": "dnaas-fabric",
+  "protocol": "drivenets",
+  "scale": "large",
+  "summary": "DriveNets DNAAS service fabric. Customer PEs front-end a leaf/spine/fabric disaggregated cluster for VPN + VPWS service delivery at scale.",
+  "tags": [
+    "drivenets",
+    "dnaas",
+    "service-fabric",
+    "pe-ce",
+    "leaf-spine"
+  ],
+  "objects": [
+    {
+      "id": "dnaas",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 960,
+      "y": 600,
+      "width": 1700,
+      "height": 720,
+      "fillColor": "#00b4d8",
+      "fillEnabled": true,
+      "fillOpacity": 0.06,
+      "strokeColor": "#00b4d8",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 18,
+      "label": "DNAAS Service Fabric"
+    },
+    {
+      "id": "ce1",
+      "type": "device",
+      "label": "Customer-A",
+      "x": 220,
+      "y": 400,
+      "role": "ce",
+      "visualStyle": "simple",
+      "color": "#16a085"
+    },
+    {
+      "id": "ce2",
+      "type": "device",
+      "label": "Customer-B",
+      "x": 220,
+      "y": 880,
+      "role": "ce",
+      "visualStyle": "simple",
+      "color": "#16a085"
+    },
+    {
+      "id": "pe1",
+      "type": "device",
+      "label": "PE-1",
+      "x": 480,
+      "y": 400,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6"
+    },
+    {
+      "id": "pe2",
+      "type": "device",
+      "label": "PE-2",
+      "x": 480,
+      "y": 880,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6"
+    },
+    {
+      "id": "leaf1",
+      "type": "device",
+      "label": "LEAF-1",
+      "x": 820,
+      "y": 400,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "leaf2",
+      "type": "device",
+      "label": "LEAF-2",
+      "x": 820,
+      "y": 880,
+      "role": "leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "spine1",
+      "type": "device",
+      "label": "SPINE-1",
+      "x": 1200,
+      "y": 400,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "spine2",
+      "type": "device",
+      "label": "SPINE-2",
+      "x": 1200,
+      "y": 880,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "fabric1",
+      "type": "device",
+      "label": "FABRIC-1",
+      "x": 1560,
+      "y": 400,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "fabric2",
+      "type": "device",
+      "label": "FABRIC-2",
+      "x": 1560,
+      "y": 880,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "l_ce1_pe1",
+      "type": "link",
+      "device1": "ce1",
+      "device2": "pe1",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "CE-PE"
+    },
+    {
+      "id": "l_ce2_pe2",
+      "type": "link",
+      "device1": "ce2",
+      "device2": "pe2",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "CE-PE"
+    },
+    {
+      "id": "l_pe1_l1",
+      "type": "link",
+      "device1": "pe1",
+      "device2": "leaf1",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "DNAAS"
+    },
+    {
+      "id": "l_pe2_l2",
+      "type": "link",
+      "device1": "pe2",
+      "device2": "leaf2",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "DNAAS"
+    },
+    {
+      "id": "l_leaf1_spine1",
+      "type": "link",
+      "device1": "leaf1",
+      "device2": "spine1",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "fabric"
+    },
+    {
+      "id": "l_leaf1_spine2",
+      "type": "link",
+      "device1": "leaf1",
+      "device2": "spine2",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "fabric"
+    },
+    {
+      "id": "l_leaf2_spine1",
+      "type": "link",
+      "device1": "leaf2",
+      "device2": "spine1",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "fabric"
+    },
+    {
+      "id": "l_leaf2_spine2",
+      "type": "link",
+      "device1": "leaf2",
+      "device2": "spine2",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "fabric"
+    },
+    {
+      "id": "l_spine1_fabric1",
+      "type": "link",
+      "device1": "spine1",
+      "device2": "fabric1",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "fabric"
+    },
+    {
+      "id": "l_spine1_fabric2",
+      "type": "link",
+      "device1": "spine1",
+      "device2": "fabric2",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "fabric"
+    },
+    {
+      "id": "l_spine2_fabric1",
+      "type": "link",
+      "device1": "spine2",
+      "device2": "fabric1",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "fabric"
+    },
+    {
+      "id": "l_spine2_fabric2",
+      "type": "link",
+      "device1": "spine2",
+      "device2": "fabric2",
+      "linkType": "dnaas",
+      "color": "#00b4d8",
+      "style": "solid",
+      "label": "fabric"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "DNAAS Service Fabric (DriveNets)",
+      "x": 960,
+      "y": 140,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_roles",
+      "type": "text",
+      "text": "PE = customer-facing (VPN termination)\nLEAF / SPINE / FABRIC = cluster fabric\nDNAAS = Disaggregated Network-as-a-Service",
+      "x": 960,
+      "y": 1060,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#00b4d8",
+      "borderWidth": 1
+    }
+  ]
+}

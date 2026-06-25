@@ -7,8 +7,24 @@
   "jira_key": "SW-205161",
   "parent_category": "SW-204115",
   "created": "2026-03-20",
-  "device_requirements": {"type": "any", "features": ["evpn", "two-acs"], "min_ncp_count": 1},
-  "reference_table": "Local->Local: RT-2 update; suppression YES; local loop YES; sanctions FREEZE/DROP/SHUT",
+  "updated": "2026-04-22",
+  "spec_source_of_truth": {
+    "confluence_page_id": "6311379530",
+    "title": "evpn-mac-mobility Source of Truth (High-Level Spec)",
+    "owner": "Ido Koren",
+    "version": "v26.1",
+    "url": "https://drivenets.atlassian.net/wiki/spaces/~557058be7c2e9d0db24004a36470aee16954e8/pages/6311379530",
+    "authoritative_jira": ["SW-154752 (MAC Move Action Matrix)", "SW-178113 (MH-SH interaction)", "SW-116723 (LLP impl)"]
+  },
+  "mac_move_action_matrix": {
+    "local-SH_to_local-SH": {"counter": "ignore", "advertise_rt2": "ignore", "sequence": "ignore", "freeze": false, "blackhole": false, "shutdown_ac": false, "llp_counter_increments": false, "reason": "Both ACs single-homed (ESI=0) -- silently ignored by design"},
+    "local-SH_to_local-MH": {"counter": "increment", "advertise_rt2": true, "sequence": "increment", "freeze": false, "blackhole": true, "shutdown_ac": true, "llp_counter_increments": true},
+    "local-MH_to_local-SH": {"counter": "increment", "advertise_rt2": true, "sequence": "increment", "freeze": false, "blackhole": true, "shutdown_ac": true, "llp_counter_increments": true},
+    "local-MH_to_local-MH": {"counter": "increment", "advertise_rt2": true, "sequence": "increment", "freeze": false, "blackhole": true, "shutdown_ac": true, "llp_counter_increments": true, "constraint": "different ESIs"}
+  },
+  "critical_rule": "LLP counter ONLY increments on moves between local ACs with DIFFERENT ESIs (or one zero-ESI + one non-zero-ESI). SH-to-SH moves (both ESI=0) are silently ignored per v26.1 spec.",
+  "device_requirements": {"type": "any", "features": ["evpn", "two-acs-different-esi-or-one-mh"], "min_ncp_count": 1},
+  "reference_table": "Local->Local: counter/advertise/suppression depend on ESI combination (see mac_move_action_matrix)",
   "show_commands_validated": {
     "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more": "SHOW_COMMANDS line 10091 -- Single MAC lookup",
     "show evpn mac-table instance {evpn_name} | no-more": "SHOW_COMMANDS line 10089 -- MAC entries for specific instance",
@@ -20,9 +36,9 @@
     "show evpn instance {evpn_name} loop-prevention local | no-more": "Local loop prevention status",
     "show evpn mac-table detail instance {evpn_name} | no-more": "Detailed MAC with sequence/flags (note: 'detail' keyword comes BEFORE 'instance')",
     "show evpn mac summary | no-more": "Global MAC count summary",
-    "show dnos-internal routing evpn mac-mobility-redis-count | no-more": "MAC mobility move counter",
+    "show evpn mac summary | no-more": "MAC mobility move counter",
     "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "NCP forwarding state and flags",
-    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more": "Ghost MAC detection",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more": "Ghost MAC detection",
     "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
   },
   "invalid_commands": {
@@ -31,7 +47,27 @@
   },
   "prerequisites": [
     {"id": "two_ac", "check": "two_attachment_circuits", "fix_via": "Second AC on bridge-domain"},
-    {"id": "suppression_cfg", "check": "mac_mobility_suppression", "fix_via": "network-services evpn instance {evpn_name} mac-handling loop-prevention admin-state enabled"}
+    {"id": "suppression_cfg", "check": "mac_mobility_suppression", "fix_via": "network-services evpn instance {evpn_name} mac-handling loop-prevention admin-state enabled"},
+    {
+      "id": "two_forwarding_acs",
+      "check": "two_acs_in_forwarding_all",
+      "check_command": "show evpn instance {evpn_name} | no-more",
+      "expect": "At least 2 ACs with 'forwarding-all' forwarding state in the instance table",
+      "fix_via": "Avoid seamless-integration DF-election blocking. Use non-SI EVPN instance OR configure seamless-integration site-id N site-interface <iface> per AC AND MH ethernet-segment on the second AC with a non-zero ESI",
+      "reason": "Seamless-integration DF election forces all-but-one AC into blocking-all unless each forwarding AC is mapped under its own site-id + site-interface",
+      "severity": "blocking_for_SC02_SC03_SC04",
+      "remediation_working_example_PE1_HA_TEST_ELAN": "network-services evpn instance HA_TEST_ELAN seamless-integration site-id 2 site-interface ge400-0/0/5.1001 + network-services multihoming interface ge400-0/0/5.1001 esi arbitrary value 00:11:22:33:44:55:66:77:88 redundancy-mode all-active"
+    },
+    {
+      "id": "different_esi_ac_pair",
+      "check": "ac_pair_different_esi",
+      "check_command": "show evpn instance {evpn_name} | no-more",
+      "expect": "ac1 and ac2 have DIFFERENT ESI values (e.g. ac1 ESI=0/SH, ac2 ESI=non-zero/MH; or both MH with different ESIs)",
+      "fix_via": "config_knowledge.multihoming_esi: assign ethernet-segment identifier to ac2 so it becomes MH with non-zero ESI",
+      "reason": "Per v26.1 spec (SW-154752 MAC Move Action Matrix), LLP counter ONLY increments when ESIs differ. SH-to-SH moves (both ESI=0) are silently ignored.",
+      "severity": "blocking_for_SC02_SC03_SC04",
+      "fix_config_template": "network-services\n  multihoming\n    interface {ac2_iface}\n      esi arbitrary value 00:11:22:33:44:55:66:77:88\n      redundancy-mode all-active\n    !\n  !\n!"
+    }
   ],
   "scenarios": [
     {
@@ -51,71 +87,112 @@
             "check_mac_flags": true,
             "forbidden_flags": ["F", "D"],
             "check_forwarding": true,
-            "check_ghost_macs": true,
-            "check_mobility_counter": true
+            "check_ghost_macs": true
           }
         }
       }
     },
     {
-      "id": "SC02_rapid_flap_suppression",
-      "name": "Rapid AC<->AC flap; suppression FREEZE/DROP/SHUT per config",
+      "id": "SC02_SH_SH_rapid_flap_ignored",
+      "name": "SH->SH rapid flap: per v26.1 spec, SH-to-SH moves are IGNORED (no counter increment, no suppression)",
+      "requires_ac_profile": "both_single_homed_ESI_zero",
       "phases": {
         "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
         "trigger": {"action": "rapid_move_ac1_ac2", "method": "spirent"},
         "verify": {
           "show_commands": [
             "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
-            "show evpn mac-table instance {evpn_name} suppress | no-more",
-            "show evpn instance {evpn_name} loop-prevention mac-table | no-more"
+            "show evpn instance {evpn_name} loop-prevention local | no-more"
           ],
           "expect": {
-            "sanction_applied": true,
             "check_mac_flags": true,
             "check_forwarding": true,
             "check_ghost_macs": true,
-            "check_suppress_list": true,
-            "check_loop_prevention": true,
-            "expected_lp_state": "suppressed"
+            "local_loop_count_increments": false,
+            "rt2_advertised": false,
+            "sequence_unchanged": true,
+            "rationale": "SH-to-SH (both ESI=0) is silently ignored per MAC Move Action Matrix SW-154752"
           },
-          "trace_greps": [{"file": "routing_engine/bgpd_traces", "keywords": ["mac", "move", "suppress"]}]
+          "trace_greps": [{"file": "routing_engine/bgpd_traces", "keywords": ["mac", "move"]}],
+          "trace_views": [
+            {"file": "routing_engine/bgpd_traces", "match": "mac move", "context_before": 0, "context_after": 0, "max_lines": 50}
+          ]
         }
       }
     },
     {
-      "id": "SC03_local_loop_counter",
-      "name": "Local loop prevention counter increments on Local->Local only",
+      "id": "SC02_MH_SH_rapid_flap_suppressed",
+      "name": "MH->SH rapid flap: counter increments, RT-2 updates, sequence increments (SW-154752)",
+      "requires_ac_profile": "ac1_mh_ac2_sh_or_ac1_sh_ac2_mh",
       "phases": {
         "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
+        "trigger": {"action": "rapid_move_ac1_ac2", "method": "spirent"},
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+            "show evpn instance {evpn_name} loop-prevention local | no-more",
+            "show evpn mac summary | no-more"
+          ],
+          "expect": {
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "local_loop_count_increments": true,
+            "rt2_advertised": true,
+            "sequence_increments": true
+          },
+          "trace_greps": [{"file": "routing_engine/bgpd_traces", "keywords": ["mac", "move"]}],
+          "trace_views": [
+            {"file": "routing_engine/bgpd_traces", "match": "mac move", "context_before": 0, "context_after": 0, "max_lines": 50}
+          ]
+        }
+      }
+    },
+    {
+      "id": "SC03_local_loop_counter_ESI_aware",
+      "name": "LLP counter increments ONLY on moves between ACs with DIFFERENT ESIs (spec v26.1)",
+      "requires_ac_profile": "different_esi_pair",
+      "phases": {
+        "snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more", "show evpn instance {evpn_name} | no-more"]},
         "trigger": {"action": "local_to_local_moves"},
         "verify": {
           "show_commands": [
             "show evpn instance {evpn_name} loop-prevention interface | no-more",
-            "show evpn instance {evpn_name} loop-prevention local | no-more"
+            "show evpn instance {evpn_name} loop-prevention local | no-more",
+            "show evpn instance {evpn_name} loop-prevention mac-table | no-more"
           ],
           "expect": {
             "local_loop_count_increments": true,
             "check_mac_flags": true,
             "forbidden_flags": ["F", "D"],
             "check_forwarding": true,
-            "check_ghost_macs": true
+            "check_ghost_macs": true,
+            "esi_precondition": "ac1.esi != ac2.esi"
           }
-        }
+        },
+        "event_expectations": [
+          {"event": "L2_MAC_MOBILITY_LOOP_DETECTED", "expect": "present", "min_count": 1, "description": "Loop detection on local moves with different ESIs"}
+        ]
       }
     },
     {
       "id": "SC04_sticky_enforcement",
-      "name": "Sticky AC: moves from PW/EVPN ignored per SW-194578 matrix",
+      "name": "Sticky AC: moves from PW/EVPN ignored per SW-194578 matrix (NOTE: sticky applies on NEXT move, not retroactively)",
       "phases": {
-        "snapshot": {"show_commands": ["show config network-services evpn | no-more"]},
-        "trigger": {"action": "attempt_move_to_sticky_ac"},
+        "snapshot": {"show_commands": ["show config network-services evpn | no-more", "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more"]},
+        "trigger": {
+          "action": "attempt_move_to_sticky_ac",
+          "must_flush_first": true,
+          "flush_reason": "Sticky-interface config takes effect on NEXT move event for each MAC. Existing MAC entries are NOT retroactively flagged. Must re-learn MAC AFTER applying sticky config."
+        },
         "verify": {
           "expect": {
             "sticky_honored": true,
             "check_mac_flags": true,
             "forbidden_flags": ["F", "D"],
             "check_forwarding": true,
-            "check_ghost_macs": true
+            "check_ghost_macs": true,
+            "sticky_flag_present_after_relearn": true
           }
         }
       }
@@ -131,13 +208,523 @@
             "check_mac_flags": true,
             "forbidden_flags": ["F", "D"],
             "check_forwarding": true,
-            "check_ghost_macs": true,
-            "check_mobility_counter": true
+            "check_ghost_macs": true
           }
+        }
+      }
+    },
+    {
+      "id": "SC06_sanction_firing",
+      "name": "Stress wave A: apply suppress sanction, flap 12x past the 5-move window, assert LLP suppression state and RT-2 burst",
+      "requires_ac_profile": "different_esi_pair",
+      "stress_category": "sanction_firing",
+      "jira_source": "SW-154752 #4 / SW-204115 matrix (sanction actions: FREEZE/DROP/SHUT)",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} loop-prevention local | no-more",
+            "show evpn instance {evpn_name} loop-prevention interface | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "sanction_ac_ac_rapid_flap",
+          "method": "spirent",
+          "params": {
+            "pre_sanction": "suppress",
+            "flap_count": 12,
+            "interval_sec": 0.25
+          }
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+            "show evpn instance {evpn_name} loop-prevention local | no-more",
+            "show evpn instance {evpn_name} loop-prevention interface | no-more",
+            "show evpn instance {evpn_name} loop-prevention mac-table | no-more",
+            "show evpn mac-table instance {evpn_name} suppress | no-more",
+            "show bgp l2vpn evpn summary | no-more"
+          ],
+          "expect": {
+            "local_loop_count_increments": true,
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "sanction_state_present": true,
+            "rationale": "With pre_sanction=suppress and 12 flaps the LLP FSM must enter suppress state and emit RT-2 withdraw/re-advertise bursts. If DNOS never suppresses, or keeps the AC shut after revert, this is a real bug."
+          },
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["suppress", "loop", "mobility"]}
+          ],
+          "trace_views": [
+            {"file": "routing_engine/bgpd_traces", "match": "suppress",  "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "loop",      "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "mobility",  "context_before": 0, "context_after": 0, "max_lines": 50}
+          ]
+        },
+        "event_expectations": [
+          {"event": "L2_MAC_MOBILITY_LOOP_DETECTED", "expect": "present", "min_count": 1, "description": "Loop detection must fire when sanction is armed and threshold exceeded"}
+        ]
+      }
+    },
+    {
+      "id": "SC07_subsecond_rapid_flap",
+      "name": "Stress wave C: 50 flaps at 100ms interval -- stress mobility-history / seq / suppression FSM",
+      "requires_ac_profile": "different_esi_pair",
+      "stress_category": "subsecond_flap",
+      "jira_source": "SW-204115 meeting note (back-and-forth rapid) + implicit DNOS robustness",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac-table detail instance {evpn_name} | no-more",
+            "show evpn mac summary | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "subsecond_rapid_flap_ac_ac",
+          "method": "spirent",
+          "params": {
+            "flap_count": 50,
+            "interval_sec": 0.1
+          }
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+            "show evpn mac-table detail instance {evpn_name} | no-more",
+            "show evpn instance {evpn_name} loop-prevention local | no-more",
+            "show evpn instance {evpn_name} loop-prevention mac-table | no-more",
+            "show evpn mac summary | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more"
+          ],
+          "expect": {
+            "sequence_consistent": true,
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "local_loop_count_increments": true,
+            "rationale": "At 100ms intervals DNOS must still maintain a consistent sequence, history, and either suppress or accept -- but never leak ghost/duplicate entries. Sequence inconsistency or ghost MACs = bug."
+          },
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["mobility", "sequence", "mac move"]}
+          ],
+          "trace_views": [
+            {"file": "routing_engine/bgpd_traces", "match": "mobility", "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "sequence", "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "mac move", "context_before": 0, "context_after": 0, "max_lines": 50}
+          ]
+        },
+        "event_expectations": [
+          {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "BGP peer must not drop under sub-second RT-2 churn"}
+        ]
+      }
+    },
+    {
+      "id": "SC08_SH_SH_coverage_swap",
+      "name": "Stress wave D: temporarily make both ACs SH+ESI=0 on device, drive rapid flap, assert 'ignore the move' per SW-154752 #2, restore MH",
+      "requires_ac_profile": "different_esi_pair",
+      "stress_category": "sh_sh_coverage",
+      "jira_source": "SW-154752 Row#1 / v26.1 Source-of-Truth Case 2 (SH+SH+ESI=0 silently ignored)",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show config network-services multihoming | flatten | no-more",
+            "show evpn instance {evpn_name} loop-prevention local | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "sh_sh_coverage_flap",
+          "method": "spirent",
+          "params": {
+            "flap_count": 10,
+            "interval_sec": 0.3
+          }
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+            "show evpn instance {evpn_name} loop-prevention local | no-more",
+            "show evpn instance {evpn_name} loop-prevention interface | no-more",
+            "show evpn mac summary | no-more",
+            "show config network-services multihoming | flatten | no-more"
+          ],
+          "expect": {
+            "local_loop_count_increments": false,
+            "rt2_advertised": false,
+            "sequence_unchanged": true,
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "rationale": "Per v26.1 spec SH->SH (both ESI=0) moves MUST be silently ignored: no LLP counter, no RT-2 churn, no seq bump. Any increment here is a DNOS spec violation."
+          }
+        }
+      }
+    },
+    {
+      "id": "SC09_irb_si_cli_rejection",
+      "name": "Stress wave F: commit-check must REJECT IRB under a seamless-integration EVI (mandatory negative control per SW-204115 meeting #8)",
+      "stress_category": "cli_negative_control",
+      "jira_source": "SW-204115 review meeting #8 (IRB + seamless-integration is mutually exclusive)",
+      "comment": "DNOS syntax: IRB is 'interfaces irbN admin-state enabled' then 'network-services evpn instance <name> router-interface irbN'. Validated live on PE-1 DNOS 26.2: rejection text is 'EVPN router-interface (IRB) and Seamless VPLS (EVPN seamless-integration) cannot be configured at the same time.'",
+      "phases": {
+        "trigger": {
+          "action": "attempt_irb_config",
+          "expect": "fail",
+          "expected_error_regex": [
+            "cannot be configured at the same time",
+            "router-interface.*seamless",
+            "IRB.*seamless",
+            "seamless.*router-interface",
+            "seamless.*IRB"
+          ],
+          "config_commands": [
+            "interfaces irb9099 admin-state enabled",
+            "network-services evpn instance {evpn_name} router-interface irb9099"
+          ]
+        },
+        "verify": {
+          "expect": {
+            "cli_rejects_with_error": true,
+            "commit_fails_or_config_rejected": true,
+            "expected_error_patterns": [
+              "cannot be configured at the same time",
+              "router-interface",
+              "seamless"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "SC10_admin_flap_race",
+      "name": "Stress wave H: admin-down AC1 while MAC is moving AC1->AC2 -- hunt ghost MAC / duplicate entries / flush races",
+      "requires_ac_profile": "different_esi_pair",
+      "stress_category": "admin_flap_race",
+      "jira_source": "Implicit robustness (SW-204115 meeting notes #2, #5 -- flush correctness)",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "admin_flap_during_move",
+          "method": "spirent",
+          "params": {
+            "admin_down_delay_sec": 0.8
+          }
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+            "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more",
+            "show evpn instance {evpn_name} loop-prevention mac-table | no-more"
+          ],
+          "expect": {
+            "check_ghost_macs": true,
+            "check_forwarding": true,
+            "check_mac_flags": true,
+            "rationale": "After the admin-down->up cycle DNOS must converge to a single consistent MAC entry on AC2 (or on AC1 after re-learn). Ghost MACs, duplicate forwarding entries, or a MAC still pointing at the down AC are bugs."
+          },
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["flush", "mac move", "admin"]}
+          ],
+          "trace_views": [
+            {"file": "routing_engine/bgpd_traces", "match": "flush",    "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "mac move", "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "admin",    "context_before": 0, "context_after": 0, "max_lines": 50}
+          ]
+        }
+      }
+    },
+    {
+      "id": "SC11_bulk_ac_ac_flap_100_macs",
+      "name": "Stress wave I: 100 MACs flapped AC1<->AC2 (5 flaps, 2s interval) -- bulk mobility + BGP RT-2 burst + FIB churn at scale",
+      "requires_ac_profile": "different_esi_pair",
+      "stress_category": "bulk_ac_ac_flap",
+      "jira_source": "SW-204115 robustness / scale clause (MAC counts >= 1k per AC, start with 100 and grow)",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac summary | no-more",
+            "show evpn mac summary | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "rapid_move_ac1_ac2",
+          "method": "spirent",
+          "params": {
+            "flap_count": 5,
+            "interval_sec": 2.0,
+            "mac_count": 100
+          }
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+            "show evpn mac-table detail instance {evpn_name} | no-more",
+            "show evpn mac summary | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more",
+            "show evpn mac summary | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+            "show bgp l2vpn evpn summary | no-more"
+          ],
+          "expect": {
+            "sequence_consistent": true,
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "rationale": "With 100 MACs flapping AC1<->AC2 at 2s cadence DNOS must track per-MAC sequence, advertise per-MAC RT-2 bursts, and keep a single FIB entry per MAC. Total BGP RT-2 events ~= mac_count * flap_count = 500. Ghost MACs, stuck MACs, or duplicate FIB entries at this scale = DNOS bug."
+          },
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["mobility", "sequence", "mac move"]}
+          ],
+          "trace_views": [
+            {"file": "routing_engine/bgpd_traces", "match": "mobility", "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "sequence", "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "mac move", "context_before": 0, "context_after": 0, "max_lines": 50}
+          ]
+        },
+        "event_expectations": [
+          {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "BGP peer must not drop under 500 RT-2 churn"}
+        ]
+      }
+    },
+    {
+      "id": "SC12_triple_ac_A_B_C_A",
+      "name": "Stress wave J: triple-AC rotation A->B->C (3-way mobility sequence) -- SW-204115 meeting #3 triple-AC coverage",
+      "requires_ac_profile": "triple_ac_three_subifs",
+      "stress_category": "triple_ac_sequence",
+      "jira_source": "SW-204115 review meeting #3 (triple-AC mobility) + SW-154752 multi-AC matrix",
+      "prereq_check": {
+        "description": "Requires a third L2 AC on the EVPN instance. If absent at runtime the scenario SKIPs (tracked as a coverage gap in DEV_GUIDELINES 10.9).",
+        "required_subif_count": 3
+      },
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show config network-services evpn instance {evpn_name} | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "sequence_moves_multi_ac",
+          "method": "spirent",
+          "params": {
+            "ac3_vlan": 1002,
+            "ac3_outer_vlan": 214,
+            "mac_count": 1,
+            "skip_if_ac3_missing": true
+          }
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+            "show evpn mac-table detail instance {evpn_name} | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more",
+            "show evpn mac summary | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more"
+          ],
+          "expect": {
+            "sequence_consistent": true,
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "rationale": "Triple-AC A->B->C MAC mobility must advance the sequence monotonically (expect +2 from A-only baseline) and land the MAC on AC3. The mobility history must record both AC1->AC2 and AC2->AC3 with no gaps, duplicates, or inversions."
+          },
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["mobility", "sequence", "mac move"]}
+          ],
+          "trace_views": [
+            {"file": "routing_engine/bgpd_traces", "match": "mobility", "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "sequence", "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "mac move", "context_before": 0, "context_after": 0, "max_lines": 50}
+          ]
+        }
+      }
+    },
+    {
+      "id": "SC13_persistent_ac_shutdown_sanction",
+      "name": "Stress wave K: arm action=shutdown on LLP, cross 5-threshold via flap, observe per-AC shutdown state -- SW-154752 Case 5",
+      "requires_ac_profile": "different_esi_pair",
+      "stress_category": "persistent_shutdown",
+      "jira_source": "SW-154752 Case 5 (persistent AC window shutdown + restore-timer) + SW-116723 (LLP impl)",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} loop-prevention local | no-more",
+            "show evpn instance {evpn_name} loop-prevention interface | no-more",
+            "show evpn instance {evpn_name} loop-prevention mac-table | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "rapid_move_ac1_ac2",
+          "method": "spirent",
+          "params": {
+            "flap_count": 10,
+            "interval_sec": 0.3,
+            "pre_sanction": "shutdown"
+          }
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+            "show evpn mac-table detail instance {evpn_name} | no-more",
+            "show evpn instance {evpn_name} loop-prevention local | no-more",
+            "show evpn instance {evpn_name} loop-prevention interface | no-more",
+            "show evpn instance {evpn_name} loop-prevention mac-table | no-more",
+            "show evpn mac summary | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more"
+          ],
+          "expect": {
+            "local_loop_count_increments": true,
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "rationale": "With action=shutdown and 10 flaps (threshold=5) DNOS MUST mark the offending MAC/interface with the shutdown sanction. Loop-prevention mac-table Status column must shift to Shutdown (or equivalent sanctioned state). Status staying Forward under 10 flaps + shutdown action = DNOS sanction bug."
+          },
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["loop-prevention", "shutdown", "sanction"]}
+          ],
+          "trace_views": [
+            {"file": "routing_engine/bgpd_traces", "match": "loop-prevention", "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "shutdown",        "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "sanction",        "context_before": 0, "context_after": 0, "max_lines": 50}
+          ]
+        }
+      }
+    },
+    {
+      "id": "SC14_ha_observation_mid_move",
+      "name": "Stress wave L: rapid AC1<->AC2 flap while a parallel BGP-state show runs -- scaffolds SW-204115 HA switchover (real process-restart deferred)",
+      "requires_ac_profile": "different_esi_pair",
+      "stress_category": "ha_parallel",
+      "jira_source": "SW-204115 HA matrix (MAC mobility survives HA event) -- this scaffold uses a safe parallel show; swap ha_command for 'request system process-restart routing:bgpd' to run the destructive variant manually once lab is scheduled",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show system health | no-more",
+            "show bgp l2vpn evpn summary | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "parallel_flap_and_restart",
+          "method": "spirent",
+          "ha_command": "show bgp l2vpn evpn summary | no-more",
+          "params": {
+            "flap_count": 5,
+            "interval_sec": 0.5,
+            "mac_count": 1
+          }
+        },
+        "verify": {
+          "show_commands": [
+            "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
+            "show evpn mac-table detail instance {evpn_name} | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show evpn mac summary | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more"
+          ],
+          "expect": {
+            "check_mac_flags": true,
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "rationale": "Concurrent flap + HA observation must not cause ghost MACs, stuck sessions, or a stale sequence. Even with only a show command in parallel, the rapid_flap thread must not block or starve the CLI session."
+          }
+        }
+      }
+    },
+    {
+      "id": "SC15_cluster_flush_correctness_at_scale",
+      "name": "Stress wave M: learn bulk MACs, drive moves, then 'clear evpn mac-table' -- SW-204115 meeting #5 flush correctness at scale",
+      "requires_ac_profile": "different_esi_pair",
+      "stress_category": "bulk_flush",
+      "jira_source": "SW-204115 review meeting #5 (cluster flush correctness) + SW-178113 (MH-SH flush edges)",
+      "phases": {
+        "snapshot": {
+          "show_commands": [
+            "show evpn mac summary | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more"
+          ]
+        },
+        "trigger": {
+          "action": "rapid_move_ac1_ac2",
+          "method": "spirent",
+          "params": {
+            "flap_count": 2,
+            "interval_sec": 2.0,
+            "mac_count": 50
+          }
+        },
+        "verify": {
+          "show_commands": [
+            "clear evpn mac-table instance {evpn_name} force",
+            "show evpn mac-table instance {evpn_name} | no-more",
+            "show evpn mac summary | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more",
+            "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more"
+          ],
+          "expect": {
+            "check_ghost_macs": true,
+            "check_forwarding": true,
+            "rationale": "After a bulk learn + clear DNOS must fully drop all 50 MACs from the EVI: mac-table empty (or only the later re-learn), zero ghost MACs, zero duplicate FIB entries, mac summary count reset. Any stale MAC after clear = flush bug. The clear command runs as the first verify show so the subsequent show commands see the post-clear state."
+          },
+          "trace_greps": [
+            {"file": "routing_engine/bgpd_traces", "keywords": ["clear", "flush", "mac-table"]}
+          ],
+          "trace_views": [
+            {"file": "routing_engine/bgpd_traces", "match": "clear",     "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "flush",     "context_before": 0, "context_after": 0, "max_lines": 50},
+            {"file": "routing_engine/bgpd_traces", "match": "mac-table", "context_before": 0, "context_after": 0, "max_lines": 50}
+          ]
         }
       }
     }
   ],
+  "traffic_config": {
+    "rate_mbps": 1,
+    "frame_size": 128,
+    "flap_rate_mbps": 10,
+    "note": "1 Mbps for learning/moves; 10 Mbps for rapid flap scenarios"
+  },
+  "ac_topology_profiles": {
+    "description": "Scenario-specific AC topology. Each scenario declares 'requires_ac_profile' and runtime picks (or auto-creates) matching AC pair. Drives esi_precondition checks.",
+    "both_single_homed_ESI_zero": {
+      "ac1": {"homing": "single-homed", "esi": "0"},
+      "ac2": {"homing": "single-homed", "esi": "0"},
+      "expected_behavior_per_spec": "LLP/counter IGNORE moves between them (SH-to-SH rule)",
+      "config_required": "None beyond base EVPN instance; both ACs default to SH",
+      "use_for_scenarios": ["SC01_non_sticky_move", "SC02_SH_SH_rapid_flap_ignored"]
+    },
+    "different_esi_pair": {
+      "ac1": {"homing": "single-homed", "esi": "0"},
+      "ac2": {"homing": "multi-homed", "esi": "00:11:22:33:44:55:66:77:88:99"},
+      "expected_behavior_per_spec": "LLP counter increments; RT-2 advertised; sequence increments",
+      "config_required": "Add ethernet-segment to ac2 via multihoming_esi config (config_knowledge.py line 213)",
+      "use_for_scenarios": ["SC02_MH_SH_rapid_flap_suppressed", "SC03_local_loop_counter_ESI_aware", "SC04_sticky_enforcement"]
+    },
+    "both_multi_homed_different_esi": {
+      "ac1": {"homing": "multi-homed", "esi": "00:aa:bb:cc:dd:ee:ff:11:22:33"},
+      "ac2": {"homing": "multi-homed", "esi": "00:11:22:33:44:55:66:77:88:99"},
+      "expected_behavior_per_spec": "LLP counter increments; both MH local",
+      "use_for_scenarios": ["SC05_back_forth_sequence"]
+    },
+    "triple_ac_three_subifs": {
+      "ac1": {"homing": "single-homed", "esi": "0"},
+      "ac2": {"homing": "multi-homed", "esi": "00:11:22:33:44:55:66:77:88:99"},
+      "ac3": {"homing": "single-homed", "esi": "0"},
+      "expected_behavior_per_spec": "SC12 requires a THIRD attachment circuit (e.g. ge400-0/0/5.1002) in the EVPN instance; SKIPs until provisioned",
+      "config_required": "Add a third sub-interface to HA_TEST_ELAN (non-SI instance) OR add a third SI site-id with site-interface",
+      "use_for_scenarios": ["SC12_triple_ac_A_B_C_A"]
+    }
+  },
+  "topology_constraints": {
+    "seamless_integration_df_election": "If EVPN instance has seamless-integration, DF election forces all-but-one AC into blocking-all state. Block SC02/SC03/SC04 unless: (a) EVPN instance WITHOUT seamless-integration is used, OR (b) MH ethernet-segment is properly configured with site-id + site-preference on each AC",
+    "currently_blocked_ac_examples": "HA_TEST_ELAN on PE-1: only ge400-0/0/5.1000 is forwarding-all (site-id=1 + site-interface), all other ACs are blocking-all",
+    "remediation": "Create a SECOND EVPN instance (non-SI) named HA_TEST_ELAN_AC_AC for ac_ac test, OR configure MH-ES on two ACs within HA_TEST_ELAN with different site-preference"
+  },
   "runtime_parameters": {
     "evpn_name": {"resolve": "runtime"},
     "test_mac": {"resolve": "runtime"},
@@ -146,27 +733,23 @@
   "verdict": {"layers": 10, "stop_on_fail": false},
   "counter_commands": [
     {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
-    {"label": "mobility_counter", "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more", "parser": "key_value", "description": "Mobility counter"},
-    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more", "parser": "line_count", "description": "Ghost MAC count"}
   ],
   "counter_expectations": [
     {"label": "mac_count", "rule": "no_decrease", "description": "MAC count stable during moves"},
-    {"label": "mobility_counter", "rule": "increase", "description": "Mobility counter should increase"},
     {"label": "ghost_mac_count", "rule": "zero", "description": "No ghost MACs"}
   ],
   "event_expectations": [
-    {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "No BGP notifications"},
-    {"event": "L2_MAC_MOBILITY_MAC_ADDRESS_SUPPRESSED", "expect": "present", "min_count": 1, "description": "Suppression expected on rapid flap"},
-    {"event": "L2_MAC_MOBILITY_LOOP_DETECTED", "expect": "present", "min_count": 1, "description": "Loop detection on local moves"}
+    {"event": "BGP_NOTIFICATION", "expect": "absent", "description": "No BGP notifications"}
   ],
   "health_checks": {
     "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager", "neighbour_manager"],
     "check_crashes": true,
     "check_alarms": true
   },
-  "cleanup_commands": ["no debug evpn mac-mobility", "no debug evpn mac-learning", "no set logging terminal"],
+  "cleanup_commands": ["no debug evpn mac-mobility", "no debug evpn mac-learning", "unset logging terminal"],
   "config_baseline": {
-    "sections": ["network-services evpn", "protocols bgp"],
+    "sections": ["network-services evpn", "protocols bgp {asn}"],
     "full_config": false,
     "ignore_patterns": ["last-modified", "commit-id"]
   }

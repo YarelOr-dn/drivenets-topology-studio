@@ -8,6 +8,133 @@
 'use strict';
 
 window.SelectionPopups = {
+    _pickSshTarget(device, serial = '', sshConfig = null) {
+        if (window.TopologyDeviceIdentity?.resolveIdentity) {
+            const resolved = window.TopologyDeviceIdentity.resolveIdentity(device, { deviceId: serial });
+            if (resolved.host) return resolved.host;
+        }
+        if (window.TopologySshTarget && window.TopologySshTarget.pick) {
+            return window.TopologySshTarget.pick(device, { serial, sshConfig }).host;
+        }
+        return (sshConfig?.hostBackup || sshConfig?.host || serial || '').trim();
+    },
+
+    _isGeneratedCanvasLabel(value) {
+        const clean = String(value || '').trim();
+        return /^(NCP|NCP-\d+|S|S\d+)$/i.test(clean);
+    },
+
+    _pickLookupId(device, serial = '', host = '') {
+        if (window.TopologyDeviceIdentity?.resolveIdentity) {
+            const resolved = window.TopologyDeviceIdentity.resolveIdentity(device, { deviceId: serial, host });
+            if (resolved.deviceId) return resolved.deviceId;
+        }
+        const candidates = [
+            device?._registeredDeviceId,
+            device?._registeredHostname,
+            device?._monitoredKey,
+            device?.deviceSerial,
+            device?.serial,
+            device?.device_id,
+            device?.hostname,
+            host,
+            serial,
+            device?.label
+        ].map(v => String(v || '').trim()).filter(Boolean);
+        return candidates.find(v => !SelectionPopups._isGeneratedCanvasLabel(v)) || '';
+    },
+
+    _pickGitCommit(payload = {}) {
+        const candidates = [
+            payload.git_commit,
+            payload.gitCommit,
+            payload.git_commit_hash,
+            payload.git_hash,
+            payload.commit,
+            payload.commit_hash,
+            payload.build_git_commit,
+            payload.version_info?.git_commit,
+            payload.context?.git_commit,
+        ];
+        const value = candidates.find(v => v !== undefined && v !== null && String(v).trim() !== '');
+        return value === undefined ? null : String(value).trim();
+    },
+
+    _escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
+
+    _pickGitCommitDeviceIdentity(device, serial = '', host = '') {
+        const generated = [];
+        const strongCandidates = [
+            device?._registeredHostname,
+            device?.hostname,
+            device?._monitoredKey,
+            device?._registeredDeviceId,
+            device?.device_id,
+            device?.deviceSerial,
+            device?.serial,
+            serial,
+            host
+        ].map(v => String(v || '').trim()).filter(Boolean);
+        const label = String(device?.label || '').trim();
+        if (label) {
+            if (SelectionPopups._isGeneratedCanvasLabel(label)) generated.push(label);
+            else strongCandidates.unshift(label);
+        }
+        const primary = strongCandidates.find(v => !SelectionPopups._isGeneratedCanvasLabel(v))
+            || strongCandidates[0]
+            || generated[0]
+            || 'Device';
+        const secondary = [host, serial]
+            .map(v => String(v || '').trim())
+            .find(v => v && v !== primary && !SelectionPopups._isGeneratedCanvasLabel(v));
+        return { primary, secondary: secondary || '' };
+    },
+
+    _renderGitCommitTitle(deviceName, tsStr = '') {
+        const safeName = SelectionPopups._escapeHtml(deviceName || 'Device');
+        const safeTs = SelectionPopups._escapeHtml(tsStr || '');
+        return `
+            <span class="git-commit-title-label">Git Commit - ${safeName}</span>
+            ${safeTs ? `<span class="git-commit-title-time">Updated ${safeTs}</span>` : ''}
+        `;
+    },
+
+    _metadataState(device, kind, serial = '', host = '', data = null) {
+        const guard = window.TopologyDeviceIdentity || null;
+        if (!guard?.metadataState) return { ready: true, loading: false, status: 'ready' };
+        return guard.metadataState(device, kind, {
+            host,
+            deviceId: SelectionPopups._pickLookupId(device, serial, host),
+            data
+        });
+    },
+
+    _hasKnownMetadataIdentity(device, serial = '', host = '') {
+        const guard = window.TopologyDeviceIdentity || null;
+        if (guard?.hasKnownMetadataIdentity) {
+            return guard.hasKnownMetadataIdentity(device, { host });
+        }
+        return !!(
+            device?._registeredDeviceId
+            || device?._registeredHostname
+            || device?._registeredMgmtIp
+            || device?._registeredSerialNumber
+            || device?._monitoredKey
+            || device?._monitorRegistered
+            || device?._monitorContext
+            || device?._monitorCapabilities
+            || device?._metadataDiscovered
+            || SelectionPopups._pickLookupId(device, serial, host)
+        );
+    },
+
     /**
      * Position a popup element relative to an anchor rect, clamped to viewport.
      * @param {HTMLElement} popup - The popup element (must be in DOM)
@@ -25,6 +152,132 @@ window.SelectionPopups = {
         if (top < 10) top = 10;
         popup.style.left = left + 'px';
         popup.style.top = top + 'px';
+    },
+
+    closeObjectToolbarPopups(editor, keepId = '') {
+        const popupIds = [
+            'device-style-palette-popup',
+            'device-label-style-menu',
+            'color-palette-popup',
+            'lldp-inline-submenu',
+            'stack-inline-submenu',
+            'link-width-slider-popup',
+            'link-style-options-popup',
+            'link-curve-options-popup',
+            'device-layer-dropdown',
+            'link-layer-dropdown'
+        ];
+        popupIds.forEach((id) => {
+            if (id === keepId) return;
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        });
+        if (keepId !== 'color-palette-popup' && editor && editor._colorEditingLink) {
+            editor._colorEditingLink = null;
+            if (typeof editor.draw === 'function') editor.draw();
+        }
+    },
+
+    _linkStyleChoices(editor) {
+        const fallback = ['solid', 'dashed', 'dashed-wide', 'dotted', 'dotted-wide', 'arrow', 'double-arrow', 'dashed-arrow', 'dashed-double-arrow'];
+        const seen = new Set();
+        const choices = [];
+        ['solid', 'dashed', 'arrow'].forEach((group) => {
+            const variants = (editor && typeof editor.getLinkStyleVariants === 'function')
+                ? editor.getLinkStyleVariants(group)
+                : [];
+            (variants && variants.length ? variants : []).forEach((style) => {
+                if (!style || seen.has(style)) return;
+                seen.add(style);
+                choices.push(style);
+            });
+        });
+        fallback.forEach((style) => {
+            if (!seen.has(style)) {
+                seen.add(style);
+                choices.push(style);
+            }
+        });
+        return choices;
+    },
+
+    _linkStyleLabel(style) {
+        const labels = {
+            solid: 'Solid',
+            dashed: 'Dashed',
+            'dashed-wide': 'Dashed Wide',
+            dotted: 'Dotted',
+            'dotted-wide': 'Dotted Wide',
+            arrow: 'Arrow',
+            'double-arrow': 'Double Arrow',
+            'dashed-arrow': 'Dashed Arrow',
+            'dashed-double-arrow': 'Dashed Double Arrow'
+        };
+        return labels[style] || String(style || '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    },
+
+    _oppositeEndpoint(endpoint) {
+        if (endpoint === 'start') return 'end';
+        if (endpoint === 'end') return 'start';
+        return endpoint;
+    },
+
+    _swapEndpointFields(obj, prefixA, prefixB) {
+        if (!obj) return;
+        Object.keys(obj).forEach((key) => {
+            if (!key.startsWith(prefixA)) return;
+            const suffix = key.slice(prefixA.length);
+            const otherKey = `${prefixB}${suffix}`;
+            if (!Object.prototype.hasOwnProperty.call(obj, otherKey)) return;
+            const tmp = obj[key];
+            obj[key] = obj[otherKey];
+            obj[otherKey] = tmp;
+        });
+    },
+
+    _swapLinkDetailSides(details) {
+        if (!details) return;
+        Object.keys(details).forEach((key) => {
+            if (!key.endsWith('A')) return;
+            const otherKey = `${key.slice(0, -1)}B`;
+            if (!Object.prototype.hasOwnProperty.call(details, otherKey)) return;
+            const tmp = details[key];
+            details[key] = details[otherKey];
+            details[otherKey] = tmp;
+        });
+    },
+
+    flipLinkDirection(editor, link) {
+        if (!link || (link.type !== 'link' && link.type !== 'unbound')) return false;
+        if (editor && typeof editor.saveState === 'function') editor.saveState();
+
+        SelectionPopups._swapEndpointFields(link, 'device1', 'device2');
+        SelectionPopups._swapLinkDetailSides(link.linkDetails);
+
+        if (link.start && link.end) {
+            const oldStart = { x: link.start.x, y: link.start.y };
+            link.start = { x: link.end.x, y: link.end.y };
+            link.end = oldStart;
+        }
+
+        if (link.connectedTo) {
+            link.connectedTo.thisEndpoint = SelectionPopups._oppositeEndpoint(link.connectedTo.thisEndpoint);
+            link.connectedTo.otherEndpoint = SelectionPopups._oppositeEndpoint(link.connectedTo.otherEndpoint);
+        }
+        if (link.mergedWith) {
+            link.mergedWith.parentFreeEnd = SelectionPopups._oppositeEndpoint(link.mergedWith.parentFreeEnd);
+            link.mergedWith.childFreeEnd = SelectionPopups._oppositeEndpoint(link.mergedWith.childFreeEnd);
+            link.mergedWith.connectionEndpoint = SelectionPopups._oppositeEndpoint(link.mergedWith.connectionEndpoint);
+            link.mergedWith.childConnectionEndpoint = SelectionPopups._oppositeEndpoint(link.mergedWith.childConnectionEndpoint);
+        }
+
+        delete link._renderedEndpoints;
+        delete link._renderedEndpointAnchors;
+        delete link._arrowTipStart;
+        delete link._arrowTipEnd;
+        if (editor && typeof editor.draw === 'function') editor.draw();
+        if (editor && typeof editor.scheduleAutoSave === 'function') editor.scheduleAutoSave();
+        return true;
     },
 
     _showToolbarTooltip(editor, btn, title) {
@@ -66,20 +319,24 @@ window.SelectionPopups = {
     },
 
     _showLldpInlineSubmenu(editor, lldpBtn, device, serial, sshConfig, toolbar, isDarkMode, iconColor, hoverBg) {
-        // Close the other submenu if open
-        const otherSubmenu = document.getElementById('stack-inline-submenu');
-        if (otherSubmenu) otherSubmenu.remove();
-
         // Remove existing submenu
         const existing = document.getElementById('lldp-inline-submenu');
         if (existing) {
             existing.remove();
             return; // Toggle off
         }
+        SelectionPopups.closeObjectToolbarPopups(editor, 'lldp-inline-submenu');
         
         const isLldpRunning = device._lldpRunning || device._lldpAnimating;
         const hasLldpData = device.lldpEnabled || device.lldpDiscoveryComplete;
         const hasNewResults = device._lldpNewResults;
+        const lldpHost = SelectionPopups._pickSshTarget(device, serial, sshConfig);
+        const lldpRows = window.LldpDialog?._sanitizeLldpNeighbors
+            ? window.LldpDialog._sanitizeLldpNeighbors(device._lldpData?.neighbors || device._lldpData?.lldp_neighbors || [])
+            : (device._lldpData?.neighbors || []);
+        const lldpState = SelectionPopups._metadataState(device, 'lldp', serial, lldpHost, device._lldpData);
+        const lldpKnownIdentity = SelectionPopups._hasKnownMetadataIdentity(device, serial, lldpHost);
+        const lldpReady = lldpState.ready && (lldpRows.length || device._lldpData?.raw_output);
         
         // Create submenu with same styling as toolbar
         const submenu = document.createElement('div');
@@ -183,12 +440,13 @@ window.SelectionPopups = {
         // LLDP Table button
         submenu.appendChild(createSubBtn(
             '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>',
-            'LLDP Table',
+            lldpReady ? 'LLDP Table' : (lldpKnownIdentity ? 'LLDP Table (loads current device data)' : 'LLDP Table (run probe/discover first)'),
             () => {
                 editor.hideDeviceSelectionToolbar();
                 editor.showLldpTableDialog(device, serial);
             },
-            hasNewResults
+            hasNewResults,
+            !lldpReady && !lldpKnownIdentity
         ));
         
         submenu.addEventListener('keydown', (e) => { e.stopPropagation(); });
@@ -207,15 +465,12 @@ window.SelectionPopups = {
     },
 
     _showSystemStackInlineSubmenu(editor, stackBtn, device, serial, sshConfig, toolbar, isDarkMode, iconColor, hoverBg) {
-        // Close the other submenu if open
-        const otherSubmenu = document.getElementById('lldp-inline-submenu');
-        if (otherSubmenu) otherSubmenu.remove();
-
         const existing = document.getElementById('stack-inline-submenu');
         if (existing) {
             existing.remove();
             return;
         }
+        SelectionPopups.closeObjectToolbarPopups(editor, 'stack-inline-submenu');
         const submenu = document.createElement('div');
         submenu.id = 'stack-inline-submenu';
         const glassBg = isDarkMode ? 'rgba(15, 15, 25, 0.25)' : 'rgba(255, 255, 255, 0.25)';
@@ -289,12 +544,19 @@ window.SelectionPopups = {
         const _hasStack = !!(device._stackData?.components?.length);
         const _mode = (device._deviceMode || '').toUpperCase();
         const _isGiEmpty = (_mode === 'GI' || _mode === 'BASEOS_SHELL') && !_hasStack;
+        const _host = SelectionPopups._pickSshTarget(device, serial, sshConfig);
+        const _lookupId = SelectionPopups._pickLookupId(device, serial, _host);
+        const _knownIdentity = SelectionPopups._hasKnownMetadataIdentity(device, serial, _host);
+        const _stackState = SelectionPopups._metadataState(device, 'stack', serial, _host, device._stackData);
+        const _gitState = SelectionPopups._metadataState(device, 'git', serial, _host);
+        const _stackReady = _stackState.ready && !!(device._stackData?.components?.length || device._stackData?.raw_output);
+        const _gitReady = _gitState.ready && device._gitCommit !== undefined && device._gitCommit !== null && device._gitCommit !== '';
         const _upgradeTooltip = _isUpgrading
             ? 'Upgrade Stack (upgrade in progress)'
             : 'Upgrade Stack';
         const _stackTableTooltip = _isGiEmpty
             ? 'Stack Table (empty -- device in ' + (_mode || 'GI') + ' mode)'
-            : (_isUpgrading ? 'Stack Table (upgrade in progress)' : 'Stack Table');
+            : (_isUpgrading ? 'Stack Table (upgrade in progress)' : (_stackReady ? 'Stack Table' : (_knownIdentity ? 'Stack Table (loads current device data)' : 'Stack Table (run probe/discover first)')));
 
         submenu.appendChild(createSubBtn(
             '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/>',
@@ -314,6 +576,10 @@ window.SelectionPopups = {
             _stackTableTooltip,
             () => {
                 editor.hideDeviceSelectionToolbar();
+                if (!_stackReady && !_knownIdentity) {
+                    if (editor.showToast) editor.showToast('Not discovered yet. Run probe/discover before opening system stack.', 'info');
+                    return;
+                }
                 if (_isGiEmpty) {
                     if (editor.showToast) editor.showToast(`Device has empty stack (${_mode || 'GI'} mode) -- no stack data to show`, 'warning');
                     return;
@@ -322,19 +588,20 @@ window.SelectionPopups = {
                 else if (editor.showToast) editor.showToast('Stack dialog not available', 'error');
             },
             false,
-            false
+            _isUpgrading || _isGiEmpty || (!_stackReady && !_knownIdentity)
         ));
-        const _gitDisabled = _isUpgrading || _isGiEmpty;
+        const _gitDisabled = _isUpgrading || _isGiEmpty || (!_gitReady && !_knownIdentity);
         const _gitTooltip = _isUpgrading
             ? 'Git Commit (unavailable -- upgrade in progress)'
-            : (_isGiEmpty ? 'Git Commit (unavailable -- device in ' + (_mode || 'GI') + ' mode)' : 'Git Commit');
+            : (_isGiEmpty ? 'Git Commit (unavailable -- device in ' + (_mode || 'GI') + ' mode)' : (_gitReady ? 'Git Commit' : (_knownIdentity ? 'Git Commit (fetch current device data)' : 'Git Commit (run probe/discover first)')));
         submenu.appendChild(createSubBtn(
             '<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
             _gitTooltip,
             async () => {
-                const host = sshConfig?.host || serial;
-                if (!host) {
-                    if (editor.showToast) editor.showToast('No SSH address configured', 'error');
+                const host = SelectionPopups._pickSshTarget(device, serial, sshConfig);
+                const lookupId = SelectionPopups._pickLookupId(device, serial, host);
+                if (!host || SelectionPopups._isGeneratedCanvasLabel(host) || !lookupId) {
+                    if (editor.showToast) editor.showToast('Not discovered yet. Run probe/discover before fetching git commit.', 'info');
                     return;
                 }
                 const existing = document.getElementById('git-commit-popup');
@@ -342,60 +609,48 @@ window.SelectionPopups = {
 
                 const popup = document.createElement('div');
                 popup.id = 'git-commit-popup';
+                popup.className = 'git-commit-popup';
                 popup.style.cssText = `
                     position: fixed; z-index: 100003;
-                    min-width: 280px; max-width: 420px;
-                    background: rgba(20,25,35,0.95);
-                    border: 1px solid rgba(255,255,255,0.12);
-                    border-radius: 12px;
-                    padding: 0;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-                    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
                 `;
-                const cachedHash = (device._gitCommit !== undefined && device._gitCommit !== null && device._gitCommit !== '') ? device._gitCommit : null;
+                const gitState = SelectionPopups._metadataState(device, 'git', serial, host);
+                const cachedHash = gitState.ready && (device._gitCommit !== undefined && device._gitCommit !== null && device._gitCommit !== '') ? device._gitCommit : null;
                 const cachedTs = cachedHash ? device._gitCommitFetchedAt : null;
                 const _fmtTs = (ts) => { if (!ts) return ''; const d = new Date(ts); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); };
                 const tsStr = _fmtTs(cachedTs);
-                const hashEsc = (cachedHash || '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+                const deviceIdentity = SelectionPopups._pickGitCommitDeviceIdentity(device, serial, host);
+                const hashEsc = SelectionPopups._escapeHtml(cachedHash || '');
+                const secondaryEsc = SelectionPopups._escapeHtml(deviceIdentity.secondary);
                 popup.innerHTML = `
-                    <div id="git-commit-header" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 6px; cursor: move; user-select: none;">
-                        <span id="git-commit-title" style="color: rgba(255,255,255,0.6); font-size: 11px;">Git Commit${tsStr ? ' - ' + tsStr : ''}</span>
-                        <span style="display: flex; gap: 4px;">
-                            <button id="git-commit-refresh" type="button" style="
-                                background: rgba(0, 180, 216, 0.15);
-                                border: 1px solid rgba(0, 180, 216, 0.3);
-                                border-radius: 6px;
-                                width: 28px; height: 28px; padding: 0;
-                                cursor: pointer;
-                                display: flex; align-items: center; justify-content: center;
-                                transition: all 0.15s;
-                            " title="Refresh via live SSH">
-                                <svg id="git-commit-refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00B4D8" stroke-width="2.5" style="transition: transform 0.3s;">
+                    <div id="git-commit-header" class="git-commit-header">
+                        <div class="git-commit-heading">
+                            <span id="git-commit-title" class="git-commit-title">${SelectionPopups._renderGitCommitTitle(deviceIdentity.primary, tsStr)}</span>
+                            ${secondaryEsc ? `<span class="git-commit-device-meta">Target: ${secondaryEsc}</span>` : ''}
+                        </div>
+                        <span class="git-commit-header-actions">
+                            <button id="git-commit-refresh" class="git-commit-icon-btn git-commit-refresh-btn" type="button" title="Refresh via live SSH" aria-label="Refresh git commit">
+                                <svg id="git-commit-refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="transition: transform 0.3s;">
                                     <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
                                     <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                                 </svg>
                             </button>
-                            <button id="git-commit-close" type="button" style="
-                                background: rgba(255, 255, 255, 0.1);
-                                border: none;
-                                border-radius: 6px;
-                                width: 28px; height: 28px; padding: 0;
-                                cursor: pointer;
-                                display: flex; align-items: center; justify-content: center;
-                                transition: background 0.15s;
-                            " title="Close">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="2"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+                            <button id="git-commit-close" class="git-commit-icon-btn git-commit-close-btn" type="button" title="Close" aria-label="Close git commit">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
                             </button>
                         </span>
                     </div>
-                    <div style="padding: 0 14px 12px;">
-                        <div id="git-commit-body" style="position: relative; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px 36px 10px 12px; font-family: Monaco, Menlo, Consolas, monospace; font-size: 12px; color: rgba(255,255,255,0.9); word-break: break-all;">
-                            ${cachedHash ? hashEsc : '<span style="color: rgba(255,255,255,0.5);">Fetching via live SSH...</span>'}
-                            <button id="git-commit-copy" type="button" style="position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0; background: transparent; border: none; cursor: pointer; color: rgba(255,255,255,0.5); display: flex; align-items: center; justify-content: center; ${cachedHash ? '' : 'display:none;'}" title="Copy">
+                    <div class="git-commit-content">
+                        <div class="git-commit-label-row">
+                            <span>Commit Hash</span>
+                            <span class="git-commit-source">Live device metadata</span>
+                        </div>
+                        <div id="git-commit-body" class="git-commit-body">
+                            ${cachedHash ? hashEsc : '<span class="git-commit-muted">Not discovered yet. Fetching from device...</span>'}
+                            <button id="git-commit-copy" type="button" class="git-commit-copy-btn" style="${cachedHash ? '' : 'display:none;'}" title="Copy commit hash" aria-label="Copy commit hash">
                                 <svg width="14" height="14" viewBox="0 0 24 24"><use href="#ico-copy"/></svg>
                             </button>
                         </div>
-                        <div id="git-commit-error" style="color: #e74c3c; font-size: 11px; margin-top: 8px; display: none;"></div>
+                        <div id="git-commit-error" class="git-commit-error"></div>
                     </div>
                 `;
                 document.body.appendChild(popup);
@@ -431,22 +686,7 @@ window.SelectionPopups = {
                     document.head.appendChild(s);
                 }
 
-                // Refresh button hover
-                const _refreshBtn = popup.querySelector('#git-commit-refresh');
                 const _refreshIcon = popup.querySelector('#git-commit-refresh-icon');
-                _refreshBtn.addEventListener('mouseenter', () => {
-                    _refreshBtn.style.background = 'rgba(0, 180, 216, 0.3)';
-                    _refreshBtn.style.borderColor = 'rgba(0, 180, 216, 0.5)';
-                });
-                _refreshBtn.addEventListener('mouseleave', () => {
-                    _refreshBtn.style.background = 'rgba(0, 180, 216, 0.15)';
-                    _refreshBtn.style.borderColor = 'rgba(0, 180, 216, 0.3)';
-                });
-
-                // Close button hover
-                const _closeBtn = popup.querySelector('#git-commit-close');
-                _closeBtn.addEventListener('mouseenter', () => { _closeBtn.style.background = 'rgba(231, 76, 60, 0.3)'; });
-                _closeBtn.addEventListener('mouseleave', () => { _closeBtn.style.background = 'rgba(255, 255, 255, 0.1)'; });
 
                 let lastRefreshAbort = null;
                 const doClose = () => {
@@ -467,8 +707,8 @@ window.SelectionPopups = {
                         const onCopied = () => {
                             if (editor.showToast) editor.showToast('Copied to clipboard', 'success');
                             if (svg) svg.setAttribute('href', '#ico-check');
-                            copyBtn.style.color = 'rgba(39,174,96,0.9)';
-                            setTimeout(() => { if (svg) svg.setAttribute('href', '#ico-copy'); copyBtn.style.color = 'rgba(255,255,255,0.5)'; }, 1500);
+                            copyBtn.classList.add('copied');
+                            setTimeout(() => { if (svg) svg.setAttribute('href', '#ico-copy'); copyBtn.classList.remove('copied'); }, 1500);
                         };
                         (typeof safeClipboardWrite === 'function' ? safeClipboardWrite(text) : navigator.clipboard.writeText(text)).then(onCopied).catch(() => {});
                     };
@@ -480,13 +720,14 @@ window.SelectionPopups = {
                     const errEl = popup.querySelector('#git-commit-error');
                     const titleEl = popup.querySelector('#git-commit-title');
                     if (!bodyEl) return;
-                    const hEsc = (hashVal || '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-                    bodyEl.innerHTML = `${hEsc || '(empty)'}<button id="git-commit-copy" type="button" style="position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0; background: transparent; border: none; cursor: pointer; color: rgba(255,255,255,0.5); display: flex; align-items: center; justify-content: center;" title="Copy"><svg width="14" height="14" viewBox="0 0 24 24"><use href="#ico-copy"/></svg></button>`;
+                    const hEsc = SelectionPopups._escapeHtml(hashVal || '');
+                    const emptyText = error ? 'Not discovered yet' : 'Not reported by device';
+                    bodyEl.innerHTML = `${hEsc || '<span class="git-commit-muted">' + SelectionPopups._escapeHtml(emptyText) + '</span>'}<button id="git-commit-copy" type="button" class="git-commit-copy-btn" style="display: ${hashVal ? 'flex' : 'none'};" title="Copy commit hash" aria-label="Copy commit hash"><svg width="14" height="14" viewBox="0 0 24 24"><use href="#ico-copy"/></svg></button>`;
                     _wireCopy(hashVal);
                     if (error) { errEl.textContent = error; errEl.style.display = 'block'; }
                     else { errEl.style.display = 'none'; }
                     if (device._gitCommitFetchedAt) {
-                        titleEl.textContent = 'Git Commit - ' + _fmtTs(device._gitCommitFetchedAt);
+                        titleEl.innerHTML = SelectionPopups._renderGitCommitTitle(deviceIdentity.primary, _fmtTs(device._gitCommitFetchedAt));
                     }
                 };
 
@@ -501,18 +742,28 @@ window.SelectionPopups = {
                     if (refreshBtn) { refreshBtn.disabled = true; refreshBtn.style.opacity = '0.5'; }
                     if (refreshIcon) refreshIcon.style.animation = 'gitCommitSpin 1s linear infinite';
                     if (errEl) errEl.style.display = 'none';
-                    bodyEl.innerHTML = '<span style="color: rgba(255,255,255,0.5);">Fetching git commit...</span>';
-                    const deviceIdNow = device?.label || device?.deviceSerial || serial || host;
+                    bodyEl.innerHTML = '<span class="git-commit-muted">Fetching git commit...</span>';
+                    const deviceIdNow = SelectionPopups._pickLookupId(device, serial, host);
+                    if (!deviceIdNow) {
+                        _updateBody(null, 'Run probe/discover or add a verified device identity first.');
+                        return;
+                    }
+                    const identityGuard = window.TopologyDeviceIdentity || null;
+                    const identityToken = identityGuard?.makeRequestToken
+                        ? identityGuard.makeRequestToken(device, { host, deviceId: deviceIdNow })
+                        : null;
                     try {
                         let newHash = null;
+                        let responsePayload = {};
                         if (typeof ScalerAPI !== 'undefined' && ScalerAPI.getDeviceGitCommit) {
                             if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
                             const res = await ScalerAPI.getDeviceGitCommit(deviceIdNow, host, sshConfig?.user || '', sshConfig?.password || '');
-                            newHash = res?.git_commit;
+                            responsePayload = res || {};
+                            newHash = SelectionPopups._pickGitCommit(res || {});
                         }
                         if (newHash == null) {
                             if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-                            const _timer = setTimeout(() => lastRefreshAbort?.abort(), 50000);
+                            const _timer = setTimeout(() => lastRefreshAbort?.abort(), 10000);
                             const resp = await fetch('/api/dnaas/device-gitcommit', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
@@ -520,18 +771,39 @@ window.SelectionPopups = {
                                 signal
                             }).finally(() => clearTimeout(_timer));
                             const data = resp.ok ? await resp.json().catch(() => ({})) : {};
-                            newHash = data?.git_commit;
+                            responsePayload = data || {};
+                            newHash = SelectionPopups._pickGitCommit(data || {});
                             if (!resp.ok) throw new Error(data?.detail || `HTTP ${resp.status}`);
+                        }
+                        const identityCheck = identityGuard?.validateResponseForDevice && identityToken
+                            ? identityGuard.validateResponseForDevice(device, responsePayload, identityToken, { host, deviceId: deviceIdNow })
+                            : { ok: true };
+                        if ((identityGuard?.signature && identityToken
+                            && identityGuard.signature(device, host) !== identityToken.signature) || !identityCheck.ok) {
+                            _updateBody(null, identityCheck.reason || 'Git response ignored because the device SN/host changed.');
+                            return;
                         }
                         if (newHash != null) {
                             device._gitCommit = newHash;
-                            device._gitCommitFetchedAt = Date.now();
+                            device._gitCommitFetchedAt = responsePayload.git_commit_fetched_at
+                                ? (Date.parse(responsePayload.git_commit_fetched_at) || Date.now())
+                                : Date.now();
+                            if (identityGuard?.markMetadataReady) {
+                                identityGuard.markMetadataReady(device, 'git', {
+                                    host,
+                                    deviceId: deviceIdNow,
+                                    source: 'git-popup'
+                                });
+                            }
                             if (editor.requestDraw) editor.requestDraw();
                         }
                         _updateBody(newHash, null);
                     } catch (e) {
                         if (e?.name !== 'AbortError') {
-                            _updateBody(device?._gitCommit || null, e?.message || 'Failed to fetch');
+                            const safeCached = SelectionPopups._metadataState(device, 'git', serial, host).ready
+                                ? (device?._gitCommit || null)
+                                : null;
+                            _updateBody(safeCached, e?.message || 'Failed to fetch');
                         }
                     } finally {
                         if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.style.opacity = '1'; }
@@ -562,6 +834,7 @@ window.SelectionPopups = {
     showDeviceStylePalette(editor, device) {
         const existing = document.getElementById('device-style-palette-popup');
         if (existing) { existing.remove(); return; }
+        SelectionPopups.closeObjectToolbarPopups(editor, 'device-style-palette-popup');
         
         const toolbar = editor._deviceSelectionToolbar;
         if (!toolbar) return;
@@ -611,6 +884,10 @@ window.SelectionPopups = {
             { id: 'server', name: 'Server' },
             { id: 'hex', name: 'Hexagon' }
         ];
+        const activeBg = isDark ? 'rgba(52,152,219,0.20)' : 'rgba(52,152,219,0.15)';
+        const activeBorder = 'rgba(52,152,219,0.5)';
+        const inactiveBg = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)';
+        const inactiveBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
 
         const _renderStylePreview = (canvas, styleId, color, dark) => {
             const ctx = canvas.getContext('2d');
@@ -639,13 +916,21 @@ window.SelectionPopups = {
             } catch (_) {}
         };
         
+        const applyButtonState = (btn, styleId) => {
+            const active = (device.visualStyle || 'circle') === styleId;
+            btn.style.border = `1px solid ${active ? activeBorder : inactiveBorder}`;
+            btn.style.background = active ? activeBg : inactiveBg;
+            btn.style.color = active ? '#3498db' : textC;
+            btn.style.transform = 'scale(1)';
+        };
+        const refreshButtonStates = () => {
+            grid.querySelectorAll('button[data-device-style]').forEach((btn) => {
+                applyButtonState(btn, btn.dataset.deviceStyle);
+            });
+        };
+
         styles.forEach(style => {
             const btn = document.createElement('button');
-            const isActive = (device.visualStyle || 'circle') === style.id;
-            const activeBg = isDark ? 'rgba(52,152,219,0.20)' : 'rgba(52,152,219,0.15)';
-            const activeBorder = 'rgba(52,152,219,0.5)';
-            const inactiveBg = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)';
-            const inactiveBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
 
             const miniCanvas = document.createElement('canvas');
             _renderStylePreview(miniCanvas, style.id, device.color || '#3498db', isDark);
@@ -656,37 +941,38 @@ window.SelectionPopups = {
 
             btn.appendChild(miniCanvas);
             btn.appendChild(label);
+            btn.dataset.deviceStyle = style.id;
             btn.style.cssText = `
                 width: 62px; height: 50px;
-                border: 1px solid ${isActive ? activeBorder : inactiveBorder};
-                background: ${isActive ? activeBg : inactiveBg};
-                color: ${isActive ? '#3498db' : textC};
                 border-radius: 8px; cursor: pointer;
                 transition: all 0.15s ease;
                 display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
                 font-family: inherit;
             `;
+            applyButtonState(btn, style.id);
             btn.onmouseenter = () => {
-                if (!isActive) {
+                if ((device.visualStyle || 'circle') !== style.id) {
                     btn.style.background = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)';
                     btn.style.borderColor = isDark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.12)';
                     btn.style.transform = 'scale(1.04)';
                 }
             };
             btn.onmouseleave = () => {
-                if (!isActive) {
+                if ((device.visualStyle || 'circle') !== style.id) {
                     btn.style.background = inactiveBg;
                     btn.style.borderColor = inactiveBorder;
                     btn.style.transform = 'scale(1)';
                 }
             };
-            btn.onclick = () => {
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                e.preventDefault();
                 device.visualStyle = style.id;
                 if (editor.reconnectLinksToDevice) editor.reconnectLinksToDevice(device);
                 editor.saveState();
                 editor.draw();
-                popup.remove();
-                setTimeout(() => editor.showDeviceSelectionToolbar(device), 50);
+                if (editor.scheduleAutoSave) editor.scheduleAutoSave();
+                refreshButtonStates();
             };
             grid.appendChild(btn);
         });
@@ -728,6 +1014,7 @@ window.SelectionPopups = {
     showLinkWidthSlider(editor, link) {
         const existing = document.getElementById('link-width-slider-popup');
         if (existing) { existing.remove(); return; }
+        SelectionPopups.closeObjectToolbarPopups(editor, 'link-width-slider-popup');
         
         const toolbar = editor._linkSelectionToolbar;
         if (!toolbar) return;
@@ -792,6 +1079,7 @@ window.SelectionPopups = {
     showLinkStyleOptions(editor, link) {
         const existing = document.getElementById('link-style-options-popup');
         if (existing) { existing.remove(); return; }
+        SelectionPopups.closeObjectToolbarPopups(editor, 'link-style-options-popup');
         
         const toolbar = editor._linkSelectionToolbar;
         if (!toolbar) return;
@@ -825,16 +1113,15 @@ window.SelectionPopups = {
             font-family: 'Poppins', -apple-system, sans-serif;
         `;
         
-        const styles = ['solid', 'dashed', 'dotted', 'arrow', 'double-arrow'];
+        const styles = SelectionPopups._linkStyleChoices(editor);
         const activeBg = isDark ? 'rgba(52,152,219,0.20)' : 'rgba(52,152,219,0.15)';
         const activeBorder = 'rgba(52,152,219,0.5)';
         const inactiveBg = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)';
         const inactiveBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
-        
-        styles.forEach(style => {
+
+        const makeMenuButton = (label, isActive, onClick) => {
             const btn = document.createElement('button');
-            const isActive = (link.style || 'solid') === style;
-            btn.textContent = style.charAt(0).toUpperCase() + style.slice(1).replace('-', ' ');
+            btn.textContent = label;
             btn.style.cssText = `
                 padding: 6px 12px;
                 border: 1px solid ${isActive ? activeBorder : inactiveBorder};
@@ -848,17 +1135,61 @@ window.SelectionPopups = {
                 transition: all 0.15s ease;
             `;
             btn.onmouseenter = () => {
-                if (!isActive) { btn.style.background = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)'; btn.style.borderColor = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)'; }
+                if (!isActive) {
+                    btn.style.background = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)';
+                    btn.style.borderColor = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)';
+                }
             };
             btn.onmouseleave = () => {
-                if (!isActive) { btn.style.background = inactiveBg; btn.style.borderColor = inactiveBorder; }
+                if (!isActive) {
+                    btn.style.background = inactiveBg;
+                    btn.style.borderColor = inactiveBorder;
+                }
             };
-            btn.onclick = () => {
-                link.style = style;
-                editor.saveState();
-                editor.draw();
-                popup.remove();
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onClick();
             };
+            return btn;
+        };
+
+        const refreshStyleButtons = () => {
+            popup.querySelectorAll('button[data-link-style]').forEach((btn) => {
+                const active = (link.style || 'solid') === btn.dataset.linkStyle;
+                btn.style.border = `1px solid ${active ? activeBorder : inactiveBorder}`;
+                btn.style.background = active ? activeBg : inactiveBg;
+                btn.style.color = active ? '#3498db' : textC;
+                btn.style.fontWeight = active ? '600' : '400';
+            });
+        };
+
+        const flipBtn = makeMenuButton('Flip Arrow Direction', false, () => {
+            if (SelectionPopups.flipLinkDirection(editor, link)) {
+                if (editor.showToast) editor.showToast('Link arrow direction flipped', 'success');
+            }
+        });
+        flipBtn.style.marginBottom = '4px';
+        popup.appendChild(flipBtn);
+
+        const sep = document.createElement('div');
+        sep.style.cssText = `height: 1px; background: ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'}; margin: 2px 0 4px;`;
+        popup.appendChild(sep);
+
+        styles.forEach(style => {
+            const isActive = (link.style || 'solid') === style;
+            const btn = makeMenuButton(SelectionPopups._linkStyleLabel(style), isActive, () => {
+                if (editor.saveState) editor.saveState();
+                if (typeof editor.setLinkStyle === 'function') {
+                    editor.setLinkStyle(style);
+                } else {
+                    link.style = style;
+                    if (editor.draw) editor.draw();
+                    if (editor.scheduleAutoSave) editor.scheduleAutoSave();
+                }
+                refreshStyleButtons();
+            });
+            btn.dataset.linkStyle = style;
             popup.appendChild(btn);
         });
         
@@ -873,6 +1204,7 @@ window.SelectionPopups = {
     showLinkCurveOptions(editor, link) {
         const existing = document.getElementById('link-curve-options-popup');
         if (existing) { existing.remove(); return; }
+        SelectionPopups.closeObjectToolbarPopups(editor, 'link-curve-options-popup');
         
         const toolbar = editor._linkSelectionToolbar;
         if (!toolbar) return;
@@ -1011,6 +1343,7 @@ window.SelectionPopups = {
     showDeviceLabelStyleMenu(editor, device, toolbar) {
         const existing = document.getElementById('device-label-style-menu');
         if (existing) { existing.remove(); return; }
+        SelectionPopups.closeObjectToolbarPopups(editor, 'device-label-style-menu');
 
         if (!toolbar) toolbar = editor._deviceSelectionToolbar;
         if (!toolbar) return;

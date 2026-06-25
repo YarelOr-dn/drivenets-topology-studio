@@ -1,0 +1,146 @@
+[
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:31:45.173+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 35,
+    "output_preview": "  ETH TAG: 0\n    MAC table is empty",
+    "output_full": "  ETH TAG: 0\n    MAC table is empty"
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:31:48.425+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 35,
+    "output_preview": "  ETH TAG: 0\n    MAC table is empty",
+    "output_full": "  ETH TAG: 0\n    MAC table is empty"
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:31:51.678+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 35,
+    "output_preview": "  ETH TAG: 0\n    MAC table is empty",
+    "output_full": "  ETH TAG: 0\n    MAC table is empty"
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:00:01:01 | no-more",
+    "timestamp": "2026-04-03T09:31:51.928+00:00",
+    "duration_ms": 501,
+    "phase": "verify",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:31:52.430+00:00",
+    "duration_ms": 501,
+    "phase": "verify",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:31:52.931+00:00",
+    "duration_ms": 100,
+    "phase": "verify",
+    "output_length": 442,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:31:53.032+00:00",
+    "duration_ms": 251,
+    "phase": "verify",
+    "output_length": 35,
+    "output_preview": "  ETH TAG: 0\n    MAC table is empty",
+    "output_full": "  ETH TAG: 0\n    MAC table is empty"
+  },
+  {
+    "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:00:01:01 | no-more",
+    "timestamp": "2026-04-03T09:31:53.283+00:00",
+    "duration_ms": 501,
+    "phase": "verify",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:31:53.784+00:00",
+    "duration_ms": 501,
+    "phase": "verify",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  },
+  {
+    "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:31:54.285+00:00",
+    "duration_ms": 100,
+    "phase": "verify",
+    "output_length": 442,
+    "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0",
+    "output_full": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+  },
+  {
+    "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:31:54.386+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 18,
+    "output_preview": "EvpnMacs [size: 0]",
+    "output_full": "EvpnMacs [size: 0]"
+  },
+  {
+    "command": "show evpn arp-table instance HA_TEST_ELAN | no-more",
+    "timestamp": "2026-04-03T09:31:54.637+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 35,
+    "output_preview": "  ETH TAG: 0\n    ARP table is empty",
+    "output_full": "  ETH TAG: 0\n    ARP table is empty"
+  },
+  {
+    "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+    "timestamp": "2026-04-03T09:31:54.887+00:00",
+    "duration_ms": 50,
+    "phase": "verify",
+    "output_length": 26,
+    "output_preview": "ERROR: Incomplete command.",
+    "output_full": "ERROR: Incomplete command."
+  },
+  {
+    "command": "show bgp l2vpn evpn summary | no-more",
+    "timestamp": "2026-04-03T09:31:54.938+00:00",
+    "duration_ms": 250,
+    "phase": "verify",
+    "output_length": 483,
+    "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 3\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567      86867      86833    0     0       2 01w3d01h                   1\n  5.5.5.5         4    1234567       4119       8238    0     0       0 never      Idle            \n\nTotal number of established neighbors with L2vpn EVPN 1/2\n\nTotal number of NSR capable BGP sessions 0",
+    "output_full": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 3\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567      86867      86833    0     0       2 01w3d01h                   1\n  5.5.5.5         4    1234567       4119       8238    0     0       0 never      Idle            \n\nTotal number of established neighbors with L2vpn EVPN 1/2\n\nTotal number of NSR capable BGP sessions 0"
+  },
+  {
+    "command": "show file traces routing_engine/bgpd_traces | include 09:31 | include ERROR | no-more",
+    "timestamp": "2026-04-03T09:31:55.189+00:00",
+    "duration_ms": 3955,
+    "phase": "verify",
+    "output_length": 437,
+    "output_preview": "2026-04-02T23:09:31.441080 +03:00 [WARNING   ] [bgp_debug.c:449:bgp_notify_print] [bgpd:1342:1342] 2045377:4888477: %NOTIFICATION: vrf default sent to neighbor 5.5.5.5 2/2 (OPEN Message Error/Bad Peer AS) 2 bytes 1b 6a\n2026-04-03T09:31:33.928339 +03:00 [WARNING   ] [bgp_debug.c:449:bgp_notify_print] [bgpd:1342:1342] 2141628:5221491: %NOTIFICATION: vrf default sent to neighbor 5.5.5.5 2/2 (OPEN Message Error/Bad Peer AS) 2 bytes 1b 6a",
+    "output_full": "2026-04-02T23:09:31.441080 +03:00 [WARNING   ] [bgp_debug.c:449:bgp_notify_print] [bgpd:1342:1342] 2045377:4888477: %NOTIFICATION: vrf default sent to neighbor 5.5.5.5 2/2 (OPEN Message Error/Bad Peer AS) 2 bytes 1b 6a\n2026-04-03T09:31:33.928339 +03:00 [WARNING   ] [bgp_debug.c:449:bgp_notify_print] [bgpd:1342:1342] 2141628:5221491: %NOTIFICATION: vrf default sent to neighbor 5.5.5.5 2/2 (OPEN Message Error/Bad Peer AS) 2 bytes 1b 6a"
+  },
+  {
+    "command": "show file traces routing_engine/fibmgrd_traces | include 09:31 | include ERROR | no-more",
+    "timestamp": "2026-04-03T09:31:59.144+00:00",
+    "duration_ms": 20976,
+    "phase": "verify",
+    "output_length": 0,
+    "output_preview": "",
+    "output_full": ""
+  }
+]

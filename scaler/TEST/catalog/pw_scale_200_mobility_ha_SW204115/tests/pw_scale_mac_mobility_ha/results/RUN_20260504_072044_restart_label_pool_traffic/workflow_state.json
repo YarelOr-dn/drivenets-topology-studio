@@ -1,0 +1,38 @@
+{
+  "devices": [
+    "RR-SA-2",
+    "PE-4"
+  ],
+  "failed_phase": "verify_dnaas_ready_after_config",
+  "label_pool": {
+    "PE-4": {
+      "configured": 2048,
+      "in_use": 2048,
+      "mismatch_banner": false,
+      "reachable": true,
+      "ready": true
+    },
+    "RR-SA-2": {
+      "configured": 2048,
+      "in_use": 2048,
+      "mismatch_banner": false,
+      "reachable": true,
+      "ready": true
+    }
+  },
+  "phase": "verify_dnaas_ready_after_config",
+  "phase_log": "/home/dn/drivenets-topology-studio/scaler/TEST/catalog/pw_scale_200_mobility_ha_SW204115/tests/pw_scale_mac_mobility_ha/results/RUN_20260504_072044_restart_label_pool_traffic/verify_dnaas_ready_after_config.log",
+  "restart_results": [
+    {
+      "device": "PE-4",
+      "ok": true
+    },
+    {
+      "device": "RR-SA-2",
+      "ok": true
+    }
+  ],
+  "run_dir": "/home/dn/drivenets-topology-studio/scaler/TEST/catalog/pw_scale_200_mobility_ha_SW204115/tests/pw_scale_mac_mobility_ha/results/RUN_20260504_072044_restart_label_pool_traffic",
+  "updated_at": "2026-05-04T07:41:37",
+  "verdict": "BLOCKED"
+}

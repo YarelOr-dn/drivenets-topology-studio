@@ -1,0 +1,9 @@
+{
+  "completed": 8,
+  "detail": "batch 2/50",
+  "phase": "dnaas_preflight_ready",
+  "status": "running",
+  "step": "dnaas_batch_start",
+  "timestamp": "2026-05-04T07:38:20+0000",
+  "total": 400
+}

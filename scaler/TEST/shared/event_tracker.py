@@ -226,7 +226,7 @@ def disable_terminal_logging(
 ) -> None:
     """Disable real-time syslog on terminal."""
     try:
-        run_show(device, "no set logging terminal")
+        run_show(device, "unset logging terminal")
     except Exception:
         pass
 

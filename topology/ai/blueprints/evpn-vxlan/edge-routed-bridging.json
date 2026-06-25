@@ -1,0 +1,232 @@
+{
+  "name": "edge-routed-bridging",
+  "protocol": "evpn-vxlan",
+  "scale": "medium",
+  "summary": "EVPN-VXLAN Edge-Routed Bridging. Border leaves terminate L3 VNIs and peer to the WAN edge; server leaves stay pure L2. Modern DC alternative to centralised IRB.",
+  "tags": [
+    "evpn",
+    "vxlan",
+    "erb",
+    "border-leaf",
+    "irb"
+  ],
+  "layout_hint": "clos-3-stage",
+  "objects": [
+    {
+      "id": "fabric",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 960,
+      "y": 520,
+      "width": 1520,
+      "height": 540,
+      "fillColor": "#1abc9c",
+      "fillEnabled": true,
+      "fillOpacity": 0.06,
+      "strokeColor": "#1abc9c",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 16,
+      "label": "EVPN-VXLAN ERB Fabric"
+    },
+    {
+      "id": "s1",
+      "type": "device",
+      "label": "Spine-1",
+      "x": 720,
+      "y": 300,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "s2",
+      "type": "device",
+      "label": "Spine-2",
+      "x": 1200,
+      "y": 300,
+      "role": "spine",
+      "visualStyle": "classic",
+      "color": "#2980b9"
+    },
+    {
+      "id": "l1border",
+      "type": "device",
+      "label": "L1-Border",
+      "x": 380,
+      "y": 680,
+      "role": "border-leaf",
+      "visualStyle": "classic",
+      "color": "#e67e22"
+    },
+    {
+      "id": "l2server",
+      "type": "device",
+      "label": "L2-Server",
+      "x": 760,
+      "y": 680,
+      "role": "server-leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "l3server",
+      "type": "device",
+      "label": "L3-Server",
+      "x": 1160,
+      "y": 680,
+      "role": "server-leaf",
+      "visualStyle": "classic",
+      "color": "#27ae60"
+    },
+    {
+      "id": "l4border",
+      "type": "device",
+      "label": "L4-Border",
+      "x": 1540,
+      "y": 680,
+      "role": "border-leaf",
+      "visualStyle": "classic",
+      "color": "#e67e22"
+    },
+    {
+      "id": "l_l1border_s1",
+      "type": "link",
+      "device1": "l1border",
+      "device2": "s1",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN"
+    },
+    {
+      "id": "l_l1border_s2",
+      "type": "link",
+      "device1": "l1border",
+      "device2": "s2",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN"
+    },
+    {
+      "id": "l_l2server_s1",
+      "type": "link",
+      "device1": "l2server",
+      "device2": "s1",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN"
+    },
+    {
+      "id": "l_l2server_s2",
+      "type": "link",
+      "device1": "l2server",
+      "device2": "s2",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN"
+    },
+    {
+      "id": "l_l3server_s1",
+      "type": "link",
+      "device1": "l3server",
+      "device2": "s1",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN"
+    },
+    {
+      "id": "l_l3server_s2",
+      "type": "link",
+      "device1": "l3server",
+      "device2": "s2",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN"
+    },
+    {
+      "id": "l_l4border_s1",
+      "type": "link",
+      "device1": "l4border",
+      "device2": "s1",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN"
+    },
+    {
+      "id": "l_l4border_s2",
+      "type": "link",
+      "device1": "l4border",
+      "device2": "s2",
+      "linkType": "evpn",
+      "color": "#1abc9c",
+      "style": "dashed-wide",
+      "label": "EVPN"
+    },
+    {
+      "id": "wan",
+      "type": "device",
+      "label": "WAN Edge",
+      "x": 960,
+      "y": 960,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6"
+    },
+    {
+      "id": "l_l1_wan",
+      "type": "link",
+      "device1": "l1border",
+      "device2": "wan",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP"
+    },
+    {
+      "id": "l_l4_wan",
+      "type": "link",
+      "device1": "l4border",
+      "device2": "wan",
+      "linkType": "ebgp",
+      "color": "#e67e22",
+      "style": "arrow",
+      "label": "eBGP"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "EVPN-VXLAN Edge-Routed Bridging (ERB)",
+      "x": 960,
+      "y": 140,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_erb",
+      "type": "text",
+      "text": "Gateway IRB on the LEAF (border role)\nL2 + L3 VNIs terminate at the edge\nSpine stays pure IP-underlay",
+      "x": 280,
+      "y": 400,
+      "fontSize": 11,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#1abc9c",
+      "borderWidth": 1
+    }
+  ]
+}

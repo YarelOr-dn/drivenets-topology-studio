@@ -11,7 +11,7 @@ Ensures tests leave devices in a clean state, even on crash or SIGTERM:
 Recipe JSON format:
     "cleanup_commands": [
         "no debug evpn mac-mobility",
-        "no set logging terminal"
+        "unset logging terminal"
     ],
     "isolation": {
         "clear_between_scenarios": true,

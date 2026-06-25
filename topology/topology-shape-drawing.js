@@ -262,6 +262,40 @@ window.ShapeDrawing = {
             ctx.setLineDash([]);
             ctx.restore();
         }
+        // 2026-04-26: container badge -- a tiny "package" glyph in the
+        // top-left corner of any shape with `containerMode: true`. Drawn
+        // in front of the lock/merge badges so users see at a glance
+        // that dragging the shape will carry inner objects.
+        if (shape.containerMode === true && (isShapeSelected || editor.showLinkTypeLabels)) {
+            const iconScale = 1 / editor.zoom;
+            const badgeSize = 11 * iconScale;
+            const bx = shape.x - (shape.width || 50) / 2 + badgeSize + 2 * iconScale;
+            const by = shape.y - (shape.height || 50) / 2 - 12 * iconScale;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(bx, by, badgeSize * 0.85, 0, Math.PI * 2);
+            const grad = ctx.createRadialGradient(bx, by, 0, bx, by, badgeSize);
+            grad.addColorStop(0, 'rgba(52, 152, 219, 0.95)');
+            grad.addColorStop(1, 'rgba(41, 128, 185, 0.95)');
+            ctx.fillStyle = grad;
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+            ctx.lineWidth = 1 * iconScale;
+            ctx.stroke();
+            // Tiny stack icon (3 stacked rectangles representing layers)
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.4 * iconScale;
+            ctx.lineJoin = 'round';
+            const inner = badgeSize * 0.55;
+            ctx.beginPath();
+            ctx.rect(bx - inner / 2, by - inner / 2 + inner * 0.25, inner, inner * 0.45);
+            ctx.moveTo(bx - inner / 2, by - inner * 0.05);
+            ctx.lineTo(bx + inner / 2, by - inner * 0.05);
+            ctx.moveTo(bx - inner / 2, by - inner * 0.35);
+            ctx.lineTo(bx + inner / 2, by - inner * 0.35);
+            ctx.stroke();
+            ctx.restore();
+        }
         if (editor.showLinkTypeLabels || (isShapeSelected && (shape.locked || shape.mergedToBackground))) {
             const iconScale = 1 / editor.zoom;
             const iconSize = 12 * iconScale;
@@ -493,27 +527,6 @@ window.ShapeDrawing = {
             ctx.textBaseline = 'middle';
             ctx.fillText(`${rotationDegrees}°`, handleX, handleY - arcRadius - 8 * zoomScale);
             ctx.restore();
-        }
-        
-        // Draw GROUP indicator if shape belongs to a group
-        if (shape.groupId) {
-            const dotSize = 6 * zoomScale;
-            // Position at bottom-left of shape
-            const dotX = x - w/2 - 10 * zoomScale;
-            const dotY = y + h/2 + 10 * zoomScale;
-            
-            // Purple dot indicator
-            ctx.beginPath();
-            ctx.arc(dotX, dotY, dotSize, 0, Math.PI * 2);
-            const groupGradient = ctx.createRadialGradient(dotX, dotY, 0, dotX, dotY, dotSize);
-            groupGradient.addColorStop(0, 'rgba(155, 89, 182, 0.95)');
-            groupGradient.addColorStop(1, 'rgba(142, 68, 173, 0.95)');
-            ctx.fillStyle = groupGradient;
-            ctx.fill();
-            
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-            ctx.lineWidth = 1.5 * zoomScale;
-            ctx.stroke();
         }
         
         ctx.restore();

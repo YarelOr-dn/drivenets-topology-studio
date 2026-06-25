@@ -1,0 +1,27 @@
+{
+  "phase_name": "mac_cleanup",
+  "started_at": "2026-04-14T17:55:42.998+00:00",
+  "completed_at": "2026-04-14T17:55:43.349+00:00",
+  "duration_sec": 0.351,
+  "command_count": 2,
+  "commands": [
+    {
+      "command": "clear evpn mac-table",
+      "timestamp": "2026-04-14T17:55:42.998+00:00",
+      "duration_ms": 50,
+      "phase": "mac_cleanup",
+      "output_length": 78,
+      "output_preview": "-------------------------------------------^\nERROR: Unknown word: 'mac-table'."
+    },
+    {
+      "command": "clear evpn mac-table instance HA_TEST_ELAN",
+      "timestamp": "2026-04-14T17:55:43.048+00:00",
+      "duration_ms": 50,
+      "phase": "mac_cleanup",
+      "output_length": 100,
+      "output_preview": "--------------------------------------------------------------^\nERROR: Unknown word: 'HA_TEST_ELAN'."
+    }
+  ],
+  "parsed_values": {},
+  "anomalies": []
+}

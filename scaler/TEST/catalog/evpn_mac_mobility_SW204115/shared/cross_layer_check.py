@@ -27,27 +27,79 @@ XRAY integration:
 
 from __future__ import annotations
 
-import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .mac_parsers import (
-    ArpTableEntry,
-    FibMacEntry,
-    FwdTableEntry,
-    MacDetailEntry,
     parse_arp_table,
     parse_evpn_mac_entries,
     parse_fib_evpn_mac,
     parse_forwarding_table_flags,
     parse_ghost_macs,
     parse_mac_detail,
-    strip_ansi,
 )
 
 RunShowFn = Callable[[str, str], str]
+
+
+def parallel_show_per_device(
+    plan: Dict[str, List[str]],
+    run_show: RunShowFn,
+    max_workers: int = 4,
+) -> Dict[Tuple[str, str], str]:
+    """Run read-only show commands across multiple DUTs in parallel.
+
+    Each DUT gets one worker thread; commands for the same DUT run serially
+    inside that thread (the underlying persistent SSH session is single-channel
+    per device, so multiple threads on the same device would race the prompt
+    detector). Cross-device fan-out is the actual win: collecting EVPN/BGP
+    snapshots across PE-1 + PE-4 + RR-SA-2 in roughly the wall-time of the
+    slowest device instead of the sum of all three.
+
+    Returns a dict keyed by (device, command). Output is the raw show response
+    (or `[show-failed] ...` on exception).
+
+    Caller contract:
+      - Only use for READ-ONLY commands (show / show config). Do NOT use for
+        config-mode writes -- those must go through dnos_atomic_commit /
+        dnos_multi_device_commit per the /TEST decision tree.
+      - Devices in `plan` MUST be distinct keys. Same-device commands must be
+        passed in the same list to preserve session ordering.
+    """
+    if not plan:
+        return {}
+
+    results: Dict[Tuple[str, str], str] = {}
+    if len(plan) == 1:
+        # Single device: skip pool overhead, just iterate.
+        only_device, commands = next(iter(plan.items()))
+        for cmd in commands:
+            try:
+                results[(only_device, cmd)] = run_show(only_device, cmd)
+            except (OSError, IOError, ConnectionError, TimeoutError, RuntimeError) as exc:
+                results[(only_device, cmd)] = f"[show-failed] {exc.__class__.__name__}: {exc}"
+        return results
+
+    def _worker(device: str, commands: List[str]) -> List[Tuple[Tuple[str, str], str]]:
+        rows: List[Tuple[Tuple[str, str], str]] = []
+        for cmd in commands:
+            try:
+                rows.append(((device, cmd), run_show(device, cmd)))
+            except (OSError, IOError, ConnectionError, TimeoutError, RuntimeError) as exc:
+                rows.append(((device, cmd),
+                             f"[show-failed] {exc.__class__.__name__}: {exc}"))
+        return rows
+
+    workers = max(1, min(max_workers, len(plan)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_worker, dev, cmds) for dev, cmds in plan.items()]
+        for fut in futures:
+            for key, output in fut.result():
+                results[key] = output
+    return results
 
 XRAY_SCRIPT_CANDIDATES = [
     Path.home() / "live_capture.py",
@@ -71,14 +123,60 @@ def _find_xray_script() -> Optional[Path]:
     return None
 
 
-# Show commands indexed by layer name, with {evpn_name} and {test_mac} placeholders
+# Show commands indexed by layer name, with {evpn_name} and {test_mac} placeholders.
+# Live-validated 2026-04-29 on PE-1, PE-4, RR-SA-2 during AC<->EVPN move.
+# Naming convention: L1_* = per-MAC source-qualified, L2_* = EVI/PW state,
+# L3_* = BGP RT-2 cross-PE, L4_* = NCP/datapath, plus legacy aliases for
+# backward-compat with older recipes.
 SHOW_COMMAND_MATRIX: Dict[str, str] = {
+    # Legacy (kept for backward-compat with existing recipes)
     "mac_table": "show evpn mac-table instance {evpn_name} mac {test_mac} | no-more",
     "mac_detail": "show evpn mac-table detail instance {evpn_name} | no-more",
     "forwarding_table": "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more",
     "fib_database": "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more",
     "arp_table": "show evpn arp-table instance {evpn_name} | no-more",
-    "ghost_macs": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more",
+    "ghost_macs": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+
+    # L1 -- Source-qualified per-MAC (Protocol, Sequence, Mobility History, Sticky)
+    # CRITICAL for mobility tests.
+    #
+    # Live-verified 2026-04-29 on PE-4 + PE-1 (CL/SA, dnos 26.x):
+    #   `show evpn mac-table detail mac <mac>`                 -- ERROR: Unknown word 'mac'
+    #   `show evpn mac-table detail instance <name> mac <mac>` -- ERROR: Unknown word 'mac'
+    #     -> The `mac <mac>` filter does NOT exist on the `detail` variant in this build.
+    #   `show evpn mac-table mac <mac>` (no detail)            -- VALID, single line, NO history/seq
+    #   `show evpn mac-table detail instance <name>`           -- VALID, full dump for the EVI,
+    #                                                              parser must scan to the MAC.
+    #   `show evpn mac-table detail`                           -- VALID, full dump across all EVIs.
+    #
+    # Conclusion: there is NO single-MAC detail command. The verifier MUST run the
+    # per-EVI detail dump and grep/parse for the target MAC.
+    "L1_per_mac_summary": "show evpn mac-table mac {test_mac} | no-more",
+    "L1_evi_full_detail": "show evpn mac-table detail instance {evpn_name} | no-more",
+    "L1_all_evi_full_detail": "show evpn mac-table detail | no-more",
+
+    # L2 -- EVI + PW state (suppression thresholds, PW peer status, label-base)
+    "L2_evi_detail": "show evpn instance {evpn_name} detail | no-more",
+    "L2_pw_state": "show evpn instance {evpn_name} vpls-pw | no-more",
+    "L2_pw_counters": "show evpn instance {evpn_name} vpls-pw counters | no-more",
+
+    # L3 -- BGP RT-2 cross-PE (originator, MAC Mobility ext-community seq)
+    # Live PE-1 validation on 2026-04-30: `mac` is a completion token but a
+    # peer advertised/received route check is stronger proof. Keep this layer
+    # on the route-type 2 table and let scenario_runner add peer-specific
+    # advertised-routes / received-routes commands for decisive assertions.
+    "L3_bgp_rt2_lookup": "show bgp l2vpn evpn route-type 2 | include {test_mac}",
+    "L3_bgp_evpn_summary": "show bgp l2vpn evpn summary | no-more",
+    "L3_bgp_vpls_summary": "show bgp l2vpn vpls summary | no-more",
+
+    # L4 -- NCP / datapath (forwarding-table install)
+    "L4_forwarding_per_mac": "show evpn forwarding-table mac-address-table instance {evpn_name} mac {test_mac} | no-more",
+    "L4_forwarding_full": "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more",
+
+    # Cleanup / state-reset (used between move scenarios)
+    "RESET_clear_mac_table": "clear evpn mac-table instance {evpn_name}",
+    "RESET_clear_suppression": "clear evpn instance {evpn_name} mac-suppression",
+    "RESET_clear_history": "clear evpn instance {evpn_name} mac-history",
 }
 
 # Trigger-type -> which layers are mandatory and which are optional
@@ -127,6 +225,182 @@ TRIGGER_LAYER_RELEVANCE: Dict[str, Dict[str, str]] = {
         "mac_table": "required", "mac_detail": "required",
         "forwarding_table": "required", "fib_database": "required",
         "arp_table": "optional", "ghost_macs": "required",
+    },
+}
+
+
+# Role-based 5-layer expectation matrix (added 2026-04-29 after audit found
+# previous tests passed silently because they only checked one PE per move).
+#
+# For every move scenario, EVERY participating PE has a role:
+#   - "src"  : the PE that previously owned the MAC locally (loses Local)
+#   - "dst"  : the PE that now owns the MAC locally (gains Local)
+#   - "pw"   : a non-DUT VPLS PW node that sees the MAC via the PW (Protocol VPLS_PW)
+#   - "rr"   : route-reflector (sees only BGP RT-2, no Local, no PW unless also a leaf)
+#
+# Per role, the matrix declares the expected per-MAC Protocol field, expected
+# Mobility-History presence, expected RT-2 originator, and expected
+# forwarding-table presence. The verdict engine compares actual vs expected
+# at EVERY participating PE simultaneously and FAILS the move if ANY differs.
+#
+# This is what catches the false-PASS bugs: mac visible somewhere, but with
+# wrong Protocol or stale sequence on a different PE.
+
+ROLE_EXPECTATIONS: Dict[str, Dict[str, Dict[str, object]]] = {
+    "spirent_ac_to_evpn": {
+        # Source-AC PE loses Local, becomes bgp via the new owner
+        "src": {
+            "L1_protocol":      "bgp",
+            "L1_seq_advances":  True,
+            "L1_history":       "ignore",   # remote PE only shows history if it had a flush; not deterministic
+            "L3_rt2_origin":    "{dst_loopback}",
+            "L4_forwarding":    "via_pw_or_bgp_nexthop",
+        },
+        # Destination PE gains Local on the AC
+        "dst": {
+            "L1_protocol":      "Local",
+            "L1_seq_advances":  True,
+            "L1_history":       "must_have_entry",
+            "L3_rt2_origin":    "{dst_loopback}",
+            "L3_rt2_advertised_by_dst": True,
+            "L4_forwarding":    "via_local_ac",
+        },
+        # Any PW-only node (RR-as-VPLS-leaf) sees it via the PW
+        "pw": {
+            "L1_protocol":      "VPLS_PW",
+            "L1_seq_advances":  True,
+            "L1_history":       "must_be_empty",  # PW nodes never track mobility history
+            "L4_forwarding":    "via_pw_label",
+        },
+    },
+    "spirent_evpn_to_ac": {
+        # mirror of ac_to_evpn (src and dst swap roles per move)
+        "src": {
+            "L1_protocol":      "bgp",
+            "L1_seq_advances":  True,
+            "L3_rt2_origin":    "{dst_loopback}",
+            "L4_forwarding":    "via_pw_or_bgp_nexthop",
+        },
+        "dst": {
+            "L1_protocol":      "Local",
+            "L1_seq_advances":  True,
+            "L1_history":       "must_have_entry",
+            "L3_rt2_origin":    "{dst_loopback}",
+            "L3_rt2_advertised_by_dst": True,
+            "L4_forwarding":    "via_local_ac",
+        },
+        "pw": {
+            "L1_protocol":      "VPLS_PW",
+            "L1_seq_advances":  True,
+            "L1_history":       "must_be_empty",
+            "L4_forwarding":    "via_pw_label",
+        },
+    },
+    "spirent_ac_to_pw": {
+        # AC PE loses Local; remote sees it via PW; BGP RT-2 is withdrawn
+        # because PW-learned MACs do NOT advertise RT-2.
+        "src": {
+            "L1_protocol":      "VPLS_PW",      # src now sees it from PW side
+            "L1_seq_advances":  True,
+            "L1_history":       "must_be_empty",
+            "L3_rt2_advertised_by_src": False,  # CRITICAL: PW source -> no RT-2
+            "L4_forwarding":    "via_pw_label",
+        },
+        "dst": {
+            "L1_protocol":      "Local",        # the destination is whichever AC took over
+            "L1_seq_advances":  True,
+            "L1_history":       "must_have_entry",
+            "L3_rt2_advertised_by_dst": True,   # only the AC owner advertises RT-2
+            "L4_forwarding":    "via_local_ac",
+        },
+    },
+    "spirent_pw_to_pw": {
+        # both ends see PW; no Local owner; no RT-2 advertised
+        "src": {
+            "L1_protocol":      "VPLS_PW",
+            "L1_seq_advances":  True,
+            "L1_history":       "must_be_empty",
+            "L3_rt2_advertised_by_src": False,
+            "L4_forwarding":    "via_pw_label",
+        },
+        "dst": {
+            "L1_protocol":      "VPLS_PW",
+            "L1_seq_advances":  True,
+            "L1_history":       "must_be_empty",
+            "L3_rt2_advertised_by_dst": False,
+            "L4_forwarding":    "via_pw_label",
+        },
+    },
+    "spirent_ac_to_ac": {
+        # AC<->AC across two AC-owning PEs
+        "src": {
+            "L1_protocol":      "bgp",
+            "L1_seq_advances":  True,
+            "L3_rt2_origin":    "{dst_loopback}",
+            "L3_rt2_advertised_by_src": False,
+            "L4_forwarding":    "via_pw_or_bgp_nexthop",
+        },
+        "dst": {
+            "L1_protocol":      "Local",
+            "L1_seq_advances":  True,
+            "L1_history":       "must_have_entry",
+            "L3_rt2_origin":    "{dst_loopback}",
+            "L3_rt2_advertised_by_dst": True,
+            "L4_forwarding":    "via_local_ac",
+        },
+        "pw": {
+            "L1_protocol":      "VPLS_PW",
+            "L1_seq_advances":  True,
+            "L1_history":       "must_be_empty",
+            "L4_forwarding":    "via_pw_label",
+        },
+    },
+    "spirent_evpn_evpn": {
+        # remote-EVPN to remote-EVPN: no Local on the DUT at all,
+        # only RT-2 originator changes
+        "src": {
+            "L1_protocol":      "bgp",
+            "L1_seq_advances":  True,
+            "L3_rt2_origin":    "{dst_loopback}",
+            "L4_forwarding":    "via_pw_or_bgp_nexthop",
+        },
+        "dst": {
+            "L1_protocol":      "bgp",
+            "L1_seq_advances":  True,
+            "L3_rt2_origin":    "{dst_loopback}",
+            "L4_forwarding":    "via_pw_or_bgp_nexthop",
+        },
+    },
+}
+
+
+# Required L1+L3+L4 per role for the layer-verifier. The verdict engine uses
+# this to decide which layers MUST run on which device for a given move type.
+ROLE_LAYER_RELEVANCE: Dict[str, Dict[str, str]] = {
+    "src": {
+        "L1_evi_full_detail":    "required",  # full EVI dump; parser scans for {test_mac}
+        "L1_per_mac_summary":    "required",  # quick existence/source check
+        "L3_bgp_rt2_lookup":     "required",
+        "L4_forwarding_per_mac": "required",
+        "L2_evi_detail":         "optional",
+    },
+    "dst": {
+        "L1_evi_full_detail":    "required",
+        "L1_per_mac_summary":    "required",
+        "L3_bgp_rt2_lookup":     "required",
+        "L4_forwarding_per_mac": "required",
+        "L2_evi_detail":         "required",
+    },
+    "pw": {
+        "L1_evi_full_detail":    "required",
+        "L1_per_mac_summary":    "required",
+        "L4_forwarding_per_mac": "required",
+        "L2_pw_state":           "required",
+        "L3_bgp_rt2_lookup":     "optional",
+    },
+    "rr": {
+        "L3_bgp_rt2_lookup":     "required",
+        "L1_evi_full_detail":    "optional",  # only if RR is also a VPLS leaf
     },
 }
 
@@ -218,6 +492,12 @@ def collect_all_layers(
     subs = {"evpn_name": evpn_name, "test_mac": test_mac}
 
     for layer_name, cmd_template in SHOW_COMMAND_MATRIX.items():
+        if layer_name.startswith("RESET_"):
+            # The matrix documents validated cleanup commands, but the
+            # cross-layer collector is read-only evidence collection. Running
+            # these here erases the MAC we are trying to verify.
+            result.layers_skipped.append(layer_name)
+            continue
         req = relevance.get(layer_name, "optional")
         cmd = cmd_template.format(**subs)
         try:
@@ -237,10 +517,23 @@ def collect_all_layers(
     return result
 
 
-def compare_layers(result: CrossLayerResult) -> CrossLayerResult:
+def compare_layers(
+    result: CrossLayerResult,
+    absent_is_pass: bool = False,
+) -> CrossLayerResult:
     """Run all cross-reference rules on collected layer outputs.
 
     Populates result.mismatches with any inconsistencies found.
+
+    ``absent_is_pass`` (added 2026-04-23 audit): for flush/clear/aging
+    scenarios the MAC is EXPECTED to be missing after the trigger.
+    Without this flag the cross-layer engine raises a ``mac_existence``
+    FAIL, which over-rides the deliberate PASS that ``check_mac_flags``
+    and ``check_forwarding`` already produced. When True we treat MAC
+    absence as the PASS condition: ghost-MAC checks still run because a
+    truly clean flush should leave NO traces (including no ghost), but
+    interface/source/sequence cross-references are skipped (no entry to
+    compare against).
     """
     mac = result.mac
     outputs = result.layer_outputs
@@ -260,8 +553,23 @@ def compare_layers(result: CrossLayerResult) -> CrossLayerResult:
     fib_entry = next((e for e in fib_entries if e.mac == mac), None)
     arp_entry = next((e for e in arp_entries if e.mac == mac), None)
 
-    # RULE 1: MAC must exist in mac-table
+    # RULE 1: MAC must exist in mac-table -- UNLESS this is a flush/aging
+    # scenario where absence is the PASS condition.
     if not mac_entry:
+        if absent_is_pass:
+            # Still run ghost-MAC check: a clean flush leaves NO traces,
+            # so a ghost entry would still be a real failure.
+            if mac in ghost_list:
+                result.mismatches.append(MismatchItem(
+                    rule="no_ghost",
+                    severity="FAIL",
+                    layers_involved=["ghost_macs"],
+                    detail=(
+                        f"MAC {mac} cleared from mac-table but found in ghost "
+                        f"table -- partial flush, stale entry remains"
+                    ),
+                ))
+            return result
         result.mismatches.append(MismatchItem(
             rule="mac_existence",
             severity="FAIL",
@@ -453,13 +761,21 @@ def run_cross_layer_check(
     trigger_type: str = "default",
     enable_xray: bool = False,
     xray_duration_sec: int = 5,
+    absent_is_pass: bool = False,
 ) -> CrossLayerResult:
     """Full cross-layer check pipeline: collect -> compare -> optionally XRAY.
 
     This is the single entry point for the orchestrator.
+
+    ``absent_is_pass``: propagated into ``compare_layers`` so flush/aging
+    scenarios don't false-FAIL with ``mac_existence``. The orchestrator
+    derives this from the same recipe expect keys that gate
+    ``check_mac_flags`` / ``check_forwarding`` (mac_absent_after_clear,
+    table_empty_or_flushing, mac_absent, mac_aged) -- keep the contract
+    unified across all three layers.
     """
     result = collect_all_layers(device, evpn_name, test_mac, run_show, trigger_type)
-    result = compare_layers(result)
+    result = compare_layers(result, absent_is_pass=absent_is_pass)
 
     if enable_xray and not result.passed:
         result = trigger_xray_on_mismatch(device, result, xray_duration_sec)

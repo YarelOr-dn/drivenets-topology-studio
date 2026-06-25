@@ -1,0 +1,61 @@
+{
+  "evi": {
+    "count": 200,
+    "end": 3300,
+    "start": 3101
+  },
+  "inner_vlan": {
+    "count": 200,
+    "end": 3300,
+    "start": 3101
+  },
+  "label_block_size": 8,
+  "label_budget_per_device": {
+    "first_slot": 0,
+    "last_slot": 1599,
+    "slots": 1600
+  },
+  "logical_streams": 400,
+  "pe4": {
+    "ac_parent": "ge100-18/0/0",
+    "device": "YOR_CL_PE-4",
+    "first_ac": "ge100-18/0/0.3101",
+    "last_ac": "ge100-18/0/0.3300",
+    "outer_vlan": 219
+  },
+  "pe4_site_id": {
+    "count": 200,
+    "end": 10200,
+    "start": 10001
+  },
+  "rr_sa_2": {
+    "ac_parent": "bundle-100",
+    "device": "RR-SA-2",
+    "first_ac": "bundle-100.3101",
+    "last_ac": "bundle-100.3300",
+    "spirent_outer_vlan": 215,
+    "wire_outer_vlan": 4
+  },
+  "rr_site_id": {
+    "count": 200,
+    "end": 20200,
+    "start": 20001
+  },
+  "service_count": 200,
+  "service_index": {
+    "count": 200,
+    "end": 200,
+    "start": 1
+  },
+  "stream_count": 2,
+  "traffic_strategy": "modifier",
+  "uniqueness": {
+    "destination_macs": 400,
+    "pe4_rds": 200,
+    "route_targets": 200,
+    "rr_rds": 200,
+    "service_names": 200,
+    "site_ids_total": 400,
+    "source_macs": 400
+  }
+}

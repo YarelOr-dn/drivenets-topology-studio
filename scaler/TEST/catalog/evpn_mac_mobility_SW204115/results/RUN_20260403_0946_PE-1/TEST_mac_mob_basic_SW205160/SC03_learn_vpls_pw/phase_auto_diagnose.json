@@ -1,0 +1,139 @@
+{
+  "phase_name": "auto_diagnose",
+  "started_at": "2026-04-03T09:57:15.806+00:00",
+  "completed_at": "2026-04-03T09:59:00.547+00:00",
+  "duration_sec": 104.741,
+  "command_count": 16,
+  "commands": [
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include MAC | no-more",
+      "timestamp": "2026-04-03T09:57:15.806+00:00",
+      "duration_ms": 7910,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include EVPN | no-more",
+      "timestamp": "2026-04-03T09:57:23.716+00:00",
+      "duration_ms": 6408,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include withdraw | no-more",
+      "timestamp": "2026-04-03T09:57:30.125+00:00",
+      "duration_ms": 10213,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include announce | no-more",
+      "timestamp": "2026-04-03T09:57:40.339+00:00",
+      "duration_ms": 7760,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include seq | no-more",
+      "timestamp": "2026-04-03T09:57:48.099+00:00",
+      "duration_ms": 5256,
+      "phase": "auto_diagnose",
+      "output_length": 312,
+      "output_preview": "2026-04-03T03:09:55.868043 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2087867:1071922:  output got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 100.70.0.205 remote addr: 100.64.6.134 local port: 179 remote port: 42263) seq:2860757188 ack:132682309 flags:FA msgSize:0"
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include duplicate | no-more",
+      "timestamp": "2026-04-03T09:57:53.356+00:00",
+      "duration_ms": 6808,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:55 | include suppress | no-more",
+      "timestamp": "2026-04-03T09:58:00.165+00:00",
+      "duration_ms": 9312,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 09:55 | include MAC | no-more",
+      "timestamp": "2026-04-03T09:58:09.478+00:00",
+      "duration_ms": 19775,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 09:55 | include evpn | no-more",
+      "timestamp": "2026-04-03T09:58:29.253+00:00",
+      "duration_ms": 9713,
+      "phase": "auto_diagnose",
+      "output_length": 18265,
+      "output_preview": "2026-04-03T02:09:55.034588 +03:00 [DEBUG     ] [EvpnBgpProxy.cpp:1127:OnInstallVplsRoute] [rib-manager:1344:1344] 207804:6692484: EVPN: INSTALL VPLS ROUTE: evi-id: 6, site-id: 1, nh(s): NH#1: 6.6.6.6 label-base 16 encap: vpls mtu: 1500 cw: 1 in-fl: 0 out-fl: 0 down: 0 pref: 10 offset: 1 block_size: 8 rd: 443326399789596928\n2026-04-03T02:09:55.034681 +03:00 [DEBUG     ] [EvpnSeamlessIntegrationEvpn.cpp:686:handleDfChanged] [rib-manager:1344:1344] 207805:6692484: EVPN: seamless-integration EVPN on"
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 09:55 | include FIB | no-more",
+      "timestamp": "2026-04-03T09:58:38.967+00:00",
+      "duration_ms": 20376,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+      "timestamp": "2026-04-03T09:58:59.343+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 35,
+      "output_preview": "  ETH TAG: 0\n    MAC table is empty"
+    },
+    {
+      "command": "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+      "timestamp": "2026-04-03T09:58:59.594+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 207,
+      "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+    },
+    {
+      "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+      "timestamp": "2026-04-03T09:58:59.844+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 42,
+      "output_preview": "Number of MAC-Mobility entries in redis: 0"
+    },
+    {
+      "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+      "timestamp": "2026-04-03T09:59:00.095+00:00",
+      "duration_ms": 100,
+      "phase": "auto_diagnose",
+      "output_length": 26,
+      "output_preview": "ERROR: Incomplete command."
+    },
+    {
+      "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-03T09:59:00.195+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 18,
+      "output_preview": "EvpnMacs [size: 0]"
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-03T09:59:00.446+00:00",
+      "duration_ms": 100,
+      "phase": "auto_diagnose",
+      "output_length": 442,
+      "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+    }
+  ],
+  "parsed_values": {},
+  "anomalies": []
+}

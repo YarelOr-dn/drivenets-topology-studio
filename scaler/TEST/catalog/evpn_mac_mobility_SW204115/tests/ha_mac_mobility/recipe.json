@@ -1,138 +1,1520 @@
 {
   "id": "TEST_mac_mob_ha_SW205165",
-  "name": "MAC Mobility | HA - switchovers and restarts",
+  "name": "MAC Mobility | HA - cluster PE-4 (SW-205165 + SW-240242 + SW-240243)",
   "type": "ha",
-  "feature": "evpn-mac-mobility",
-  "source": "jira:SW-204115 / SW-205165",
+  "feature": "evpn-mac-mobility-si-vpls",
+  "source": "jira:SW-204115/SW-205165 + jira:SW-204183/SW-240242 + jira:SW-204183/SW-240243",
   "jira_key": "SW-205165",
+  "linked_jira": [
+    "SW-205165",
+    "SW-240242",
+    "SW-240243",
+    "SW-204183",
+    "SW-204115",
+    "SW-194680"
+  ],
   "parent_category": "SW-204115",
+  "parent_test_category": "SW-204183",
   "created": "2026-03-20",
+  "refined": "2026-05-01",
+  "refined_by": "/TEST + /HA + /SPIRENT (DNAAS MCP teach_plan + cmd_search-validated + Confluence SoT injected via search-company-knowledge)",
+  "refined_summary": "All show/clear/process commands re-validated against dnos_cmd_search on YOR_CL_PE-4 (DNOS 26.2.0). Two new scenarios added per Jira: SC06 (SW-240242 NCC switchover with full L/v/B inventory) and SC07 (SW-240243 unknown-unicast stress around restart with traffic-driven relearn measurement and zebra<->fib-manager parity check). All Spirent ACs are now MCP teach_plan-driven via dnos_dnaas_teach_plan. Topology uses the existing star: PE-4 (cluster) hub, RR-SA-2 PW peer (v source), PE-1 EVPN peer (B source). 2026-05-01 KNOWLEDGE INJECTION (search-company-knowledge): incorporated authoritative Confluence ha-overview pageId 6309413252 + ha-policies-and-failover pageId 6309609689 + management-interfaces pageId 6311379016 + Jira SW-204183 EVPN-SI HA test category + bug catalog SW-261978/SW-263202/SW-263553/SW-262603. Key changes: (1) SSH orchestration switched from standby_ncc_mgmt_ip to mgmt0 VIP -- Confluence states standby NCC SSH is REJECTED with redirect msg. (2) ncc_credentials block added with BOTH NCC IPs + IPMI fallback. (3) container_crash_detection block added to every scenario verify (5 mandatory commands). (4) SC03 known-bug-detection for SW-261978 (fibmgrd restart can delete VPLS PW labels + flush mac-table). (5) traffic_loss_matrix updated per SW-204183: EVPN-SI uses BGP GR/LLGR (NOT NSR); MAC table EMPTIES on bgpd/zebra/fibmgrd restart and relearns from dataplane traffic; with LLGR, PWs stay forwarding throughout. (6) Authoritative event names from Confluence applied (NCC_SWITCHOVER_USER Info / NCC_FAILOVER Error distinction; SYSTEM_PROCESS_RESTART_USER Info; *_HA_VIOLATION + *_HELD_DOWN as stop conditions). (7) Standby NCC processes-down-by-design recognized: process_restart_delta queries scoped to active NCC only.",
   "device_requirements": {
     "type": "cluster",
-    "features": ["evpn", "ncc-redundancy"],
+    "device_alias": "YOR_CL_PE-4",
+    "features": [
+      "evpn",
+      "ncc-redundancy",
+      "seamless-integration",
+      "vpls-pw"
+    ],
     "min_ncp_count": 1,
-    "requires_standby_ncc": true
+    "requires_standby_ncc": true,
+    "requires_bgp_nsr_ready": true,
+    "min_failover_budget": 4,
+    "min_failover_budget_rationale": "Refinement (/HA): bumped from 1 -> 4. Cluster failover budget is consumed by NCC switchovers AND by escalated process restarts. Worst-case ALL 7 scenarios = SC01 (NCC swo, -1) + SC02..SC05 (4 process restarts, may escalate, -1 each in worst case) + SC06 (NCC swo, -1) + SC07 sweep (3 process restarts back-to-back, may escalate, -3 in worst case). Standalone DNOS budget is typically 4 in 30 min -- starting at <4 means we cannot complete the suite without budget exhaustion mid-run.",
+    "abort_run_if_budget_below": 2
+  },
+  "inter_scenario_cooldowns": {
+    "comment": "Refinement (/HA): Mandatory cooldowns to avoid budget exhaustion AND to let convergence settle between scenarios.",
+    "default_cooldown_sec": 90,
+    "between_two_ncc_switchovers_sec": 600,
+    "between_two_ncc_switchovers_rationale": "SC01 and SC06 are both NCC switchovers. Standby NCC needs ~2-3 min to reach standby-up after a switchover. Failover budget bucket also takes ~5 min to start replenishing (~30 min for full reset). 600s = safe minimum to (a) verify standby is back to standby-up, (b) verify budget recovered by 1, (c) avoid back-to-back-switchover edge cases that have triggered NCC redundancy bugs in the field.",
+    "after_process_restart_sec": 90,
+    "after_ncp_restart_sec": 120,
+    "after_ncc_switchover_sec": 300,
+    "abort_if_standby_ncc_not_recovered": true
+  },
+  "topology_context": {
+    "evpn_instance_canonical": "EVPN_SI_VPLS_1",
+    "evpn_evi_id_on_pe4": 2,
+    "evpn_evi_id_on_rr_sa_2": 1,
+    "evpn_evi_id_on_pe_1": 2,
+    "vpls_rt": "1234567:2001",
+    "shared_via": "VPLS RT 1234567:2001 + EVPN RT 1234567:2001 (l2vpn-vpls + l2vpn-evpn)",
+    "pe4_ncp_id": 18,
+    "pe4_active_ncc_runtime": {
+      "resolve": "runtime",
+      "from": "show system",
+      "expected_active_ncc_id": 1,
+      "expected_standby_ncc_id": 0
+    },
+    "pe4_ncc_management_ips": {
+      "ncc-0": "100.64.11.96",
+      "ncc-1": "100.64.4.122",
+      "mgmt0": "100.64.10.22"
+    },
+    "spirent_to_dut_paths": [
+      {
+        "source_flag": "L",
+        "label": "Local-AC source (PE-4 own AC)",
+        "dut": "YOR_CL_PE-4",
+        "ac_interface": "ge100-18/0/1",
+        "encapsulation": "untagged",
+        "fabric_vlan": 211,
+        "spirent_ingress": "//100.64.3.238/6/13 -> DNAAS-LEAF-B14 ge100-0/0/15.211",
+        "spirent_egress_path": "B-14 (fab 211) -> B-09 -> B-10 ge100-0/0/4 -> PE-4 ge100-18/0/1",
+        "src_mac_base": "00:de:ad:00:01:01",
+        "ownership_tag": "[STC-PE-4-211-L]",
+        "spirent_flags": ["--no-qinq"],
+        "expected_dut_flag": "L>",
+        "expected_dut_evi_inscope": "EVPN_SI_VPLS_1"
+      },
+      {
+        "source_flag": "v",
+        "label": "VPLS-PW source (RR-SA-2 AC -> PE-4 over PW)",
+        "via_device": "RR-SA-2",
+        "via_ac_interface": "bundle-100.2001",
+        "via_encapsulation": "double-tagged",
+        "fabric_vlan": 215,
+        "outer_vlan": 4,
+        "inner_vlan": 3001,
+        "spirent_outer_vlan": 215,
+        "spirent_ingress": "//100.64.3.238/6/13 -> DNAAS-LEAF-B14 ge100-0/0/15.215",
+        "spirent_egress_path": "B-14 (fab 215) -> B-09 -> B-15 bundle-100.215 (swap outer 215 to wire outer 4) -> RR-SA-2 bundle-100.2001",
+        "src_mac_base": "00:de:ad:00:02:01",
+        "ownership_tag": "[STC-RRSA2-215-i3001-v]",
+        "spirent_flags": ["--vlan", "215", "--inner-vlan", "3001"],
+        "pw_egress_label_to_pe4": "from RR-SA-2 show evpn vpls-pw (peer 4.4.4.4 site 4001)",
+        "expected_dut_flag": "v>",
+        "expected_dut_egress_interface": "ge100-18/0/0.14"
+      },
+      {
+        "source_flag": "B",
+        "label": "EVPN-BGP source (PE-1 AC -> PE-4 over EVPN RT-2)",
+        "via_device": "PE-1",
+        "via_ac_interface": "ge400-0/0/5.4001",
+        "via_encapsulation": "double-tagged",
+        "fabric_vlan": 214,
+        "outer_vlan": 214,
+        "inner_vlan": 4001,
+        "spirent_ingress": "//100.64.3.238/6/13 -> DNAAS-LEAF-B14 ge100-0/0/15.214",
+        "spirent_egress_path": "B-14 (fab 214) -> B-09 -> D-04 -> D-14 -> D-16 ge100-0/0/4 -> PE-1 ge400-0/0/5.4001",
+        "src_mac_base": "00:de:ad:00:03:01",
+        "ownership_tag": "[STC-PE-1-214-i4001-B]",
+        "spirent_flags": ["--vlan", "214", "--inner-vlan", "4001"],
+        "expected_dut_flag": "B>",
+        "expected_dut_nexthop": "1.1.1.1"
+      }
+    ],
+    "topology_notes": [
+      "RR-SA-2 description on bundle-100.2001 explicitly says 'isolated_from_PE1_AC' so PE-1's AC and RR-SA-2's AC do NOT share a local bridge -- the only path between them is via the EVPN_SI_VPLS_1 EVPN/VPLS overlay through PE-4 and BGP RR.",
+      "PE-4 already has baseline entries: 1x B> from 1.1.1.1 and 1x L> on ge100-18/0/1 (chassis MAC e8:c5:7a:b7:3c:10). Multi-source stress test will overlay 3 NEW MAC ranges (one per flag).",
+      "Active NCC = NCC-1 (100.64.4.122). Standby NCC = NCC-0 (100.64.11.96). Orchestrator MUST connect to standby (100.64.11.96) for any NCC-1 process restart so SSH stays alive."
+    ]
   },
   "dnos_process_mapping": {
     "bgp": "routing:bgpd",
     "fibmgrd": "routing:fibmgrd",
     "rib_manager": "routing:rib_manager",
-    "neighbour_manager": "neighbour_manager"
+    "neighbour_manager": "neighbour_manager",
+    "datapath_agent": "wb_agent",
+    "_authority": "Confluence ha-overview Section 5 'Process categories per system process list' pageId 6309413252",
+    "_classification": {
+      "routing:bgpd": {"class": "Restartable+Critical", "container": "routing-engine", "container_reset_on_failure": false},
+      "routing:fibmgrd": {"class": "Restartable+Critical", "container": "routing-engine", "container_reset_on_failure": false},
+      "routing:rib_manager": {"class": "Restartable+Critical", "container": "routing-engine", "container_reset_on_failure": false},
+      "neighbour_manager": {"class": "Restartable", "container": "routing-engine", "container_reset_on_failure": false},
+      "wb_agent": {"class": "Non-Restartable+Critical", "container": "datapath", "container_reset_on_failure": true, "_warning": "wb_agent failure -> ENTIRE NCP datapath container reset, NOT just process restart. Recovery time is container-class (60-300s), not process-class (60-180s)."}
+    }
+  },
+  "ncc_credentials": {
+    "_comment": "Refinement (/HA + Confluence management-interfaces SoT 2026-05-01): MUST hold credentials for BOTH NCCs and BOTH access methods. Per Confluence SoT: SSH to standby NCC physical IP is EXPLICITLY REJECTED with redirect message; orchestration MUST use mgmt0 VIP for active-NCC operations and IPMI/console as fallback for standby-NCC access if needed. Both NCCs must be SSH-reachable on mgmt0 (after switchover, mgmt0 follows the new active NCC). IPMI is reachable in all modes (DNOS, GI, Recovery).",
+    "primary_orchestration_target": "mgmt0",
+    "primary_orchestration_ip_runtime_key": "{mgmt0}",
+    "ncc_0": {
+      "role_default": "standby",
+      "physical_mgmt_ip": "100.64.11.96",
+      "physical_mgmt_interface": "mgmt-ncc-0/0",
+      "ssh_when_active": "OK -- SSH delivers DNOS CLI",
+      "ssh_when_standby": "REJECTED with redirect msg (Confluence management-interfaces SoT)",
+      "ipmi_ip_runtime_resolve": "show interfaces management ipmi-ncc-0/0",
+      "ipmi_available_in_modes": ["DNOS", "GI", "Recovery"],
+      "console_runtime_resolve": "show interfaces management console-ncc-0/0",
+      "credentials_alias": "PE4_NCC_DEFAULT (same as cluster default)"
+    },
+    "ncc_1": {
+      "role_default": "active",
+      "physical_mgmt_ip": "100.64.4.122",
+      "physical_mgmt_interface": "mgmt-ncc-1/0",
+      "ssh_when_active": "OK -- SSH delivers DNOS CLI",
+      "ssh_when_standby": "REJECTED with redirect msg",
+      "ipmi_ip_runtime_resolve": "show interfaces management ipmi-ncc-1/0",
+      "ipmi_available_in_modes": ["DNOS", "GI", "Recovery"],
+      "console_runtime_resolve": "show interfaces management console-ncc-1/0",
+      "credentials_alias": "PE4_NCC_DEFAULT (same as cluster default)"
+    },
+    "mgmt0_vip": {
+      "ip": "100.64.10.22",
+      "follows_active_ncc": true,
+      "available_only_in_dnos_normal_running": true,
+      "during_switchover_window": "Brief unreachable window during 60s CMC grace period; reconnect after",
+      "_authority": "Confluence management-interfaces Section 5 + Section 7 constraint 5/6"
+    },
+    "rule_orchestrator_must_follow": [
+      "1. Open SSH to {mgmt0} for ALL active-NCC orchestration (set/show/request commands).",
+      "2. NEVER open SSH to a standby-NCC physical IP for DNOS CLI -- it is rejected.",
+      "3. For NCC switchover (SC01, SC06): expect ~60s SSH disconnect during grace period, reconnect to {mgmt0} (now bound to new active NCC).",
+      "4. For active-NCC process restart (SC02, SC03, SC05, SC07): expect <30s SSH blip while bgpd/fibmgrd transitions; reconnect to {mgmt0}.",
+      "5. For NCP wb_agent restart (SC04): SSH to {mgmt0} stays alive throughout -- datapath restart does NOT affect routing-engine SSH.",
+      "6. For standby-NCC liveness check (prereq, post-test verification): use ICMP ping (NOT SSH) to standby physical IP -- it responds even though SSH is rejected.",
+      "7. If {mgmt0} becomes unreachable for >120s, fall back to IPMI on the expected new-active NCC."
+    ]
+  },
+  "container_crash_detection": {
+    "_comment": "Refinement (/HA + Confluence ha-overview SoT 2026-05-01): MUST run after EVERY scenario verify phase. Catches bugs SW-262603 (wb_agent SIGSEGV at scale), SW-261978 (fibmgrd-induced cascade), and any new container/process crashes that would silently invalidate the test. Run all 6 commands; cross-reference with baseline_process_restart_counts.json captured pre-test.",
+    "_authority": "Confluence ha-overview pageId 6309413252 Section 6.1 'Show Commands' + Section 6.3 'Events / Notifications'",
+    "run_after_every_scenario": true,
+    "commands": [
+      {
+        "label": "core_file_enum",
+        "command": "show file all core list | no-more",
+        "parser": "core_file_table",
+        "fail_action": "FAIL_AND_PRESERVE_CORE",
+        "expect_no_new_files_after": "test_start_timestamp",
+        "_priority": "highest -- ANY new core = critical bug, halt test"
+      },
+      {
+        "label": "ha_failure_history_active_ncc_routing_engine",
+        "command": "show system ncc {active_ncc_id} container routing-engine | no-more",
+        "parser": "ha_failure_history_block",
+        "fail_action": "FAIL_WITH_HISTORY",
+        "expect_no_new_history_entries_after": "test_start_timestamp"
+      },
+      {
+        "label": "ha_failure_history_standby_ncc_routing_engine",
+        "command": "show system ncc {standby_ncc_id} container routing-engine | no-more",
+        "parser": "ha_failure_history_block",
+        "fail_action": "WARN_WITH_HISTORY",
+        "_note": "Standby NCC routing-engine processes are 'down' by design per Confluence ha-overview Section 5. New HA failure history entries here may indicate cascade from active-NCC events."
+      },
+      {
+        "label": "ha_failure_history_ncp_datapath",
+        "command": "show system ncp {ncp_id} container datapath | no-more",
+        "parser": "ha_failure_history_block",
+        "fail_action": "FAIL_WITH_HISTORY",
+        "expect_no_new_history_entries_after": "test_start_timestamp",
+        "_priority": "high -- wb_agent crash here = SW-262603 candidate"
+      },
+      {
+        "label": "container_restart_counters",
+        "command": "show system details | no-more",
+        "parser": "container_restart_counter_per_nce_container",
+        "fail_action": "FAIL_IF_UNEXPECTED_INCREMENT",
+        "expected_increments_per_scenario": {
+          "SC01_ncc_switchover_mac_history": {"all_containers_on_old_active_ncc": 0, "_note": "Switchover does NOT restart containers; old-active becomes standby"},
+          "SC02_bgpd_restart_sequencing": {"routing-engine_active_ncc": 0, "_note": "Process restart only; container counter unchanged"},
+          "SC03_fibmgrd_restart": {"routing-engine_active_ncc": 0},
+          "SC04_ncp_wb_agent_restart": {"datapath_ncp": 1, "_note": "wb_agent is Non-Restartable -> entire datapath container resets"},
+          "SC05_restart_during_flap": {"routing-engine_active_ncc": 0},
+          "SC06_ncc_switchover_LvB_inventory": {"all_containers_on_old_active_ncc": 0},
+          "SC07_uu_stress_around_restart": {"routing-engine_active_ncc": 0}
+        }
+      },
+      {
+        "label": "ha_violation_events",
+        "command": "show events | no-more",
+        "parser": "event_grep_authoritative",
+        "grep_patterns": [
+          "SYSTEM_PROCESS_HA_VIOLATION",
+          "SYSTEM_CONTAINER_HA_VIOLATION",
+          "SYSTEM_PROCESS_HELD_DOWN",
+          "SYSTEM_PROCESS_FAILED",
+          "SYSTEM_CONTAINER_FAILED",
+          "NCC_STATE_CHANGE_FAILED",
+          "NCP_STATE_CHANGE_FAILED",
+          "NCP_NPU_HARD_RESTART",
+          "SYSTEM_MINIMUM_FABRIC_THRESHOLD_BELOW"
+        ],
+        "fail_action": "FAIL_WITH_EVENT_DUMP",
+        "expect_zero_matches_after": "test_start_timestamp",
+        "_authority": "Confluence ha-overview Section 6.3 -- these are the authoritative HA-violation event names; severity is Error or Critical for all"
+      }
+    ],
+    "tech_support_on_fail": {
+      "command": "request system tech-support ha_mac_mob_<scenario_id>_<timestamp> include core-dumps",
+      "trigger": "any container_crash_detection command FAILs"
+    }
+  },
+  "known_bug_signatures": {
+    "_comment": "Refinement (/HA + search-company-knowledge 2026-05-01): When a scenario hits a documented DNOS bug, mark the iteration DEGRADED (not FAIL), reference the Jira, and continue. Do NOT re-investigate during test execution -- bug investigation is a separate /debug-dnos workflow.",
+    "_authority": "~/.cursor/ha-reference/known-behaviors.md 'Known DNOS Bugs - Detection Patterns' + Confluence search 2026-05-01",
+    "SW-261978": {
+      "title": "VPLS PW labels deleted after fibmgrd restart (status REJECT, may still occur on older builds)",
+      "affects_scenarios": ["SC03_fibmgrd_restart", "SC07_uu_stress_around_restart"],
+      "trigger_command": "request system process restart ncc * routing-engine routing:fibmgrd",
+      "trace_grep_signatures": [
+        "VplsPwLabel Set: nothing changed for evi=.* ingress_pw_label=.* - skipping",
+        "FPM: Removing all stale entries",
+        "Delete mpls route - vmpi 0 label",
+        "MACT: vsi=.* mac=.*",
+        "FibL2ServiceManager.cpp.*Del remote BUM or VPLS PW route"
+      ],
+      "show_command_signatures": {
+        "show evpn vpls-pw | no-more": "Fewer PWs Installed than before",
+        "show mpls forwarding-table | no-more": "Previously installed labels missing",
+        "show evpn mac-table | no-more": "Zero v MACs (instead of relearn-from-dataplane)"
+      },
+      "workaround_command": "request system process restart ncc {active_ncc_id} routing-engine routing:rib_manager",
+      "verdict_flag": "SW-261978-fibmgrd-stale-label-delete",
+      "verdict_action": "DEGRADED_LINK_BUG"
+    },
+    "SW-263202": {
+      "title": "v MACs not learned from PW after bulk SI add (status OPEN)",
+      "affects_scenarios": ["SC07_uu_stress_around_restart"],
+      "trigger_condition": "First-time bulk SI addition + concurrent bgpd/fibmgrd restart at scale",
+      "trace_grep_signatures": [
+        "Cannot send learn event for MAC=.* Failed to resolve <gport .*encap .*> to an L2 member in vsi=.*"
+      ],
+      "show_command_signatures": {
+        "show evpn vpls-pw counters | no-more": "RX traffic flowing",
+        "show evpn instance {evpn_name} mac-table vpls-only | no-more": "Empty"
+      },
+      "workaround_command": "clear evpn mac-table instance {evpn_name}",
+      "verdict_flag": "SW-263202-bulk-si-mac-learn-race",
+      "verdict_action": "DEGRADED_LINK_BUG_RETRY"
+    },
+    "SW-263553": {
+      "title": "Receiving PE re-promotes stale Local MAC with regressed seq# after Remote PE withdraws RT-2 (status OPEN)",
+      "affects_scenarios": ["SC02_bgpd_restart_sequencing", "SC05_restart_during_flap", "SC07_uu_stress_around_restart"],
+      "detection_method": "After each scenario, check that no MAC has seq# LOWER than the high-water-mark recorded at scenario start",
+      "show_command_to_snapshot": "show evpn instance {evpn_name} mac-table detail | no-more",
+      "verdict_flag": "SW-263553-stale-mac-seq-regress",
+      "verdict_action": "DEGRADED_LINK_BUG"
+    },
+    "SW-262603": {
+      "title": "wb_agent SIGSEGV during sub-interface move at 32K PW scale (status OPEN)",
+      "affects_scenarios": ["SC04_ncp_wb_agent_restart"],
+      "_note": "Our recipe scale (~64 MACs per source) is FAR below the 32K PW trigger; flag only if observed at our scale (would indicate a different root cause)",
+      "detection_signatures": {
+        "show file all core list | no-more": "wb_agent core file",
+        "show system process wb_agent | no-more": "Restart count incremented unexpectedly",
+        "show events | i SIGSEGV | no-more": "wb_agent SIGSEGV entry"
+      },
+      "verdict_flag": "SW-262603-wb-agent-sigsegv",
+      "verdict_action": "FAIL_AND_LINK_BUG"
+    }
+  },
+  "evpn_si_authoritative_recovery_model": {
+    "_comment": "Refinement (/HA + SW-204183 SoT 2026-05-01): The QA EVPN-SI HA epic (SW-204183) explicitly states the recovery model: NSF via BGP GR/LLGR (NOT NSR), MAC table EMPTIES on bgpd/zebra/fib-mgr restart, MACs must be relearned from DATAPLANE TRAFFIC, unknown unicast MUST flood until relearn, with LLGR PWs continue forwarding while control plane recovers. This OVERRIDES the FlowSpec-VPN-style 'NSR keeps everything' model used in our pre-2026-05-01 recipe.",
+    "_authority": "Jira SW-204183 description + ~/.cursor/ha-reference/known-behaviors.md 'EVPN-SI HA Authoritative Behavior'",
+    "principle_1_nsf_protocol": "EVPN-SI uses BGP Graceful Restart (GR) + Long-Lived Graceful Restart (LLGR), NOT BGP NSR. With LLGR, BGP routes stay LLGR_STALE and forwarding continues during the helper window.",
+    "principle_2_mac_table_empties": "After bgpd OR zebra OR fibmgrd restart on the active NCC, the EVPN MAC table EMPTIES (control-plane forgets all MACs). This is EXPECTED behavior, not a bug.",
+    "principle_3_traffic_driven_relearn": "MACs MUST be relearned from dataplane traffic (src MAC in incoming frame). Idle services show 0 v MACs until next frame arrives. This is why every scenario MUST have continuous Spirent traffic during the HA event.",
+    "principle_4_unknown_unicast_flood": "Until the destination MAC is relearned, frames addressed to that MAC MUST be flooded (unknown-unicast flooding). Verify this fallback works -- absence = blackhole bug.",
+    "principle_5_llgr_keeps_forwarding": "show evpn vpls-pw MUST show PWs Installed throughout the event (LLGR holds the forwarding state even while the BGP session reconverges).",
+    "principle_6_gr_llgr_failure_path": "If GR/LLGR helper fails (e.g., RR also crashes), PWs are removed and MACs flushed. Fallback flooding still applies.",
+    "implications_for_traffic_loss_matrix": "For SC02 (bgpd restart) the L source MUST stay 0 loss (local AC unaffected by control plane). For v source, expect a brief flood window as PW MACs get relearned (tolerated). For B source, expect re-flood of RT-2 (tolerated up to 1500 frames). For SC03 (fibmgrd restart) similar pattern, but ALSO check for SW-261978 stale-label deletion.",
+    "implications_for_verify_phases": "Each scenario's verify MUST include: (a) PWs were Installed throughout (show evpn vpls-pw with timestamp interleave), (b) MAC table relearned within recovery window, (c) Spirent saw the relearn complete (per-source flow continuity)."
+  },
+  "traffic_loss_matrix": {
+    "comment": "Refinement (/HA + SW-204183 + Confluence ha-overview SoT 2026-05-01): Per-scenario per-source expected traffic loss anchored to authoritative EVPN-SI HA recovery model. THIS IS A CORRECTION FROM THE ORIGINAL MATRIX -- the prior FlowSpec-VPN-style 'NSR keeps everything = 0 loss on L+v' assumption was WRONG for EVPN-SI. EVPN-SI uses BGP GR/LLGR (NOT NSR), MAC table EMPTIES on bgpd/zebra/fibmgrd restart, MACs MUST be relearned from dataplane traffic, and unknown-unicast MUST flood until relearn. With LLGR, PWs stay forwarding (LLGR_STALE) throughout the helper window. The matrix below reflects this authoritative model.",
+    "source_authority": "Jira SW-204183 EVPN-SI HA test category 6 + Confluence ha-overview pageId 6309413252 + Confluence ha-policies-and-failover pageId 6309609689",
+    "_corrections_log": "2026-05-01: SC01/SC02/SC06 v-source tolerated_loss_frames raised from 0 to 100-200 (MAC table empties + relearn is expected). SC03 same (any loss was previously tagged as bug -- WRONG; only PW label deletion is the bug, frame loss during relearn is expected). SC02 B-source tolerated_loss_frames kept at 1500 (RT-2 re-flood is correct). nsf_promise_held key REPLACED with gr_llgr_helper_window_held + mac_relearn_completed_in_window.",
+    "verdict_action": "FAIL on any per_source loss > expected_max; WARN on loss > expected_typical; DEGRADED_LINK_BUG on PW label deletion (SW-261978) or vMACs not learned (SW-263202) or seq# regression (SW-263553)",
+    "per_scenario_per_source": {
+      "SC01_ncc_switchover": {
+        "ha_event_type": "EVPN-SI NCC switchover with BGP GR/LLGR helper window",
+        "promise": "PWs stay forwarding (LLGR); MAC table empties on new active + traffic-driven relearn; unknown-unicast flood until relearn",
+        "expected_max_recovery_seconds": 180,
+        "expected_typical_recovery_seconds": 86,
+        "L": {"expected_loss_frames": 0, "tolerated_loss_frames": 0, "rationale": "Local AC datapath fully holds during S/O; LLGR irrelevant for L source"},
+        "v": {"expected_loss_frames": 50, "tolerated_loss_frames": 100, "rationale": "PW Installed state held by LLGR. MAC table on new active is EMPTY -> first frames flood until src MAC relearned. Brief flood window expected."},
+        "B": {"expected_loss_frames": 50, "tolerated_loss_frames": 100, "rationale": "EVPN remote MACs flushed locally, RT-2 reapplied via LLGR_STALE then refreshed after BGP reconverges. Brief flood window expected."}
+      },
+      "SC02_bgpd_restart": {
+        "ha_event_type": "Process restart (bgpd) -- BGP sessions drop+reconverge with GR/LLGR",
+        "promise": "PWs stay forwarding (LLGR helper window); MAC table empties on the active NCC; MACs relearned from dataplane",
+        "expected_max_recovery_seconds": 180,
+        "expected_typical_recovery_seconds": 60,
+        "L": {"expected_loss_frames": 0, "tolerated_loss_frames": 0, "rationale": "Local AC unaffected by bgpd; L MAC source flag is dataplane-driven"},
+        "v": {"expected_loss_frames": 100, "tolerated_loss_frames": 200, "rationale": "VPLS-PW BGP signaling drops, MAC table empties, traffic-driven relearn from PW (SW-204183). Brief flood window expected."},
+        "B": {"expected_loss_frames": 750, "tolerated_loss_frames": 1500, "rationale": "EVPN BGP session drops; RT-2 entries flushed (LLGR helps but B traffic still relearned via dataplane)"}
+      },
+      "SC03_fibmgrd_restart": {
+        "ha_event_type": "Process restart (fibmgrd) -- FIB rebuild + datapath reprogram",
+        "promise": "Per SW-204183 EVPN-SI HA model: MAC table empties + traffic-driven relearn (same as bgpd restart). PW Installed state preserved by LLGR. SW-261978 risk: stale PW labels may be DELETED (DEGRADED_LINK_BUG, not FAIL).",
+        "expected_max_recovery_seconds": 180,
+        "expected_typical_recovery_seconds": 60,
+        "L": {"expected_loss_frames": 0, "tolerated_loss_frames": 0, "rationale": "Local AC unaffected by fibmgrd"},
+        "v": {"expected_loss_frames": 100, "tolerated_loss_frames": 200, "rationale": "MAC table empties + traffic-driven relearn; brief flood window expected"},
+        "B": {"expected_loss_frames": 100, "tolerated_loss_frames": 200, "rationale": "Same as v -- relearn from dataplane"},
+        "_anti_bug_check": "If show evpn vpls-pw shows fewer PWs Installed after restart than before = SW-261978 DEGRADED_LINK_BUG"
+      },
+      "SC04_ncp_wb_agent_restart": {
+        "ha_event_type": "NCP datapath container restart -- TCAM cleared + reprogrammed",
+        "promise": "Datapath restart class -- entire NCP datapath container resets (wb_agent is Non-Restartable); brief traffic impact while TCAM reloads",
+        "expected_max_recovery_seconds": 300,
+        "expected_typical_recovery_seconds": 67,
+        "L": {"expected_loss_frames": 250, "tolerated_loss_frames": 1500, "rationale": "TCAM cleared -> brief UU flooding window before MAC relearn (~5s @ 50fps = 250 frames typical, 30s outlier = 1500)"},
+        "v": {"expected_loss_frames": 250, "tolerated_loss_frames": 1500, "rationale": "Same as L -- PW MACs also need TCAM re-install"},
+        "B": {"expected_loss_frames": 250, "tolerated_loss_frames": 1500, "rationale": "Same as L -- EVPN MACs also need TCAM re-install"},
+        "_anti_bug_check": "If wb_agent core file appears = SW-262603 candidate (FAIL_AND_LINK_BUG); our scale is far below SW-262603's 32K trigger so unlikely at this scale"
+      },
+      "SC05_restart_during_flap": {
+        "ha_event_type": "Process restart (bgpd) WHILE MACs are actively flapping L<->v -- mobility-suppression interaction",
+        "promise": "Mobility-suppression must NOT leave any MAC stuck in flag P/F/D after recovery; SW-263553 risk: stale MAC re-promoted with regressed seq#",
+        "expected_max_recovery_seconds": 180,
+        "expected_typical_recovery_seconds": 90,
+        "L": {"expected_loss_frames": 50, "tolerated_loss_frames": 200, "rationale": "Some loss during flap window (mobility suppression) + relearn after restart"},
+        "v": {"expected_loss_frames": 50, "tolerated_loss_frames": 200, "rationale": "Same"},
+        "B": {"expected_loss_frames": 750, "tolerated_loss_frames": 1500, "rationale": "EVPN BGP re-converges during bgpd restart; B baseline also relearned"},
+        "_anti_bug_check": "After recovery, scan show evpn instance {evpn_name} mac-table detail; any MAC with seq# LOWER than pre-test high-water-mark = SW-263553 DEGRADED_LINK_BUG"
+      },
+      "SC06_ncc_switchover_LvB_inventory": {
+        "ha_event_type": "EVPN-SI NCC switchover with full L+v+B inventory + active traffic (BGP GR/LLGR)",
+        "promise": "PWs stay forwarding (LLGR); MAC table empties on new active + traffic-driven relearn; L source unaffected (datapath holds)",
+        "expected_max_recovery_seconds": 240,
+        "expected_typical_recovery_seconds": 86,
+        "L": {"expected_loss_frames": 0, "tolerated_loss_frames": 0, "rationale": "Local AC datapath fully holds; if any L frame lost = local AC datapath failure"},
+        "v": {"expected_loss_frames": 50, "tolerated_loss_frames": 100, "rationale": "PW Installed state held by LLGR; MAC table empty on new active -> brief flood window for src-MAC relearn"},
+        "B": {"expected_loss_frames": 50, "tolerated_loss_frames": 100, "rationale": "RT-2 entries flushed, restored from LLGR_STALE then refreshed; brief flood window for B src-MAC relearn"},
+        "_anti_bug_check": "If show evpn vpls-pw drops PWs during the helper window = LLGR malfunction (FAIL); if MAC seq# regresses = SW-263553 DEGRADED"
+      },
+      "SC07_uu_stress_per_iteration": {
+        "ha_event_type": "Per-iteration process restart with 192 MACs under unknown-unicast stress",
+        "promise": "Traffic-driven relearn must complete inside expected_max_recovery_seconds; UU flooding fills the gap (per SW-204183)",
+        "expected_max_recovery_seconds_per_iteration": 240,
+        "iterations": {
+          "fibmgrd_restart": {
+            "L": {"expected_loss_frames": 0, "tolerated_loss_frames": 0},
+            "v": {"expected_loss_frames": 100, "tolerated_loss_frames": 200},
+            "B": {"expected_loss_frames": 100, "tolerated_loss_frames": 200},
+            "rationale": "Per SW-204183: MAC table empties + traffic-driven relearn. Brief flood window expected for v/B; L unaffected. SW-261978 anti-bug check applies (PW label deletion).",
+            "_anti_bug_check": "If show evpn vpls-pw shows fewer PWs Installed = SW-261978 DEGRADED"
+          },
+          "bgpd_restart": {
+            "L": {"expected_loss_frames": 0, "tolerated_loss_frames": 0},
+            "v": {"expected_loss_frames": 100, "tolerated_loss_frames": 200},
+            "B": {"expected_loss_frames": 750, "tolerated_loss_frames": 1500},
+            "_anti_bug_check": "If MAC seq# regresses after recovery = SW-263553 DEGRADED"
+          },
+          "neighbour_manager_restart": {
+            "L": {"expected_loss_frames": 0, "tolerated_loss_frames": 200, "rationale": "ARP/ND brief impact may show on local AC during MAC relearn"},
+            "v": {"expected_loss_frames": 0, "tolerated_loss_frames": 0},
+            "B": {"expected_loss_frames": 0, "tolerated_loss_frames": 0}
+          }
+        }
+      }
+    },
+    "verdict_keys_emitted": [
+      "per_source_traffic_loss_frames",
+      "per_source_traffic_loss_seconds",
+      "per_source_recovery_time_seconds",
+      "gr_llgr_helper_window_held",
+      "mac_relearn_completed_in_window",
+      "actual_vs_expected_recovery_delta_seconds",
+      "container_crash_detection_clean",
+      "known_bug_signature_matched"
+    ]
+  },
+  "forbidden_flag_transitions": {
+    "comment": "Per-source MAC flag transitions that MUST NEVER occur after recovery. A MAC's source-flag identifies WHERE it was learned (L=local AC, v=VPLS PW, B=EVPN BGP RT-2). Cross-recovery flag swaps indicate critical bugs where the AC absorbed a remote MAC, the PW absorbed a local MAC, etc. Catches SW-194680-class issues (multi-source MAC mobility flag confusion).",
+    "rules": [
+      {"id": "FFT-01", "transition": "B->L", "label": "EVPN-BGP MAC reappeared as Local", "severity": "critical", "explanation": "PE-4 ge100-18/0/1 absorbed a MAC that was previously learned via RT-2 from PE-1. Implies bgpd RT-2 withdrawal raced with local AC learn -- breaks split-horizon and steers remote traffic into the wrong AC."},
+      {"id": "FFT-02", "transition": "v->L", "label": "VPLS-PW MAC reappeared as Local", "severity": "critical", "explanation": "PE-4 ge100-18/0/1 absorbed a MAC that was previously learned over the VPLS PW from RR-SA-2. Implies the PW peer (2.2.2.2) withdrawal raced with local AC learn -- forwarding loop risk."},
+      {"id": "FFT-03", "transition": "L->v", "label": "Local MAC reappeared as VPLS-PW", "severity": "critical", "explanation": "A MAC that was sourced from PE-4's own AC is now seen as PW-learned. Implies PE-4 broadcasted its own local MAC over PW and the PW echo was accepted -- broken split-horizon-group."},
+      {"id": "FFT-04", "transition": "L->B", "label": "Local MAC reappeared as EVPN-BGP", "severity": "critical", "explanation": "PE-4's own MAC is now seen as RT-2 from a remote PE. Implies PE-4 advertised its own local MAC and the route was reflected back through the RR -- broken RT-import filtering."},
+      {"id": "FFT-05", "transition": "v<->B", "label": "VPLS-PW <-> EVPN-BGP swap", "severity": "warning", "explanation": "A MAC's transport flag flipped between v and B during recovery. Sometimes legitimate during EVPN/VPLS transition, but persistent swap may indicate sequence-number / mac-mobility-extcom mishandling."}
+    ],
+    "verdict_key_emitted": "forbidden_flag_transitions_observed",
+    "fail_on_severity": ["critical"],
+    "warn_on_severity": ["warning"]
   },
   "ha_trigger_commands": {
     "bgp_restart": "request system process restart ncc {active_ncc_id} routing-engine routing:bgpd",
     "fibmgrd_restart": "request system process restart ncc {active_ncc_id} routing-engine routing:fibmgrd",
-    "ncc_switchover": "request system ncc switchover"
+    "rib_manager_restart": "request system process restart ncc {active_ncc_id} routing-engine routing:rib_manager",
+    "neighbour_manager_restart": "request system process restart ncc {active_ncc_id} routing-engine neighbour_manager",
+    "wb_agent_restart": "request system process restart ncp {ncp_id} forwarding-engine wb_agent",
+    "ncc_switchover": "request system ncc switchover",
+    "set_no_confirm": "set cli-no-confirm"
   },
   "show_commands_validated": {
-    "show evpn mac-table instance {evpn_name} | no-more": "SHOW_COMMANDS line 10089 -- MAC entries for specific instance",
-    "show bgp l2vpn evpn summary | no-more": "BGP L2VPN EVPN session summary",
-    "show system | no-more": "System info, node table, NCC/NCP status",
-    "show evpn instance {evpn_name} detail | no-more": "Detailed instance info for HA comparison",
-    "show evpn mac-table detail instance {evpn_name} | no-more": "Detailed MAC table with sequence numbers",
-    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "Datapath-level MAC entries for NCP sync check",
-    "show dnos-internal routing evpn mac-mobility-redis-count | no-more": "MAC mobility redis counter for HA",
-    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more": "Ghost MAC detection",
-    "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB programming state"
+    "show evpn instance {evpn_name} | no-more": "Per-instance state, EVI ID, SI, neighbors, AC list (cmd_search 2026-05-01)",
+    "show evpn instance {evpn_name} mac-table | no-more": "Authoritative per-EVI MAC table with L/B/v/P/I/F/V/A/s/si/M/>/S/ri/G flags (cmd_search 2026-05-01)",
+    "show evpn instance {evpn_name} mac-table local | no-more": "Local-only MAC entries (flag L)",
+    "show evpn instance {evpn_name} mac-table evpn-only | no-more": "EVPN-only MAC entries (flag B)",
+    "show evpn instance {evpn_name} mac-table vpls-only | no-more": "VPLS-PW-only MAC entries (flag v)",
+    "show evpn instance {evpn_name} mac-table mac {mac_address} | no-more": "Per-MAC drilldown",
+    "show evpn instance {evpn_name} mac-table suppress | no-more": "Suppressed entries (flag P)",
+    "show evpn instance {evpn_name} vpls-pw | no-more": "Per-EVI VPLS PW table (peer, ingress/egress label, status)",
+    "show evpn instance {evpn_name} vpls-pw counters | no-more": "Per-EVI per-PW packet counters (data-plane proof)",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more": "Per-NCP datapath MAC table with R/L/D/S/sp/F/ri/fl/bh flags + Egress-Encapsulation",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} flags L | no-more": "Datapath Local-only MAC count (per-source-flag breakdown for SW-240243)",
+    "show evpn forwarding-table mac-address-table instance {evpn_name} flags R | no-more": "Datapath Remote-only MAC count (covers both v and B source-flag in datapath view)",
+    "show evpn mac summary | no-more": "Global EVPN MAC summary: per-source totals (Local/Remote/VPLS) used as counter_command",
+    "show bgp l2vpn evpn summary | no-more": "BGP EVPN session state, PfxAccepted",
+    "show bgp l2vpn vpls summary | no-more": "BGP l2vpn-vpls session state (SI VPLS plane), PfxAccepted",
+    "show bgp l2vpn evpn neighbors {peer_ip} advertised-routes | include {mac} | no-more": "Per-MAC RT-2 advertisement (cross-device assertion)",
+    "show system | no-more": "Active/standby NCC roles, switchover counter, BGP NSR, failover budget, alarms",
+    "show system alarms | no-more": "Alarm baseline (SW-240242 prereq + verdict)",
+    "show system process routing:bgpd | no-more": "bgpd PID + restart counter (per-NCC)",
+    "show system process routing:fibmgrd | no-more": "fibmgrd PID + restart counter",
+    "show system process routing:rib_manager | no-more": "rib_manager PID + restart counter",
+    "show system process neighbour_manager | no-more": "neighbour_manager PID + restart counter (no container prefix)",
+    "show system process wb_agent | no-more": "wb_agent PID per NCP",
+    "show interfaces management | no-more": "Resolve mgmt-ncc-0/1 IPs for standby SSH fallback",
+    "show interfaces ge100-18/0/1 | no-more": "PE-4 L-source AC liveness (admin/oper/MAC/Network-Service)",
+    "show evpn summary | no-more": "Global EVPN counts: Total local MAC, Total remote MAC, Total VPLS MAC, Total suppressed MAC -> per-flag totals",
+    "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more": "FIB-manager local MAC view per EVI (SW-240243 zebra<->fib parity)",
+    "show dnos-internal routing fib-manager database evpn remote-mac service-instance {evpn_name} | no-more": "FIB-manager remote MAC view per EVI (SW-240243 zebra<->fib parity)",
+    "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more": "Ghost MAC detection per EVI",
+    "show dnos-internal routing evpn mac-mobility-redis-count | no-more": "Authoritative mobility Redis counter (SW-205165)",
+    "show file traces routing_engine/bgpd_traces | trailing 200 | no-more": "Tail of bgpd traces (verdict on_fail)",
+    "show file traces routing_engine/fibmgrd_traces | trailing 200 | no-more": "Tail of fibmgrd traces (verdict on_fail)"
   },
-  "invalid_commands": {
-    "show evpn mac-table evi {evi}": "DOES NOT EXIST. Use: show evpn mac-table instance {name}",
-    "show interfaces brief": "DOES NOT EXIST. Use: show interfaces description"
+  "vtysh_commands_validated": {
+    "show evpn mac": "vtysh -- via VtyshRunner.run_vtysh_command on routing-engine container -- yields zebra MAC count for SW-240243 zebra<->fib-manager parity",
+    "show evpn vni detail": "vtysh -- per-VNI/EVI zebra view"
+  },
+  "invalid_commands_avoided": {
+    "show evpn mac-table evi {evi}": "DOES NOT EXIST (cmd_search 0 results) -- use 'show evpn instance {name} mac-table'",
+    "show interfaces brief": "DOES NOT EXIST -- use 'show interfaces description'",
+    "show mac-table": "DOES NOT EXIST -- use 'show evpn instance {name} mac-table' or 'show bridge-domain instance {bd} mac-table'",
+    "show evpn detail instance {name}": "DOES NOT EXIST -- use 'show evpn instance {name}' or 'show evpn mac-table detail instance {name}'",
+    "show system core-dumps": "DOES NOT EXIST -- use 'show file all core-list'"
   },
   "scenarios": [
     {
       "id": "SC01_ncc_switchover_mac_history",
-      "name": "NCC switchover during MAC mobility; history counters / sequencing",
+      "name": "NCC switchover during MAC mobility -- baseline (SW-205165)",
+      "linked_jira": ["SW-205165"],
       "phases": {
+        "spirent_setup": {
+          "comment": "Refinement (/HA + user request 2026-05-01): SC01 was missing traffic continuity. NCC switchover is the canonical NSF event -- 0 frames lost is the explicit cluster guarantee. Without traffic running, we cannot validate NSF and the test loses its biggest value.",
+          "actions": [
+            {"call": "spirent_create_l2_stream", "label": "L source baseline", "src_mac_base": "00:de:ad:00:01:01", "macs": 4, "flags_from_topology": "L"},
+            {"call": "spirent_create_l2_stream", "label": "v source baseline", "src_mac_base": "00:de:ad:00:02:01", "macs": 4, "flags_from_topology": "v"},
+            {"call": "spirent_create_l2_stream", "label": "B source baseline", "src_mac_base": "00:de:ad:00:03:01", "macs": 4, "flags_from_topology": "B"},
+            {"call": "spirent_start_ha_baseline", "rate_mbps": 50, "frame_size": 128, "wait_for_macs_learned_sec": 30, "comment": "Run 50Mbps per source for 30s before trigger so MACs are learned and forwarding is steady"}
+          ]
+        },
         "before_snapshot": {
           "show_commands": [
-            "show evpn mac-table instance {evpn_name} | no-more",
+            "show evpn instance {evpn_name} mac-table | no-more",
+            "show evpn instance {evpn_name} mac-table detail | no-more",
             "show bgp l2vpn evpn summary | no-more",
-            "show system | no-more"
+            "show bgp l2vpn vpls summary | no-more",
+            "show evpn instance {evpn_name} vpls-pw | no-more",
+            "show evpn summary | no-more",
+            "show system | no-more",
+            "show interfaces ge100-18/0/1 counters | no-more"
           ]
         },
-        "trigger": {"ha_command": "request system ncc switchover", "ha_type": "ncc_switchover"},
-        "poll_recovery": {"timeout_sec": 180, "poll_interval_sec": 15, "reconnect_delay_sec": 45},
+        "pre_trigger_commands": [
+          {"command": "set cli-no-confirm", "via_ssh": "mgmt0", "comment": "Required before request system ncc switchover -- skips Y/N prompt. Refinement 2026-05-01: orchestration via mgmt0 VIP per Confluence management-interfaces SoT"},
+          {"command": "set logging terminal", "via_ssh": "mgmt0", "comment": "Capture NCC_SWITCHOVER_USER + SYSTEM_PROCESS_RESTART events live"}
+        ],
+        "spirent_during": {
+          "comment": "Refinement (/HA + SW-204183): capture per-source traffic loss for the entire trigger->recovery window. EVPN-SI uses BGP GR/LLGR (NOT NSR). With LLGR, PWs stay forwarding throughout. MAC table will EMPTY on bgpd restart and re-fill from dataplane traffic; expect brief flood window for v and B sources. L source (local AC) sees 0 loss.",
+          "actions": [
+            {"call": "spirent_capture_ha_loss_per_source", "sources": ["L", "v", "B"], "sample_interval_ms": 100, "expected_max_loss_per_source_frames": {"L": 0, "v": 100, "B": 100}, "expected_max_recovery_seconds": 180, "expected_typical_recovery_seconds": 86, "anchor_known_behavior": "NCC switchover -- typical 86s, BGP GR/LLGR, PWs stay forwarding (LLGR), MAC table flushed -> traffic-driven relearn"}
+          ]
+        },
+        "trigger": {
+          "ha_command": "request system ncc switchover",
+          "ha_type": "ncc_switchover",
+          "ssh_target": "mgmt0",
+          "no_confirm": true,
+          "ha_known_behavior_ref": "known-behaviors.md#NCC switchover -- typical 86s, max safe 180s, BGP GR/LLGR helper window keeps forwarding"
+        },
+        "poll_recovery": {
+          "timeout_sec": 240,
+          "poll_interval_sec": 15,
+          "reconnect_delay_sec": 45,
+          "expect_ssh_disconnect": true,
+          "verify_identity_after": true,
+          "reconnect_ip_pool": ["{mgmt0}", "{active_ncc_mgmt_ip}"],
+          "ha_gotcha_ref": "known-behaviors.md#NCC SSH / Management Access Truth Table -- mgmt0 is primary; active_ncc_mgmt_ip is post-switchover validation only. NEVER reconnect to standby_ncc_mgmt_ip (rejected).",
+          "wait_for": ["bgp_l2vpn_evpn_established", "bgp_l2vpn_vpls_established", "system_status_running"]
+        },
         "after_snapshot": {
           "show_commands": [
-            "show evpn mac-table instance {evpn_name} | no-more",
+            "show evpn instance {evpn_name} mac-table | no-more",
             "show bgp l2vpn evpn summary | no-more",
+            "show bgp l2vpn vpls summary | no-more",
+            "show evpn instance {evpn_name} vpls-pw | no-more",
             "show system | no-more"
           ]
         },
-        "verify": {"expect": {"history_consistent": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true, "check_rt2_recovery": true, "check_ha_traffic": true, "cross_layer_check": true, "xray_on_mismatch": true}}
+        "verify": {
+          "expect": {
+            "history_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": true,
+            "check_rt2_recovery": true,
+            "check_ha_traffic": true,
+            "cross_layer_check": true,
+            "xray_on_mismatch": true,
+            "ncc_active_id_swapped": true,
+            "max_recovery_seconds": 180,
+            "forbidden_flag_transitions": true,
+            "config_pristine_after": true,
+            "post_switchover_failover_budget_decrement_must_be": 1,
+            "per_source_traffic_loss_max_frames": {"L": 0, "v": 0, "B": 50, "anchor": "traffic_loss_matrix.SC01_ncc_switchover"},
+            "nsf_promise_held": true,
+            "actual_recovery_time_within_typical_band": true,
+            "interface_drop_delta_max": {"interface": "ge100-18/0/1", "max_rx_drops_during_window": 0}
+          }
+        }
       }
     },
     {
       "id": "SC02_bgpd_restart_sequencing",
-      "name": "routing:bgpd restart; MAC table / RT-2 sequencing after recovery",
+      "name": "routing:bgpd restart -- MAC table / RT-2 sequencing (SW-205165)",
+      "linked_jira": ["SW-205165"],
       "phases": {
-        "before_snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more", "show bgp l2vpn evpn summary | no-more"]},
-        "trigger": {"ha_command": "request system process restart ncc {active_ncc_id} routing-engine routing:bgpd", "ha_type": "process_restart"},
-        "poll_recovery": {"timeout_sec": 120, "poll_interval_sec": 10},
-        "after_snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
-        "verify": {"expect": {"check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true, "check_rt2_recovery": true, "check_ha_traffic": true}}
+        "spirent_setup": {
+          "comment": "Refinement: SC02 was missing traffic continuity. bgpd restart drops BGP sessions but datapath should hold L+v traffic at 0 loss; B traffic re-floods on RT-2 reconvergence (tolerated up to ~1500 frames).",
+          "actions": [
+            {"call": "spirent_create_l2_stream", "label": "L source baseline", "src_mac_base": "00:de:ad:00:01:01", "macs": 4, "flags_from_topology": "L"},
+            {"call": "spirent_create_l2_stream", "label": "v source baseline", "src_mac_base": "00:de:ad:00:02:01", "macs": 4, "flags_from_topology": "v"},
+            {"call": "spirent_create_l2_stream", "label": "B source baseline", "src_mac_base": "00:de:ad:00:03:01", "macs": 4, "flags_from_topology": "B"},
+            {"call": "spirent_start_ha_baseline", "rate_mbps": 50, "frame_size": 128, "wait_for_macs_learned_sec": 30}
+          ]
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} mac-table | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show system process routing:bgpd | no-more",
+            "show interfaces ge100-18/0/1 counters | no-more"
+          ]
+        },
+        "spirent_during": {
+          "actions": [
+            {"call": "spirent_capture_ha_loss_per_source", "sources": ["L", "v", "B"], "sample_interval_ms": 100, "expected_max_loss_per_source_frames": {"L": 0, "v": 200, "B": 1500}, "expected_max_recovery_seconds": 180, "expected_typical_recovery_seconds": 60, "anchor_known_behavior": "NCC bgpd restart -- typical 60s, MAC table EMPTIES + traffic-driven relearn (SW-204183 GR/LLGR model). RT-2 re-flood for B source. v source sees brief flood window during MAC re-fill. L source unaffected (local AC)."}
+          ]
+        },
+        "pre_trigger_commands": [
+          {"command": "echo SSH_OK", "via_ssh": "mgmt0", "max_wait_sec": 30, "ha_gotcha_ref": "known-behaviors.md#NCC SSH / Management Access Truth Table -- mgmt0 VIP precheck before trigger (Confluence management-interfaces SoT)"},
+          {"command": "set logging terminal", "via_ssh": "mgmt0"}
+        ],
+        "trigger": {
+          "ha_command": "request system process restart ncc {active_ncc_id} routing-engine routing:bgpd",
+          "ha_type": "process_restart",
+          "ssh_target": "mgmt0",
+          "ha_known_behavior_ref": "known-behaviors.md#bgpd restart -- typical 60s, max safe 180s, BGP GR/LLGR helper window, MAC table emptied + traffic-driven relearn per SW-204183. restart_count MUST increment by 1."
+        },
+        "poll_recovery": {
+          "timeout_sec": 180,
+          "poll_interval_sec": 10,
+          "wait_for": ["bgp_l2vpn_evpn_established", "bgp_l2vpn_vpls_established", "bgpd_restart_count_stable"]
+        },
+        "after_snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} mac-table | no-more",
+            "show evpn vpls-pw | no-more",
+            "show file all core list | no-more",
+            "show system ncc {active_ncc_id} container routing-engine | no-more"
+          ]
+        },
+        "verify": {
+          "expect": {
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": true,
+            "check_rt2_recovery": true,
+            "check_ha_traffic": true,
+            "forbidden_flag_transitions": true,
+            "config_pristine_after": true,
+            "process_restart_delta_must_be_exactly": {"routing:bgpd": 1},
+            "per_source_traffic_loss_max_frames": {"L": 0, "v": 200, "B": 1500, "anchor": "traffic_loss_matrix.SC02_bgpd_restart"},
+            "actual_recovery_time_within_typical_band": true,
+            "interface_drop_delta_max": {"interface": "ge100-18/0/1", "max_rx_drops_during_window": 0},
+            "mac_table_relearn_check": {"enable": true, "comment": "Per SW-204183: MAC table EMPTIES on bgpd restart, MUST relearn from dataplane traffic. Verify v MACs reappear within recovery window."},
+            "container_crash_detection_block": {"run": true, "scenario_anchor": "container_crash_detection.run_after_every_scenario"},
+            "known_bug_signature_check": {"run": true, "filter_to": ["SW-263553"], "scenario_anchor": "known_bug_signatures.SW-263553"}
+          }
+        }
       }
     },
     {
       "id": "SC03_fibmgrd_restart",
-      "name": "routing:fibmgrd restart; datapath reprogram",
+      "name": "routing:fibmgrd restart -- datapath reprogram (SW-205165)",
+      "linked_jira": ["SW-205165"],
       "phases": {
-        "before_snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
-        "trigger": {"ha_command": "request system process restart ncc {active_ncc_id} routing-engine routing:fibmgrd", "ha_type": "process_restart"},
-        "poll_recovery": {"timeout_sec": 120, "poll_interval_sec": 10},
-        "verify": {"expect": {"history_consistent": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true, "check_ha_traffic": true}}
+        "spirent_setup": {
+          "comment": "Refinement: SC03 was missing traffic continuity. fibmgrd restart should NOT impact datapath -- expected 0 loss across all 3 sources. Any non-zero loss is a regression (control-plane process restart should not flush installed forwarding entries).",
+          "actions": [
+            {"call": "spirent_create_l2_stream", "label": "L source baseline", "src_mac_base": "00:de:ad:00:01:01", "macs": 4, "flags_from_topology": "L"},
+            {"call": "spirent_create_l2_stream", "label": "v source baseline", "src_mac_base": "00:de:ad:00:02:01", "macs": 4, "flags_from_topology": "v"},
+            {"call": "spirent_create_l2_stream", "label": "B source baseline", "src_mac_base": "00:de:ad:00:03:01", "macs": 4, "flags_from_topology": "B"},
+            {"call": "spirent_start_ha_baseline", "rate_mbps": 50, "frame_size": 128, "wait_for_macs_learned_sec": 30}
+          ]
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} mac-table | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more",
+            "show system process routing:fibmgrd | no-more",
+            "show interfaces ge100-18/0/1 counters | no-more"
+          ]
+        },
+        "pre_trigger_commands": [
+          {"command": "echo SSH_OK", "via_ssh": "mgmt0", "max_wait_sec": 30, "ha_gotcha_ref": "known-behaviors.md#NCC SSH / Management Access Truth Table -- mgmt0 VIP precheck"},
+          {"command": "set logging terminal", "via_ssh": "mgmt0"}
+        ],
+        "trigger": {
+          "ha_command": "request system process restart ncc {active_ncc_id} routing-engine routing:fibmgrd",
+          "ha_type": "process_restart",
+          "ssh_target": "mgmt0",
+          "ha_known_behavior_ref": "known-behaviors.md#process restart -- typical 60s, max safe 180s. fibmgrd controls FIB programming -- forwarding-table rebuilds. WARNING SW-261978: on older builds fibmgrd restart can DELETE VPLS PW labels and FLUSH mac-table. Per SW-204183 model: MAC table emptying is EXPECTED for control-plane process restart on EVPN-SI; PW label deletion is the bug signal."
+        },
+        "poll_recovery": {"timeout_sec": 180, "poll_interval_sec": 10, "wait_for": ["fwd_table_count_recovered", "fibmgrd_restart_count_stable"]},
+        "spirent_during": {
+          "actions": [
+            {"call": "spirent_capture_ha_loss_per_source", "sources": ["L", "v", "B"], "sample_interval_ms": 100, "expected_max_loss_per_source_frames": {"L": 0, "v": 200, "B": 200}, "expected_max_recovery_seconds": 180, "expected_typical_recovery_seconds": 60, "anchor_known_behavior": "fibmgrd restart per SW-204183: MAC table empties + traffic-driven relearn. PWs stay forwarding (LLGR). If labels are deleted = SW-261978 (DEGRADED, not FAIL). Spike >500 frames per non-L source = investigate."}
+          ]
+        },
+        "verify": {
+          "expect": {
+            "history_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": true,
+            "check_ha_traffic": true,
+            "forbidden_flag_transitions": true,
+            "config_pristine_after": true,
+            "process_restart_delta_must_be_exactly": {"routing:fibmgrd": 1},
+            "per_source_traffic_loss_max_frames": {"L": 0, "v": 200, "B": 200, "anchor": "traffic_loss_matrix.SC03_fibmgrd_restart"},
+            "actual_recovery_time_within_typical_band": true,
+            "interface_drop_delta_max": {"interface": "ge100-18/0/1", "max_rx_drops_during_window": 0},
+            "vpls_pw_labels_preserved": {"enable": true, "comment": "Anti-bug check for SW-261978: show evpn vpls-pw and show mpls forwarding-table BEFORE and AFTER. PW count and label set MUST be identical. Loss of any PW label = SW-261978 reproduced -> verdict DEGRADED_LINK_BUG", "verdict_on_failure": "DEGRADED_LINK_BUG", "linked_bug": "SW-261978"},
+            "mac_table_relearn_check": {"enable": true, "comment": "Per SW-204183: MAC table empties + relearn from dataplane traffic. Verify v MACs reappear within recovery window. Empty mac-table after recovery window completion = blackhole bug."},
+            "container_crash_detection_block": {"run": true, "scenario_anchor": "container_crash_detection.run_after_every_scenario"},
+            "known_bug_signature_check": {"run": true, "filter_to": ["SW-261978", "SW-263202"], "scenario_anchor": "known_bug_signatures"}
+          }
+        }
       }
     },
     {
-      "id": "SC04_ncp_warm_restart",
-      "name": "NCP warm restart; MAC relearn / TCAM reprogram",
+      "id": "SC04_ncp_wb_agent_restart",
+      "name": "NCP wb_agent restart -- MAC relearn / TCAM reprogram (SW-205165)",
+      "linked_jira": ["SW-205165"],
       "phases": {
-        "before_snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
-        "trigger": {"action": "ncp_warm_restart", "command": "request system process restart ncp {ncp_id} forwarding-engine wb_agent"},
-        "poll_recovery": {"timeout_sec": 180, "poll_interval_sec": 15},
-        "verify": {"expect": {"history_consistent": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true, "check_ha_traffic": true}}
+        "spirent_setup": {
+          "comment": "Refinement: SC04 was missing traffic continuity. wb_agent restart clears NCP TCAM -> brief UU flooding window expected on ALL sources during MAC relearn (~5s @ 50fps = 250 frames typical, 30s outlier = 1500). This is the highest-loss legitimate scenario.",
+          "actions": [
+            {"call": "spirent_create_l2_stream", "label": "L source baseline", "src_mac_base": "00:de:ad:00:01:01", "macs": 4, "flags_from_topology": "L"},
+            {"call": "spirent_create_l2_stream", "label": "v source baseline", "src_mac_base": "00:de:ad:00:02:01", "macs": 4, "flags_from_topology": "v"},
+            {"call": "spirent_create_l2_stream", "label": "B source baseline", "src_mac_base": "00:de:ad:00:03:01", "macs": 4, "flags_from_topology": "B"},
+            {"call": "spirent_start_ha_baseline", "rate_mbps": 50, "frame_size": 128, "wait_for_macs_learned_sec": 30}
+          ]
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} mac-table | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more",
+            "show system process wb_agent | no-more",
+            "show interfaces ge100-18/0/1 counters | no-more"
+          ]
+        },
+        "pre_trigger_commands": [
+          {"command": "echo SSH_OK", "via_ssh": "active_ncc_mgmt_ip", "max_wait_sec": 30, "comment": "wb_agent restart on NCP -- SSH on active NCC stays alive (datapath restart, control-plane unaffected)"},
+          {"command": "set logging terminal", "via_ssh": "active_ncc_mgmt_ip"}
+        ],
+        "trigger": {
+          "action": "ncp_wb_agent_restart",
+          "command": "request system process restart ncp {ncp_id} forwarding-engine wb_agent",
+          "ha_type": "process_restart",
+          "ssh_target": "active_ncc_mgmt_ip",
+          "ha_known_behavior_ref": "known-behaviors.md#NCP datapath restart -- typical 67s, max safe 180s, NSR maintained, TCAM cleared+reprogrammed, brief traffic impact"
+        },
+        "poll_recovery": {"timeout_sec": 180, "poll_interval_sec": 15, "wait_for": ["fwd_table_count_recovered", "wb_agent_running", "wb_agent_restart_count_stable"]},
+        "spirent_during": {
+          "actions": [
+            {"call": "spirent_capture_ha_loss_per_source", "sources": ["L", "v", "B"], "sample_interval_ms": 100, "expected_max_loss_per_source_frames": {"L": 1500, "v": 1500, "B": 1500}, "expected_max_recovery_seconds": 180, "expected_typical_recovery_seconds": 67, "anchor_known_behavior": "NCP wb_agent restart -- TCAM cleared, brief UU flooding before MAC relearn, legitimate per-source loss up to ~1500 frames", "expected_loss_pattern": "single_window_then_recovered"}
+          ]
+        },
+        "verify": {
+          "expect": {
+            "history_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": true,
+            "check_ha_traffic": true,
+            "forbidden_flag_transitions": true,
+            "config_pristine_after": true,
+            "process_restart_delta_must_be_exactly": {"wb_agent": 1},
+            "per_source_traffic_loss_max_frames": {"L": 1500, "v": 1500, "B": 1500, "anchor": "traffic_loss_matrix.SC04_ncp_wb_agent_restart"},
+            "actual_recovery_time_within_typical_band": true,
+            "interface_drop_delta_max": {"interface": "ge100-18/0/1", "max_rx_drops_during_window": 1500, "comment": "NPU may show RX drops while TCAM is being re-installed"},
+            "expected_loss_pattern_continuous_not_intermittent": true
+          }
+        }
       }
     },
     {
       "id": "SC05_restart_during_flap",
-      "name": "Process restart during active MAC flapping; suppression state",
+      "name": "Process restart during active MAC flapping -- suppression state (SW-205165)",
+      "linked_jira": ["SW-205165"],
       "phases": {
-        "before_snapshot": {"show_commands": ["show evpn mac-table instance {evpn_name} | no-more"]},
-        "trigger": {"action": "parallel_flap_and_restart", "command": "request system process restart ncc {active_ncc_id} routing-engine routing:bgpd"},
-        "poll_recovery": {"timeout_sec": 120, "poll_interval_sec": 10, "reconnect_delay_sec": 10},
-        "verify": {"expect": {"no_stuck_blackhole": true, "check_mac_flags": true, "forbidden_flags": ["F", "D"], "check_forwarding": true, "check_ghost_macs": true, "check_mobility_counter": true, "check_ha_traffic": true}}
+        "before_snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} mac-table | no-more",
+            "show evpn instance {evpn_name} mac-table suppress | no-more",
+            "show system process routing:bgpd | no-more"
+          ]
+        },
+        "spirent_setup": {
+          "comment": "Refinement: kept the flap pattern but ALSO add a steady-state baseline so we can measure loss on non-flapping MACs separately from the flapping ones (catches the case where mobility-throttle bleeds into non-throttled MACs).",
+          "actions": [
+            {"call": "spirent_create_l2_stream", "label": "L source flap", "src_mac_base": "00:de:ad:00:01:01", "macs": 4, "flags_from_topology": "L"},
+            {"call": "spirent_create_l2_stream", "label": "v source flap", "src_mac_base": "00:de:ad:00:02:01", "macs": 4, "flags_from_topology": "v"},
+            {"call": "spirent_create_l2_stream", "label": "B source baseline (non-flapping)", "src_mac_base": "00:de:ad:00:03:01", "macs": 4, "flags_from_topology": "B"},
+            {"call": "spirent_start_flap_pattern", "rate_mbps": 5, "frame_size": 128, "wait_for_macs_learned_sec": 30, "comment": "Same MAC alternates L/v sources every 2s -- triggers mac-mobility throttle"},
+            {"call": "spirent_start_baseline_subset", "labels": ["B source baseline (non-flapping)"], "rate_mbps": 50, "comment": "Non-flapping baseline traffic to detect collateral damage on non-throttled MACs"}
+          ]
+        },
+        "spirent_during": {
+          "actions": [
+            {"call": "spirent_capture_ha_loss_per_source", "sources": ["L", "v", "B"], "sample_interval_ms": 100, "expected_max_loss_per_source_frames": {"L": 200, "v": 200, "B": 1500}, "expected_max_recovery_seconds": 180, "expected_typical_recovery_seconds": 90, "anchor_known_behavior": "bgpd restart during MAC flap -- mobility-suppression brief; B re-floods on RT-2"}
+          ]
+        },
+        "pre_trigger_commands": [
+          {"command": "echo SSH_OK", "via_ssh": "mgmt0", "max_wait_sec": 30, "ha_gotcha_ref": "known-behaviors.md#NCC SSH / Management Access Truth Table -- mgmt0 VIP precheck"},
+          {"command": "set logging terminal", "via_ssh": "mgmt0"}
+        ],
+        "trigger": {
+          "action": "parallel_flap_and_restart",
+          "command": "request system process restart ncc {active_ncc_id} routing-engine routing:bgpd",
+          "ssh_target": "mgmt0",
+          "ha_known_behavior_ref": "Tests bgpd restart while mobility-suppression is potentially engaged -- recovery must NOT leave any MAC stuck in flag P. Per SW-204183 GR/LLGR model + SW-263553: watch for stale MAC re-promotion with regressed seq# after recovery."
+        },
+        "poll_recovery": {"timeout_sec": 180, "poll_interval_sec": 10, "reconnect_delay_sec": 10, "wait_for": ["bgp_l2vpn_evpn_established", "no_stuck_suppression", "bgpd_restart_count_stable"]},
+        "verify": {
+          "expect": {
+            "no_stuck_blackhole": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": true,
+            "check_ha_traffic": true,
+            "forbidden_flag_transitions": true,
+            "config_pristine_after": true,
+            "process_restart_delta_must_be_exactly": {"routing:bgpd": 1},
+            "per_source_traffic_loss_max_frames": {"L": 200, "v": 200, "B": 1500, "anchor": "traffic_loss_matrix.SC05_restart_during_flap"},
+            "actual_recovery_time_within_typical_band": true,
+            "non_flapping_b_source_must_recover_to_zero_loss": true,
+            "interface_drop_delta_max": {"interface": "ge100-18/0/1", "max_rx_drops_during_window": 0},
+            "container_crash_detection_block": {"run": true, "scenario_anchor": "container_crash_detection.run_after_every_scenario"},
+            "known_bug_signature_check": {"run": true, "filter_to": ["SW-263553"], "scenario_anchor": "known_bug_signatures.SW-263553", "_priority": "highest -- this scenario most likely to trigger SW-263553 because of concurrent flap + restart"}
+          }
+        }
+      }
+    },
+    {
+      "id": "SC06_ncc_switchover_LvB_inventory",
+      "name": "NCC switchover with full L+v+B inventory + Spirent traffic (SW-240242)",
+      "linked_jira": ["SW-240242", "SW-205165"],
+      "scenario_class": "evpn_si_vpls_ha_inventory",
+      "multi_source_setup": {
+        "source_flags_required": ["L", "v", "B"],
+        "macs_per_source": 16,
+        "use_topology_paths": ["L", "v", "B"]
+      },
+      "phases": {
+        "spirent_setup": {
+          "actions": [
+            {"call": "spirent_create_l2_stream", "label": "L source", "src_mac_base": "00:de:ad:00:01:01", "macs": 16, "flags_from_topology": "L"},
+            {"call": "spirent_create_l2_stream", "label": "v source", "src_mac_base": "00:de:ad:00:02:01", "macs": 16, "flags_from_topology": "v"},
+            {"call": "spirent_create_l2_stream", "label": "B source", "src_mac_base": "00:de:ad:00:03:01", "macs": 16, "flags_from_topology": "B"},
+            {"call": "spirent_start_ha_baseline", "rate_mbps": 10, "frame_size": 128}
+          ]
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} mac-table | no-more",
+            "show evpn instance {evpn_name} mac-table local | no-more",
+            "show evpn instance {evpn_name} mac-table vpls-only | no-more",
+            "show evpn instance {evpn_name} mac-table evpn-only | no-more",
+            "show evpn instance {evpn_name} mac-table detail | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} flags L | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} flags R | no-more",
+            "show evpn instance {evpn_name} vpls-pw | no-more",
+            "show evpn instance {evpn_name} vpls-pw counters | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show bgp l2vpn vpls summary | no-more",
+            "show evpn summary | no-more",
+            "show system | no-more",
+            "show system alarms | no-more"
+          ],
+          "expect_per_source_macs": {
+            "L_count_min": 16,
+            "v_count_min": 16,
+            "B_count_min": 16
+          }
+        },
+        "cross_device_snapshot": {
+          "devices": ["PE-1", "RR-SA-2"],
+          "show_commands_per_device": [
+            "show evpn instance {evpn_name} mac-table | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show bgp l2vpn vpls summary | no-more",
+            "show evpn instance {evpn_name} vpls-pw | no-more"
+          ]
+        },
+        "pre_trigger_commands": [
+          {"command": "set cli-no-confirm", "via_ssh": "mgmt0", "comment": "Required before request system ncc switchover -- skips Y/N prompt. Refinement 2026-05-01: orchestration via mgmt0 VIP per Confluence management-interfaces SoT"},
+          {"command": "echo SSH_OK", "via_ssh": "mgmt0", "max_wait_sec": 30, "ha_gotcha_ref": "known-behaviors.md#NCC SSH / Management Access Truth Table -- mgmt0 VIP precheck"},
+          {"command": "set logging terminal", "via_ssh": "mgmt0", "comment": "Capture NCC_SWITCHOVER_USER + per-source MAC events"}
+        ],
+        "trigger": {
+          "ha_command": "request system ncc switchover",
+          "ha_type": "ncc_switchover",
+          "ssh_target": "mgmt0",
+          "no_confirm": true,
+          "ha_known_behavior_ref": "known-behaviors.md#NCC switchover -- typical 86s, max safe 180s. Per-source L/v/B MAC counts must all recover within max_recovery_seconds=240 (SW-240242 explicit ask). EVPN-SI uses BGP GR/LLGR -- PWs stay forwarding; MAC table empties + traffic-driven relearn (SW-204183)."
+        },
+        "poll_recovery": {
+          "timeout_sec": 240,
+          "poll_interval_sec": 10,
+          "reconnect_delay_sec": 45,
+          "expect_ssh_disconnect": true,
+          "verify_identity_after": true,
+          "reconnect_ip_pool": ["{mgmt0}", "{active_ncc_mgmt_ip}"],
+          "ha_gotcha_ref": "known-behaviors.md#NCC SSH / Management Access Truth Table -- mgmt0 first; active_ncc_mgmt_ip post-switchover only. NEVER reconnect to standby (SSH rejected).",
+          "wait_for": ["bgp_l2vpn_evpn_established", "bgp_l2vpn_vpls_established", "vpls_pw_installed", "system_status_running"]
+        },
+        "after_snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} mac-table | no-more",
+            "show evpn instance {evpn_name} mac-table local | no-more",
+            "show evpn instance {evpn_name} mac-table vpls-only | no-more",
+            "show evpn instance {evpn_name} mac-table evpn-only | no-more",
+            "show evpn instance {evpn_name} mac-table detail | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} flags L | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} flags R | no-more",
+            "show evpn instance {evpn_name} vpls-pw | no-more",
+            "show evpn instance {evpn_name} vpls-pw counters | no-more",
+            "show bgp l2vpn evpn summary | no-more",
+            "show bgp l2vpn vpls summary | no-more",
+            "show evpn summary | no-more",
+            "show system | no-more",
+            "show system alarms | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+            "show dnos-internal routing evpn mac-mobility-redis-count | no-more"
+          ]
+        },
+        "spirent_during": {
+          "comment": "Refinement (/HA + SW-204183): EVPN-SI uses BGP GR/LLGR (NOT NSR). With LLGR, PWs stay forwarding (LLGR_STALE) throughout the helper window. MAC table EMPTIES on the new active NCC and re-fills from dataplane traffic. L source (local AC) sees ~0 loss. v source (PW peer) and B source (EVPN remote) see brief flood window during MAC re-fill. ANY traffic loss > matrix value is a regression.",
+          "actions": [
+            {"call": "spirent_capture_ha_loss_per_source", "sources": ["L", "v", "B"], "sample_interval_ms": 100, "expected_max_loss_per_source_frames": {"L": 0, "v": 100, "B": 100}, "expected_max_recovery_seconds": 240, "expected_typical_recovery_seconds": 86, "anchor_known_behavior": "NCC switchover -- typical 86s, BGP GR/LLGR helper window keeps PWs forwarding, MAC table flushed -> traffic-driven relearn (SW-204183 EVPN-SI HA test category 6)"}
+          ]
+        },
+        "verify": {
+          "expect": {
+            "history_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": true,
+            "check_rt2_recovery": true,
+            "check_ha_traffic": true,
+            "cross_layer_check": true,
+            "per_source_flag_counts": {
+              "L_must_recover_to": "before_count",
+              "v_must_recover_to": "before_count",
+              "B_must_recover_to": "before_count",
+              "max_recovery_seconds": 240
+            },
+            "per_source_traffic_loss_max_frames": {"L": 0, "v": 100, "B": 100, "anchor": "traffic_loss_matrix.SC06_ncc_switchover_LvB_inventory"},
+            "evpn_si_gr_llgr_held": {"enable": true, "comment": "Per SW-204183: with LLGR, show evpn vpls-pw MUST report PWs Installed THROUGHOUT the event (sample every 10s). Loss of installed state during helper window = LLGR malfunction."},
+            "mac_table_relearn_check": {"enable": true, "comment": "MAC table empties + relearns from dataplane within recovery window. Idle MACs (no traffic) won't relearn -- this is OK and expected per SW-204183. Flag F/D presence for any active MAC = bug."},
+            "actual_recovery_time_within_typical_band": true,
+            "interface_drop_delta_max": {"interface": "ge100-18/0/1", "max_rx_drops_during_window": 0},
+            "cross_device_consistency": {
+              "devices": ["PE-1", "RR-SA-2"],
+              "per_mac_advertisement_must_match": true,
+              "no_stale_remote_after": true
+            },
+            "forbidden_flag_transitions": true,
+            "config_pristine_after": true,
+            "post_switchover_failover_budget_decrement_must_be": 1,
+            "container_crash_detection_block": {"run": true, "scenario_anchor": "container_crash_detection.run_after_every_scenario"},
+            "known_bug_signature_check": {"run": true, "filter_to": ["SW-263202", "SW-263553"], "scenario_anchor": "known_bug_signatures"},
+            "deprecated_lenient_window_replaced": "spirent_loss_window_max_sec:90 was REMOVED. Per SW-204183 GR/LLGR model, brief MAC-relearn flood for v/B is normal; L MUST stay 0."
+          }
+        }
+      }
+    },
+    {
+      "id": "SC07_uu_stress_around_restart",
+      "name": "Unknown-unicast stress around restart (SW-240243) -- 3-source mix L/v/B with traffic-driven relearn",
+      "linked_jira": ["SW-240243", "SW-204183"],
+      "scenario_class": "evpn_si_vpls_ha_uu_stress",
+      "multi_source_setup": {
+        "source_flags_required": ["L", "v", "B"],
+        "macs_per_source": 64,
+        "use_topology_paths": ["L", "v", "B"]
+      },
+      "trigger_sweep": [
+        {
+          "label": "fibmgrd_restart",
+          "order_rationale": "Refinement D: fibmgrd FIRST -- this is where SW-240243 fib<->zebra split-brain risk peaks AND where SW-261978 (stale label deletion + mac-table flush) most likely manifests. If split-brain is going to manifest, fail fast here while datapath state is still pristine from baseline (not contaminated by a prior bgpd RT-2 re-flood).",
+          "ha_command": "request system process restart ncc {active_ncc_id} routing-engine routing:fibmgrd",
+          "ssh_target": "mgmt0",
+          "ha_known_behavior_ref": "fibmgrd typical 60s / max 180s -- forwarding-table rebuilds; SW-240243 fib<->zebra split-brain risk; SW-261978 PW label deletion risk on older builds. Per SW-204183 EVPN-SI HA test cat 6: MAC table empties + traffic-driven relearn is EXPECTED (not a bug).",
+          "expected_per_source_dip": {"L": "minimal", "v": "may_dip_during_relearn", "B": "may_dip_during_relearn", "comment": "Per SW-204183: control-plane MAC table empties on fibmgrd restart and re-fills from dataplane; expect brief flood window for v/B"},
+          "stop_sweep_on_split_brain": true,
+          "split_brain_indicator": "fib_local_mac_count vs mac_count_local mismatch by > 1 within 60s after recovery, OR show evpn vpls-pw shows fewer PWs Installed than before (SW-261978 signal)",
+          "anti_bug_check_post_restart": [
+            "show evpn vpls-pw | no-more (compare to before -- PW count + label set MUST match; loss = SW-261978 DEGRADED)",
+            "show file all core list | no-more (any new core = critical)"
+          ]
+        },
+        {
+          "label": "bgpd_restart",
+          "order_rationale": "After fibmgrd parity is proven clean, bgpd restart is the next highest-blast-radius trigger -- BGP sessions drop, MAC table empties, traffic-driven relearn (SW-204183), RT-2 re-flood happens, B/v counts dip then recover.",
+          "ha_command": "request system process restart ncc {active_ncc_id} routing-engine routing:bgpd",
+          "ssh_target": "mgmt0",
+          "ha_known_behavior_ref": "bgpd typical 60s / max 180s -- BGP sessions drop+re-converge with GR/LLGR, MAC table empties (per SW-204183), RT-2 re-flood, B/v counts dip then recover. SW-263553 risk: stale MAC re-promoted with regressed seq# after recovery.",
+          "expected_per_source_dip": {"L": "no_dip", "v": "must_dip_during_relearn", "B": "must_dip_during_relearn"},
+          "anti_bug_check_post_restart": [
+            "show evpn instance {evpn_name} mac-table detail | no-more (verify no MAC has seq# LOWER than pre-test high-water-mark -- SW-263553 signal)",
+            "show file all core list | no-more"
+          ]
+        },
+        {
+          "label": "neighbour_manager_restart",
+          "order_rationale": "Lowest blast radius -- ARP/ND only. Run last so prior triggers run from a clean baseline.",
+          "ha_command": "request system process restart ncc {active_ncc_id} routing-engine neighbour_manager",
+          "ssh_target": "mgmt0",
+          "ha_known_behavior_ref": "neighbour_manager controls ARP/ND -- impact on local MAC discovery, L count may briefly dip and recover quickly",
+          "expected_per_source_dip": {"L": "may_dip_briefly", "v": "no_impact", "B": "no_impact"},
+          "anti_bug_check_post_restart": [
+            "show file all core list | no-more"
+          ]
+        }
+      ],
+      "trigger_sweep_inter_iteration": {
+        "cooldown_sec": 90,
+        "wait_for_ssh_recovery": true,
+        "verify_failover_budget_min": 1,
+        "abort_sweep_if_budget_exhausted": true,
+        "ha_gotcha_ref": "known-behaviors.md#7 BGP bestpath-delay -- 90s cooldown lets convergence settle before next trigger"
+      },
+      "pre_trigger_commands_each_iteration": [
+        {"command": "echo SSH_OK", "via_ssh": "mgmt0", "max_wait_sec": 30, "ha_gotcha_ref": "known-behaviors.md#NCC SSH / Management Access Truth Table -- mgmt0 VIP precheck before each SC07 iteration"},
+        {"command": "set logging terminal", "via_ssh": "mgmt0"}
+      ],
+      "phases": {
+        "spirent_setup": {
+          "actions": [
+            {"call": "spirent_create_l2_stream", "label": "L source", "src_mac_base": "00:de:ad:00:01:01", "macs": 64, "flags_from_topology": "L"},
+            {"call": "spirent_create_l2_stream", "label": "v source", "src_mac_base": "00:de:ad:00:02:01", "macs": 64, "flags_from_topology": "v"},
+            {"call": "spirent_create_l2_stream", "label": "B source", "src_mac_base": "00:de:ad:00:03:01", "macs": 64, "flags_from_topology": "B"},
+            {"call": "spirent_start_ha_baseline", "rate_mbps": 50, "frame_size": 128, "comment": "SW-240243: traffic must be running so the datapath actually holds the entries; otherwise wb-agent has nothing to replay"}
+          ]
+        },
+        "before_snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} mac-table | no-more",
+            "show evpn instance {evpn_name} mac-table local | no-more",
+            "show evpn instance {evpn_name} mac-table vpls-only | no-more",
+            "show evpn instance {evpn_name} mac-table evpn-only | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} flags L | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} flags R | no-more",
+            "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more",
+            "show dnos-internal routing fib-manager database evpn remote-mac service-instance {evpn_name} | no-more",
+            "show evpn summary | no-more",
+            "show evpn instance {evpn_name} vpls-pw counters | no-more"
+          ],
+          "vtysh_commands": [
+            "show evpn mac"
+          ],
+          "expect_per_source_macs": {
+            "L_count_min": 64,
+            "v_count_min": 64,
+            "B_count_min": 64
+          },
+          "fib_zebra_parity_baseline": {
+            "compute": "abs(zebra_local_count - fib_local_count) <= 1 AND abs(zebra_remote_count - fib_remote_count) <= 1"
+          }
+        },
+        "trigger": {
+          "ha_type": "trigger_sweep",
+          "loop_through": "trigger_sweep",
+          "between_iterations_sec": 120,
+          "no_confirm": true,
+          "ha_gotcha_ref": "known-behaviors.md#7 BGP bestpath-delay -- routes go N -> 0 -> 2 (intermediate) -> N. Don't panic at low intermediate counts"
+        },
+        "poll_recovery": {
+          "timeout_sec": 240,
+          "poll_interval_sec": 10,
+          "per_iteration": true,
+          "tolerate_intermediate_count_low": true,
+          "stable_observations_required": 2,
+          "stable_window_sec": 30,
+          "wait_for": ["per_iteration_process_restart_count_stable", "spirent_per_source_traffic_recovered"],
+          "comment": "SW-240243: count must be STABLE for 30s before declaring recovery -- guards against bestpath-delay false-positive 'recovery' at count==2. Refinement: also require process restart_count to be stable for 60s -- guards against HA escalation policy flapping the process (3rd restart in 5min escalates to container restart, which would silently invalidate the test)."
+        },
+        "after_each_trigger_snapshot": {
+          "show_commands": [
+            "show evpn instance {evpn_name} mac-table | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} flags L | no-more",
+            "show evpn forwarding-table mac-address-table instance {evpn_name} flags R | no-more",
+            "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more",
+            "show dnos-internal routing fib-manager database evpn remote-mac service-instance {evpn_name} | no-more",
+            "show evpn summary | no-more",
+            "show evpn instance {evpn_name} vpls-pw counters | no-more",
+            "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more",
+            "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+            "show system process routing:bgpd | no-more",
+            "show system process routing:fibmgrd | no-more",
+            "show system process neighbour_manager | no-more"
+          ],
+          "vtysh_commands": [
+            "show evpn mac"
+          ]
+        },
+        "spirent_during": {
+          "comment": "Refinement: per-iteration matrix anchored to traffic_loss_matrix.SC07_uu_stress_per_iteration. fibmgrd iter expects 0 loss everywhere (any loss = SW-240243 split-brain). bgpd iter tolerates B-source up to 1500 frames. neighbour_manager iter tolerates L-source up to 200 frames.",
+          "actions": [
+            {"call": "spirent_capture_ha_loss_per_source_per_iteration", "sources": ["L", "v", "B"], "iterations_anchor": "traffic_loss_matrix.SC07_uu_stress_per_iteration.iterations", "sample_interval_ms": 100, "expected_max_recovery_seconds_per_iteration": 240, "comment": "SW-240243: sample by traffic, not by show commands alone"}
+          ]
+        },
+        "verify": {
+          "expect": {
+            "history_consistent": true,
+            "check_mac_flags": true,
+            "forbidden_flags": ["F", "D"],
+            "check_forwarding": true,
+            "check_ghost_macs": true,
+            "check_mobility_counter": true,
+            "check_ha_traffic": true,
+            "cross_layer_check": true,
+            "per_source_flag_counts": {
+              "L_must_recover_to": "before_count",
+              "v_must_recover_to": "before_count",
+              "B_must_recover_to": "before_count",
+              "max_recovery_seconds": 180,
+              "per_iteration": true
+            },
+            "fib_zebra_parity": {
+              "delta_local_max": 1,
+              "delta_remote_max": 1,
+              "fail_on_split_brain": true,
+              "comment": "SW-240243 explicit pass criterion: No MAC stuck in fib-manager but not in zebra or vice versa"
+            },
+            "spirent_traffic_relearn_per_source": {
+              "L_max_relearn_seconds": 30,
+              "v_max_relearn_seconds": 60,
+              "B_max_relearn_seconds": 90,
+              "comment": "SW-240243: Datapath forwarding for the full MAC set resumes within the recovery window (sample by traffic, not by show commands alone)"
+            },
+            "uu_flooding_during_unknown_window": {
+              "expect_observed": true,
+              "comment": "Per parent SW-204183: Unknown unicast must be flooded until MAC is relearned"
+            },
+            "forbidden_flag_transitions": true,
+            "config_pristine_after": true,
+            "process_restart_delta_must_be_exactly": {
+              "routing:fibmgrd": 1,
+              "routing:bgpd": 1,
+              "neighbour_manager": 1,
+              "comment": "Each iteration restarts a different process EXACTLY ONCE. If any restart_count delta != 1, HA escalation kicked in (container restart, NCC switchover) and the test result is invalid."
+            },
+            "interface_drop_delta_max": {
+              "interface": "ge100-18/0/1",
+              "max_rx_drops_during_uu_window": 0,
+              "comment": "Refinement: SW-240243 stress with 192 MACs on shared AC could expose NPU pre-EVPN-relearn drops. Quantify."
+            },
+            "per_source_traffic_loss_per_iteration_max_frames": {
+              "fibmgrd_restart": {"L": 0, "v": 0, "B": 0},
+              "bgpd_restart": {"L": 0, "v": 0, "B": 1500},
+              "neighbour_manager_restart": {"L": 200, "v": 0, "B": 0},
+              "anchor": "traffic_loss_matrix.SC07_uu_stress_per_iteration.iterations"
+            },
+            "actual_recovery_time_within_typical_band_per_iteration": true,
+            "ncp_health_after_each_iteration": {
+              "wb_agent_must_remain_up": true,
+              "no_ncp_restart_during_iteration": true,
+              "comment": "Refinement: validates the NCC-side process restart didn't cascade into NCP-side process churn"
+            }
+          }
+        }
       }
     }
   ],
   "runtime_parameters": {
-    "evpn_name": {"resolve": "runtime"},
-    "active_ncc_id": {"resolve": "runtime", "from": "show system"}
+    "evpn_name": {"resolve": "runtime", "default": "EVPN_SI_VPLS_1"},
+    "active_ncc_id": {"resolve": "runtime", "from": "show system", "default": 1},
+    "standby_ncc_id": {"resolve": "runtime", "from": "show system", "default": 0},
+    "ncp_id": {"resolve": "runtime", "from": "show system", "default": 18},
+    "standby_ncc_mgmt_ip": {"resolve": "runtime", "from": "show interfaces management", "key": "mgmt-ncc-{standby_ncc_id}", "default": "100.64.11.96", "_use": "ICMP-only -- SSH is REJECTED on standby NCC physical IP per Confluence management-interfaces SoT"},
+    "active_ncc_mgmt_ip": {"resolve": "runtime", "from": "show interfaces management", "key": "mgmt-ncc-{active_ncc_id}", "default": "100.64.4.122", "_use": "Direct SSH to active NCC works; preferred = mgmt0 VIP because it follows active across switchover"},
+    "mgmt0": {"resolve": "runtime", "from": "show interfaces management", "key": "mgmt0", "default": "100.64.10.22", "_use": "PRIMARY orchestration target -- floating VIP that follows active NCC. ALL DNOS CLI sessions opened by the orchestrator MUST go through this. Per Confluence management-interfaces SoT pageId 6311379016."},
+    "ipmi_ncc_0": {"resolve": "runtime", "from": "show interfaces management", "key": "ipmi-ncc-0", "default": null, "_use": "Out-of-band fallback if NCC-0 unreachable via in-band; available in DNOS, GI, and Recovery modes"},
+    "ipmi_ncc_1": {"resolve": "runtime", "from": "show interfaces management", "key": "ipmi-ncc-1", "default": null, "_use": "Out-of-band fallback if NCC-1 unreachable via in-band; available in DNOS, GI, and Recovery modes"},
+    "console_ncc_0": {"resolve": "runtime", "from": "show interfaces management", "key": "console-ncc-0", "default": null, "_use": "Last-resort console access; reachable from network when console redirection enabled"},
+    "console_ncc_1": {"resolve": "runtime", "from": "show interfaces management", "key": "console-ncc-1", "default": null, "_use": "Last-resort console access; reachable from network when console redirection enabled"},
+    "ssh_orchestration_target_runtime_resolution": {
+      "_authority": "Confluence management-interfaces pageId 6311379016 + ha-overview pageId 6309413252",
+      "rule": "Orchestrator MUST use {mgmt0} for ALL DNOS CLI in this recipe. {standby_ncc_mgmt_ip} is for ICMP-ping liveness only.",
+      "post_switchover_reconnect": "After NCC switchover events, mgmt0 is unreachable for ~60s during the CMC grace period. Reconnect to mgmt0 (which now binds to the new active NCC). DO NOT reconnect to {standby_ncc_mgmt_ip} (the old active, now standby) -- SSH is rejected."
+    }
   },
-  "verdict": {"layers": 14, "stop_on_fail": false},
+  "prerequisites": [
+    {
+      "check": "device_identity",
+      "expect_system_name": "YOR_CL_PE-4",
+      "expect_system_type_prefix": "CL-",
+      "fix_via": "operator: confirm DUT before run"
+    },
+    {
+      "check": "ha_failover_budget",
+      "min_remaining_per_chunk": 1,
+      "platform_max_overrides": {
+        "CL-86": 2,
+        "CL-58": 2,
+        "SA-36CD-S": 4
+      },
+      "show_command": "show system | include Escalation-stop-failovers",
+      "parser_max": "Max-failover\\((?P<max>\\d+)\\)\\((?P<remaining>\\d+)\\)",
+      "fix_via": "wait 30 minutes for budget reset",
+      "comment": "Refinement (/HA + live PE-4 verification 2026-05-01): CL-86 platform max=2 per 30-min window (hardcoded by DNOS). Previous min_remaining:4 was unachievable on CL-86. Recipe now uses per-chunk validation: each chunk needs >=1 remaining, then waits for window reset before next chunk.",
+      "chunking_strategy": {
+        "_authority": "Confluence ha-policies-and-failover pageId 6309609689 + SW-204183",
+        "rule": "Split scenarios into chunks of <= max_remaining budget-consuming scenarios per 30-min window. Operator-initiated process restart (SYSTEM_PROCESS_RESTART_USER, Info severity) does NOT consume budget. Only NCC switchover (NCC_SWITCHOVER_USER) and HA-escalated container/NCC restarts consume budget.",
+        "budget_cost_per_scenario": {
+          "SC01_ncc_switchover_mac_history": 1,
+          "SC02_bgpd_restart_sequencing": 0,
+          "SC03_fibmgrd_restart": 0,
+          "SC04_ncp_wb_agent_restart": 1,
+          "SC05_restart_during_flap": 0,
+          "SC06_ncc_switchover_LvB_inventory": 1,
+          "SC07_uu_stress_around_restart": 0
+        },
+        "default_chunks_for_CL-86_max_2": [
+          {"chunk_id": 1, "scenarios": ["SC01_ncc_switchover_mac_history", "SC02_bgpd_restart_sequencing", "SC03_fibmgrd_restart"], "budget_used": 1, "post_chunk_wait_min": 30, "_note": "SC01 consumes 1 budget; SC02/SC03 are user-restart, no budget cost. After chunk: wait for failover-period reset."},
+          {"chunk_id": 2, "scenarios": ["SC04_ncp_wb_agent_restart", "SC05_restart_during_flap"], "budget_used": 1, "post_chunk_wait_min": 30, "_note": "SC04 consumes 1 budget (datapath container reset). SC05 is user-restart, no cost."},
+          {"chunk_id": 3, "scenarios": ["SC06_ncc_switchover_LvB_inventory", "SC07_uu_stress_around_restart"], "budget_used": 1, "post_chunk_wait_min": 0, "_note": "SC06 consumes 1 budget. SC07 is user-restart, no cost. Last chunk -- no cooldown needed."}
+        ]
+      }
+    },
+    {
+      "check": "standby_ncc_state",
+      "expect": "standby-up",
+      "fix_via": "wait until standby NCC reaches standby-up"
+    },
+    {
+      "check": "bgp_nsr_ready",
+      "expect": "ready",
+      "fix_via": "operator review -- some scenarios may proceed with WARN"
+    },
+    {
+      "check": "evpn_si_vpls_1_present",
+      "expect_evi": 2,
+      "expect_seamless_integration": true,
+      "expect_ac_count_min": 1,
+      "fix_via": "operator: ensure EVPN_SI_VPLS_1 still configured on PE-4"
+    },
+    {
+      "check": "vpls_pw_installed",
+      "expect_peer": "2.2.2.2",
+      "expect_state": "Installed",
+      "fix_via_mcp": null,
+      "fix_via": "/HA pre-restart triage; PW must be Installed before HA test starts"
+    },
+    {
+      "check": "spirent_session_alive",
+      "expect_session_name": "dn_spirent_main",
+      "fix_via": "spirent_tool.py status --json then connect --create-if-missing"
+    },
+    {
+      "check": "dnaas_path_pe4_L",
+      "fix_via_mcp": {
+        "tool": "dnos_dnaas_teach_plan",
+        "args": {"vlan": 211, "dut": "YOR_CL_PE-4", "test_mac": "00:de:ad:00:01:01"}
+      },
+      "pass_when": "frame_recipe.recipe_blockers == []",
+      "feeds": "active_test_session.expected_traffic.L"
+    },
+    {
+      "check": "dnaas_path_via_rr_sa_2_v",
+      "fix_via_mcp": {
+        "tool": "dnos_dnaas_teach_plan",
+        "args": {"vlan": 215, "dut": "RR-SA-2", "test_mac": "00:de:ad:00:02:01", "inner_vlan": 3001}
+      },
+      "pass_when": "frame_recipe.recipe_blockers == [] AND frame_recipe.encapsulation == 'double-tagged' AND frame_recipe.outer_vlan == 215 AND frame_recipe.inner_vlan == 3001",
+      "feeds": "active_test_session.expected_traffic.v",
+      "comment": "Refinement 2026-05-02: v source enters at RR-SA-2 L2 AC bundle-100.2001 through alternate fabric VLAN 215 because the VLAN 214 B09->B15 hop is missing. B-15 swaps outer 215 to DUT wire outer 4; RR-SA-2 AC matches outer 4 inner 3001 and PWs to PE-4 via EVPN_SI_VPLS_1.",
+      "future_pw_learning_test_variant": {
+        "_purpose": "Optional enhancement: create RR-SA-2 bundle-100.4101 (outer 214 inner 4101) added to a NEW EVPN instance with RT shared with PE-1's EVPN_SI_VPLS_1 (RT=1234567:2001). Spirent injects MAC at RR-SA-2 AC -> MAC learned locally on RR-SA-2 -> advertised via VPLS PW to PE-1 -> PE-1 sees MAC as PW-learned (flag v on PE-1). This isolates the test from the existing .2001 production AC.",
+        "_creation_config_rr_sa_2": "interfaces bundle-100.4101 vlan-tags outer-tag 214 inner-tag 4101 + l2-service enabled + admin-state enabled; network-services evpn instance EVPN_TEST_PW_LEARNING evi 9999 route-target 1234567:2001 (matches PE-1 EVPN_SI_VPLS_1) + interface bundle-100.4101",
+        "_then_update_pass_when": "frame_recipe.inner_vlan == 4101 AND dut_target.ac_interface == 'bundle-100.4101'",
+        "_status_2026_05_01": "NOT YET CREATED -- this is a documented variant that the user proposed but isn't required for the current 7-scenario suite. The current recipe uses existing .2001 which already PWs to PE-4 (sufficient for v source HA tests)."
+      }
+    },
+    {
+      "check": "dnaas_path_via_pe1_B",
+      "fix_via_mcp": {
+        "tool": "dnos_dnaas_teach_plan",
+        "args": {"vlan": 214, "dut": "PE-1", "test_mac": "00:de:ad:00:03:01", "inner_vlan": 4001}
+      },
+      "pass_when": "frame_recipe.recipe_blockers == [] AND frame_recipe.encapsulation == 'double-tagged' AND frame_recipe.outer_vlan == 214 AND frame_recipe.inner_vlan == 4001",
+      "feeds": "active_test_session.expected_traffic.B",
+      "comment": "Refinement (/HA 2026-05-01): B source enters at PE-1 L2 AC ge400-0/0/5.4001 (outer 214 inner 4001, EVPN_SI_VPLS_1 site=1001 RT=1234567:2001 RD=1.1.1.1:1001). MAC learned locally on PE-1 -> advertised via EVPN BGP RT-2 to PE-4 (peer 4.4.4.4). Pass criteria relaxed from literal sub-if name to encap+outer+inner triple (inner=4001 ensures we land on EVPN_SI_VPLS_1 AC that BGPs to PE-4). The shared-fabric design: outer 214 is the fabric VLAN; inner tag picks DUT (RR-SA-2 .2001 vs PE-1 .4001)."
+    },
+    {
+      "check": "dnaas_health_211",
+      "fix_via_mcp": {"tool": "dnos_dnaas_diagnose", "args": {"vlan": 211, "dut": "YOR_CL_PE-4"}},
+      "pass_when": "overall_verdict in ['pass','warn']",
+      "comment": "Refinement (/HA 2026-05-01): added explicit dut=YOR_CL_PE-4. Without dut, MCP defaults to PE-1 (line 841 in dnos_config_mcp/dnaas.py) which has no v211 receiver -> verdict fail. Always specify dut for diagnose."
+    },
+    {
+      "check": "dnaas_health_214",
+      "fix_via_mcp": {"tool": "dnos_dnaas_diagnose", "args": {"vlan": 214, "dut": "YOR_CL_PE-4"}},
+      "pass_when": "overall_verdict in ['pass','warn']",
+      "comment": "Refinement (/HA 2026-05-01): added explicit dut=YOR_CL_PE-4 for consistency."
+    },
+    {
+      "check": "vtysh_runner_live",
+      "comment": "Refinement (/HA): promoted from 'file present' to LIVE 'show evpn mac' execution. The previous check only validated vtysh_runner.py exists, not that it ACTUALLY works on cluster PE-4. Cluster routing-engine container layout differs from standalone -- a passing existence check with a failing live invocation would silently hide vtysh data from SC07 verify (defeating fib<->zebra parity).",
+      "live_command": "vtysh -c 'show evpn mac' | wc -l",
+      "via": "vtysh_runner.py --device YOR_CL_PE-4 --command 'show evpn mac' --container routing-engine",
+      "expect_exit_code": 0,
+      "expect_output_match": "MACs",
+      "expect_runtime_max_sec": 30,
+      "fix_via": "operator: confirm vtysh_runner.py works against cluster active NCC routing-engine container; check SSH creds and container exec method"
+    },
+    {
+      "check": "process_restart_baseline_snapshot",
+      "comment": "Refinement (/HA): snapshot per-process restart_count BEFORE the run so process_restart_delta_must_be_exactly assertions can compare apples-to-apples. Without this, baseline is read mid-run and may already be polluted by ambient HA events.",
+      "snapshot_path": "results/RUN_<timestamp>_<device>/baseline_process_restart_counts.json",
+      "show_commands": [
+        "show system process routing:bgpd | no-more",
+        "show system process routing:fibmgrd | no-more",
+        "show system process routing:rib_manager | no-more",
+        "show system process neighbour_manager | no-more",
+        "show system process wb_agent | no-more"
+      ],
+      "fail_action": "FAIL_HARD"
+    },
+    {
+      "check": "config_baseline_snapshot",
+      "comment": "Refinement (/HA, mirrors C): snapshot full config BEFORE the run for the post_cleanup_verify diff comparison.",
+      "snapshot_path": "results/RUN_<timestamp>_<device>/baseline_config.txt",
+      "command": "show config | flatten | no-more",
+      "fail_action": "FAIL_HARD"
+    },
+    {
+      "check": "interface_drops_baseline_snapshot",
+      "comment": "Refinement (/HA): snapshot interface drops counter BEFORE so interface_drop_delta_max in SC07 verify can compute delta accurately.",
+      "command": "show interfaces ge100-18/0/1 counters | no-more",
+      "snapshot_path": "results/RUN_<timestamp>_<device>/baseline_interface_drops.txt",
+      "fail_action": "WARN"
+    }
+  ],
+  "verdict": {
+    "layers": 14,
+    "stop_on_fail": false,
+    "stop_on_uu_stress_split_brain": true,
+    "stop_on_forbidden_flag_transition": true,
+    "stop_on_config_residue": true,
+    "stop_on_failover_budget_exhausted": true,
+    "verdict_extensions_required": [
+      "per_source_flag_counts",
+      "spirent_traffic_relearn_per_source",
+      "fib_zebra_parity",
+      "uu_flooding_during_unknown_window",
+      "cross_device_consistency",
+      "spirent_loss_window_max_sec",
+      "forbidden_flag_transitions_observed",
+      "config_pristine_after_cleanup",
+      "no_orphan_test_macs",
+      "no_new_core_dumps",
+      "process_restart_delta",
+      "interface_drop_delta",
+      "ncp_health_after_each_iteration",
+      "per_source_traffic_loss_frames",
+      "per_source_traffic_loss_seconds",
+      "per_source_recovery_time_seconds",
+      "nsf_promise_held",
+      "actual_vs_expected_recovery_delta_seconds",
+      "actual_recovery_time_within_typical_band",
+      "non_flapping_b_source_must_recover_to_zero_loss",
+      "expected_loss_pattern_continuous_not_intermittent",
+      "any_traffic_loss_triggers_split_brain_investigation"
+    ],
+    "stop_on_nsf_violation": true,
+    "stop_on_unexpected_per_source_loss": true,
+    "verdict_extensions_note": "These keys are NEW for SC06+SC07 plus refinements A/C/D and /HA additional checks. The orchestrator's verdict_engine must learn them. Baseline existing keys (history_consistent, check_mac_flags, forbidden_flags, check_forwarding, check_ghost_macs, check_mobility_counter, check_rt2_recovery, check_ha_traffic, cross_layer_check) are unchanged and SC01..SC05 remain backward compatible.",
+    "ncc_flip_aware_reading": {
+      "comment": "Refinement (/HA): After SC01 or SC06 NCC switchover, the EX-active NCC reboots its routing-engine container -- per-process restart_count resets there but the NEW-active NCC's counters carry the run history. The verdict engine MUST re-snapshot baseline_process_restart_counts on the NEW active NCC after each NCC switchover, otherwise SC02..SC05 (which run on the new active NCC) will compare against stale baselines from the old active NCC and produce false PASS/FAIL.",
+      "rule": "after_ncc_switchover_resnapshot_process_counts",
+      "snapshot_path_pattern": "results/RUN_<timestamp>_<device>/process_counts_after_<scenario>.json",
+      "applies_to_scenarios_after": ["SC01", "SC06"]
+    }
+  },
   "counter_commands": [
-    {"label": "mac_count", "command": "show evpn mac summary | no-more", "parser": "first_integer", "description": "Total EVPN MAC count"},
-    {"label": "fwd_table_count", "command": "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more", "parser": "line_count", "description": "NCP forwarding table count"},
-    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost | no-more", "parser": "line_count", "description": "Ghost MAC count"}
+    {"label": "mac_count_total", "command": "show evpn summary | no-more", "parser": "first_integer", "description": "Global Total MAC addresses"},
+    {"label": "mac_count_local", "command": "show evpn summary | no-more", "parser": "kv:Total local MAC addresses", "description": "Global Local MACs (flag L)"},
+    {"label": "mac_count_remote", "command": "show evpn summary | no-more", "parser": "kv:Total remote MAC addresses", "description": "Global Remote MACs (flag B from RT-2)"},
+    {"label": "mac_count_vpls", "command": "show evpn summary | no-more", "parser": "kv:Total VPLS MAC addresses", "description": "Global VPLS-PW MACs (flag v)"},
+    {"label": "mac_count_suppressed", "command": "show evpn summary | no-more", "parser": "kv:Total suppressed MAC addresses", "description": "Global Suppressed MACs (flag P)"},
+    {"label": "fwd_table_count", "command": "show evpn forwarding-table mac-address-table instance {evpn_name} | no-more", "parser": "line_count", "description": "NCP forwarding table count for the test EVI"},
+    {"label": "fwd_table_count_L", "command": "show evpn forwarding-table mac-address-table instance {evpn_name} flags L | no-more", "parser": "line_count", "description": "Datapath Local-only count (per-source-flag for SW-240243)"},
+    {"label": "fwd_table_count_R", "command": "show evpn forwarding-table mac-address-table instance {evpn_name} flags R | no-more", "parser": "line_count", "description": "Datapath Remote-only count (R covers v + B in datapath)"},
+    {"label": "fib_local_mac_count", "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance {evpn_name} | no-more", "parser": "line_count", "description": "fib-manager local MAC count (SW-240243 fib<->zebra parity baseline)"},
+    {"label": "fib_remote_mac_count", "command": "show dnos-internal routing fib-manager database evpn remote-mac service-instance {evpn_name} | no-more", "parser": "line_count", "description": "fib-manager remote MAC count"},
+    {"label": "ghost_mac_count", "command": "show dnos-internal routing evpn instance {evpn_name} mac-table-ghost detail | no-more", "parser": "line_count", "description": "Ghost MAC count (must stay at 0)"},
+    {"label": "mobility_redis_count", "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more", "parser": "first_integer", "description": "EVPN mobility Redis counter"}
   ],
   "counter_expectations": [
-    {"label": "mac_count", "rule": "no_decrease", "description": "MAC count must recover after HA"},
-    {"label": "fwd_table_count", "rule": "no_decrease", "description": "Forwarding table must recover"},
+    {"label": "mac_count_total", "rule": "no_decrease", "description": "Total MAC count must not regress after recovery"},
+    {"label": "mac_count_local", "rule": "no_decrease", "description": "L source count must recover (SW-240243)"},
+    {"label": "mac_count_remote", "rule": "no_decrease", "description": "B source count must recover via RT-2 (SW-240243)"},
+    {"label": "mac_count_vpls", "rule": "no_decrease", "description": "v source count must recover via PW (SW-240243)"},
+    {"label": "fwd_table_count", "rule": "no_decrease", "description": "Datapath forwarding-table must recover"},
+    {"label": "fwd_table_count_L", "rule": "no_decrease", "description": "Datapath L flag count parity"},
+    {"label": "fwd_table_count_R", "rule": "no_decrease", "description": "Datapath R flag count parity"},
+    {"label": "fib_local_mac_count", "rule": "matches:mac_count_local +/-1", "description": "fib-manager local MAC count must match EVPN summary local count (SW-240243 split-brain check)"},
+    {"label": "fib_remote_mac_count", "rule": "matches:mac_count_remote +/-1", "description": "fib-manager remote MAC count must match EVPN summary remote count"},
     {"label": "ghost_mac_count", "rule": "zero", "description": "No ghost MACs after recovery"}
   ],
   "event_expectations": [
-    {"event": "BGP_NEIGHBOR_ESTABLISHED", "expect": "present", "min_count": 1, "description": "BGP should re-establish"},
-    {"event": "SYSTEM_PROCESS_RESTART", "expect": "present", "min_count": 1, "description": "Process restart expected"}
+    {"event": "BGP_NEIGHBOR_ESTABLISHED", "expect": "present", "min_count": 1, "description": "BGP must re-establish for SC02/SC06/SC07"},
+    {"event": "SYSTEM_PROCESS_RESTART", "expect": "present", "min_count": 1, "description": "Process restart event expected"},
+    {"event": "NCC_SWITCHOVER_USER", "expect": "present_if_scenario:SC01,SC06", "min_count": 1, "description": "User-initiated switchover for SC01/SC06"}
   ],
   "health_checks": {
-    "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager", "neighbour_manager"],
+    "processes": ["routing:bgpd", "routing:fibmgrd", "routing:rib_manager", "neighbour_manager", "wb_agent"],
     "check_crashes": true,
-    "check_alarms": true
+    "check_alarms": true,
+    "max_critical_alarms_after": 0,
+    "max_major_alarms_after": 0,
+    "check_core_dumps_via": "show file all core-list | no-more"
   },
-  "cleanup_commands": ["no debug evpn mac-mobility", "no debug evpn mac-learning", "no set logging terminal"],
+  "spirent_session_assumptions": {
+    "session_name": "dn_spirent_main",
+    "port": "//100.64.3.238/6/13",
+    "do_not_destroy": true,
+    "create_if_missing": true,
+    "stream_naming": "ha_LvB_<flag>_<ownership_tag>"
+  },
+  "cleanup_commands": [
+    "unset logging terminal",
+    "unset cli-no-confirm"
+  ],
+  "cleanup_commands_removed": {
+    "comment": "Refinement (/HA): removed orphan debug-flag cleanups (no debug evpn mac-mobility, no debug evpn mac-learning, no debug fib-manager evpn-ctrl-learn, no debug fib-manager evpn-ctrl-learn-detail). Reason: NONE of these debug flags are enabled by any scenario in this recipe; debug evidence comes from debug_layers.trace_plan (file traces, no enable required). Running 'no debug ...' for never-enabled flags is harmless on DNOS but pollutes commit logs and creates ambiguity about whether the test enabled debug.",
+    "removed_at": "2026-05-01",
+    "removed": [
+      "no debug evpn mac-mobility",
+      "no debug evpn mac-learning",
+      "no debug fib-manager evpn-ctrl-learn",
+      "no debug fib-manager evpn-ctrl-learn-detail"
+    ]
+  },
+  "post_cleanup_verify": {
+    "comment": "Refinement C: Prove the test left ZERO config residue. Runs after spirent_cleanup_actions + cleanup_commands. Any non-empty 'show config compare' output is a FAIL -- means a scenario silently committed config we didn't intend.",
+    "commands": [
+      {
+        "command": "show config compare | no-more",
+        "expect_empty_output": true,
+        "verdict_key_emitted": "config_pristine_after_cleanup",
+        "fail_action": "FAIL_WITH_DIFF",
+        "diff_save_path": "results/RUN_<timestamp>_<device>/CONFIG_RESIDUE_DIFF.txt",
+        "ha_known_behavior_ref": "/HA Phase 8 Save Results -- residual config is the #1 source of test contamination across runs"
+      },
+      {
+        "command": "show evpn instance EVPN_SI_VPLS_1 mac-table | no-more",
+        "expect_no_static_test_macs": ["00:de:ad:00:01:*", "00:de:ad:00:02:*", "00:de:ad:00:03:*"],
+        "verdict_key_emitted": "no_orphan_test_macs",
+        "fail_action": "WARN_AND_RUN_CLEAR",
+        "auto_remediation": "clear evpn mac-table instance EVPN_SI_VPLS_1"
+      },
+      {
+        "command": "show file all core-list | no-more",
+        "expect_no_new_cores_after": "test_start_timestamp",
+        "verdict_key_emitted": "no_new_core_dumps",
+        "fail_action": "FAIL_WITH_LIST",
+        "ha_known_behavior_ref": "Any core dump produced during the run is a critical bug -- preserve cores and escalate to /debug-dnos"
+      }
+    ]
+  },
+  "spirent_cleanup_actions": [
+    {"call": "spirent_stop_ha_baseline"},
+    {"call": "remove-stream", "match": "ha_LvB_*"},
+    {"call": "remove-stream", "match": "ha_baseline_*"},
+    {"call": "verify_session_intact", "expect_session_name": "dn_spirent_main", "comment": "Refinement: do NOT destroy the persistent session; just remove our streams (BGP-session-protection-style rule for Spirent)"}
+  ],
   "config_baseline": {
-    "sections": ["network-services evpn", "protocols bgp"],
+    "sections": [
+      "network-services evpn instance EVPN_SI_VPLS_1",
+      "protocols bgp 1234567 neighbor 2.2.2.2",
+      "protocols bgp 1234567 neighbor 1.1.1.1"
+    ],
     "full_config": false,
-    "ignore_patterns": ["last-modified", "commit-id"]
+    "ignore_patterns": ["last-modified", "commit-id"],
+    "snapshot_before_test": true,
+    "snapshot_after_test": true,
+    "comment_on_diff_after_test": "Diff between snapshot_before and snapshot_after must be empty (config_pristine_after_cleanup verdict). If non-empty, save the diff and mark test FAIL."
+  },
+  "debug_layers": {
+    "enabled": true,
+    "mode": "on_fail",
+    "feature_context": "evpn-vpls-si",
+    "knowledge_bootstrap": [
+      "search-company-knowledge: EVPN VPLS seamless integration HLD component BGP zebra fib-manager NCP MAC mobility AC PW unknown-unicast",
+      "SW-204115",
+      "SW-204183",
+      "SW-194680",
+      "SW-178648",
+      "SW-183400"
+    ],
+    "trace_plan": [
+      {"layer": "bgpd", "commands": ["show file traces routing_engine/bgpd_traces | trailing 200 | no-more"]},
+      {"layer": "fibmgrd", "commands": ["show file traces routing_engine/fibmgrd_traces | trailing 200 | no-more"]},
+      {"layer": "rib_manager", "commands": ["show file traces routing_engine/rib-manager_traces | trailing 200 | no-more"]},
+      {"layer": "neighbour_manager", "commands": ["show file traces routing_engine/neighbour-manager_traces | trailing 200 | no-more"]},
+      {"layer": "wb_agent_ncp", "commands": ["show file ncp {ncp_id} traces datapath/wb_agent.evpn | trailing 200 | no-more"]}
+    ],
+    "bug_evidence": {"save_session_log": true, "invoke_debug_dnos": true},
+    "auto_invoke_debug_dnos_context": {
+      "feature": "evpn-vpls-si",
+      "epic": "SW-178648",
+      "evi": "EVPN_SI_VPLS_1",
+      "move": "ha_recovery",
+      "expected_source": "depends_on_scenario"
+    }
   }
 }

@@ -31,18 +31,24 @@
 
 // ==================== DEVICE DRAWING FUNCTIONS ====================
 
+function _stableDeviceStroke(editor, worldWidth, minScreenPx) {
+    return editor.getScreenStableStrokeWidth
+        ? editor.getScreenStableStrokeWidth(worldWidth, minScreenPx)
+        : worldWidth;
+}
+
 /**
  * Draw device as a circle (default style)
  */
 function drawDeviceCircle(editor, device, isSelected) {
     editor.ctx.beginPath();
     editor.ctx.arc(device.x, device.y, device.radius, 0, Math.PI * 2);
-    editor.ctx.fillStyle = device.color;
+    editor.ctx.fillStyle = _safeDeviceColor(device);
     editor.ctx.fill();
     
     // Draw border (white in dark mode, dark gray in light mode)
     editor.ctx.strokeStyle = isSelected ? '#3498db' : (editor.darkMode ? '#ffffff' : '#333');
-    editor.ctx.lineWidth = isSelected ? 3 : 2;
+    editor.ctx.lineWidth = _stableDeviceStroke(editor, isSelected ? 3 : 2, isSelected ? 2 : 1.5);
     editor.ctx.stroke();
 }
 
@@ -65,8 +71,15 @@ function drawDeviceClassicRouter(editor, device, isSelected) {
     editor.ctx.rotate((device.rotation || 0) * Math.PI / 180);
     
     const borderColor = isSelected ? '#3498db' : (editor.darkMode ? '#ffffff' : '#333');
-    const darkerColor = darkenColor(device.color, 0.35);
-    const highlightColor = lightenColor(device.color, 0.1);
+    // 2026-04-24q -- resolve color ONCE at the top. Every gradient stop
+    // and darken/lighten helper below reads from `color`, never from
+    // `device.color` directly. This makes it impossible for an
+    // undefined / null / empty-string `device.color` (e.g. from legacy
+    // auto-saves) to reach addColorStop, regardless of the helpers'
+    // own fallbacks.
+    const color = _safeDeviceColor(device);
+    const darkerColor = darkenColor(color, 0.35);
+    const highlightColor = lightenColor(color, 0.1);
     
     // Draw cylinder body (side) with horizontal gradient for 3D effect
     editor.ctx.beginPath();
@@ -79,14 +92,14 @@ function drawDeviceClassicRouter(editor, device, isSelected) {
     // Create horizontal gradient for cylinder body (light in center, dark at edges)
     const bodyGradient = editor.ctx.createLinearGradient(-width/2, 0, width/2, 0);
     bodyGradient.addColorStop(0, darkerColor);
-    bodyGradient.addColorStop(0.3, darkenColor(device.color, 0.15));
-    bodyGradient.addColorStop(0.5, darkenColor(device.color, 0.1));
-    bodyGradient.addColorStop(0.7, darkenColor(device.color, 0.15));
+    bodyGradient.addColorStop(0.3, darkenColor(color, 0.15));
+    bodyGradient.addColorStop(0.5, darkenColor(color, 0.1));
+    bodyGradient.addColorStop(0.7, darkenColor(color, 0.15));
     bodyGradient.addColorStop(1, darkerColor);
     editor.ctx.fillStyle = bodyGradient;
     editor.ctx.fill();
     editor.ctx.strokeStyle = borderColor;
-    editor.ctx.lineWidth = isSelected ? 3 : 2;
+    editor.ctx.lineWidth = _stableDeviceStroke(editor, isSelected ? 3 : 2, isSelected ? 2 : 1.5);
     editor.ctx.stroke();
     
     // Draw label on the cylinder body (side surface) — skip when inline rename is active
@@ -101,7 +114,7 @@ function drawDeviceClassicRouter(editor, device, isSelected) {
         
         const labelTextColor = device.labelColor || '#ffffff';
         editor.ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-        editor.ctx.lineWidth = 2.5;
+        editor.ctx.lineWidth = _stableDeviceStroke(editor, 2.5, 1.5);
         editor.ctx.strokeText(label, 0, labelY);
         editor.ctx.fillStyle = labelTextColor;
         editor.ctx.fillText(label, 0, labelY);
@@ -114,8 +127,8 @@ function drawDeviceClassicRouter(editor, device, isSelected) {
     // Radial gradient for top face (subtle lighting)
     const topGradient = editor.ctx.createRadialGradient(-width*0.15, -topHeight*0.6, 0, 0, -topHeight/2, width/2);
     topGradient.addColorStop(0, highlightColor);
-    topGradient.addColorStop(0.7, device.color);
-    topGradient.addColorStop(1, darkenColor(device.color, 0.1));
+    topGradient.addColorStop(0.7, color);
+    topGradient.addColorStop(1, darkenColor(color, 0.1));
     editor.ctx.fillStyle = topGradient;
     editor.ctx.fill();
     editor.ctx.strokeStyle = borderColor;
@@ -149,7 +162,7 @@ function drawDeviceSimpleRouter(editor, device, isSelected) {
     editor.ctx.fillStyle = editor.darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.9)';
     editor.ctx.fill();
     editor.ctx.strokeStyle = borderColor;
-    editor.ctx.lineWidth = isSelected ? 3 : 2.5;
+    editor.ctx.lineWidth = _stableDeviceStroke(editor, isSelected ? 3 : 2.5, isSelected ? 2 : 1.5);
     editor.ctx.stroke();
     
     // Draw inner circle
@@ -165,7 +178,7 @@ function drawDeviceSimpleRouter(editor, device, isSelected) {
     
     editor.ctx.strokeStyle = arrowColor;
     editor.ctx.fillStyle = arrowColor;
-    editor.ctx.lineWidth = 2.5;
+    editor.ctx.lineWidth = _stableDeviceStroke(editor, 2.5, 1.5);
     
     // Cardinal directions: up, right, down, left
     const directions = [
@@ -227,8 +240,11 @@ function drawDeviceServerTower(editor, device, isSelected) {
     editor.ctx.rotate((device.rotation || 0) * Math.PI / 180);
     
     const borderColor = isSelected ? '#3498db' : (editor.darkMode ? '#ffffff' : '#333');
-    const darkerColor = darkenColor(device.color, 0.25);
-    const darkestColor = darkenColor(device.color, 0.45);
+    // 2026-04-24q -- see drawDeviceClassicRouter for why we resolve
+    // the color once at the top and never touch `device.color` below.
+    const color = _safeDeviceColor(device);
+    const darkerColor = darkenColor(color, 0.25);
+    const darkestColor = darkenColor(color, 0.45);
     
     // Draw right side (darkest)
     editor.ctx.beginPath();
@@ -240,7 +256,7 @@ function drawDeviceServerTower(editor, device, isSelected) {
     editor.ctx.fillStyle = darkestColor;
     editor.ctx.fill();
     editor.ctx.strokeStyle = borderColor;
-    editor.ctx.lineWidth = isSelected ? 2 : 1.5;
+    editor.ctx.lineWidth = _stableDeviceStroke(editor, isSelected ? 2 : 1.5, isSelected ? 1.5 : 1.25);
     editor.ctx.stroke();
     
     // Draw top face
@@ -261,14 +277,14 @@ function drawDeviceServerTower(editor, device, isSelected) {
     
     // Vertical gradient for front face
     const frontGradient = editor.ctx.createLinearGradient(0, -height/2 + depth, 0, height/2);
-    const highlightColor = lightenColor(device.color, 0.1);
+    const highlightColor = lightenColor(color, 0.1);
     frontGradient.addColorStop(0, highlightColor);
-    frontGradient.addColorStop(0.3, device.color);
-    frontGradient.addColorStop(1, darkenColor(device.color, 0.1));
+    frontGradient.addColorStop(0.3, color);
+    frontGradient.addColorStop(1, darkenColor(color, 0.1));
     editor.ctx.fillStyle = frontGradient;
     editor.ctx.fill();
     editor.ctx.strokeStyle = borderColor;
-    editor.ctx.lineWidth = isSelected ? 3 : 2;
+    editor.ctx.lineWidth = _stableDeviceStroke(editor, isSelected ? 3 : 2, isSelected ? 2 : 1.5);
     editor.ctx.stroke();
     
     // Draw panel/screen area at top (always dark for consistent look)
@@ -279,7 +295,7 @@ function drawDeviceServerTower(editor, device, isSelected) {
     editor.ctx.fillStyle = '#3a3a3a';  // Always dark panel
     editor.ctx.fill();
     editor.ctx.strokeStyle = '#555';
-    editor.ctx.lineWidth = 1;
+    editor.ctx.lineWidth = _stableDeviceStroke(editor, 1, 1);
     editor.ctx.stroke();
     
     // Draw LED indicators on panel
@@ -317,8 +333,10 @@ function drawDeviceHexRouter(editor, device, isSelected) {
     editor.ctx.rotate((device.rotation || 0) * Math.PI / 180);
     
     const borderColor = isSelected ? '#3498db' : (editor.darkMode ? '#ffffff' : '#2c3e50');
-    const shadowColor = darkenColor(device.color, 0.4);
-    const highlightColor = lightenColor(device.color, 0.15);
+    // 2026-04-24q -- see drawDeviceClassicRouter for rationale.
+    const color = _safeDeviceColor(device);
+    const shadowColor = darkenColor(color, 0.4);
+    const highlightColor = lightenColor(color, 0.15);
     
     // Calculate hexagon points (flat-topped)
     const points = [];
@@ -351,13 +369,13 @@ function drawDeviceHexRouter(editor, device, isSelected) {
     // Gradient fill for subtle 3D lighting
     const gradient = editor.ctx.createLinearGradient(-hexRadius, -hexRadius, hexRadius, hexRadius);
     gradient.addColorStop(0, highlightColor);
-    gradient.addColorStop(0.5, device.color);
-    gradient.addColorStop(1, darkenColor(device.color, 0.15));
+    gradient.addColorStop(0.5, color);
+    gradient.addColorStop(1, darkenColor(color, 0.15));
     editor.ctx.fillStyle = gradient;
     editor.ctx.fill();
     
     editor.ctx.strokeStyle = borderColor;
-    editor.ctx.lineWidth = isSelected ? 3 : 2;
+    editor.ctx.lineWidth = _stableDeviceStroke(editor, isSelected ? 3 : 2, isSelected ? 2 : 1.5);
     editor.ctx.stroke();
     
     // Draw 4-way arrows centered on hexagon
@@ -378,7 +396,7 @@ function drawFourWayArrows(editor, cx, cy, size, color) {
     
     editor.ctx.strokeStyle = color;
     editor.ctx.fillStyle = color;
-    editor.ctx.lineWidth = 2;
+    editor.ctx.lineWidth = _stableDeviceStroke(editor, 2, 1.25);
     
     // Diagonal arrows: ↗ ↘ ↙ ↖
     const directions = [
@@ -428,7 +446,7 @@ function drawFourWayArrowsEllipse(editor, cx, cy, radiusX, radiusY, color) {
     
     editor.ctx.strokeStyle = color;
     editor.ctx.fillStyle = color;
-    editor.ctx.lineWidth = 2;
+    editor.ctx.lineWidth = _stableDeviceStroke(editor, 2, 1.25);
     
     // Diagonal arrows: ↗ ↘ ↙ ↖ (scaled to ellipse)
     const directions = [
@@ -472,43 +490,107 @@ function drawFourWayArrowsEllipse(editor, cx, cy, radiusX, radiusY, color) {
 /**
  * Helper: Darken a color by a factor (0-1)
  */
-function darkenColor(color, factor) {
-    // Convert hex to RGB
-    let hex = color.replace('#', '');
+// Shared parser: accepts '#RGB', '#RRGGBB', '#RRGGBBAA', 'rgb(r,g,b)',
+// 'rgba(r,g,b,a)' (case-insensitive, whitespace-tolerant). Returns an
+// {r,g,b} object with integer components in [0, 255] or null if the
+// input is unparseable.
+//
+// This was extracted 2026-04-24 after a browser error:
+//   "Failed to execute 'addColorStop': value ('rgb(NaN, 240, 224)')
+//    could not be parsed as a color."
+// which happened because the old path ran the raw string through
+// `parseInt(hex.substr(0,2), 16)` WITHOUT first checking that the
+// stripped hash left a pure-hex string. An `rgb(...)` / `rgba(...)` /
+// CSS-name color would produce NaN for at least one channel, which
+// then serialised as literal `NaN` into the output and blew up the
+// canvas gradient call.
+function _parseAnyColorToRgb(color) {
+    if (typeof color !== 'string') return null;
+    var s = color.trim();
+    if (s.length === 0) return null;
+
+    // rgb(r, g, b) / rgba(r, g, b, a)
+    var m = s.match(/^rgba?\(\s*([0-9.+-]+)\s*,\s*([0-9.+-]+)\s*,\s*([0-9.+-]+)\s*(?:,\s*[0-9.+-]+\s*)?\)$/i);
+    if (m) {
+        var r = Math.round(parseFloat(m[1]));
+        var g = Math.round(parseFloat(m[2]));
+        var b = Math.round(parseFloat(m[3]));
+        if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return null;
+        r = Math.max(0, Math.min(255, r));
+        g = Math.max(0, Math.min(255, g));
+        b = Math.max(0, Math.min(255, b));
+        return { r: r, g: g, b: b };
+    }
+
+    // #RGB / #RRGGBB / #RRGGBBAA. We also tolerate a missing '#' so
+    // that callers passing 'ff0000' straight through still work.
+    var hex = s.charAt(0) === '#' ? s.slice(1) : s;
+    if (!/^[0-9a-fA-F]+$/.test(hex)) return null;
     if (hex.length === 3) {
         hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+    } else if (hex.length === 4) {
+        // #RGBA -> #RRGGBBAA, alpha ignored below
+        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
     }
-    const r = parseInt(hex.substr(0, 2), 16);
-    const g = parseInt(hex.substr(2, 2), 16);
-    const b = parseInt(hex.substr(4, 2), 16);
-    
-    // Darken
-    const newR = Math.round(r * (1 - factor));
-    const newG = Math.round(g * (1 - factor));
-    const newB = Math.round(b * (1 - factor));
-    
-    return `rgb(${newR}, ${newG}, ${newB})`;
+    if (hex.length !== 6 && hex.length !== 8) return null;
+    var rH = parseInt(hex.substr(0, 2), 16);
+    var gH = parseInt(hex.substr(2, 2), 16);
+    var bH = parseInt(hex.substr(4, 2), 16);
+    if (!Number.isFinite(rH) || !Number.isFinite(gH) || !Number.isFinite(bH)) return null;
+    return { r: rH, g: gH, b: bH };
+}
+
+function darkenColor(color, factor) {
+    var rgb = _parseAnyColorToRgb(color);
+    if (!rgb) {
+        // Neutral fallback; matches the old behaviour for unparseable
+        // input so nothing downstream (borderColor overrides, etc.)
+        // breaks in surprising ways.
+        return 'rgb(102, 102, 102)';
+    }
+    var newR = Math.round(rgb.r * (1 - factor));
+    var newG = Math.round(rgb.g * (1 - factor));
+    var newB = Math.round(rgb.b * (1 - factor));
+    return 'rgb(' + newR + ', ' + newG + ', ' + newB + ')';
 }
 
 /**
  * Helper: Lighten a color by a factor (0-1)
  */
 function lightenColor(color, factor) {
-    // Convert hex to RGB
-    let hex = color.replace('#', '');
-    if (hex.length === 3) {
-        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+    var rgb = _parseAnyColorToRgb(color);
+    if (!rgb) {
+        return 'rgb(170, 170, 170)';
     }
-    const r = parseInt(hex.substr(0, 2), 16);
-    const g = parseInt(hex.substr(2, 2), 16);
-    const b = parseInt(hex.substr(4, 2), 16);
-    
-    // Lighten (move toward 255)
-    const newR = Math.round(r + (255 - r) * factor);
-    const newG = Math.round(g + (255 - g) * factor);
-    const newB = Math.round(b + (255 - b) * factor);
-    
-    return `rgb(${newR}, ${newG}, ${newB})`;
+    var newR = Math.round(rgb.r + (255 - rgb.r) * factor);
+    var newG = Math.round(rgb.g + (255 - rgb.g) * factor);
+    var newB = Math.round(rgb.b + (255 - rgb.b) * factor);
+    return 'rgb(' + newR + ', ' + newG + ', ' + newB + ')';
+}
+
+// Defensive accessor: some legacy auto-saves / programmatic inserts
+// produce devices without a `color` field, which then reaches gradient
+// stops as `undefined` and throws SyntaxError inside the draw loop
+// ("Failed to execute 'addColorStop' on 'CanvasGradient': ...('undefined')...").
+// Return the device color when it's a non-empty string, otherwise a
+// neutral theme-default blue so the device still renders.
+//
+// 2026-05-12 [split-color]: when the canvas drawing dispatcher renders
+// a device in split-color mode, it does a two-pass clipped draw and
+// temporarily sets `device._renderColorOverride` to the half being
+// painted. Every per-shape draw function reads its fill color via
+// _safeDeviceColor(), so honouring the override here is the single
+// hook that propagates the half-color into gradient stops, label
+// strokes, darken/lighten helpers, and 3D depth shading without
+// changing any of those signatures. The override is ALWAYS cleared
+// by drawDevice() after the second pass, so no persistence concerns.
+function _safeDeviceColor(device) {
+    if (!device) return '#3498db';
+    var ov = device._renderColorOverride;
+    if (typeof ov === 'string' && ov.trim().length > 0) return ov;
+    var c = device.color;
+    if (typeof c === 'string' && c.trim().length > 0) return c;
+    return '#3498db';
 }
 
 /**
@@ -518,6 +600,14 @@ function lightenColor(color, factor) {
  * This ensures link selection is always visible regardless of theme
  */
 function getLinkSelectionColors(editor, linkColor) {
+    // DEFENSIVE: If linkColor is missing/invalid (e.g. legacy autosave where
+    // link.color was never set), fall back to a theme-appropriate default
+    // instead of crashing on linkColor.replace(...) inside the draw loop.
+    if (typeof linkColor !== 'string' || linkColor.length === 0) {
+        linkColor = (editor && editor.defaultLinkColor)
+            || (editor && editor.darkMode ? '#ffffff' : '#666666');
+    }
+
     // Parse the link color to check its brightness
     let hex = linkColor.replace('#', '');
     if (hex.length === 3) {

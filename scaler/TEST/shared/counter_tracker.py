@@ -15,7 +15,7 @@ Recipe JSON format (inside scenario or top-level):
     "counter_expectations": [
         {"label": "evpn_mac_count", "rule": "no_decrease",
          "description": "MAC count must not drop"},
-        {"label": "error_drops", "rule": "zero", "description": "No new error drops"},
+        {"label": "error_drops", "rule": "zero", "description": "No error drops"},
         ...
     ]
 
@@ -24,7 +24,9 @@ Parser types:
     key_value       -- parse "key: value" lines into dict
     table_sum       -- sum all integers in a column
     line_count      -- count non-empty output lines
-    regex           -- use custom regex pattern from "regex" field
+    count_lines_with_pattern -- count lines matching regex/pattern
+    ghost_mac_count -- count real EVPN ghost/suppression entries only
+    regex/regex_capture -- use custom regex pattern from "regex" or "pattern"
 """
 
 from __future__ import annotations
@@ -67,7 +69,7 @@ class CounterCommand:
             label=d["label"],
             command=d["command"],
             parser=d.get("parser", "first_integer"),
-            regex=d.get("regex", ""),
+            regex=d.get("regex", d.get("pattern", "")),
             description=d.get("description", ""),
         )
 
@@ -232,6 +234,40 @@ def _parse_line_count(output: str) -> int:
     return len([l for l in lines if l.strip() and not l.strip().startswith("---")])
 
 
+def _parse_count_lines_with_pattern(output: str, pattern: str) -> int:
+    """Count non-empty lines that match a recipe regex/pattern."""
+    cleaned = _strip_ansi(output)
+    if not pattern:
+        return _parse_line_count(cleaned)
+    rx = re.compile(pattern)
+    return sum(1 for line in cleaned.splitlines() if rx.search(line.strip()))
+
+
+def _parse_ghost_mac_count(output: str) -> int:
+    """Count real EVPN ghost entries from the DNOS mac-table-ghost detail view.
+
+    The command is an "also include ghosts" diagnostic view, not a ghost-only
+    table. Active selected MACs are expected in the output and must not count.
+    """
+    cleaned = _strip_ansi(output)
+    count = 0
+    chunks = re.split(r"(?=^MAC address:\s*)", cleaned, flags=re.MULTILINE)
+    for chunk in chunks:
+        if not re.search(r"^MAC address:\s*[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}", chunk, re.MULTILINE):
+            continue
+        lower = chunk.lower()
+        has_selected_protocol = "protocol:" in lower
+        has_suppression = (
+            "suppression: suppressed" in lower
+            or "suppression: indefinitely" in lower
+            or "traffic handling: drop" in lower
+        )
+        has_stale_protocol = re.search(r"protocol:\s+\S+,\s*stale", lower) is not None
+        if has_suppression or has_stale_protocol or not has_selected_protocol:
+            count += 1
+    return count
+
+
 def _parse_regex(output: str, pattern: str) -> Optional[Any]:
     """Extract value using a custom regex pattern."""
     m = re.search(pattern, _strip_ansi(output))
@@ -251,7 +287,10 @@ PARSERS = {
     "key_value": lambda out, _: _parse_key_value(out),
     "table_sum": lambda out, _: _parse_table_sum(out),
     "line_count": lambda out, _: _parse_line_count(out),
+    "count_lines_with_pattern": lambda out, regex: _parse_count_lines_with_pattern(out, regex),
+    "ghost_mac_count": lambda out, _: _parse_ghost_mac_count(out),
     "regex": lambda out, regex: _parse_regex(out, regex),
+    "regex_capture": lambda out, regex: _parse_regex(out, regex),
 }
 
 
@@ -283,7 +322,8 @@ def snapshot_counters(
         duration_ms = int((time.monotonic() - t0) * 1000)
 
         if not error:
-            parser_fn = PARSERS.get(cc.parser, PARSERS["first_integer"])
+            parser_name = "ghost_mac_count" if cc.label == "ghost_mac_count" else cc.parser
+            parser_fn = PARSERS.get(parser_name, PARSERS["first_integer"])
             try:
                 value = parser_fn(raw, cc.regex)
             except Exception as exc:
@@ -377,9 +417,9 @@ def _evaluate_rule(
         return delta <= 0, f"delta={delta}, {'stable/decreased' if delta <= 0 else 'INCREASED'}"
 
     if rule == "zero":
-        if isinstance(delta, (int, float)):
-            return delta == 0, f"delta={delta}, {'zero' if delta == 0 else 'NON-ZERO'}"
-        return after == before, f"{'unchanged' if after == before else 'CHANGED'}"
+        if isinstance(after, (int, float)):
+            return after == 0, f"value={after}, {'zero' if after == 0 else 'NON-ZERO'}"
+        return after in (0, "0", "", None, False), f"value={after}"
 
     if rule == "stable":
         return after == before, f"{'stable' if after == before else 'CHANGED'}"

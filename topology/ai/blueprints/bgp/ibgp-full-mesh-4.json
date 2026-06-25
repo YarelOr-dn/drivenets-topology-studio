@@ -1,0 +1,164 @@
+{
+  "name": "ibgp-full-mesh-4",
+  "protocol": "ibgp",
+  "scale": "small",
+  "summary": "Classic 4-node iBGP full mesh. Every router peers with every other; session count scales as n(n-1)/2 -- the reason Route Reflectors exist.",
+  "tags": [
+    "ibgp",
+    "full-mesh",
+    "4-node"
+  ],
+  "layout_hint": "mesh",
+  "objects": [
+    {
+      "id": "as1",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 700,
+      "y": 500,
+      "width": 900,
+      "height": 640,
+      "fillColor": "#3498db",
+      "fillEnabled": true,
+      "fillOpacity": 0.08,
+      "strokeColor": "#3498db",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 14,
+      "label": "AS 65001"
+    },
+    {
+      "id": "r1",
+      "type": "device",
+      "label": "R1",
+      "x": 400,
+      "y": 280,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "10.0.0.1"
+    },
+    {
+      "id": "r2",
+      "type": "device",
+      "label": "R2",
+      "x": 1000,
+      "y": 280,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "10.0.0.2"
+    },
+    {
+      "id": "r3",
+      "type": "device",
+      "label": "R3",
+      "x": 1000,
+      "y": 720,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "10.0.0.3"
+    },
+    {
+      "id": "r4",
+      "type": "device",
+      "label": "R4",
+      "x": 400,
+      "y": 720,
+      "role": "pe",
+      "visualStyle": "classic",
+      "color": "#9b59b6",
+      "ip": "10.0.0.4"
+    },
+    {
+      "id": "l_r1_r2",
+      "type": "link",
+      "device1": "r1",
+      "device2": "r2",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "label": "iBGP"
+    },
+    {
+      "id": "l_r1_r3",
+      "type": "link",
+      "device1": "r1",
+      "device2": "r3",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "label": "iBGP"
+    },
+    {
+      "id": "l_r1_r4",
+      "type": "link",
+      "device1": "r1",
+      "device2": "r4",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "label": "iBGP"
+    },
+    {
+      "id": "l_r2_r3",
+      "type": "link",
+      "device1": "r2",
+      "device2": "r3",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "label": "iBGP"
+    },
+    {
+      "id": "l_r2_r4",
+      "type": "link",
+      "device1": "r2",
+      "device2": "r4",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "label": "iBGP"
+    },
+    {
+      "id": "l_r3_r4",
+      "type": "link",
+      "device1": "r3",
+      "device2": "r4",
+      "linkType": "ibgp",
+      "color": "#3498db",
+      "style": "dashed",
+      "label": "iBGP"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "iBGP Full Mesh (4 nodes)",
+      "x": 700,
+      "y": 160,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_note",
+      "type": "text",
+      "text": "AS 65001 -- every speaker peers with every other\nBGP session count = n(n-1)/2 = 6",
+      "x": 700,
+      "y": 840,
+      "fontSize": 13,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#334155",
+      "borderWidth": 1
+    }
+  ]
+}

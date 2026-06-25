@@ -11,6 +11,45 @@
 
 // Export LinkDrawing to global scope
 window.LinkDrawing = {
+    _readableLinkWidth(editor, link, width, minScreenPx = 1.25) {
+        const base = editor.getScreenStableStrokeWidth
+            ? editor.getScreenStableStrokeWidth(width, minScreenPx)
+            : width;
+        if (!link || !link._generatedTopologyObject) return base;
+        const zoom = Math.max(0.05, Number(editor.zoom) || 1);
+        const target = 2.15 / zoom;
+        return Math.max(base, Math.min(target, (Number(width) || 1.5) * 3.0));
+    },
+
+    _arrowHeadGeometry(renderLinkWidth, variant = 'default') {
+        const width = Math.max(1, Number(renderLinkWidth) || 1);
+        if (variant === 'unbound') {
+            return {
+                length: Math.max(11, Math.min(18, 8 + width * 2.2)),
+                spread: Math.PI / 7,
+                strokeWidth: Math.max(0.7, Math.min(1.2, width * 0.22)),
+            };
+        }
+        return {
+            length: 10 + width * 3,
+            spread: Math.PI / 5,
+            strokeWidth: 1,
+        };
+    },
+
+    _isXrayCaptureRenderActive(editor, link) {
+        if (!editor || !link || (link.type !== 'link' && link.type !== 'unbound') || !link.id) {
+            return false;
+        }
+        const device1 = link.device1 ? editor.getObjectById?.(link.device1) : null;
+        const device2 = link.device2 ? editor.getObjectById?.(link.device2) : null;
+        if (!device1 || !device2) return false;
+        if (editor._xrayCapturing === link.id) return true;
+        return !!(window.XrayPopup
+            && typeof window.XrayPopup.isOpenForLink === 'function'
+            && window.XrayPopup.isOpenForLink(editor, link));
+    },
+
     drawLink(editor, link) {
         // Skip hidden links (e.g., when BD visibility is toggled off)
         if (link._hidden || link.hidden) return;
@@ -149,6 +188,7 @@ window.LinkDrawing = {
         
         // Get link width and style early for arrow shortening
         const linkWidthEarly = link.width !== undefined ? link.width : editor.currentLinkWidth;
+        const renderLinkWidthEarly = this._readableLinkWidth(editor, link, linkWidthEarly, 1.25);
         const linkStyleEarly = link.style !== undefined ? link.style : 'solid';
         const isArrowStyle = linkStyleEarly === 'arrow' || linkStyleEarly === 'double-arrow' || 
                             linkStyleEarly === 'dashed-arrow' || linkStyleEarly === 'dashed-double-arrow';
@@ -156,7 +196,8 @@ window.LinkDrawing = {
         // ENHANCED: Shorten line for arrow styles so line doesn't show through arrowhead
         // CRITICAL: Only shorten STRAIGHT lines - curved lines use the filled arrow to cover overlap
         const curveWillBeEnabled = (link.curveOverride !== undefined ? link.curveOverride : editor.linkCurveMode) && editor.magneticFieldStrength > 0;
-        const arrowInset = isArrowStyle ? (10 + (linkWidthEarly * 3) + linkWidthEarly) : 0;
+        const arrowGeomEarly = this._arrowHeadGeometry(renderLinkWidthEarly, 'unbound');
+        const arrowInset = isArrowStyle ? (arrowGeomEarly.length + Math.max(2, renderLinkWidthEarly * 0.75)) : 0;
         
         // Only shorten for STRAIGHT lines (not curved) to maintain arrow alignment
         if (isArrowStyle && !curveWillBeEnabled) {
@@ -186,11 +227,13 @@ window.LinkDrawing = {
         // Magnetic field must be > 0 for curves to work
         const curveEnabled = (link.curveOverride !== undefined ? link.curveOverride : editor.linkCurveMode) && editor.magneticFieldStrength > 0;
         
-        // ENHANCED: Use clipping to create true transparent gaps for attached text
+        // ENHANCED: Use clipping to create true transparent gaps for visible attached text
         const attachedTexts = editor.objects.filter(obj => 
             obj.type === 'text' && 
             obj.linkId === link.id && 
-            obj._onLinkLine === true
+            obj._onLinkLine === true &&
+            editor.showLinkAttachments !== false &&
+            !(obj._interfaceLabel === true && !editor.showLinkTypeLabels)
         );
         
         if (attachedTexts.length > 0) {
@@ -207,11 +250,14 @@ window.LinkDrawing = {
                 const fontStyle = textObj.fontStyle || 'normal';
                 const fontWeight = textObj.fontWeight || 'normal';
                 const fontFamily = textObj.fontFamily || 'Arial, sans-serif';
-                editor.ctx.font = `${fontStyle} ${fontWeight} ${textObj.fontSize}px ${fontFamily}`;
+                const displayFontSize = editor.getDprSnappedFontSize
+                    ? editor.getDprSnappedFontSize(textObj.fontSize)
+                    : textObj.fontSize;
+                editor.ctx.font = `${fontStyle} ${fontWeight} ${displayFontSize}px ${fontFamily}`;
                 
                 const textContent = textObj.text || 'Text';
                 const lines = textContent.split('\n');
-                const fontSize = parseInt(textObj.fontSize) || 14;
+                const fontSize = parseInt(displayFontSize) || 14;
                 const lineHeight = fontSize * 1.3;
                 let maxLineW = 0;
                 for (const line of lines) {
@@ -447,14 +493,21 @@ window.LinkDrawing = {
                     closestObstacleRadius = Math.max(closestObstacleRadius, obstacle.radius);
                 });
                 
-                // ENHANCED: Choose curve direction based on which side has LESS pressure
-                let curveDir = 1;
-                if (positiveSidePressure > negativeSidePressure) {
-                    curveDir = -1;  // More pressure from positive side - curve toward negative
-                } else if (negativeSidePressure > positiveSidePressure) {
-                    curveDir = 1;   // More pressure from negative side - curve toward positive
-                }
-                
+                // ENHANCED: Choose curve direction with STICKY hysteresis so a
+                // tiny stretch movement doesn't flip the curve to the opposite
+                // side of the obstacle. The first time this link sees obstacle
+                // pressure we pick the lower-pressure side; subsequent frames
+                // only flip when the OPPOSITE side has substantially more
+                // pressure than the cached side (>=1.5x AND absolute delta >=
+                // 8 pressure units) -- otherwise we keep the cached side.
+                // Cleared by `_clearAutoCurveSideCache` when the link is
+                // obstacle-free or its obstacle set materially changes.
+                const stickyCurveDir = window.LinkAutoCurveSide
+                    ? window.LinkAutoCurveSide.choose(link, positiveSidePressure, negativeSidePressure)
+                    : (positiveSidePressure > negativeSidePressure ? -1
+                        : (negativeSidePressure > positiveSidePressure ? 1 : 1));
+                let curveDir = stickyCurveDir;
+
                 // Calculate deflection magnitude based on the higher pressure
                 const deflectionMag = Math.max(positiveSidePressure, negativeSidePressure);
                 
@@ -496,6 +549,10 @@ window.LinkDrawing = {
                 editor.ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, finalEndX, finalEndY);
         } else {
                 // No obstacles - add slight curvature for visual separation
+            // Clear any cached sticky side -- when obstacles return we want a
+            // fresh decision instead of inheriting the side chosen in a
+            // previous, possibly different obstacle layout.
+            if (window.LinkAutoCurveSide) window.LinkAutoCurveSide.clear(link);
             const curveOffset = linkIndex > 0 ? Math.ceil(linkIndex / 2) * 10 * direction : 0;
             cp1x = finalStartX + Math.cos(perpAngle) * curveOffset;
             cp1y = finalStartY + Math.sin(perpAngle) * curveOffset;
@@ -515,6 +572,7 @@ window.LinkDrawing = {
             }
         } else {
             // Curve mode disabled - draw straight line (static, no gravity)
+            if (window.LinkAutoCurveSide) window.LinkAutoCurveSide.clear(link);
             editor.ctx.moveTo(finalStartX, finalStartY);
             editor.ctx.lineTo(finalEndX, finalEndY);
             
@@ -524,16 +582,40 @@ window.LinkDrawing = {
             link._cp1 = null;
             link._cp2 = null;
         }
-        
-        // ENHANCED: Auto-adjust link color for visibility in current mode
-        let linkColor = link.color;
-        if (!isSelected) {
-            // Adjust color based on mode (darken light colors in light mode, brighten dark colors in dark mode)
-            linkColor = editor.adjustColorForMode(link.color);
+
+        if (link._renderedEndpoints) {
+            link._renderedEndpointAnchors = {
+                device1X: device1.x,
+                device1Y: device1.y,
+                device2X: device2.x,
+                device2Y: device2.y
+            };
         }
         
-        // Get link width (use per-link width if set, otherwise use global currentLinkWidth)
-        const linkWidth = link.width !== undefined ? link.width : editor.currentLinkWidth;
+        // ENHANCED: Auto-adjust link color for visibility in current mode
+        // DEFENSIVE: coerce missing/invalid link.color (legacy autosave data) to
+        // a theme-appropriate default so downstream helpers never see undefined.
+        // 2026-04-24 -- resolveColor() lets link.linkType drive the color when
+        // the user never set an explicit one (AI-generated protocol topologies).
+        // Explicit non-default link.color always wins (preserves every
+        // hand-coloured link the user drew).
+        let rawLinkColor = (window.TopologyLinkStyles && typeof window.TopologyLinkStyles.resolveColor === 'function')
+            ? window.TopologyLinkStyles.resolveColor(link, editor)
+            : ((typeof link.color === 'string' && link.color.length > 0)
+                ? link.color
+                : (editor.defaultLinkColor || (editor.darkMode ? '#ffffff' : '#666666')));
+        let linkColor = rawLinkColor;
+        if (!isSelected) {
+            // Adjust color based on mode (darken light colors in light mode, brighten dark colors in dark mode)
+            linkColor = editor.adjustColorForMode(rawLinkColor) || rawLinkColor;
+        }
+        
+        // Get link width (use per-link width if set, otherwise use protocol
+        // default from TopologyLinkStyles, finally the editor's global width).
+        const linkWidth = (window.TopologyLinkStyles && typeof window.TopologyLinkStyles.resolveWidth === 'function')
+            ? window.TopologyLinkStyles.resolveWidth(link, editor)
+            : (link.width !== undefined ? link.width : editor.currentLinkWidth);
+        const renderLinkWidth = this._readableLinkWidth(editor, link, linkWidth, 1.25);
         
         // ENHANCED: Instant visual feedback with glow on selection
         // Skip highlight when editing color/width/style to see actual appearance
@@ -545,17 +627,32 @@ window.LinkDrawing = {
         const selectionColors = editor.getLinkSelectionColors(linkColor);
         const selectionColor = selectionColors.stroke;
         const selectionGlow = selectionColors.glow;
+        const xrayRenderActive = this._isXrayCaptureRenderActive(editor, link);
         
-        if (link._xrayCaptureActive) {
+        if (xrayRenderActive) {
             editor.ctx.save();
             editor.ctx.shadowColor = 'rgba(0, 200, 255, 0.6)';
             editor.ctx.shadowBlur = 14;
             editor.ctx.strokeStyle = 'rgba(0, 200, 255, 0.35)';
-            editor.ctx.lineWidth = linkWidth + 8;
-            editor.ctx.setLineDash([6, 4]);
+            editor.ctx.lineWidth = renderLinkWidth + (
+                editor.getScreenStableStrokeWidth
+                    ? editor.getScreenStableStrokeWidth(8, 6)
+                    : 8
+            );
+            const dash = editor.getScreenStableStrokeWidth
+                ? editor.getScreenStableStrokeWidth(6, 4)
+                : 6;
+            const gap = editor.getScreenStableStrokeWidth
+                ? editor.getScreenStableStrokeWidth(4, 3)
+                : 4;
+            editor.ctx.setLineDash([dash, gap]);
             editor.ctx.beginPath();
-            editor.ctx.moveTo(startX, startY);
-            editor.ctx.lineTo(endX, endY);
+            editor.ctx.moveTo(finalStartX, finalStartY);
+            if (curveMode && (link._cp1 || link._cp2)) {
+                editor.ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, finalEndX, finalEndY);
+            } else {
+                editor.ctx.lineTo(finalEndX, finalEndY);
+            }
             editor.ctx.stroke();
             editor.ctx.setLineDash([]);
             editor.ctx.restore();
@@ -564,17 +661,21 @@ window.LinkDrawing = {
             editor.ctx.shadowColor = selectionGlow;
             editor.ctx.shadowBlur = 8;
             editor.ctx.strokeStyle = selectionColor;
-            editor.ctx.lineWidth = linkWidth + 2;
+            editor.ctx.lineWidth = renderLinkWidth + 2;
         } else {
             editor.ctx.shadowBlur = 0;
             editor.ctx.strokeStyle = linkColor;
-            editor.ctx.lineWidth = linkWidth;
+            editor.ctx.lineWidth = renderLinkWidth;
         }
         
-        // CRITICAL: Use link's own style if set
-        // If link has no style property (old links), default to 'solid' (not global style)
-        // This ensures existing links don't change when global style changes
-        const linkStyle = link.style !== undefined ? link.style : 'solid';
+        // CRITICAL: Use link's own style if set. If no explicit style,
+        // fall back to the protocol default (iBGP dashed, eBGP arrow,
+        // EVPN dashed-wide, ...) via TopologyLinkStyles so AI-generated
+        // protocol-tagged links render with the right line style.
+        // Existing links without linkType keep their solid default.
+        const linkStyle = (window.TopologyLinkStyles && typeof window.TopologyLinkStyles.resolveStyle === 'function')
+            ? window.TopologyLinkStyles.resolveStyle(link)
+            : (link.style !== undefined ? link.style : 'solid');
         
         // ENHANCED: Apply link style (solid, dashed, dashed-wide, dotted, arrow variants)
         // Scale dash patterns with link width for consistent visual appearance
@@ -591,24 +692,64 @@ window.LinkDrawing = {
         
         if (linkStyle === 'dashed' || linkStyle === 'dashed-arrow' || linkStyle === 'dashed-double-arrow') {
             // Scale dash pattern with width: base 8,4 at width 2, scale proportionally
-            const dashScale = Math.max(1, linkWidth / 2);
+            const dashScale = Math.max(1, renderLinkWidth / 2);
             editor.ctx.setLineDash([8 * dashScale, 4 * dashScale]);
         } else if (linkStyle === 'dashed-wide') {
             // Scale wide dash pattern with width
-            const dashScale = Math.max(1, linkWidth / 2);
+            const dashScale = Math.max(1, renderLinkWidth / 2);
             editor.ctx.setLineDash([18 * dashScale, 18 * dashScale]);
         } else if (linkStyle === 'dotted') {
             // For dotted, use round caps - the dot size IS the lineWidth
             // Scale gap based on line width so dots stay visible when thick
             editor.ctx.lineCap = 'round';
-            const dotSize = Math.max(linkWidth * 2, 4); // Bigger dots (minimum 4px)
-            const dotGap = Math.max(linkWidth * 4 + 12, 16); // Gap scales with width (minimum 16px)
+            const dotSize = Math.max(renderLinkWidth * 2, 4); // Bigger dots (minimum 4px)
+            const dotGap = Math.max(renderLinkWidth * 4 + 12, 16); // Gap scales with width (minimum 16px)
             editor.ctx.setLineDash([0.1, dotGap]); // Tiny dash with scaled gap
             editor.ctx.lineWidth = dotSize; // Dot diameter = lineWidth
         } else {
             editor.ctx.setLineDash([]); // Solid line
         }
         
+        // OVERLAP BOUNDARY RIM:
+        // When two same-coloured links share (nearly) the same path -- common
+        // for parallel iBGP / eBGP links between the same pair of devices --
+        // the second link paints over the first and the pair becomes
+        // indistinguishable. To guarantee a visible boundary between
+        // overlapping same-colour links, we stroke a slightly wider rim in a
+        // darkened version of the link's own colour BEFORE the main stroke.
+        // When a second link is drawn over the first, its rim overpaints the
+        // first link's colour on the outer edge, leaving a thin darker band
+        // that reads as the seam between them. Skipped for selected links
+        // (they already carry a coloured glow), x-ray captures (already have
+        // a cyan halo), and non-solid styles (the dash/dotted breaks already
+        // provide visual separation and a rim would look muddy).
+        const _isSolidStyle = (linkStyle === 'solid'
+            || linkStyle === 'arrow'
+            || linkStyle === 'double-arrow');
+        if (_isSolidStyle && !isSelected && !skipHighlight && !xrayRenderActive) {
+            editor.ctx.save();
+            // darkenColor is defined module-scope in topology-device-styles.js
+            // and is already hardened against undefined / invalid inputs
+            // (the 2026-04-21 crash-storm fix). 35% darken mirrors the ratio
+            // used for device body shading so link rims stay visually
+            // consistent with the rest of the palette.
+            const rimColor = (typeof darkenColor === 'function')
+                ? darkenColor(linkColor, 0.35)
+                : linkColor;
+            editor.ctx.strokeStyle = rimColor;
+            // +1.4px (0.7px rim on each side) scales correctly with the
+            // current zoom because ctx is already in world coordinates.
+            editor.ctx.lineWidth = renderLinkWidth + 1.4;
+            editor.ctx.shadowBlur = 0;
+            editor.ctx.stroke();
+            editor.ctx.restore();
+            // Re-assert the per-link stroke/width that the main stroke
+            // below depends on -- restore() rolled them back to whatever
+            // was on the stack before the rim pass.
+            editor.ctx.strokeStyle = linkColor;
+            editor.ctx.lineWidth = renderLinkWidth;
+        }
+
         editor.ctx.stroke();
         
         // ENHANCED: Restore clipping context if we applied it for text gaps
@@ -620,7 +761,7 @@ window.LinkDrawing = {
             editor.ctx.lineCap = 'butt';
         editor.ctx.lineJoin = 'miter';
         if (linkStyle === 'dotted') {
-            editor.ctx.lineWidth = linkWidth;
+            editor.ctx.lineWidth = renderLinkWidth;
         }
         
         editor.ctx.shadowBlur = 0; // Reset shadow for other elements
@@ -639,7 +780,7 @@ window.LinkDrawing = {
         
         if (isArrowStyleQL) {
             // Scale arrow size with link width (base 16px for width 2, scales proportionally)
-            const arrowLength = 10 + (linkWidth * 3);
+            const arrowLength = 10 + (renderLinkWidth * 3);
             const arrowAngleSpread = Math.PI / 5; // 36° angle for nice arrowhead
             
             // =========================================================================
@@ -791,8 +932,8 @@ window.LinkDrawing = {
         let startX, startY, endX, endY;
         
         // Get device references if attached
-        const device1 = link.device1 ? editor.objects.find(o => o.id === link.device1) : null;
-        const device2 = link.device2 ? editor.objects.find(o => o.id === link.device2) : null;
+        const device1 = link.device1 ? editor.getObjectById(link.device1) : null;
+        const device2 = link.device2 ? editor.getObjectById(link.device2) : null;
         
         // Calculate start position (shape-aware)
         if (device1) {
@@ -836,6 +977,7 @@ window.LinkDrawing = {
         
         // Get link width and style early for arrow shortening
         const linkWidthEarly = link.width !== undefined ? link.width : editor.currentLinkWidth;
+        const renderLinkWidthEarly = this._readableLinkWidth(editor, link, linkWidthEarly, 1.25);
         const linkStyleEarly = link.style !== undefined ? link.style : 'solid';
         const isArrowStyle = linkStyleEarly === 'arrow' || linkStyleEarly === 'double-arrow' || 
                             linkStyleEarly === 'dashed-arrow' || linkStyleEarly === 'dashed-double-arrow';
@@ -851,7 +993,7 @@ window.LinkDrawing = {
             isStartMP = true; // Start is connected to child link
         }
         if (link.mergedInto) {
-            const parentLink = editor.objects.find(o => o.id === link.mergedInto.parentId);
+            const parentLink = editor.getObjectById(link.mergedInto.parentId);
             if (parentLink?.mergedWith?.childFreeEnd !== 'start') {
                 isStartMP = true; // Start is connected to parent link
             }
@@ -863,7 +1005,7 @@ window.LinkDrawing = {
             isEndMP = true; // End is connected to child link
         }
         if (link.mergedInto) {
-            const parentLink = editor.objects.find(o => o.id === link.mergedInto.parentId);
+            const parentLink = editor.getObjectById(link.mergedInto.parentId);
             if (parentLink?.mergedWith?.childFreeEnd !== 'end') {
                 isEndMP = true; // End is connected to parent link
             }
@@ -885,7 +1027,7 @@ window.LinkDrawing = {
         // ENHANCED: Shorten line for arrow styles so line doesn't show through arrowhead
         // CRITICAL: Only shorten STRAIGHT lines - curved lines use the filled arrow to cover overlap
         // Extra padding (linkWidth * 1) ensures thick lines are fully hidden behind arrow
-        const arrowInset = isArrowStyle ? (10 + (linkWidthEarly * 3) + linkWidthEarly) : 0;
+        const arrowInset = isArrowStyle ? (10 + (renderLinkWidthEarly * 3) + renderLinkWidthEarly) : 0;
         
         // Only shorten for STRAIGHT lines (not curved) to maintain arrow alignment
         if (isArrowStyle && !curveWillBeEnabled) {
@@ -919,8 +1061,8 @@ window.LinkDrawing = {
         
         if (isSUL) {
             // Calculate perpendicular angle for curvature - EXACTLY like drawLink()
-            const device1 = editor.objects.find(o => o.id === link.device1);
-            const device2 = editor.objects.find(o => o.id === link.device2);
+            const device1 = editor.getObjectById(link.device1);
+            const device2 = editor.getObjectById(link.device2);
             
             if (device1 && device2) {
                 const angle = Math.atan2(device2.y - device1.y, device2.x - device1.x);
@@ -941,11 +1083,13 @@ window.LinkDrawing = {
         }
         
         // Draw line (curved or straight)
-        // ENHANCED: Use clipping to create true transparent gaps for attached text
+        // ENHANCED: Use clipping to create true transparent gaps for visible attached text
         const attachedTexts = editor.objects.filter(obj => 
             obj.type === 'text' && 
             obj.linkId === link.id && 
-            obj._onLinkLine === true
+            obj._onLinkLine === true &&
+            editor.showLinkAttachments !== false &&
+            !(obj._interfaceLabel === true && !editor.showLinkTypeLabels)
         );
         
         if (attachedTexts.length > 0) {
@@ -955,7 +1099,9 @@ window.LinkDrawing = {
             // Draw a large rectangle covering the whole canvas
             editor.ctx.rect(-100000, -100000, 200000, 200000);
             
-            // For each attached text, cut out its area (counter-clockwise for hole)
+            // For each attached text, cut out its area (counter-clockwise for hole).
+            // Match CanvasDrawing.drawText DPR-snapped font so the clip hole tracks
+            // the rendered TB exactly at any zoom (no link line bleed-through).
             for (const textObj of attachedTexts) {
                 editor.ctx.save();
                 const txtMetrics = editor.ctx.measureText(textObj.text || 'Text');
@@ -963,12 +1109,16 @@ window.LinkDrawing = {
                 
                 // Calculate text box dimensions
                 editor.ctx.save();
-                editor.ctx.font = `${textObj.fontSize}px Arial`;
+                const requestedFontSize = Number(textObj.fontSize) || 14;
+                const renderedFontSize = editor.getDprSnappedFontSize
+                    ? editor.getDprSnappedFontSize(requestedFontSize)
+                    : requestedFontSize;
+                editor.ctx.font = `${renderedFontSize}px Arial`;
                 const metrics = editor.ctx.measureText(textObj.text || 'Text');
                 editor.ctx.restore();
                 
                 const w = metrics.width;
-                const h = parseInt(textObj.fontSize);
+                const h = parseInt(renderedFontSize);
                 const padding = 4;
                 const gapW = w + padding * 2;
                 const gapH = h + padding * 2;
@@ -1152,20 +1302,18 @@ window.LinkDrawing = {
                     closestObstacleRadius = Math.max(closestObstacleRadius, obstacle.radius);
                 });
                 
-                // ENHANCED: Choose curve direction based on which side has LESS pressure
-                // This ensures the link curves toward the clearer side, avoiding overlap
-                let curveDir = 1;
+                // ENHANCED: Choose curve direction with STICKY hysteresis so a
+                // tiny stretch movement doesn't flip the curve to the opposite
+                // side of the obstacle (see `LinkAutoCurveSide.choose`). Only
+                // flip when the opposite side has SUBSTANTIALLY more pressure
+                // than the cached side, otherwise keep the cached side.
                 let totalPressure = positiveSidePressure + negativeSidePressure;
-                
-                if (positiveSidePressure > negativeSidePressure) {
-                    // More pressure from positive side - curve toward negative side
-                    curveDir = -1;
-                } else if (negativeSidePressure > positiveSidePressure) {
-                    // More pressure from negative side - curve toward positive side
-                    curveDir = 1;
-                }
-                // If equal pressure, use default direction (positive)
-                
+                const stickyCurveDir = window.LinkAutoCurveSide
+                    ? window.LinkAutoCurveSide.choose(link, positiveSidePressure, negativeSidePressure)
+                    : (positiveSidePressure > negativeSidePressure ? -1
+                        : (negativeSidePressure > positiveSidePressure ? 1 : 1));
+                let curveDir = stickyCurveDir;
+
                 // Calculate deflection magnitude based on total pressure but in chosen direction
                 const deflectionMag = Math.max(positiveSidePressure, negativeSidePressure);
                 
@@ -1205,6 +1353,8 @@ window.LinkDrawing = {
                 editor.ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, endX, endY);
             } else {
                 // No obstacles - add slight curvature for visual separation (EXACTLY like QLs)
+                // Clear sticky side cache so re-entering an obstacle field picks fresh.
+                if (window.LinkAutoCurveSide) window.LinkAutoCurveSide.clear(link);
                 const linkIndex = link.linkIndex || 0;
                 const curveOffset = linkIndex > 0 ? Math.ceil(linkIndex / 2) * 10 * curveDirection : 0;
                 
@@ -1226,6 +1376,7 @@ window.LinkDrawing = {
             }
         } else {
             // Curve disabled - straight line
+            if (window.LinkAutoCurveSide) window.LinkAutoCurveSide.clear(link);
             editor.ctx.moveTo(startX, startY);
             editor.ctx.lineTo(endX, endY);
             
@@ -1237,14 +1388,27 @@ window.LinkDrawing = {
         }
         
         // ENHANCED: Auto-adjust link color for visibility in current mode
-        let linkColor = link.color;
+        // DEFENSIVE: coerce missing/invalid link.color (legacy autosave data) to
+        // a theme-appropriate default so downstream helpers never see undefined.
+        // 2026-04-24 -- unbound-link path mirrors drawLink(): linkType drives
+        // color/style/width only when the user never set an explicit value.
+        let rawLinkColor = (window.TopologyLinkStyles && typeof window.TopologyLinkStyles.resolveColor === 'function')
+            ? window.TopologyLinkStyles.resolveColor(link, editor)
+            : ((typeof link.color === 'string' && link.color.length > 0)
+                ? link.color
+                : (editor.defaultLinkColor || (editor.darkMode ? '#ffffff' : '#666666')));
+        let linkColor = rawLinkColor;
         if (!isSelected) {
             // Adjust color based on mode (darken light colors in light mode, brighten dark colors in dark mode)
-            linkColor = editor.adjustColorForMode(link.color);
+            linkColor = editor.adjustColorForMode(rawLinkColor) || rawLinkColor;
         }
         
-        // Get link width (use per-link width if set, otherwise use global currentLinkWidth)
-        const linkWidth = link.width !== undefined ? link.width : editor.currentLinkWidth;
+        // Get link width (use per-link width if set, otherwise use protocol
+        // default from TopologyLinkStyles, finally the editor's global width).
+        const linkWidth = (window.TopologyLinkStyles && typeof window.TopologyLinkStyles.resolveWidth === 'function')
+            ? window.TopologyLinkStyles.resolveWidth(link, editor)
+            : (link.width !== undefined ? link.width : editor.currentLinkWidth);
+        const renderLinkWidth = this._readableLinkWidth(editor, link, linkWidth, 1.25);
         
         // THEME-AWARE SELECTION: Use contrasting colors based on current mode
         const selectionColors = editor.getLinkSelectionColors(linkColor);
@@ -1258,17 +1422,21 @@ window.LinkDrawing = {
             editor.ctx.shadowColor = selectionGlow;
             editor.ctx.shadowBlur = 8;
             editor.ctx.strokeStyle = selectionColor;
-            editor.ctx.lineWidth = linkWidth + 2;
+            editor.ctx.lineWidth = renderLinkWidth + 2;
         } else {
             editor.ctx.shadowBlur = 0;
             editor.ctx.strokeStyle = linkColor;
-            editor.ctx.lineWidth = linkWidth;
+            editor.ctx.lineWidth = renderLinkWidth;
         }
         
-        // CRITICAL: Use link's own style if set
-        // If link has no style property (old links), default to 'solid' (not global style)
-        // This ensures existing links don't change when global style changes
-        const linkStyle = link.style !== undefined ? link.style : 'solid';
+        // CRITICAL: Use link's own style if set. If no explicit style,
+        // fall back to the protocol default (iBGP dashed, eBGP arrow,
+        // EVPN dashed-wide, ...) via TopologyLinkStyles so AI-generated
+        // protocol-tagged links render with the right line style.
+        // Existing links without linkType keep their solid default.
+        const linkStyle = (window.TopologyLinkStyles && typeof window.TopologyLinkStyles.resolveStyle === 'function')
+            ? window.TopologyLinkStyles.resolveStyle(link)
+            : (link.style !== undefined ? link.style : 'solid');
         
         // ENHANCED: Apply link style (solid, dashed, dashed-wide, dotted, arrow variants)
         // Scale dash patterns with link width for consistent visual appearance
@@ -1285,24 +1453,46 @@ window.LinkDrawing = {
         
         if (linkStyle === 'dashed' || linkStyle === 'dashed-arrow' || linkStyle === 'dashed-double-arrow') {
             // Scale dash pattern with width: base 8,4 at width 2, scale proportionally
-            const dashScale = Math.max(1, linkWidth / 2);
+            const dashScale = Math.max(1, renderLinkWidth / 2);
             editor.ctx.setLineDash([8 * dashScale, 4 * dashScale]);
         } else if (linkStyle === 'dashed-wide') {
             // Scale wide dash pattern with width
-            const dashScale = Math.max(1, linkWidth / 2);
+            const dashScale = Math.max(1, renderLinkWidth / 2);
             editor.ctx.setLineDash([18 * dashScale, 18 * dashScale]);
         } else if (linkStyle === 'dotted') {
             // For dotted, use round caps - the dot size IS the lineWidth
             // Scale gap based on line width so dots stay visible when thick
             editor.ctx.lineCap = 'round';
-            const dotSize = Math.max(linkWidth * 2, 4); // Bigger dots (minimum 4px)
-            const dotGap = Math.max(linkWidth * 4 + 12, 16); // Gap scales with width (minimum 16px)
+            const dotSize = Math.max(renderLinkWidth * 2, 4); // Bigger dots (minimum 4px)
+            const dotGap = Math.max(renderLinkWidth * 4 + 12, 16); // Gap scales with width (minimum 16px)
             editor.ctx.setLineDash([0.1, dotGap]); // Tiny dash with scaled gap
             editor.ctx.lineWidth = dotSize; // Dot diameter = lineWidth
         } else {
             editor.ctx.setLineDash([]); // Solid line
         }
         
+        // OVERLAP BOUNDARY RIM (same rationale as the main drawLink() above,
+        // kept in sync so the unbound-link render path produces an identical
+        // look when two same-colour links share a path). See the comment on
+        // the first drawLink() for why this exists and why dashed/dotted and
+        // selected/x-ray states opt out.
+        const _isSolidStyle2 = (linkStyle === 'solid'
+            || linkStyle === 'arrow'
+            || linkStyle === 'double-arrow');
+        if (_isSolidStyle2 && !isSelected && !skipHighlight) {
+            editor.ctx.save();
+            const rimColor2 = (typeof darkenColor === 'function')
+                ? darkenColor(linkColor, 0.35)
+                : linkColor;
+            editor.ctx.strokeStyle = rimColor2;
+            editor.ctx.lineWidth = renderLinkWidth + 1.4;
+            editor.ctx.shadowBlur = 0;
+            editor.ctx.stroke();
+            editor.ctx.restore();
+            editor.ctx.strokeStyle = linkColor;
+            editor.ctx.lineWidth = renderLinkWidth;
+        }
+
         editor.ctx.stroke();
         
         // ENHANCED: Restore clipping context if we applied it for text gaps
@@ -1314,7 +1504,7 @@ window.LinkDrawing = {
             editor.ctx.lineCap = 'butt';
         editor.ctx.lineJoin = 'miter';
         if (linkStyle === 'dotted') {
-            editor.ctx.lineWidth = linkWidth;
+            editor.ctx.lineWidth = renderLinkWidth;
         }
         
         editor.ctx.shadowBlur = 0; // Reset shadow after drawing link
@@ -1359,7 +1549,7 @@ window.LinkDrawing = {
             // CRITICAL: If also a child (middle link), MUST check parent connection too
             if (link.mergedInto) {
                 // This is a child link
-                const parentLink = editor.objects.find(o => o.id === link.mergedInto.parentId);
+                const parentLink = editor.getObjectById(link.mergedInto.parentId);
                 if (parentLink && parentLink.mergedWith) {
                     const childFreeEnd = parentLink.mergedWith.childFreeEnd;
                     if (childFreeEnd !== 'start') isStartFree = false;
@@ -1400,9 +1590,11 @@ window.LinkDrawing = {
                 startTangentAngle = Math.atan2(link.end.y - link.start.y, link.end.x - link.start.x);
             }
             
-            // Scale arrow size with link width (base 16px for width 2, scales proportionally)
-            const arrowLength = 10 + (linkWidth * 3);
-            const arrowAngleSpread = Math.PI / 5; // 36°
+            // Unbound TP arrows are intentionally slimmer than device-link arrows.
+            // They act like endpoint handles, so a broad black triangle looks noisy.
+            const arrowGeom = this._arrowHeadGeometry(renderLinkWidth, 'unbound');
+            const arrowLength = arrowGeom.length;
+            const arrowAngleSpread = arrowGeom.spread;
             
             // Arrow tips at any non-merge-point endpoint: device-attached OR free TP
             // MPs (internal BUL chain joints) never get arrows
@@ -1427,8 +1619,8 @@ window.LinkDrawing = {
             
             // Store arrow colors for deferred drawing pass (arrows drawn AFTER devices)
             link._arrowFillColor = isSelected ? selectionColor : linkColor;
-            link._arrowStrokeColor = isSelected ? linkColor : '#333';
-            link._arrowStrokeWidth = 1.5;
+            link._arrowStrokeColor = linkColor;
+            link._arrowStrokeWidth = arrowGeom.strokeWidth;
             
             // Arrows at any non-merge-point endpoint (device-attached OR free TP)
             // MPs are internal chain joints where two links merge -- no arrows there
@@ -1441,7 +1633,7 @@ window.LinkDrawing = {
                 if (link.mergedWith.parentFreeEnd !== 'end') endIsMergePoint = true;
                 if (link.mergedWith.parentFreeEnd !== 'start') startIsMergePoint = true;
             } else if (link.mergedInto) {
-                const pLink = editor.objects.find(o => o.id === link.mergedInto.parentId);
+                const pLink = editor.getObjectById(link.mergedInto.parentId);
                 if (pLink && pLink.mergedWith) {
                     if (pLink.mergedWith.childFreeEnd !== 'end') endIsMergePoint = true;
                     if (pLink.mergedWith.childFreeEnd !== 'start') startIsMergePoint = true;
@@ -1475,6 +1667,10 @@ window.LinkDrawing = {
             const dotSize = Math.max(linkWidth * 2, 4);
             endpointRadius = dotSize / 2; // Radius is half the dot diameter
         }
+        // Enforce minimum screen-pixel radius so endpoints stay visible when zoomed out.
+        if (typeof editor.getScreenStableStrokeWidth === 'function') {
+            endpointRadius = editor.getScreenStableStrokeWidth(endpointRadius, isSelected ? 4 : 3);
+        }
         const isStretching = editor.stretchingLink === link;
         
         // Check if start endpoint is an MP (actual connection point where 2 TPs merged)
@@ -1492,7 +1688,7 @@ window.LinkDrawing = {
         }
         // Check if this is a child link and start is the CONNECTED end (not the free end)
         else if (link.mergedInto) {
-            const parentLink = editor.objects.find(o => o.id === link.mergedInto.parentId);
+            const parentLink = editor.getObjectById(link.mergedInto.parentId);
             if (parentLink && parentLink.mergedWith) {
                 const childFreeEnd = parentLink.mergedWith.childFreeEnd;
                 if (childFreeEnd !== 'start') {
@@ -1524,7 +1720,9 @@ window.LinkDrawing = {
         }
         editor.ctx.fill();
         editor.ctx.strokeStyle = 'white';
-        editor.ctx.lineWidth = 1;
+        editor.ctx.lineWidth = editor.getScreenStableStrokeWidth
+            ? editor.getScreenStableStrokeWidth(1, 1)
+            : 1;
         editor.ctx.stroke();
         
         // ENHANCED: Add TP numbering - POSITIONAL (TP-1 and TP-2 are current free ends)
@@ -1550,7 +1748,7 @@ window.LinkDrawing = {
                 }
                 // Via mergedInto: childFreeEnd='end' means end is free, so start is connected
                 if (chainLink.mergedInto) {
-                    const parent = editor.objects.find(o => o.id === chainLink.mergedInto.parentId);
+                    const parent = editor.getObjectById(chainLink.mergedInto.parentId);
                     if (parent?.mergedWith && parent.mergedWith.childFreeEnd === 'end') {
                         startIsConnected = true;
                     }
@@ -1567,7 +1765,7 @@ window.LinkDrawing = {
                 }
                 // Via mergedInto: childFreeEnd='start' means start is free, so end is connected
                 if (chainLink.mergedInto) {
-                    const parent = editor.objects.find(o => o.id === chainLink.mergedInto.parentId);
+                    const parent = editor.getObjectById(chainLink.mergedInto.parentId);
                     if (parent?.mergedWith && parent.mergedWith.childFreeEnd === 'start') {
                         endIsConnected = true;
                     }
@@ -1598,19 +1796,23 @@ window.LinkDrawing = {
             // Draw TP number with UL identification
             const ulNumber = allLinks.findIndex(l => l.id === link.id) + 1;
             editor.ctx.save();
-            editor.ctx.font = `bold ${8 / editor.zoom}px Arial`;
+            const tpMainSize = editor.getScreenStableFontSize ? editor.getScreenStableFontSize(8, 9) : (8 / editor.zoom);
+            const tpSubSize = editor.getScreenStableFontSize ? editor.getScreenStableFontSize(6, 7) : (6 / editor.zoom);
+            const tpSubGap = editor.getScreenStableStrokeWidth ? editor.getScreenStableStrokeWidth(10, 10) : (10 / editor.zoom);
+            editor.ctx.font = `bold ${tpMainSize}px Arial`;
             editor.ctx.fillStyle = 'white';
             editor.ctx.textAlign = 'center';
             editor.ctx.textBaseline = 'middle';
             editor.ctx.fillText(`${tpNumber}`, startX, startY);
             // Show which UL this TP belongs to
-            editor.ctx.font = `${6 / editor.zoom}px Arial`;
-            editor.ctx.fillText(`U${ulNumber}`, startX, startY + 10 / editor.zoom);
+            editor.ctx.font = `${tpSubSize}px Arial`;
+            editor.ctx.fillText(`U${ulNumber}`, startX, startY + tpSubGap);
             editor.ctx.restore();
         } else {
             // Individual UL - show which endpoint (1=start, 2=end)
             editor.ctx.save();
-            editor.ctx.font = `bold ${7 / editor.zoom}px Arial`;
+            const tpSingleSize = editor.getScreenStableFontSize ? editor.getScreenStableFontSize(7, 8) : (7 / editor.zoom);
+            editor.ctx.font = `bold ${tpSingleSize}px Arial`;
             editor.ctx.fillStyle = 'white';
             editor.ctx.textAlign = 'center';
             editor.ctx.textBaseline = 'middle';
@@ -1634,7 +1836,7 @@ window.LinkDrawing = {
         }
         // Check if this is a child link and end is the CONNECTED end (not the free end)
         else if (link.mergedInto) {
-            const parentLink = editor.objects.find(o => o.id === link.mergedInto.parentId);
+            const parentLink = editor.getObjectById(link.mergedInto.parentId);
             if (parentLink && parentLink.mergedWith) {
                 const childFreeEnd = parentLink.mergedWith.childFreeEnd;
                 if (childFreeEnd !== 'end') {
@@ -1666,7 +1868,9 @@ window.LinkDrawing = {
         }
         editor.ctx.fill();
         editor.ctx.strokeStyle = 'white';
-        editor.ctx.lineWidth = 1;
+        editor.ctx.lineWidth = editor.getScreenStableStrokeWidth
+            ? editor.getScreenStableStrokeWidth(1, 1)
+            : 1;
         editor.ctx.stroke();
         
         // ENHANCED: Add TP numbering - POSITIONAL (TP-1 and TP-2 are current free ends)
@@ -1687,7 +1891,7 @@ window.LinkDrawing = {
                     startIsConnected = true;
                 }
                 if (chainLink.mergedInto) {
-                    const parent = editor.objects.find(o => o.id === chainLink.mergedInto.parentId);
+                    const parent = editor.getObjectById(chainLink.mergedInto.parentId);
                     if (parent?.mergedWith && parent.mergedWith.childFreeEnd === 'end') {
                         startIsConnected = true;
                     }
@@ -1702,7 +1906,7 @@ window.LinkDrawing = {
                     endIsConnected = true;
                 }
                 if (chainLink.mergedInto) {
-                    const parent = editor.objects.find(o => o.id === chainLink.mergedInto.parentId);
+                    const parent = editor.getObjectById(chainLink.mergedInto.parentId);
                     if (parent?.mergedWith && parent.mergedWith.childFreeEnd === 'start') {
                         endIsConnected = true;
                     }
@@ -1733,19 +1937,23 @@ window.LinkDrawing = {
             // Draw TP number with UL identification
             const ulNumber = allLinks.findIndex(l => l.id === link.id) + 1;
             editor.ctx.save();
-            editor.ctx.font = `bold ${8 / editor.zoom}px Arial`;
+            const tpMainSize = editor.getScreenStableFontSize ? editor.getScreenStableFontSize(8, 9) : (8 / editor.zoom);
+            const tpSubSize = editor.getScreenStableFontSize ? editor.getScreenStableFontSize(6, 7) : (6 / editor.zoom);
+            const tpSubGap = editor.getScreenStableStrokeWidth ? editor.getScreenStableStrokeWidth(10, 10) : (10 / editor.zoom);
+            editor.ctx.font = `bold ${tpMainSize}px Arial`;
             editor.ctx.fillStyle = 'white';
             editor.ctx.textAlign = 'center';
             editor.ctx.textBaseline = 'middle';
             editor.ctx.fillText(`${tpNumber}`, endX, endY);
             // Show which UL this TP belongs to
-            editor.ctx.font = `${6 / editor.zoom}px Arial`;
-            editor.ctx.fillText(`U${ulNumber}`, endX, endY + 10 / editor.zoom);
+            editor.ctx.font = `${tpSubSize}px Arial`;
+            editor.ctx.fillText(`U${ulNumber}`, endX, endY + tpSubGap);
             editor.ctx.restore();
         } else {
             // Individual UL - show which endpoint (1=start, 2=end)
             editor.ctx.save();
-            editor.ctx.font = `bold ${7 / editor.zoom}px Arial`;
+            const tpSingleSize = editor.getScreenStableFontSize ? editor.getScreenStableFontSize(7, 8) : (7 / editor.zoom);
+            editor.ctx.font = `bold ${tpSingleSize}px Arial`;
             editor.ctx.fillStyle = 'white';
             editor.ctx.textAlign = 'center';
             editor.ctx.textBaseline = 'middle';
@@ -1780,13 +1988,18 @@ window.LinkDrawing = {
                            Math.pow(t, 3) * endY;
             }
             
-            const mpRadius = isSelected ? 5 / editor.zoom : 4 / editor.zoom; // Slightly bigger when selected
+            // Screen-stable MP radius/outline so the merge point stays visible at any zoom.
+            const mpRadius = editor.getScreenStableStrokeWidth
+                ? editor.getScreenStableStrokeWidth(isSelected ? 5 : 4, isSelected ? 5 : 4)
+                : (isSelected ? 5 / editor.zoom : 4 / editor.zoom);
             editor.ctx.beginPath();
             editor.ctx.arc(mpStartX, mpStartY, mpRadius, 0, Math.PI * 2);
             editor.ctx.fillStyle = isSelected ? '#5599FF' : '#0066FA'; // DriveNets blue - brighter when selected
             editor.ctx.fill();
             editor.ctx.strokeStyle = isSelected ? '#0052CC' : '#003D99'; // Darker blue outline
-            editor.ctx.lineWidth = 2 / editor.zoom;
+            editor.ctx.lineWidth = editor.getScreenStableStrokeWidth
+                ? editor.getScreenStableStrokeWidth(2, 1.5)
+                : (2 / editor.zoom);
             editor.ctx.stroke();
             
             // ENHANCED: Add MP numbering based on CREATION ORDER
@@ -1806,7 +2019,7 @@ window.LinkDrawing = {
                 }
                 // Check if this link is a child (mergedInto) and start is where it connects
                 if (link.mergedInto && mpNumber === 0) { // Only if not already found as parent
-                    const parent = editor.objects.find(o => o.id === link.mergedInto.parentId);
+                    const parent = editor.getObjectById(link.mergedInto.parentId);
                     if (parent?.mergedWith) {
                         const childConnectedEnd = parent.mergedWith.childConnectionEndpoint ||
                             (parent.mergedWith.childFreeEnd === 'start' ? 'end' : 'start');
@@ -1820,14 +2033,17 @@ window.LinkDrawing = {
                 // Draw MP number with connected UL information
                 const ulNumber = allLinks.findIndex(l => l.id === link.id) + 1;
                 editor.ctx.save();
-                editor.ctx.font = `bold ${7 / editor.zoom}px Arial`;
+                const mpMainSize = editor.getScreenStableFontSize ? editor.getScreenStableFontSize(7, 9) : (7 / editor.zoom);
+                const mpSubSize = editor.getScreenStableFontSize ? editor.getScreenStableFontSize(6, 7) : (6 / editor.zoom);
+                const mpSubGap = editor.getScreenStableStrokeWidth ? editor.getScreenStableStrokeWidth(10, 10) : (10 / editor.zoom);
+                editor.ctx.font = `bold ${mpMainSize}px Arial`;
                 editor.ctx.fillStyle = 'white';
                 editor.ctx.textAlign = 'center';
                 editor.ctx.textBaseline = 'middle';
                 editor.ctx.fillText(`${mpNumber}`, mpStartX, mpStartY);
                 // Show which UL this MP is on
-                editor.ctx.font = `${6 / editor.zoom}px Arial`;
-                editor.ctx.fillText(`U${ulNumber}`, mpStartX, mpStartY + 10 / editor.zoom);
+                editor.ctx.font = `${mpSubSize}px Arial`;
+                editor.ctx.fillText(`U${ulNumber}`, mpStartX, mpStartY + mpSubGap);
                 editor.ctx.restore();
             }
         }
@@ -1854,13 +2070,18 @@ window.LinkDrawing = {
                          Math.pow(t, 3) * endY;
             }
             
-            const mpRadius = isSelected ? 5 / editor.zoom : 4 / editor.zoom; // Slightly bigger when selected
+            // Screen-stable MP radius/outline so the merge point stays visible at any zoom.
+            const mpRadius = editor.getScreenStableStrokeWidth
+                ? editor.getScreenStableStrokeWidth(isSelected ? 5 : 4, isSelected ? 5 : 4)
+                : (isSelected ? 5 / editor.zoom : 4 / editor.zoom);
             editor.ctx.beginPath();
             editor.ctx.arc(mpEndX, mpEndY, mpRadius, 0, Math.PI * 2);
             editor.ctx.fillStyle = isSelected ? '#5599FF' : '#0066FA'; // DriveNets blue - brighter when selected
             editor.ctx.fill();
             editor.ctx.strokeStyle = isSelected ? '#0052CC' : '#003D99'; // Darker blue outline
-            editor.ctx.lineWidth = 2 / editor.zoom;
+            editor.ctx.lineWidth = editor.getScreenStableStrokeWidth
+                ? editor.getScreenStableStrokeWidth(2, 1.5)
+                : (2 / editor.zoom);
             editor.ctx.stroke();
             
             // ENHANCED: Add MP numbering based on CREATION ORDER
@@ -1880,7 +2101,7 @@ window.LinkDrawing = {
                 }
                 // Check if this link is a child (mergedInto) and end is where it connects
                 if (link.mergedInto && mpNumber === 0) { // Only if not already found as parent
-                    const parent = editor.objects.find(o => o.id === link.mergedInto.parentId);
+                    const parent = editor.getObjectById(link.mergedInto.parentId);
                     if (parent?.mergedWith) {
                         const childConnectedEnd = parent.mergedWith.childConnectionEndpoint ||
                             (parent.mergedWith.childFreeEnd === 'start' ? 'end' : 'start');
@@ -1894,14 +2115,17 @@ window.LinkDrawing = {
                 // Draw MP number with connected UL information
                 const ulNumber = allLinks.findIndex(l => l.id === link.id) + 1;
                 editor.ctx.save();
-                editor.ctx.font = `bold ${7 / editor.zoom}px Arial`;
+                const mpMainSize = editor.getScreenStableFontSize ? editor.getScreenStableFontSize(7, 9) : (7 / editor.zoom);
+                const mpSubSize = editor.getScreenStableFontSize ? editor.getScreenStableFontSize(6, 7) : (6 / editor.zoom);
+                const mpSubGap = editor.getScreenStableStrokeWidth ? editor.getScreenStableStrokeWidth(10, 10) : (10 / editor.zoom);
+                editor.ctx.font = `bold ${mpMainSize}px Arial`;
                 editor.ctx.fillStyle = 'white';
                 editor.ctx.textAlign = 'center';
                 editor.ctx.textBaseline = 'middle';
                 editor.ctx.fillText(`${mpNumber}`, mpEndX, mpEndY);
                 // Show which UL this MP is on
-                editor.ctx.font = `${6 / editor.zoom}px Arial`;
-                editor.ctx.fillText(`U${ulNumber}`, mpEndX, mpEndY + 10 / editor.zoom);
+                editor.ctx.font = `${mpSubSize}px Arial`;
+                editor.ctx.fillText(`U${ulNumber}`, mpEndX, mpEndY + mpSubGap);
                 editor.ctx.restore();
             }
         }
@@ -2058,29 +2282,6 @@ window.LinkDrawing = {
             editor.ctx.restore();
         }
         
-        // Draw GROUP indicator if link belongs to a group
-        if (link.groupId) {
-            const midX = (startX + endX) / 2;
-            const midY = (startY + endY) / 2;
-            const dotSize = 5 / editor.zoom;
-            
-            // Small purple dot at midpoint of link
-            editor.ctx.beginPath();
-            editor.ctx.arc(midX, midY + 12 / editor.zoom, dotSize, 0, Math.PI * 2);
-            const groupGradient = editor.ctx.createRadialGradient(
-                midX, midY + 12 / editor.zoom, 0, 
-                midX, midY + 12 / editor.zoom, dotSize
-            );
-            groupGradient.addColorStop(0, 'rgba(155, 89, 182, 0.95)');
-            groupGradient.addColorStop(1, 'rgba(142, 68, 173, 0.95)');
-            editor.ctx.fillStyle = groupGradient;
-            editor.ctx.fill();
-            
-            editor.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-            editor.ctx.lineWidth = 1 / editor.zoom;
-            editor.ctx.stroke();
-        }
-
     },
 
     drawLinkArrows(editor, link) {
@@ -2093,6 +2294,11 @@ window.LinkDrawing = {
         const strokeColor = link._arrowStrokeColor;
         const strokeWidth = link._arrowStrokeWidth || 1;
         if (!len || !spread) return;
+
+        const prevLineJoin = editor.ctx.lineJoin;
+        const prevLineCap = editor.ctx.lineCap;
+        editor.ctx.lineJoin = 'round';
+        editor.ctx.lineCap = 'round';
         
         if (link._arrowAtEnd && link._arrowTipEnd) {
             const tip = link._arrowTipEnd;
@@ -2123,6 +2329,9 @@ window.LinkDrawing = {
             editor.ctx.lineWidth = strokeWidth;
             editor.ctx.stroke();
         }
+
+        editor.ctx.lineJoin = prevLineJoin;
+        editor.ctx.lineCap = prevLineCap;
     },
 };
 

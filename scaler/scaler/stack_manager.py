@@ -377,67 +377,132 @@ class StackManager:
         return 0, 0
     
     @staticmethod
-    def requires_delete_deploy(current_version: str, target_version: str) -> bool:
-        """Check if upgrade requires delete + deploy (major version change).
-        
-        Args:
-            current_version: Current DNOS version on device
-            target_version: Target DNOS version to install
-            
-        Returns:
-            True if major version differs (e.g., 25.4 -> 26.1)
+    def requires_delete_deploy(
+        current_version: str,
+        target_version: str,
+        target_branch_name: str = "",
+    ) -> bool:
+        """Check if upgrade requires delete + deploy.
+
+        Returns True when:
+        - Major version differs (e.g. 25.4 -> 26.1), OR
+        - A branch switch is detected (feature branch -> dev branch)
         """
         current_major, _ = StackManager.extract_major_version(current_version)
         target_major, _ = StackManager.extract_major_version(target_version)
-        
-        if current_major == 0 or target_major == 0:
-            return False  # Can't determine, assume no
-        
-        return current_major != target_major
+
+        if current_major != 0 and target_major != 0 and current_major != target_major:
+            return True
+
+        is_switch, _, _ = StackManager.detect_branch_switch(
+            current_version, target_version, target_branch_name
+        )
+        return is_switch
     
     @staticmethod
     def extract_branch_name(version_str: str) -> str:
         """Extract the branch/build portion from a full DNOS version string.
-        
+
         Examples:
             '26.1.0.27_priv.easraf_flowspec_vpn_wbox_side_29' -> 'easraf_flowspec_vpn_wbox_side'
             '26.1.0.1_priv.aavraham_SW-243508_show_flowspec_scale_3' -> 'aavraham_SW-243508_show_flowspec_scale'
-            '26.1.0.200_dev_v26_1_200_3' -> 'dev_v26_1_200'
+            '26.1.0.200_dev_v26_1_200_3' -> 'dev_v26_1'
             '25.4.0' -> '' (release, no branch)
+            '26.2' -> '' (version only, no branch)
         """
         import re
         if not version_str:
             return ""
-        # Strip leading version numbers: "26.1.0.27_" or "26.1.0_"
-        stripped = re.sub(r'^\d+\.\d+\.\d+(\.\d+)?_?', '', version_str)
+        s = version_str.strip()
+        if re.match(r"^\d+\.\d+(\.\d+){0,2}$", s):
+            return ""
+        stripped = re.sub(r"^\d+\.\d+\.\d+(\.\d+)?_?", "", s)
         if not stripped:
             return ""
-        # Remove "priv." prefix
-        stripped = re.sub(r'^priv\.', '', stripped)
-        # Remove trailing build number (e.g. "_29", "_3")
-        stripped = re.sub(r'_\d+$', '', stripped)
+        stripped = re.sub(r"^priv\.", "", stripped)
+        stripped = re.sub(r"_\d+$", "", stripped)
+        m_dev = re.match(r"(dev_v\d+_\d+)", stripped)
+        if m_dev:
+            return m_dev.group(1)
         return stripped
 
     @staticmethod
-    def detect_branch_switch(current_version: str, target_version: str) -> Tuple[bool, str, str]:
+    def _normalize_branch_hint(branch_name: str) -> str:
+        """Normalize a Jenkins branch name for comparison.
+
+        ``dev_v26_2`` and ``dev_v26_1`` are different dev branches.
+        ``priv.user_SW-123_fix`` is a feature branch.
+        """
+        import re
+        if not branch_name:
+            return ""
+        b = branch_name.strip().strip("/")
+        b = re.sub(r"^origin/", "", b, flags=re.IGNORECASE)
+        b = re.sub(r"%2F", "/", b)
+        return b
+
+    @staticmethod
+    def _branches_equivalent(a: str, b: str) -> bool:
+        """Check if two branch names refer to the same Jenkins branch.
+
+        ``dev_v26_2_200`` (from DNOS version string) and ``dev_v26_2`` (Jenkins
+        branch name) should be considered the same branch.
+        """
+        import re
+        al, bl = a.lower(), b.lower()
+        if al == bl:
+            return True
+        a_core = re.sub(r"_\d+$", "", al)
+        b_core = re.sub(r"_\d+$", "", bl)
+        if a_core == b_core:
+            return True
+        if a_core.startswith(b_core) or b_core.startswith(a_core):
+            return True
+        return False
+
+    @staticmethod
+    def detect_branch_switch(
+        current_version: str,
+        target_version: str,
+        target_branch_name: str = "",
+    ) -> Tuple[bool, str, str]:
         """Detect if an upgrade switches between different development branches.
-        
+
         Same major.minor.patch but different branch names can cause incompatibility
         and DN_RECOVERY. This catches cases that version comparison misses.
-        
+
+        When version strings lack branch identifiers (e.g. bare ``26.2.0.23``),
+        falls back to the Jenkins ``target_branch_name`` hint to detect cross-branch
+        upgrades (feature -> dev, dev -> dev, etc.).
+
         Returns:
             (is_switch, current_branch, target_branch)
         """
+        import re
+
         cur_branch = StackManager.extract_branch_name(current_version)
         tgt_branch = StackManager.extract_branch_name(target_version)
-        
-        if not cur_branch or not tgt_branch:
-            return False, cur_branch, tgt_branch
-        
-        if cur_branch.lower() == tgt_branch.lower():
-            return False, cur_branch, tgt_branch
-        
-        return True, cur_branch, tgt_branch
+
+        tgt_hint = StackManager._normalize_branch_hint(target_branch_name)
+
+        if not tgt_branch and tgt_hint:
+            tgt_branch = tgt_hint
+        elif tgt_branch and tgt_hint:
+            tgt_branch = tgt_hint
+
+        if cur_branch and tgt_branch:
+            if StackManager._branches_equivalent(cur_branch, tgt_branch):
+                return False, cur_branch, tgt_branch
+            return True, cur_branch, tgt_branch
+
+        if not cur_branch and tgt_branch:
+            cur_ver_is_plain = bool(
+                re.match(r"^\d+\.\d+(\.\d+){0,2}$", current_version.strip())
+            ) if current_version else False
+            if cur_ver_is_plain:
+                return True, "(feature/release)", tgt_branch
+
+        return False, cur_branch, tgt_branch
 
     def check_freshness(self, stack: StackInfo) -> Tuple[bool, str]:
         """Check if a stack is fresh enough (< 48 hours).

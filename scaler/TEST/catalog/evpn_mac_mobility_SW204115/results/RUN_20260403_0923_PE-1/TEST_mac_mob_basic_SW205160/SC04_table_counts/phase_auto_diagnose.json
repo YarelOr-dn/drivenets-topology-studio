@@ -1,0 +1,243 @@
+{
+  "phase_name": "auto_diagnose",
+  "started_at": "2026-04-03T09:38:02.188+00:00",
+  "completed_at": "2026-04-03T09:42:57.807+00:00",
+  "duration_sec": 295.619,
+  "command_count": 29,
+  "commands": [
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:35 | include mac-mobility | no-more",
+      "timestamp": "2026-04-03T09:38:02.188+00:00",
+      "duration_ms": 10013,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:35 | include MAC | no-more",
+      "timestamp": "2026-04-03T09:38:12.202+00:00",
+      "duration_ms": 6308,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:35 | include EVPN | no-more",
+      "timestamp": "2026-04-03T09:38:18.510+00:00",
+      "duration_ms": 12716,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:35 | include RT-2 | no-more",
+      "timestamp": "2026-04-03T09:38:31.226+00:00",
+      "duration_ms": 5907,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:35 | include Type-2 | no-more",
+      "timestamp": "2026-04-03T09:38:37.134+00:00",
+      "duration_ms": 9017,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:35 | include withdraw | no-more",
+      "timestamp": "2026-04-03T09:38:46.152+00:00",
+      "duration_ms": 5707,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:35 | include announce | no-more",
+      "timestamp": "2026-04-03T09:38:51.860+00:00",
+      "duration_ms": 7961,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:35 | include seq | no-more",
+      "timestamp": "2026-04-03T09:38:59.821+00:00",
+      "duration_ms": 3304,
+      "phase": "auto_diagnose",
+      "output_length": 301,
+      "output_preview": "2026-04-03T09:35:31.642667 +03:00 [INFO      ] [BgpTrius.cpp:985:updatePacket] [bgpd:1342:1575] 2142204:1107339:  input got rst or fin, iptablesReset:0 nsrState:0 key(vrf id: 0 local addr: 1.1.1.1 remote addr: 5.5.5.5 local port: 34871 remote port: 179) seq:365726551 ack:3335430458 flags:FA msgSize:0"
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:35 | include duplicate | no-more",
+      "timestamp": "2026-04-03T09:39:03.126+00:00",
+      "duration_ms": 9162,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:35 | include suppress | no-more",
+      "timestamp": "2026-04-03T09:39:12.288+00:00",
+      "duration_ms": 11114,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:35 | include frozen | no-more",
+      "timestamp": "2026-04-03T09:39:23.403+00:00",
+      "duration_ms": 9413,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:35 | include NOTIFICATION | no-more",
+      "timestamp": "2026-04-03T09:39:32.816+00:00",
+      "duration_ms": 4405,
+      "phase": "auto_diagnose",
+      "output_length": 408,
+      "output_preview": "2026-04-03T09:35:31.642679 +03:00 [WARNING   ] [bgp_debug.c:449:bgp_notify_print] [bgpd:1342:1342] 2142205:5223423: %NOTIFICATION: vrf default sent to neighbor 5.5.5.5 2/2 (OPEN Message Error/Bad Peer AS) 2 bytes 1b 6a\n2026-04-03T09:35:31.642685 +03:00 [WARNING   ] [bgp_packet.c:1922:bgp_notify_send_with_data] [bgpd:1342:1342] 2142206:5223423: Notification sent to neighbor 5.5.5.5 on vrf default: type 2/2"
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 09:35 | include Clearing | no-more",
+      "timestamp": "2026-04-03T09:39:37.222+00:00",
+      "duration_ms": 15620,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/fibmgrd_traces | include 09:35 | include MAC | no-more",
+      "timestamp": "2026-04-03T09:39:52.842+00:00",
+      "duration_ms": 26234,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/fibmgrd_traces | include 09:35 | include bridge | no-more",
+      "timestamp": "2026-04-03T09:40:19.077+00:00",
+      "duration_ms": 21730,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/fibmgrd_traces | include 09:35 | include evpn | no-more",
+      "timestamp": "2026-04-03T09:40:40.808+00:00",
+      "duration_ms": 28086,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/fibmgrd_traces | include 09:35 | include FIB | no-more",
+      "timestamp": "2026-04-03T09:41:08.895+00:00",
+      "duration_ms": 12572,
+      "phase": "auto_diagnose",
+      "output_length": 68379,
+      "output_preview": "2026-04-02T09:09:35.136422 +03:00 [DEBUG     ] [MessageParser.cpp:469:HandleMessageFromNeighborManager] [fibmgrd:1578:1578] 993427:12970521: [PACKET] Got protobuf message from Neighbor-Manager: neighbor { key { vrf_id: 1 if_id { index: 13619 cheetah_index: 13619 } ipv4 { value: 269488130 } } reachability { state: FAILED ll2addr: \"\\000\\000\\000\\000\\000\\000\" } originator: NEIGHBOUR_MANAGER }\n2026-04-02T09:09:35.136474 +03:00 [DEBUG     ] [MessageParser.cpp:1172:NeighborUpdate] [fibmgrd:1578:1578] 9"
+    },
+    {
+      "command": "show file traces routing_engine/fibmgrd_traces | include 09:35 | include flush | no-more",
+      "timestamp": "2026-04-03T09:41:21.468+00:00",
+      "duration_ms": 10865,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/fibmgrd_traces | include 09:35 | include delete | no-more",
+      "timestamp": "2026-04-03T09:41:32.333+00:00",
+      "duration_ms": 14719,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/fibmgrd_traces | include 09:35 | include ADD | no-more",
+      "timestamp": "2026-04-03T09:41:47.053+00:00",
+      "duration_ms": 8367,
+      "phase": "auto_diagnose",
+      "output_length": 65715,
+      "output_preview": "2026-04-02T09:09:35.136422 +03:00 [DEBUG     ] [MessageParser.cpp:469:HandleMessageFromNeighborManager] [fibmgrd:1578:1578] 993427:12970521: [PACKET] Got protobuf message from Neighbor-Manager: neighbor { key { vrf_id: 1 if_id { index: 13619 cheetah_index: 13619 } ipv4 { value: 269488130 } } reachability { state: FAILED ll2addr: \"\\000\\000\\000\\000\\000\\000\" } originator: NEIGHBOUR_MANAGER }\n2026-04-02T09:09:35.136474 +03:00 [DEBUG     ] [MessageParser.cpp:1172:NeighborUpdate] [fibmgrd:1578:1578] 9"
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 09:35 | include MAC | no-more",
+      "timestamp": "2026-04-03T09:41:55.420+00:00",
+      "duration_ms": 21578,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 09:35 | include evpn | no-more",
+      "timestamp": "2026-04-03T09:42:16.999+00:00",
+      "duration_ms": 22229,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show file traces routing_engine/rib-manager_traces | include 09:35 | include FIB | no-more",
+      "timestamp": "2026-04-03T09:42:39.228+00:00",
+      "duration_ms": 17423,
+      "phase": "auto_diagnose",
+      "output_length": 0,
+      "output_preview": ""
+    },
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN suppress | no-more",
+      "timestamp": "2026-04-03T09:42:56.652+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 35,
+      "output_preview": "  ETH TAG: 0\n    MAC table is empty"
+    },
+    {
+      "command": "show evpn instance HA_TEST_ELAN loop-prevention mac-table | no-more",
+      "timestamp": "2026-04-03T09:42:56.903+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 207,
+      "output_preview": "    MAC address          | Moves / Limit | Status                  | Remaining Suppress Time  | Cycles \n    ---------------------------------------------------------------------------------------------------"
+    },
+    {
+      "command": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+      "timestamp": "2026-04-03T09:42:57.153+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 42,
+      "output_preview": "Number of MAC-Mobility entries in redis: 0"
+    },
+    {
+      "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+      "timestamp": "2026-04-03T09:42:57.404+00:00",
+      "duration_ms": 50,
+      "phase": "auto_diagnose",
+      "output_length": 26,
+      "output_preview": "ERROR: Incomplete command."
+    },
+    {
+      "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-03T09:42:57.455+00:00",
+      "duration_ms": 250,
+      "phase": "auto_diagnose",
+      "output_length": 18,
+      "output_preview": "EvpnMacs [size: 0]"
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-03T09:42:57.705+00:00",
+      "duration_ms": 100,
+      "phase": "auto_diagnose",
+      "output_length": 442,
+      "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0"
+    }
+  ],
+  "parsed_values": {},
+  "anomalies": []
+}

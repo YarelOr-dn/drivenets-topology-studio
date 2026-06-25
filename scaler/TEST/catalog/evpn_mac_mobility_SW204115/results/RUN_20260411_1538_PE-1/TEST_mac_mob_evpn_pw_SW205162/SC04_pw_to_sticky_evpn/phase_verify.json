@@ -1,0 +1,134 @@
+{
+  "phase_name": "verify",
+  "started_at": "2026-04-11T15:44:52.156+00:00",
+  "completed_at": "2026-04-11T15:46:45.908+00:00",
+  "duration_sec": 113.752,
+  "command_count": 13,
+  "commands": [
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:ff:ff:01 | no-more",
+      "timestamp": "2026-04-11T15:44:52.156+00:00",
+      "duration_ms": 250,
+      "phase": "verify",
+      "output_length": 182,
+      "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 11-Apr-2026-18:35:25"
+    },
+    {
+      "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-11T15:44:52.407+00:00",
+      "duration_ms": 250,
+      "phase": "verify",
+      "output_length": 182,
+      "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 11-Apr-2026-18:35:25"
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-11T15:44:52.658+00:00",
+      "duration_ms": 100,
+      "phase": "verify",
+      "output_length": 874,
+      "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress   "
+    },
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-11T15:44:52.759+00:00",
+      "duration_ms": 250,
+      "phase": "verify",
+      "output_length": 735,
+      "output_preview": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, i - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: HA_TEST_ELAN\n  EVI ID : 1\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | Nexthop                | Label/VNI   | Resolution        \n    ------------------"
+    },
+    {
+      "command": "show evpn mac-table instance HA_TEST_ELAN mac 00:de:ad:ff:ff:01 | no-more",
+      "timestamp": "2026-04-11T15:44:53.010+00:00",
+      "duration_ms": 250,
+      "phase": "verify",
+      "output_length": 182,
+      "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 11-Apr-2026-18:35:25"
+    },
+    {
+      "command": "show evpn mac-table detail instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-11T15:44:53.260+00:00",
+      "duration_ms": 250,
+      "phase": "verify",
+      "output_length": 182,
+      "output_preview": "EVPN    : HA_TEST_ELAN\nEVI ID  : 1\nETH TAG : 0\nMAC address: 00:de:ad:ff:ff:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge400-0/0/5.1000\n      Timestamp: 11-Apr-2026-18:35:25"
+    },
+    {
+      "command": "show evpn forwarding-table mac-address-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-11T15:44:53.511+00:00",
+      "duration_ms": 100,
+      "phase": "verify",
+      "output_length": 874,
+      "output_preview": "Legend: * - Active, A - Alternate path, B - Bypass, S - Secondary, EA - Enhanced-Alternate\nFlags: R - Remote, L - Local, D - Dynamic, P - Pending-Installation, si - Sticky-Interface,\n       S - Sticky (local), sp - Suppressed, F - Leaf, ri - Router-Interface, fl - Flood, bh - Black-Hole\nEgress-Encapsulation: M - MPLS {labels are arranged from top (left) to BoS (right), E - Entropy Label}\n                      V - VXLAN {vtep id}\n\nNCP-ID 0\n\nEVPN: HA_TEST_ELAN\nTotal MAC Entries: 1\n\n| MacAddress   "
+    },
+    {
+      "command": "show dnos-internal routing fib-manager database evpn local-mac service-instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-11T15:44:53.612+00:00",
+      "duration_ms": 250,
+      "phase": "verify",
+      "output_length": 138,
+      "output_preview": "evi_id=1, eth_tag=0, mac=00:de:ad:ff:ff:01, interface=, dp_index=13624, action_type=New, Type=Add, neighbor_keys_size=0\nEvpnMacs [size: 1]"
+    },
+    {
+      "command": "show evpn arp-table instance HA_TEST_ELAN | no-more",
+      "timestamp": "2026-04-11T15:44:53.863+00:00",
+      "duration_ms": 250,
+      "phase": "verify",
+      "output_length": 35,
+      "output_preview": "  ETH TAG: 0\n    ARP table is empty"
+    },
+    {
+      "command": "show dnos-internal routing evpn instance HA_TEST_ELAN mac-table-ghost | no-more",
+      "timestamp": "2026-04-11T15:44:54.114+00:00",
+      "duration_ms": 50,
+      "phase": "verify",
+      "output_length": 26,
+      "output_preview": "ERROR: Incomplete command."
+    },
+    {
+      "command": "show bgp l2vpn evpn summary | no-more",
+      "timestamp": "2026-04-11T15:44:54.165+00:00",
+      "duration_ms": 250,
+      "phase": "verify",
+      "output_length": 583,
+      "output_preview": "BGP router identifier 1.1.1.1, local AS number 1234567\nBGP table node count 3\n\n  Neighbor        V         AS    MsgRcvd    MsgSent  InQ  OutQ  AdjOut  Up/Down   State/PfxAccepted\n  2.2.2.2         4    1234567     158226     158406    0     0       3 02w4d07h                   1\n  5.5.5.5         4    1234567       4204       8408    0     0       0 never      Connect         \n  19.19.19.2      4    1234567       6107       6394    0     0       0 00:20:18   Connect         \n\nTotal number of es"
+    },
+    {
+      "command": "show file traces routing_engine/bgpd_traces | include 15:44 | no-more",
+      "timestamp": "2026-04-11T15:44:54.416+00:00",
+      "duration_ms": 7614,
+      "phase": "verify",
+      "output_length": 113818,
+      "output_preview": "2026-04-10T14:15:44.401737 +03:00 [DEBUG     ] [bgp_fsm.c:301:bgp_connect_timer] [bgpd:1342:1342] 4544727:9438034: On vrf 1, bgpid 2(ALPHA): neighbor 16.16.16.2 0x7fe47fe34040 [FSM] Timer (connect timer expire)\n2026-04-10T14:15:44.401841 +03:00 [DEBUG     ] [bgp_network.c:984:bgp_connect] [bgpd:1342:1342] 4544728:9438034: ALPHA [Event] Connect start on vrf 16.16.16.2 to 16.16.16.2 fd 135\n2026-04-10T14:15:44.401916 +03:00 [DEBUG     ] [bgp_fsm.c:1289:bgp_start_common] [bgpd:1342:1342] 4544729:943"
+    },
+    {
+      "command": "show file traces routing_engine/fibmgrd_traces | include 15:44 | no-more",
+      "timestamp": "2026-04-11T15:45:02.031+00:00",
+      "duration_ms": 2153,
+      "phase": "verify",
+      "output_length": 1295,
+      "output_preview": "2026-04-11T16:15:44.480484 +03:00 [DEBUG     ] [MessageParser.cpp:469:HandleMessageFromNeighborManager] [fibmgrd:1578:1578] 3225330:26920633: [PACKET] Got protobuf message from Neighbor-Manager: neighbor { key { vrf_id: 4 if_id { index: 13620 cheetah_index: 13620 } ipv4 { value: 269488134 } } reachability { state: FAILED ll2addr: \"\\000\\000\\000\\000\\000\\000\" } originator: NEIGHBOUR_MANAGER }\n2026-04-11T16:15:44.480541 +03:00 [DEBUG     ] [MessageParser.cpp:1172:NeighborUpdate] [fibmgrd:1578:1578] "
+    }
+  ],
+  "parsed_values": {
+    "after_mac_count": 1,
+    "cross_layer_check": {
+      "mac": "00:de:ad:ff:ff:01",
+      "passed": true,
+      "fail_count": 0,
+      "warn_count": 0,
+      "layers_collected": [
+        "mac_table",
+        "mac_detail",
+        "forwarding_table",
+        "fib_database",
+        "arp_table",
+        "ghost_macs"
+      ],
+      "layers_skipped": [],
+      "mismatches": [],
+      "xray_triggered": false
+    }
+  },
+  "anomalies": []
+}

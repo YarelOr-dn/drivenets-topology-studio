@@ -1,0 +1,135 @@
+{
+  "aborted": false,
+  "audit_dir": "/home/dn/drivenets-topology-studio/scaler/TEST/catalog/pw_scale_200_mobility_ha_SW204115/tests/pw_scale_mac_mobility_ha/results/RUN_20260504_123247_ha_consistency_audit",
+  "consistency_verdict": "FAIL",
+  "errors": [],
+  "finished_at": "2026-05-04T12:44:57",
+  "first_10_samples": [
+    {
+      "category": "missing_mac_or_sequence",
+      "detail": {
+        "missing": false,
+        "sequence": null
+      },
+      "device": "YOR_CL_PE-4",
+      "mac": "00:de:ad:01:00:01",
+      "role": "pe4_source",
+      "service": "EVPN_PW_S001"
+    },
+    {
+      "category": "moved_state_ownership_mismatch",
+      "detail": {
+        "actual": "unknown",
+        "expected": "pw",
+        "interface": null
+      },
+      "device": "YOR_CL_PE-4",
+      "mac": "00:de:ad:01:00:01",
+      "role": "pe4_source",
+      "service": "EVPN_PW_S001"
+    },
+    {
+      "category": "missing_mac_or_sequence",
+      "detail": {
+        "missing": false,
+        "sequence": null
+      },
+      "device": "YOR_CL_PE-4",
+      "mac": "00:de:be:01:00:01",
+      "role": "rr_source",
+      "service": "EVPN_PW_S001"
+    },
+    {
+      "category": "moved_state_ownership_mismatch",
+      "detail": {
+        "actual": "unknown",
+        "expected": "local",
+        "interface": null
+      },
+      "device": "YOR_CL_PE-4",
+      "mac": "00:de:be:01:00:01",
+      "role": "rr_source",
+      "service": "EVPN_PW_S001"
+    },
+    {
+      "category": "missing_mac_or_sequence",
+      "detail": {
+        "missing": false,
+        "sequence": null
+      },
+      "device": "YOR_CL_PE-4",
+      "mac": "00:de:ad:01:00:02",
+      "role": "pe4_source",
+      "service": "EVPN_PW_S002"
+    },
+    {
+      "category": "moved_state_ownership_mismatch",
+      "detail": {
+        "actual": "unknown",
+        "expected": "pw",
+        "interface": null
+      },
+      "device": "YOR_CL_PE-4",
+      "mac": "00:de:ad:01:00:02",
+      "role": "pe4_source",
+      "service": "EVPN_PW_S002"
+    },
+    {
+      "category": "missing_mac_or_sequence",
+      "detail": {
+        "missing": false,
+        "sequence": null
+      },
+      "device": "YOR_CL_PE-4",
+      "mac": "00:de:be:01:00:02",
+      "role": "rr_source",
+      "service": "EVPN_PW_S002"
+    },
+    {
+      "category": "moved_state_ownership_mismatch",
+      "detail": {
+        "actual": "unknown",
+        "expected": "local",
+        "interface": null
+      },
+      "device": "YOR_CL_PE-4",
+      "mac": "00:de:be:01:00:02",
+      "role": "rr_source",
+      "service": "EVPN_PW_S002"
+    },
+    {
+      "category": "missing_mac_or_sequence",
+      "detail": {
+        "missing": false,
+        "sequence": null
+      },
+      "device": "YOR_CL_PE-4",
+      "mac": "00:de:ad:01:00:03",
+      "role": "pe4_source",
+      "service": "EVPN_PW_S003"
+    },
+    {
+      "category": "moved_state_ownership_mismatch",
+      "detail": {
+        "actual": "unknown",
+        "expected": "pw",
+        "interface": null
+      },
+      "device": "YOR_CL_PE-4",
+      "mac": "00:de:ad:01:00:03",
+      "role": "pe4_source",
+      "service": "EVPN_PW_S003"
+    }
+  ],
+  "ha_exit_code": 1,
+  "ha_result_dir": "/home/dn/drivenets-topology-studio/scaler/TEST/catalog/pw_scale_200_mobility_ha_SW204115/tests/pw_scale_mac_mobility_ha/results/RUN_ha_safe_no_bgp_moved_20260504_PE4_RRSA2",
+  "inconsistency_counts": {
+    "missing_mac_or_sequence": 800,
+    "moved_state_ownership_mismatch": 800
+  },
+  "post_ha_snapshot": "/home/dn/drivenets-topology-studio/scaler/TEST/catalog/pw_scale_200_mobility_ha_SW204115/tests/pw_scale_mac_mobility_ha/results/RUN_20260504_123247_ha_consistency_audit/post_ha_snapshot.json",
+  "post_snapshot": null,
+  "pre_ha_snapshot": "/home/dn/drivenets-topology-studio/scaler/TEST/catalog/pw_scale_200_mobility_ha_SW204115/tests/pw_scale_mac_mobility_ha/results/RUN_20260504_123247_ha_consistency_audit/pre_ha_snapshot.json",
+  "pre_snapshot": null,
+  "started_at": "2026-05-04T12:32:47"
+}

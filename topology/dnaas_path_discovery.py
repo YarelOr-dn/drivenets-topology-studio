@@ -42,19 +42,74 @@ except ImportError:
 # CONFIGURATION
 # ============================================================================
 
+# ----------------------------------------------------------------------------
 # Default credentials
-DEFAULT_USER = "dnroot"
-DEFAULT_PASS = "dnroot"
+# ----------------------------------------------------------------------------
+# Resolution order (first non-empty wins):
+#   1. Environment variables -- DNAAS_USER / DNAAS_PASS / DEFAULT_USER /
+#      DEFAULT_PASS. Useful in CI / containers.
+#   2. ~/.xray_config.json   -- the same admin-managed file that the FastAPI
+#      bridge uses for shared lab credentials. Keeps a single source of truth
+#      so changing the DNAAS service account in one place updates both the
+#      app and this CLI script.
+#   3. Hard fallback to the bundled DriveNets lab defaults (dnroot/dnroot for
+#      DUTs, sisaev/Drive1234! for DNAAS fabric devices).
+import os as _os
 
-# DNAAS credentials (different from PE credentials)
-DNAAS_USER = "sisaev"
-DNAAS_PASS = "Drive1234!"
+
+def _load_shared_lab_creds() -> dict:
+    """Read DUT and DNAAS service-account creds from ~/.xray_config.json.
+
+    Returns a dict with keys {dut_user, dut_pass, dnaas_user, dnaas_pass}.
+    Missing keys default to the lab defaults below.
+    """
+    out = {
+        "dut_user": "dnroot",
+        "dut_pass": "dnroot",
+        "dnaas_user": "sisaev",
+        "dnaas_pass": "Drive1234!",
+    }
+    cfg_path = _os.path.expanduser("~/.xray_config.json")
+    try:
+        with open(cfg_path) as f:
+            cfg = json.load(f)
+        creds = (cfg.get("credentials") or {})
+        if creds.get("device_user"):
+            out["dut_user"] = creds["device_user"]
+        if creds.get("device_password"):
+            out["dut_pass"] = creds["device_password"]
+        dnaas = (cfg.get("dnaas_credentials") or {})
+        if dnaas.get("user"):
+            out["dnaas_user"] = dnaas["user"]
+        if dnaas.get("password"):
+            out["dnaas_pass"] = dnaas["password"]
+    except Exception:
+        pass
+    # Env-var overrides win over the config file.
+    out["dut_user"] = _os.environ.get("DEFAULT_USER") or out["dut_user"]
+    out["dut_pass"] = _os.environ.get("DEFAULT_PASS") or out["dut_pass"]
+    out["dnaas_user"] = _os.environ.get("DNAAS_USER") or out["dnaas_user"]
+    out["dnaas_pass"] = _os.environ.get("DNAAS_PASS") or out["dnaas_pass"]
+    return out
+
+
+_LAB_CREDS = _load_shared_lab_creds()
+DEFAULT_USER = _LAB_CREDS["dut_user"]
+DEFAULT_PASS = _LAB_CREDS["dut_pass"]
+DNAAS_USER = _LAB_CREDS["dnaas_user"]
+DNAAS_PASS = _LAB_CREDS["dnaas_pass"]
 
 # Paths
 SCRIPT_DIR = Path(__file__).parent.resolve()
 INVENTORY_FILE = SCRIPT_DIR / "device_inventory.json"
 CREDENTIALS_FILE = SCRIPT_DIR / "device_credentials.json"
-OUTPUT_DIR = SCRIPT_DIR / "output"
+# Per-user output isolation: discovery_api.py spawns this script with
+# DNAAS_OUTPUT_DIR set to ~/.../output/users/<username>/ so that one user's
+# discovery results never land in another user's listing.
+# Falls back to the legacy global "output/" directory only when the env var
+# is unset (e.g., direct CLI invocation outside the API).
+OUTPUT_DIR = Path(os.environ.get("DNAAS_OUTPUT_DIR", str(SCRIPT_DIR / "output")))
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 DNAAS_TABLE_FILE = SCRIPT_DIR / "dnaas_table.xlsx"
 
 # DNAAS detection keywords
@@ -5889,8 +5944,12 @@ def _try_db_lldp_lookup(serial: str) -> list:
                 op_file = device_dir / 'operational.json'
                 if op_file.exists():
                     try:
-                        with open(op_file, 'r') as f:
-                            op_data = json.load(f)
+                        try:
+                            from routes._ops_writer import read_ops as _r
+                            op_data = _r(op_file)
+                        except Exception:
+                            with open(op_file, 'r') as f:
+                                op_data = json.load(f)
                         dev_hostname = op_data.get('hostname', device_dir.name)
                         dev_serial = op_data.get('serial_number', '')
                         dev_ip = op_data.get('connection_ip', '')
@@ -6055,8 +6114,12 @@ def _resolve_ssh_target(serial: str, inventory: DeviceInventory) -> str:
                 op_file = device_dir / 'operational.json'
                 if op_file.exists():
                     try:
-                        with open(op_file, 'r') as f:
-                            op_data = json.load(f)
+                        try:
+                            from routes._ops_writer import read_ops as _r
+                            op_data = _r(op_file)
+                        except Exception:
+                            with open(op_file, 'r') as f:
+                                op_data = json.load(f)
                         dev_hostname = op_data.get('hostname', device_dir.name) or device_dir.name
                         dev_serial = (op_data.get('serial_number', '') or '')
                         dev_ip = op_data.get('connection_ip', '') or ''

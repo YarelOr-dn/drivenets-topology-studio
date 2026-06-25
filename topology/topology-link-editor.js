@@ -75,6 +75,7 @@ class LinkEditorModal {
         }
         
         modal.classList.remove('show');
+        window.LinkTelemetry?.stopModalAutoRefresh?.();
         this.isVisible = false;
         this.currentLink = null;
         this.editingBulLinks = [];
@@ -119,6 +120,7 @@ class LinkEditorModal {
         }
         
         modal.classList.remove('show');
+        window.LinkTelemetry?.stopModalAutoRefresh?.();
         this.isVisible = false;
         this.currentLink = null;
         this.editingBulLinks = [];
@@ -2110,12 +2112,17 @@ class LinkEditorModal {
         modalContent._responsiveColumnsSetup = true;
         
         const WIDE_THRESHOLD = 750; // Show extra columns when width > 750px
+        const TALL_THRESHOLD = 560; // Reveal diagnostic rows when the user enlarges vertically
         
-        // Update width data attribute
+        // Update responsive data attributes used by the Link Table CSS.
         const updateWidthMode = () => {
             const width = modalContent.offsetWidth;
+            const contentHeight = modalContent.querySelector('.link-table-scroll')?.clientHeight
+                || modalContent.querySelector('.lt-live-telemetry-panel')?.clientHeight
+                || 0;
             const mode = width > WIDE_THRESHOLD ? 'wide' : 'narrow';
             modalContent.dataset.width = mode;
+            modalContent.dataset.height = (modalContent.offsetHeight > TALL_THRESHOLD || contentHeight > 380) ? 'tall' : 'short';
         };
         
         // Initial check

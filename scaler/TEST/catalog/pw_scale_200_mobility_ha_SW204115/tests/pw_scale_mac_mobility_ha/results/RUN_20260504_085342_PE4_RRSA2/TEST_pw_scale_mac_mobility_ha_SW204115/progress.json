@@ -1,0 +1,9 @@
+{
+  "detail": "",
+  "expected_traffic_count": 20,
+  "phase": "prerequisite_gate",
+  "service_count": 10,
+  "status": "running",
+  "step": "start",
+  "timestamp": "2026-05-04T08:53:42+0000"
+}

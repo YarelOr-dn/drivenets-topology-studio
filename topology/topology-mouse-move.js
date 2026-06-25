@@ -18,8 +18,14 @@ window.MouseMoveHandler = {
     },
 
     handleMouseMove(editor, e) {
-        // Store screen coordinates (logical/CSS pixels) for zoom operations
-        const rect = editor.canvas.getBoundingClientRect();
+        // Cache canvas rect across rapid mousemove storms (similar to the wheel rect cache).
+        // Re-read at most every 500ms or after layout-changing interactions invalidate it.
+        const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        if (!editor._mmRect || !editor._mmRectTs || (now - editor._mmRectTs) > 500) {
+            editor._mmRect = editor.canvas.getBoundingClientRect();
+            editor._mmRectTs = now;
+        }
+        const rect = editor._mmRect;
         editor.lastMouseScreen = {
             x: e.clientX - rect.left,
             y: e.clientY - rect.top
@@ -72,6 +78,9 @@ window.MouseMoveHandler = {
         }
         
         if (editor.panning) {
+            if (editor.beginCanvasPanInteraction && !editor._toolbarHiddenForPan) {
+                editor.beginCanvasPanInteraction();
+            }
             // Hide LLDP submenu when panning (table dialog persists as a window)
             const lldpSubmenu = document.getElementById('lldp-inline-submenu');
             if (lldpSubmenu) lldpSubmenu.remove();
@@ -81,9 +90,14 @@ window.MouseMoveHandler = {
             if (!editor._panSaveThrottle) {
                 editor._panSaveThrottle = setTimeout(() => { editor._panSaveThrottle = null; editor.savePanOffset(); }, 200);
             }
+            // Pure viewport translation: world positions don't change. Skip per-object recalc.
+            editor._viewportOnly = true;
             editor.updateScrollbars();
             editor.scheduleDraw();
-            editor.updateHud();
+            // Throttle HUD updates during pan; cursor world coord is non-critical at 60Hz.
+            if (!editor._panHudThrottle) {
+                editor._panHudThrottle = setTimeout(() => { editor._panHudThrottle = null; editor.updateHud(); }, 80);
+            }
             return;
         }
         
@@ -91,13 +105,22 @@ window.MouseMoveHandler = {
         
         // Store world position for debugger and HUD
         editor.lastMousePos = pos;
+
+        if (editor.currentTool === 'laser') {
+            if (!editor._laserPointerActive) {
+                return;
+            }
+            window.TopologyLaser.appendTrailPoint(editor, pos, now);
+            editor.scheduleDraw ? editor.scheduleDraw() : editor.draw();
+            return;
+        }
         
         // Skip all cursor hover detection during any active interaction
         const _anyActive = editor.dragging || editor.isDragging || editor.resizingDevice ||
             editor.rotatingDevice || editor.isDrawingLink || editor.draggingCurveHandle ||
             editor.draggingAttachedText || editor.draggingBULChain || editor.selectionBox ||
             editor.stretchingLink || editor.rotatingShape || editor.resizingShape ||
-            editor.rotatingText || editor.resizingText || editor._pendingDrag;
+            editor.rotatingText || editor.resizingText || editor.resizingPacket || editor._pendingDrag;
         
         // Update cursor if hovering over rotation, resize, or terminal button handles
         if (!_anyActive && editor.selectedObject && editor.selectedObject.type === 'device' && 
@@ -135,8 +158,11 @@ window.MouseMoveHandler = {
             }
         }
         
-        // TEXT handle cursor feedback
-        if (!_anyActive && editor.selectedObject && editor.selectedObject.type === 'text' && 
+        // TEXT handle cursor feedback. Mirror the shape branch below so
+        // rotated text boxes get rotation-corrected cursors -- e.g. a SE
+        // handle on a 90deg-rotated text box reads as 'nesw-resize'
+        // because the diagonal flipped.
+        if (!_anyActive && editor.selectedObject && editor.selectedObject.type === 'text' &&
             !editor.rotatingText && !editor.resizingText &&
             editor.selectedObject._mouseReleasedAfterSelection === true) {
             const textHandle = editor.findTextHandle(editor.selectedObject, pos.x, pos.y);
@@ -144,7 +170,12 @@ window.MouseMoveHandler = {
                 if (textHandle.type === 'rotation') {
                     editor.canvas.style.cursor = 'grab';
                 } else {
-                    editor.canvas.style.cursor = textHandle.cursor || 'nwse-resize';
+                    const effRot = editor.getEffectiveTextRotation
+                        ? editor.getEffectiveTextRotation(editor.selectedObject)
+                        : (editor.selectedObject.rotation || 0);
+                    editor.canvas.style.cursor = textHandle.handle
+                        ? MouseMoveHandler._rotatedCursor(textHandle.handle, effRot)
+                        : (textHandle.cursor || 'nwse-resize');
                 }
             } else if (!editor.dragging && !editor.panning) {
                 editor.updateCursor();
@@ -162,6 +193,20 @@ window.MouseMoveHandler = {
                 } else {
                     editor.canvas.style.cursor = MouseMoveHandler._rotatedCursor(shapeHandle, editor.selectedObject.rotation || 0);
                 }
+            } else if (!editor.dragging && !editor.panning) {
+                editor.updateCursor();
+            }
+        }
+
+        if (!_anyActive && editor.selectedObject && editor.selectedObject.type === 'packet' &&
+            editor.selectedObject._mouseReleasedAfterSelection === true &&
+            window.PacketMethods && typeof window.PacketMethods.findPacketResizeHandle === 'function') {
+            const packetHandle = window.PacketMethods.findPacketResizeHandle(editor, editor.selectedObject, pos.x, pos.y);
+            if (packetHandle) {
+                editor.canvas.style.cursor = 'ew-resize';
+            } else if (window.PacketMethods.findPacketSummaryHit &&
+                window.PacketMethods.findPacketSummaryHit(editor, editor.selectedObject, pos.x, pos.y)) {
+                editor.canvas.style.cursor = 'pointer';
             } else if (!editor.dragging && !editor.panning) {
                 editor.updateCursor();
             }
@@ -185,7 +230,7 @@ window.MouseMoveHandler = {
                 editor._potentialCPDrag = null;
                 editor.canvas.style.cursor = 'grabbing';
                 editor.saveState(); // Make curve edit undoable
-                
+
                 // Deselect link and hide toolbar since we're now dragging CP
                 if (editor.selectedObject === editor.draggingCurveHandle.link) {
                     editor.selectedObject = null;
@@ -245,29 +290,34 @@ window.MouseMoveHandler = {
                 const textAtPos = editor.findTextAt(pos.x, pos.y);
                 
                 if (textAtPos && curveHandle.isOnCP) {
-                    // Both TB and CP at this position - determine which has priority
-                    editor.ctx.save();
-                    const fontFamily = textAtPos.fontFamily || 'Arial';
-                    const fontWeight = textAtPos.fontWeight || 'normal';
-                    editor.ctx.font = `${fontWeight} ${textAtPos.fontSize}px ${fontFamily}`;
-                    const metrics = editor.ctx.measureText(textAtPos.text || 'Text');
-                    const textW = metrics.width;
-                    const textH = parseInt(textAtPos.fontSize) || 14;
-                    editor.ctx.restore();
-                    
+                    // Both TB and CP at this position - determine which has priority.
+                    // Hitbox parity with stretch (2026-05-12): resolve TB bounds
+                    // through `getTextEffectiveBounds` so the cursor decision
+                    // tracks the visible (possibly stretched / wrap-grown)
+                    // rectangle, not a stale single-line measureText of the
+                    // raw `obj.text` string.
+                    const tbBounds = (window.ObjectDetection && window.ObjectDetection.getTextEffectiveBounds)
+                        ? window.ObjectDetection.getTextEffectiveBounds(editor, textAtPos)
+                        : { w: 0, h: 0 };
+                    const textW = tbBounds.w;
+                    const textH = tbBounds.h;
+
                     // Check if mouse is on TB visible area (text + background)
                     const dx = pos.x - textAtPos.x;
                     const dy = pos.y - textAtPos.y;
-                    const angle = -(textAtPos.rotation || 0) * Math.PI / 180;
+                    const effRotTb = editor.getEffectiveTextRotation
+                        ? editor.getEffectiveTextRotation(textAtPos)
+                        : (textAtPos.rotation || 0);
+                    const angle = -effRotTb * Math.PI / 180;
                     const localX = dx * Math.cos(angle) - dy * Math.sin(angle);
                     const localY = dx * Math.sin(angle) + dy * Math.cos(angle);
-                    
+
                     // FIX: Use same hitbox as click handler (full visible area)
                     const hasBackground = textAtPos.showBackground !== false;
                     const bgPadding = hasBackground ? (textAtPos.backgroundPadding || 8) : 6;
                     const clickPadding = bgPadding + 6;
-                    
-                    const isOnTextArea = Math.abs(localX) <= (textW/2 + clickPadding) && 
+
+                    const isOnTextArea = Math.abs(localX) <= (textW/2 + clickPadding) &&
                                          Math.abs(localY) <= (textH/2 + clickPadding);
                     
                     if (isOnTextArea) {
@@ -385,7 +435,29 @@ window.MouseMoveHandler = {
                         endY: link.end.y
                     };
                 }
-                
+
+                // Auto-curve sticky side: capture the FROZEN axis (anchor ->
+                // pointer-start) at stretch start so the renderer can lock
+                // its curve direction based on the user's actual pointer
+                // path around the obstacle, not on per-frame obstacle
+                // pressure (which flips as the dragged endpoint orbits the
+                // device). The anchor is the endpoint NOT being dragged.
+                if (window.LinkAutoCurveSide) {
+                    const sLink = editor.stretchingLink;
+                    let anchorX, anchorY;
+                    if (editor.stretchingEndpoint === 'start') {
+                        anchorX = sLink.end.x;
+                        anchorY = sLink.end.y;
+                    } else {
+                        anchorX = sLink.start.x;
+                        anchorY = sLink.start.y;
+                    }
+                    window.LinkAutoCurveSide.beginStretch(
+                        sLink, anchorX, anchorY,
+                        editor._pendingStretch.startX, editor._pendingStretch.startY
+                    );
+                }
+
                 if (editor.debugger) {
                     const ulNumber = allMergedLinks.findIndex(l => l.id === editor.stretchingLink.id) + 1;
                     editor.debugger.logInfo(`UL Stretch Started (threshold ${editor._pendingStretch.threshold}px exceeded)`);
@@ -467,6 +539,7 @@ window.MouseMoveHandler = {
                     editor.textDragInitialPos = editor._pendingDrag.textDragInitialPos;
                     editor.deviceDragInitialPos = editor._pendingDrag.deviceDragInitialPos;
                     editor.shapeDragInitialPos = editor._pendingDrag.shapeDragInitialPos;
+                    editor._containerDragChildren = editor._pendingDrag.containerDragChildren || null;
                     editor.dragStartPos = editor._pendingDrag.dragStartPos;
                 }
                 
@@ -505,6 +578,15 @@ window.MouseMoveHandler = {
         // Handle link stretching (unbound links)
         // CRITICAL: Only process if stretching flags are set (safety check)
         if (editor.stretchingLink && editor.stretchingEndpoint) {
+            // Pointer-side commitment for auto-curve: feed the RAW pointer
+            // (before stickiness snap) so the user's actual hand-path
+            // determines which side the auto curve bends toward, not the
+            // snapped final position. Locks `link._autoCurveSide` once the
+            // user has clearly gone to one side of the obstacle.
+            if (window.LinkAutoCurveSide) {
+                window.LinkAutoCurveSide.updateStretch(editor.stretchingLink, pos.x, pos.y);
+            }
+
             // ENHANCED: Special handling for connection point dragging (MPs)
             if (editor.stretchingConnectionPoint) {
                 // Dragging an MP - ONLY move the MP endpoint itself!
@@ -1470,16 +1552,29 @@ window.MouseMoveHandler = {
             const isEdge = ['n', 's', 'e', 'w'].includes(handle);
 
             if (isCorner) {
-                // Corner handles: free resize anchored at opposite corner
                 const signX = handle.includes('e') ? 1 : -1;
                 const signY = handle.includes('s') ? 1 : -1;
-                newWidth = Math.max(20, startWidth + signX * dx);
-                newHeight = Math.max(20, startHeight + signY * dy);
-                // Shift center so opposite corner stays fixed
-                const localShiftX = (newWidth - startWidth) * signX / 2;
-                const localShiftY = (newHeight - startHeight) * signY / 2;
-                newCx = origCenterX + localShiftX * Math.cos(rot) - localShiftY * Math.sin(rot);
-                newCy = origCenterY + localShiftX * Math.sin(rot) + localShiftY * Math.cos(rot);
+                if (isCircle || isUniform) {
+                    // Shape-border intercardinal handles keep uniform shapes proportional.
+                    const projectedDelta = (signX * dx + signY * dy) / 2;
+                    const scale = Math.max(0.1, (startWidth + projectedDelta * 2) / startWidth);
+                    newWidth = Math.max(20, startWidth * scale);
+                    newHeight = Math.max(20, startHeight * scale);
+                    const localShiftX = (newWidth - startWidth) * signX / 4;
+                    const localShiftY = (newHeight - startHeight) * signY / 4;
+                    newCx = origCenterX + localShiftX * Math.cos(rot) - localShiftY * Math.sin(rot);
+                    newCy = origCenterY + localShiftX * Math.sin(rot) + localShiftY * Math.cos(rot);
+                    if (isCircle) newHeight = newWidth;
+                } else {
+                    // Corner handles: free resize anchored at opposite corner
+                    newWidth = Math.max(20, startWidth + signX * dx);
+                    newHeight = Math.max(20, startHeight + signY * dy);
+                    // Shift center so opposite corner stays fixed
+                    const localShiftX = (newWidth - startWidth) * signX / 2;
+                    const localShiftY = (newHeight - startHeight) * signY / 2;
+                    newCx = origCenterX + localShiftX * Math.cos(rot) - localShiftY * Math.sin(rot);
+                    newCy = origCenterY + localShiftX * Math.sin(rot) + localShiftY * Math.cos(rot);
+                }
             } else if (isEdge) {
                 if (isCircle) {
                     // Circle: any edge handle changes radius uniformly
@@ -1544,9 +1639,42 @@ window.MouseMoveHandler = {
             editor.scheduleDraw();
             return;
         }
+
+        if (editor.resizingPacket && editor._packetResizeStart) {
+            const packet = editor.resizingPacket;
+            const start = editor._packetResizeStart;
+            const direction = start.dir === 'e' ? 1 : -1;
+            // Use the wider "user" stretch range (not the auto cap) so long
+            // address lines (full MAC / IPv6 / Q-in-Q) can be fully revealed.
+            const clamp = (window.PacketMethods && window.PacketMethods.clampPacketUserWidth)
+                ? window.PacketMethods.clampPacketUserWidth
+                : ((window.PacketMethods && window.PacketMethods.clampPacketWidth)
+                    ? window.PacketMethods.clampPacketWidth
+                    : (w) => Math.max(80, Math.min(480, w)));
+            if (start.attached) {
+                // Center is locked to the cable: grow symmetrically about the
+                // link anchor so the chip stays "in proportion to" the link.
+                // The grabbed edge still tracks the cursor (delta * 2).
+                const rawDelta = pos.x - start.x;
+                packet.userWidth = clamp(start.width + rawDelta * direction * 2);
+            } else {
+                // Freestanding: pin the opposite edge, the grabbed edge follows
+                // the cursor exactly, and re-center so the pinned edge stays put.
+                // Width then changes 1:1 with the hand -> smooth, proportional.
+                const rawWidth = (pos.x - start.oppositeEdgeX) * direction;
+                const newWidth = clamp(rawWidth);
+                packet.userWidth = newWidth;
+                packet.x = start.oppositeEdgeX + direction * (newWidth / 2);
+            }
+            editor.canvas.style.cursor = 'ew-resize';
+            editor.scheduleDraw();
+            editor.updateHud(pos);
+            return;
+        }
         
         // Handle text rotation
         if (editor.rotatingText && editor.selectedObject && editor.selectedObject.type === 'text') {
+            editor.canvas.style.cursor = 'grabbing';
             const mouseAngle = Math.atan2(pos.y - editor.selectedObject.y, pos.x - editor.selectedObject.x);
             const angleDiff = (mouseAngle - editor.textRotationStartAngle) * 180 / Math.PI;
             let newRotation = (editor.textRotationStartRot + angleDiff) % 360;
@@ -1618,18 +1746,121 @@ window.MouseMoveHandler = {
             return;
         }
         
-        // Handle text resizing
-        if (editor.resizingText && editor.selectedObject) {
-            const currentDist = Math.sqrt(
-                Math.pow(pos.x - editor.selectedObject.x, 2) + 
-                Math.pow(pos.y - editor.selectedObject.y, 2)
-            );
-            const distRatio = currentDist / editor.textResizeStartDist;
-            // Increased max font size from 72 to 200 for larger text
-            const newSize = Math.max(8, Math.min(200, editor.textResizeStartSize * distRatio));
-            editor.selectedObject.fontSize = Math.round(newSize);
-            const fontSizeEl = document.getElementById('font-size');
-            if (fontSizeEl) fontSizeEl.value = Math.round(newSize);
+        // Handle text-box bbox resize (text-box parity with shapes,
+        // 2026-05-12). The math kernel mirrors the shape resize block
+        // earlier in this file: rotate the mouse delta into the text's
+        // local frame, apply per-handle width/height/center deltas,
+        // anchor the opposite corner/edge so the box "grows from" the
+        // grabbed handle just like shapes.
+        //
+        // Backward-compat: if the text is still auto-sized at this point
+        // (editor._textResizeStart.wasAutoSized === true), the snapshotted
+        // startWidth/startHeight came from the auto-measure and we now
+        // commit them to text.width/text.height -- the box becomes
+        // manual-sized as soon as the user starts dragging. Auto-size can
+        // be restored later via a "Reset to auto-size" context-menu entry
+        // (deferred).
+        if (editor.resizingText && editor.textResizeHandle && editor.selectedObject) {
+            const text = editor.selectedObject;
+            const handle = editor.textResizeHandle;
+            const start = editor._textResizeStart || { x: pos.x, y: pos.y, width: 100, height: 30, centerX: text.x, centerY: text.y };
+
+            // Rotate the raw screen-space delta into the text's local
+            // (axis-aligned) frame. effectiveRotation drives rendering, so
+            // resize math must use it too -- otherwise dragging a corner
+            // on a 45deg-rotated text box would drift sideways.
+            const effRot = editor.getEffectiveTextRotation
+                ? editor.getEffectiveTextRotation(text)
+                : (text.rotation || 0);
+            const rot = effRot * Math.PI / 180;
+            const rawDx = pos.x - start.x;
+            const rawDy = pos.y - start.y;
+            const dx = rawDx * Math.cos(-rot) - rawDy * Math.sin(-rot);
+            const dy = rawDx * Math.sin(-rot) + rawDy * Math.cos(-rot);
+
+            const startWidth = start.width;
+            const startHeight = start.height;
+            const origCenterX = start.centerX;
+            const origCenterY = start.centerY;
+
+            let newWidth = startWidth;
+            let newHeight = startHeight;
+            let newCx = origCenterX;
+            let newCy = origCenterY;
+
+            const isCorner = ['nw', 'ne', 'sw', 'se'].includes(handle);
+            const isEdge = ['n', 's', 'e', 'w'].includes(handle);
+            // Same minimum as shapes (20 world px) -- text glyph never
+            // collapses below this and the bbox stays grabbable.
+            const MIN_BOX = 20;
+
+            if (isCorner) {
+                const signX = handle.includes('e') ? 1 : -1;
+                const signY = handle.includes('s') ? 1 : -1;
+                newWidth  = Math.max(MIN_BOX, startWidth  + signX * dx);
+                newHeight = Math.max(MIN_BOX, startHeight + signY * dy);
+                // Shift center so the OPPOSITE corner stays pinned in
+                // world space (the grabbed corner moves under the cursor).
+                const localShiftX = (newWidth  - startWidth)  * signX / 2;
+                const localShiftY = (newHeight - startHeight) * signY / 2;
+                newCx = origCenterX + localShiftX * Math.cos(rot) - localShiftY * Math.sin(rot);
+                newCy = origCenterY + localShiftX * Math.sin(rot) + localShiftY * Math.cos(rot);
+            } else if (isEdge) {
+                if (handle === 'e') {
+                    newWidth = Math.max(MIN_BOX, startWidth + dx);
+                    const localShift = (newWidth - startWidth) / 2;
+                    newCx = origCenterX + localShift * Math.cos(rot);
+                    newCy = origCenterY + localShift * Math.sin(rot);
+                } else if (handle === 'w') {
+                    newWidth = Math.max(MIN_BOX, startWidth - dx);
+                    const localShift = -(newWidth - startWidth) / 2;
+                    newCx = origCenterX + localShift * Math.cos(rot);
+                    newCy = origCenterY + localShift * Math.sin(rot);
+                } else if (handle === 's') {
+                    newHeight = Math.max(MIN_BOX, startHeight + dy);
+                    const localShift = (newHeight - startHeight) / 2;
+                    newCx = origCenterX - localShift * Math.sin(rot);
+                    newCy = origCenterY + localShift * Math.cos(rot);
+                } else if (handle === 'n') {
+                    newHeight = Math.max(MIN_BOX, startHeight - dy);
+                    const localShift = -(newHeight - startHeight) / 2;
+                    newCx = origCenterX - localShift * Math.sin(rot);
+                    newCy = origCenterY + localShift * Math.cos(rot);
+                }
+            }
+
+            // Containment + reflow contract (text-box edge-stretch, 2026-05-12):
+            //
+            //   * Horizontal-only handles ('w', 'e') write ONLY text.width.
+            //     text.height stays unset (or whatever it was), and
+            //     `_heightLocked` is NEVER set on this path -- so drawText
+            //     auto-grows the rect to contain wrapped lines on every
+            //     paint. This is the default flow per the user requirement
+            //     "text MUST always be visually contained within the box".
+            //
+            //   * Vertical or corner handles set BOTH dimensions AND mark
+            //     the box as height-locked. drawText then honours
+            //     text.height and clips overflow with an ellipsis on the
+            //     last visible line + a small chevron at the bbox corner.
+            //
+            //   * Re-grabbing a 'w' / 'e' handle on a previously locked
+            //     box leaves `_heightLocked` true (the user did not ask
+            //     to release the lock). The dedicated "Reset to auto-
+            //     height" affordance is the way to clear it (deferred --
+            //     left as a tiny context-menu polish item).
+            text.width = Math.max(MIN_BOX, newWidth);
+            text.x = newCx;
+            text.y = newCy;
+            if (handle === 'w' || handle === 'e') {
+                // Width-only: do NOT touch text.height. Leave it as-is so
+                // the auto-grow math in drawText takes over for height.
+            } else {
+                // Vertical or corner: persist height and set the lock.
+                text.height = Math.max(MIN_BOX, newHeight);
+                text._heightLocked = true;
+            }
+
+            editor.canvas.style.cursor = MouseMoveHandler._rotatedCursor(handle, effRot);
             editor.scheduleDraw();
             editor.updateHud(pos);
             return;
@@ -1726,6 +1957,9 @@ window.MouseMoveHandler = {
                     
                     // Skip adjacent text (glued to links)
                     if (obj.type === 'text' && obj.linkId && obj.position) return;
+
+                    // Skip link-attached packet chips; they re-position from their link geometry.
+                    if (obj.type === 'packet' && obj.linkId) return;
                     
                     // Skip Quick Links (type 'link') - they follow their connected devices automatically
                     // Moving them here would corrupt their x/y properties (which they don't have)
@@ -2009,46 +2243,30 @@ window.MouseMoveHandler = {
                 return;
             }
             
-            // GROUP DRAG SAFETY NET: If dragging a grouped object but not all members selected,
-            // expand selection and convert to multi-select drag with CORRECT dragStart
-            if (editor.selectedObject.groupId && editor.selectedObjects.length === 1) {
-                const groupMembers = editor.getGroupMembers(editor.selectedObject);
-                if (groupMembers.length > 1) {
-                    // Add all group members to selection
-                    groupMembers.forEach(member => {
-                        if (!editor.selectedObjects.includes(member)) {
-                            editor.selectedObjects.push(member);
-                        }
-                    });
-                    
-                    // CRITICAL FIX: Reset dragStart to ABSOLUTE mouse position
-                    // Single-object drag stores OFFSET in dragStart, but multi-select needs ABSOLUTE
-                    editor.dragStart = { x: pos.x, y: pos.y };
-                    
-                    // Always capture FRESH positions at this moment
-                    editor.multiSelectInitialPositions = editor.selectedObjects.map(obj => {
-                        const initPos = { id: obj.id, x: obj.x, y: obj.y };
-                        if (obj.type === 'unbound') {
-                            initPos.startX = obj.start.x;
-                            initPos.startY = obj.start.y;
-                            initPos.endX = obj.end.x;
-                            initPos.endY = obj.end.y;
-                            initPos.curvePointX = obj.manualCurvePoint?.x;
-                            initPos.curvePointY = obj.manualCurvePoint?.y;
-                            initPos.controlPointX = obj.manualControlPoint?.x;
-                            initPos.controlPointY = obj.manualControlPoint?.y;
-                        }
-                        return initPos;
-                    });
-                    // Return immediately - multi-select handler above will pick up next frame
-                    return;
-                }
-            }
+            // Group membership no longer implies group-wide drag. Explicit group
+            // movement still works after selecting all members from the Groups panel.
             
             // CRITICAL FIX: Regular links (bound to devices) are NOT draggable!
             if (editor.selectedObject.type === 'link') {
                 // Regular links can't be moved - they follow their connected devices
                 return;
+            }
+
+            if (editor.selectedObject.type === 'packet' && editor.selectedObject.linkId) {
+                const packet = editor.selectedObject;
+                const link = editor.objects.find(obj => obj.id === packet.linkId);
+                if (link && window.PacketMethods && typeof window.PacketMethods.projectCursorToLinkT === 'function') {
+                    const now = Date.now();
+                    if (editor._lastPacketMoveTime && (now - editor._lastPacketMoveTime) < 8) {
+                        return;
+                    }
+                    editor._lastPacketMoveTime = now;
+                    packet.linkAttachT = window.PacketMethods.projectCursorToLinkT(editor, link, pos.x, pos.y);
+                    window.PacketMethods.updatePacketPosition(editor, packet);
+                    editor.scheduleDraw();
+                    editor.updateHud(pos);
+                    return;
+                }
             }
             
             // Handle dragging adjacent text (text attached to links)
@@ -2681,6 +2899,37 @@ Obj: (${editor.selectedObject.x.toFixed(0)}, ${editor.selectedObject.y.toFixed(0
                 editor.selectedObject.x = finalX;
                 editor.selectedObject.y = finalY;
                 
+                // 2026-04-26: container shapes drag every captured child
+                // (devices, text, nested shapes, unbound links) by the
+                // same delta from drag-start. Children were snapshotted
+                // at mousedown so the set is stable for the whole drag.
+                if (editor.selectedObject.type === 'shape' &&
+                    editor.selectedObject.containerMode === true &&
+                    Array.isArray(editor._containerDragChildren) &&
+                    editor._containerDragChildren.length > 0 &&
+                    editor.shapeDragInitialPos) {
+                    const cdx = finalX - editor.shapeDragInitialPos.shapeX;
+                    const cdy = finalY - editor.shapeDragInitialPos.shapeY;
+                    if (typeof editor.applyContainerDelta === 'function') {
+                        editor.applyContainerDelta(editor._containerDragChildren, cdx, cdy);
+                    }
+                    // Devices that moved with the container also need their
+                    // attached unbound-link curve points shifted so the
+                    // curve shape is preserved. Quick Links re-route on
+                    // their own from the device's new x/y.
+                    const movedDeviceIds = new Set();
+                    for (const c of editor._containerDragChildren) {
+                        if (c && c.obj && c.obj.type === 'device' && c.obj.id != null) {
+                            movedDeviceIds.add(c.obj.id);
+                        }
+                    }
+                    if (movedDeviceIds.size > 0 && typeof editor.updateQuickLinkControlPointsAfterDeviceMove === 'function') {
+                        try {
+                            editor.updateQuickLinkControlPointsAfterDeviceMove(cdx, cdy, Array.from(movedDeviceIds));
+                        } catch (e) { /* best-effort */ }
+                    }
+                }
+
                 // TEXT-TO-LINK SNAP DETECTION during drag
                 if (editor.selectedObject.type === 'text') {
                     // MANUAL CURVE: If text is attached to a link, set link to manual curve mode

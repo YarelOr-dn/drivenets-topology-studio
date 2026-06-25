@@ -46,13 +46,158 @@
         } catch (e) { console.error('[PreLoadLabelFix]', e); }
     })();
     </script>
+    <script>
+    // ============================================================================
+    // Anti browser-zoom for UI chrome
+    // ============================================================================
+    // Cmd/Ctrl + "-" / "+" (a.k.a. browser page zoom) changes
+    // window.devicePixelRatio. We capture the baseline DPR at first load and
+    // expose the CURRENT zoom ratio (relative to that baseline) as
+    // `--browser-zoom`, and its inverse as `--anti-browser-zoom`, on :root.
+    // CSS rules further down apply `zoom: var(--anti-browser-zoom, 1)` to a
+    // SHORT whitelist of shell elements (top bar, left toolbar, bottom-left
+    // topology pill, grid-controls pill, collapse toggles) so those frames
+    // render at a constant device-pixel size -- Cmd/Ctrl +/- no longer
+    // resizes them. The canvas area is intentionally NOT whitelisted so the
+    // drawing surface keeps its own app-level zoom (pill in the grid
+    // toolbar) and the browser zoom still "works" for inspecting content.
+    // Runs inline in <head> so the CSS variables are set BEFORE first paint
+    // and there is no flicker when the user has loaded the page already
+    // zoomed.
+    (function initAntiBrowserZoom() {
+        try {
+            if (window.__antiBrowserZoomReady) return;
+            window.__antiBrowserZoomReady = true;
+            var baselineDPR = window.devicePixelRatio || 1;
+            if (!baselineDPR || !isFinite(baselineDPR) || baselineDPR <= 0) baselineDPR = 1;
+            window.__baselineDevicePixelRatio = baselineDPR;
+            function apply() {
+                var dpr = window.devicePixelRatio || baselineDPR;
+                var zoomRatio = dpr / baselineDPR;
+                if (!isFinite(zoomRatio) || zoomRatio <= 0) zoomRatio = 1;
+                // Clamp to a sane range so extreme zooms don't make chrome
+                // invisible (0.01x) or overflow the canvas (100x).
+                if (zoomRatio < 0.25) zoomRatio = 0.25;
+                if (zoomRatio > 8)    zoomRatio = 8;
+                var anti = 1 / zoomRatio;
+                var root = document.documentElement;
+                root.style.setProperty('--browser-zoom', String(zoomRatio));
+                root.style.setProperty('--anti-browser-zoom', String(anti));
+            }
+            // Chain-of-matchMedia trick: listen for the next change past the
+            // current DPR, re-arm on fire. This is how modern pages detect
+            // browser zoom changes precisely across Chromium/Firefox/Safari.
+            function watch() {
+                var dpr = window.devicePixelRatio || baselineDPR;
+                try {
+                    var mql = window.matchMedia('(resolution: ' + dpr + 'dppx)');
+                    var handler = function() {
+                        apply();
+                        watch();
+                    };
+                    if (mql.addEventListener) {
+                        mql.addEventListener('change', handler, { once: true });
+                    } else if (mql.addListener) {
+                        // Safari <14 fallback. Handler can't be auto-removed
+                        // here, but it only fires once when DPR crosses the
+                        // boundary so the leak is bounded by the user's zoom
+                        // actions in a single session.
+                        mql.addListener(handler);
+                    }
+                } catch (_) { /* older browsers: resize listener below still fires */ }
+            }
+            apply();
+            watch();
+            // Belt-and-suspenders: `resize` also fires on browser zoom in
+            // every modern desktop browser and is a cheap place to re-sync
+            // if the matchMedia chain ever drops an event (e.g. tab restore).
+            window.addEventListener('resize', apply, { passive: true });
+        } catch (err) {
+            // Fail silent -- worst case the chrome scales with browser zoom
+            // as before. We never want this tiny helper to break the app.
+            try { console.warn('[AntiBrowserZoom] init failed', err); } catch (_) {}
+        }
+    })();
+    </script>
     <!-- Google Fonts for Text Tool (async, non-render-blocking) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=Caveat:wght@400;700&family=Comic+Neue:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=Caveat:wght@400;700&family=Comic+Neue:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Inter:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"></noscript>
-    <link rel="stylesheet" href="styles.css?v=20260323b">
+    <link rel="stylesheet" href="styles.css?v=20260512j-shape-toolbar-contrast">
+    <link rel="stylesheet" href="topology-cursor-install.css?v=20260512o-cursor-mcp">
     <style>
+    /* ========================================================================
+       Anti browser-zoom for UI chrome (pair with the <script> above)
+       ========================================================================
+       The inline bootstrap script sets --browser-zoom (current ratio) and
+       --anti-browser-zoom (1/ratio) on :root. We apply the inverse via the
+       CSS `zoom` property to a SHORT whitelist of shell elements so they
+       render at a constant device-pixel size regardless of Cmd/Ctrl +/-.
+       Using `zoom` (not `transform: scale`) keeps the laid-out box size in
+       sync with the visual size, so CSS Grid `auto` tracks that contain
+       the top bar and left toolbar follow along automatically -- no grid
+       template recalc needed.
+       The canvas and ALL floating dropdowns / modals are intentionally
+       left alone: drawing surface keeps its own app-level zoom pill, and
+       menus stay legible (browser zoom still works for content).
+       Fallback of 1 keeps everything a no-op before the JS runs OR if the
+       script fails, so the chrome never "disappears" at 0 in any scenario. */
+    :root {
+        --browser-zoom: 1;
+        --anti-browser-zoom: 1;
+    }
+    .top-bar,
+    .toolbar,
+    .topo-bottom-left-bar,
+    #grid-controls,
+    /* Bottom-right minimap overview. Position:absolute relative to the
+       canvas container, so its right/bottom anchor + own size scale
+       together: shrinks in place at the same screen corner. */
+    #minimap-container,
+    /* Floating dropdown panels (Topologies menu, File menu, Mapper menu,
+       Labels menu, Domain Knowledge popover, etc.). They're position:fixed
+       direct children of <body> with JS-calculated top/left, so scaling
+       only changes their visual size -- coordinate calculations done in
+       JS via getBoundingClientRect() return CSS pixels which are the
+       same coordinate space the dropdown is positioned in. */
+    .liquid-glass-dropdown,
+    /* Sharing dialog card. We deliberately do NOT scale
+       `.share-dialog-overlay` (it's the full-viewport backdrop -- shrinking
+       it would leave a transparent ring around the screen). Only the
+       inner card gets the anti-zoom. */
+    .share-dialog,
+    /* Notification Center popover, opened from the bell icon. */
+    #notification-center-panel,
+    /* Force-close / live-sync banner near the topology pill. Counts as
+       chrome -- the receiver needs the same readable size at any zoom. */
+    #topology-live-sync-banner,
+    /* Modal cards. We target `.modal-content` inside `.modal`, NOT the
+       `.modal` itself, because `.modal` is a 100%/100% fixed backdrop
+       and shrinking it would expose a transparent ring around the
+       viewport. Covers Shortcuts modal + any future modal that follows
+       the same `.modal > .modal-content` shell pattern. */
+    .modal > .modal-content {
+        zoom: var(--anti-browser-zoom, 1);
+    }
+    /* The bar-collapse handles are position:fixed outside the toolbars.
+       Scale them to match AND move their anchoring edge inward by the
+       same factor, so the small arrow stays flush with the (now shrunk)
+       right edge of the left toolbar and the bottom edge of the top bar
+       at any browser zoom. `body.toolbar-collapsed .toolbar-toggle` still
+       overrides `left: 0` so the expand arrow stays glued to the viewport
+       edge -- the calc is harmless there because `left: 0` wins.  */
+    .toolbar-toggle,
+    .top-bar-toggle {
+        zoom: var(--anti-browser-zoom, 1);
+    }
+    .toolbar-toggle {
+        left: calc(86px * var(--anti-browser-zoom, 1));
+    }
+    .top-bar-toggle {
+        top: calc(44px * var(--anti-browser-zoom, 1));
+    }
+
     /* App Icon System - Custom SVG Icons */
     .ico { display: inline-block; width: 1em; height: 1em; vertical-align: -0.125em; margin-right: 3px; }
     .ico svg { width: 100%; height: 100%; fill: currentColor; }
@@ -146,12 +291,307 @@
 
     .topo-active-bar {
         position: absolute;
-        left: 12px;
-        bottom: 42px;
+        left: 14px;
+        bottom: 48px;
         z-index: 99;
         pointer-events: none;
         transition: opacity 0.2s ease, transform 0.2s ease;
         will-change: opacity, transform;
+    }
+    .topo-active-bar #topo-active-inner {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 9px 18px 9px 12px;
+        background: linear-gradient(135deg, rgba(0, 102, 250, 0.92), rgba(0, 70, 188, 0.95));
+        backdrop-filter: blur(18px) saturate(160%);
+        -webkit-backdrop-filter: blur(18px) saturate(160%);
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-top: 1px solid rgba(255, 255, 255, 0.32);
+        border-radius: 14px;
+        box-shadow:
+            0 10px 32px rgba(0, 0, 0, 0.32),
+            0 4px 12px rgba(0, 0, 0, 0.2),
+            inset 0 1px 0 rgba(255, 255, 255, 0.18),
+            0 0 0 1px rgba(0, 102, 250, 0.18);
+        pointer-events: auto;
+        font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    .topo-active-bar #topo-active-color-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        box-shadow: 0 0 10px currentColor, inset 0 0 4px rgba(255,255,255,0.3);
+    }
+    .topo-active-bar #topo-active-save {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: rgba(255, 255, 255, 0.14);
+        cursor: pointer;
+        color: #fff;
+        flex-shrink: 0;
+        padding: 0;
+        transition: background 0.15s, border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+    }
+    .topo-active-bar #topo-active-save:hover {
+        background: rgba(255, 255, 255, 0.26);
+        border-color: rgba(255, 255, 255, 0.45);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        transform: translateY(-1px);
+    }
+    .topo-active-bar #topo-active-save:active {
+        transform: translateY(0);
+        background: rgba(0, 180, 216, 0.4);
+    }
+    .topo-active-bar #topo-active-save svg {
+        width: 15px;
+        height: 15px;
+    }
+    /* Wrapper keeps the name visually constrained AND acts as the
+       overflow viewport for the hover-to-marquee animation. Keeping
+       overflow here (not on the span itself) lets the inner text
+       translate freely without the span's own clipping kicking in. */
+    .topo-active-bar #topo-active-name-wrap {
+        position: relative;
+        display: inline-block;
+        max-width: 280px;
+        overflow: hidden;
+        /* Right-edge fade tells the user "there's more" without
+           occupying layout space like an ellipsis would. Masked out
+           the right ~16px so the letters never visually collide with
+           the "|" separator. */
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
+        mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
+    }
+    /* If the name fits the container, strip the fade so short names
+       don't look weirdly faded near the end. JS toggles this class
+       after measuring. */
+    .topo-active-bar #topo-active-name-wrap.no-fade {
+        -webkit-mask-image: none;
+        mask-image: none;
+    }
+    .topo-active-bar #topo-active-name {
+        display: inline-block;
+        font-size: 14px;
+        font-weight: 600;
+        color: #fff;
+        white-space: nowrap;
+        letter-spacing: 0.2px;
+        /* Stronger dark halo so the topology name (e.g. "MULTICAST") stays
+           legible at distance even when the surrounding pill is tinted
+           toward a light/pastel domain color. Layered shadow: a tight 1px
+           anti-alias bed + a softer 3px halo. */
+        text-shadow:
+            0 1px 0 rgba(0, 0, 0, 0.55),
+            0 0 3px rgba(0, 0, 0, 0.45);
+        will-change: transform;
+        /* Snap back gently when the user hovers out mid-scroll. While
+           the marquee keyframe is active it owns the transform so
+           this transition doesn't interfere; the moment the animation
+           stops the transform reverts and THIS transition eases it
+           back to translate(0). */
+        transition: transform 0.35s ease-out;
+    }
+    /* Hover-activated marquee. `--marquee-shift` (set from JS) is the
+       negative offset to scroll to -- equal to the overflow width
+       plus a 24px tail pad so the last letter clears the right edge
+       before the animation loops back. Duration also comes from JS
+       (~60 px/sec) so a very long name gets proportionally longer,
+       preventing a snappy jitter on short overflows. */
+    @keyframes topo-active-marquee {
+        0%   { transform: translateX(0); }
+        12%  { transform: translateX(0); }                 /* pause at start */
+        88%  { transform: translateX(var(--marquee-shift, 0)); }
+        100% { transform: translateX(var(--marquee-shift, 0)); } /* pause at end */
+    }
+    .topo-active-bar #topo-active-name-wrap.overflowing:hover #topo-active-name,
+    .topo-active-bar #topo-active-name-wrap.overflowing:focus-within #topo-active-name {
+        animation: topo-active-marquee var(--marquee-duration, 6s) linear infinite;
+    }
+    /* Respect users who opted out of motion -- drop the animation;
+       the right-edge fade still signals "there's more", and the
+       native title attribute still surfaces the full name. */
+    @media (prefers-reduced-motion: reduce) {
+        .topo-active-bar #topo-active-name-wrap.overflowing:hover #topo-active-name,
+        .topo-active-bar #topo-active-name-wrap.overflowing:focus-within #topo-active-name {
+            animation: none;
+        }
+    }
+    .topo-active-bar #topo-active-sep {
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 13px;
+        font-weight: 300;
+    }
+    .topo-active-bar #topo-active-domain {
+        font-size: 10.5px;
+        font-weight: 700;
+        color: #fff;
+        white-space: nowrap;
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        letter-spacing: 0.4px;
+        padding: 1px 7px;
+        border-radius: 5px;
+        /* Solid-dark badge (was 10% white) so the "AI"/domain label stays
+           readable regardless of which domain color the wrapper gradient
+           is tinted with -- previously a bright/pastel domain color washed
+           the badge into the same hue as its neighbor and the text
+           disappeared at distance. */
+        background: rgba(0, 0, 0, 0.30);
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        text-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.55);
+    }
+    .topo-active-bar #topo-active-dots {
+        align-items: center;
+        gap: 6px;
+        margin-left: 4px;
+        pointer-events: auto;
+    }
+
+    /* ----------------------------------------------------------------------
+       Bottom-left bar: wraps the topology indicator + AI launcher pill so
+       they sit side-by-side. The WRAPPER now owns the absolute position; the
+       child .topo-active-bar reverts to position:static and inherits bottom
+       placement from the wrapper. Existing inner rules (#topo-active-inner,
+       #topo-active-save, #topo-active-name ...) keep working unchanged.
+       ---------------------------------------------------------------------- */
+    .topo-bottom-left-bar {
+        position: absolute;
+        left: 14px;
+        bottom: 48px;
+        z-index: 99;
+        display: flex;
+        align-items: stretch;
+        gap: 8px;
+        pointer-events: none; /* children re-enable as needed */
+    }
+    .topo-bottom-left-bar > .topo-active-bar {
+        position: static;
+        left: auto;
+        bottom: auto;
+        z-index: auto;
+    }
+
+    /* AI assistant launcher pill. Always visible. Sits to the right of the
+       current-topology indicator. Double duty: single click toggles the
+       floating right-side drawer, the "A" keyboard shortcut (pressed while
+       NOT typing in a text field) does the same. The `.active` class is
+       toggled by topology-ai.js while the drawer is open so the pill stays
+       visually bound to the panel it controls.
+       Colors: DriveNets brand blue -> cyan gradient with a navy base, so
+       the AI pill reads "DriveNets" instead of a generic purple. */
+    .ai-chat-launcher {
+        pointer-events: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 8px 14px 8px 10px;
+        font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        color: #fff;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        background: linear-gradient(135deg, rgba(0, 180, 216, 0.92), rgba(0, 102, 250, 0.95));
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-top-color: rgba(255, 255, 255, 0.34);
+        border-radius: 14px;
+        cursor: pointer;
+        box-shadow:
+            0 10px 28px rgba(0, 82, 204, 0.38),
+            0 3px 10px rgba(0, 0, 0, 0.24),
+            inset 0 1px 0 rgba(255, 255, 255, 0.22),
+            0 0 0 1px rgba(0, 180, 216, 0.22);
+        backdrop-filter: blur(18px) saturate(160%);
+        -webkit-backdrop-filter: blur(18px) saturate(160%);
+        transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
+        position: relative;
+    }
+    .ai-chat-launcher:hover {
+        background: linear-gradient(135deg, rgba(62, 224, 255, 0.96), rgba(51, 133, 255, 0.98));
+        transform: translateY(-1px);
+        box-shadow:
+            0 14px 34px rgba(0, 82, 204, 0.48),
+            0 4px 12px rgba(0, 0, 0, 0.30),
+            inset 0 1px 0 rgba(255, 255, 255, 0.28),
+            0 0 0 1px rgba(62, 224, 255, 0.32);
+    }
+    .ai-chat-launcher:active {
+        transform: translateY(0);
+    }
+    .ai-chat-launcher.active {
+        background: linear-gradient(135deg, rgba(120, 230, 255, 1), rgba(0, 102, 250, 1));
+        box-shadow:
+            0 14px 34px rgba(0, 82, 204, 0.52),
+            inset 0 1px 0 rgba(255, 255, 255, 0.30),
+            0 0 0 2px rgba(120, 230, 255, 0.60);
+    }
+    .ai-chat-launcher__icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        color: #fff;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+    }
+    .ai-chat-launcher__icon svg { width: 18px; height: 18px; }
+    .ai-chat-launcher__label {
+        font-size: 13px;
+        letter-spacing: 0.6px;
+        /* Stronger dark halo so "AI" stays legible against the cyan-blue
+           gradient AND against the lighter cyan gradient used in the
+           .active state, where pure white was getting blown out. */
+        text-shadow:
+            0 1px 0 rgba(0, 0, 0, 0.50),
+            0 0 3px rgba(0, 0, 0, 0.40);
+    }
+    .ai-chat-launcher__badge {
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 9px;
+        background: #FF5E1F;
+        border: 2px solid #0D1B2A;
+        color: #fff;
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 14px;
+        text-align: center;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.40);
+    }
+    .ai-chat-launcher__badge[hidden] { display: none; }
+
+    /* Soft pulse when the user has never configured a key yet -- gives the
+       button a light "click me first" signal without being obnoxious. The
+       JS toggles `.needs-setup` after the first /api/users/me/ai-config
+       probe completes with {configured: false}. */
+    @keyframes ai-launcher-pulse {
+        0%, 100% { box-shadow:
+            0 10px 28px rgba(0, 82, 204, 0.36),
+            inset 0 1px 0 rgba(255, 255, 255, 0.22),
+            0 0 0 0 rgba(120, 230, 255, 0.0); }
+        50% { box-shadow:
+            0 10px 28px rgba(0, 82, 204, 0.42),
+            inset 0 1px 0 rgba(255, 255, 255, 0.28),
+            0 0 0 6px rgba(120, 230, 255, 0.28); }
+    }
+    .ai-chat-launcher.needs-setup:not(.active) {
+        animation: ai-launcher-pulse 2.6s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .ai-chat-launcher.needs-setup:not(.active) { animation: none; }
     }
 
     /* topo-time tooltips handled by JS tooltip system (no CSS ::after needed) */
@@ -297,6 +737,13 @@
         <path d="M20 12a8 8 0 0 1-14 5.3" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/>
         <path d="M20 4v4h-4" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
     </symbol>
+    <!-- 2026-05-12 [split-color refine]: horizontal swap arrows for the
+         color picker's L<->R swap action. Two arrows pointing in opposite
+         directions on the same horizontal axis suggest "swap sides". -->
+    <symbol id="ico-swap-horizontal" viewBox="0 0 24 24">
+        <path d="M4 8h13M14 5l3 3-3 3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <path d="M20 16H7M10 19l-3-3 3-3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </symbol>
     <symbol id="ico-close" viewBox="0 0 24 24">
         <circle cx="12" cy="12" r="10" fill="currentColor" opacity="0.15"/>
         <path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
@@ -355,6 +802,12 @@
         <path d="M2 14l10 5 10-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         <path d="M2 19l10 5 10-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
     </symbol>
+    <symbol id="ico-group" viewBox="0 0 24 24">
+        <rect x="3" y="3" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <rect x="14" y="3" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <rect x="3" y="14" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <rect x="14" y="14" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/>
+    </symbol>
     <symbol id="ico-layer-up" viewBox="0 0 24 24">
         <path d="M7 14l5-5 5 5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
     </symbol>
@@ -404,6 +857,12 @@
         <rect x="1" y="6" width="22" height="12" rx="2" fill="currentColor" opacity="0.25"/>
         <rect x="2" y="7" width="20" height="10" rx="1" fill="currentColor"/>
         <path d="M5 12v3M8 12v2M11 12v3M14 12v2M17 12v3M20 12v2" stroke="#fff" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+    </symbol>
+    <symbol id="ico-packet" viewBox="0 0 24 24">
+        <rect x="2" y="5" width="20" height="3.2" rx="0.8" fill="currentColor" opacity="0.85"/>
+        <rect x="2" y="9.2" width="20" height="3.2" rx="0.8" fill="currentColor" opacity="0.55"/>
+        <rect x="2" y="13.4" width="20" height="3.2" rx="0.8" fill="currentColor" opacity="0.35"/>
+        <rect x="2" y="17.6" width="20" height="2.4" rx="0.8" fill="currentColor" opacity="0.2"/>
     </symbol>
     
     <!-- Direction/Navigation Icons - Duotone -->
@@ -615,7 +1074,7 @@
         <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
     </symbol>
 </svg>
-<body>
+<body class="ui-skin-v2">
     <!-- Splash screen (visible instantly, removed by TopologyEditor init) -->
     <div id="app-splash" style="position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;background:#0a0a14;transition:opacity .5s">
         <div style="text-align:center">
@@ -934,11 +1393,20 @@
             Shortcuts
         </button>
         <!-- Debug button removed - use debugger.toggle() in console if needed -->
-        <button class="top-bar-btn" id="btn-link-type-labels" data-tooltip="Show/hide link type labels on canvas">
+        <button class="top-bar-btn" id="btn-link-type-labels" data-tooltip="Show/hide canvas labels and interface TBs on links">
             <svg viewBox="0 0 24 24">
                 <path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z" fill="currentColor"/>
             </svg>
             <span class="status-text">Labels</span>
+        </button>
+        <button class="top-bar-btn" id="btn-groups-panel" data-tooltip="Open Groups panel [G]" aria-pressed="false" onclick="if (window.toggleGroupsPanelFromToolbar) { window.toggleGroupsPanelFromToolbar(event); } else { console.warn('[GroupsPanel] toggle helper not loaded yet'); }">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+                <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+                <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+                <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+            </svg>
+            <span class="status-text">Groups</span>
         </button>
         <!-- Separator before DNAAS -->
         <div class="top-bar-separator"></div>
@@ -1040,39 +1508,170 @@
             </div>
         </div>
         <!-- ================================================================ -->
-        <!-- NETWORK MAPPER — Button + Panel                                  -->
+        <!-- GENERATE TOPOLOGY — Button + Panel (was Network Mapper).         -->
+        <!-- DNAAS remains owned by the DNAAS button/panel; Generate focuses  -->
+        <!-- on current/inserted DUTs and live config/LLDP facts.             -->
+        <!-- IDs ``btn-network-mapper`` + ``network-mapper-panel`` are kept   -->
+        <!-- for backwards compatibility with topology-network-mapper.js.    -->
         <!-- ================================================================ -->
         <div class="top-bar-dropdown">
-            <button class="top-bar-btn" id="btn-network-mapper" data-tooltip="Network Mapper — Discover topology via LLDP [N]">
+            <button class="top-bar-btn" id="btn-network-mapper" data-tooltip="Generate Topology — Build canvas from current or inserted devices, configs, and LLDP [N]">
                 <svg class="nm-btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"/>
-                    <circle cx="12" cy="12" r="4" fill="currentColor" stroke="none" opacity="0.6"/>
-                    <line x1="12" y1="2" x2="12" y2="6"/>
-                    <line x1="12" y1="18" x2="12" y2="22"/>
-                    <line x1="2" y1="12" x2="6" y2="12"/>
-                    <line x1="18" y1="12" x2="22" y2="12"/>
-                    <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/>
-                    <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/>
-                    <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/>
-                    <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
+                    <path d="M12 2 L12 22"/>
+                    <path d="M5 6 L19 6"/>
+                    <path d="M5 18 L19 18"/>
+                    <circle cx="5" cy="6" r="2" fill="currentColor" stroke="none"/>
+                    <circle cx="19" cy="6" r="2" fill="currentColor" stroke="none"/>
+                    <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+                    <circle cx="5" cy="18" r="2" fill="currentColor" stroke="none"/>
+                    <circle cx="19" cy="18" r="2" fill="currentColor" stroke="none"/>
+                    <path d="M12 12 L5 6"/>
+                    <path d="M12 12 L19 6"/>
+                    <path d="M12 12 L5 18"/>
+                    <path d="M12 12 L19 18"/>
                 </svg>
-                <span class="nm-btn-text">Mapper</span>
+                <span class="nm-btn-text">Generate</span>
             </button>
-            <div id="network-mapper-panel" style="display: none; position: fixed; width: 420px; background: rgba(17, 25, 40, 0.75); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 16px; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37); z-index: 999999; overflow: visible; backdrop-filter: blur(12px) saturate(180%); -webkit-backdrop-filter: blur(12px) saturate(180%);">
+            <div id="network-mapper-panel" style="display: none; position: fixed; width: 460px; max-height: 85vh; background: rgba(17, 25, 40, 0.75); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 16px; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37); z-index: 999999; overflow: hidden; backdrop-filter: blur(12px) saturate(180%); -webkit-backdrop-filter: blur(12px) saturate(180%);">
                 <!-- Header -->
                 <div style="background: rgba(6, 182, 212, 0.15); padding: 14px 18px; border-radius: 15px 15px 0 0; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255, 255, 255, 0.125);">
                     <div style="display: flex; align-items: center; gap: 10px; color: rgba(255, 255, 255, 0.9); font-weight: 600; font-size: 14px;">
                         <div style="width: 32px; height: 32px; background: rgba(6, 182, 212, 0.2); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(6, 182, 212, 0.9)" stroke-width="2">
-                                <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4" fill="rgba(6, 182, 212, 0.9)" stroke="none"/>
-                                <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>
-                                <line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(6, 182, 212, 0.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 2 L12 22"/>
+                                <path d="M5 6 L19 6"/>
+                                <path d="M5 18 L19 18"/>
+                                <circle cx="5" cy="6" r="2" fill="rgba(6, 182, 212, 0.9)" stroke="none"/>
+                                <circle cx="19" cy="6" r="2" fill="rgba(6, 182, 212, 0.9)" stroke="none"/>
+                                <circle cx="12" cy="12" r="2.5" fill="rgba(6, 182, 212, 0.9)" stroke="none"/>
+                                <circle cx="5" cy="18" r="2" fill="rgba(6, 182, 212, 0.9)" stroke="none"/>
+                                <circle cx="19" cy="18" r="2" fill="rgba(6, 182, 212, 0.9)" stroke="none"/>
                             </svg>
                         </div>
-                        Network Mapper
+                        Discover Topology
                     </div>
                     <span id="nm-panel-status" style="font-size: 10px; padding: 4px 10px; border-radius: 12px; background: rgba(39, 174, 96, 0.2); border: 1px solid rgba(255, 255, 255, 0.125); color: rgba(255, 255, 255, 0.9); font-weight: 500; backdrop-filter: blur(10px);">Ready</span>
                 </div>
+
+                <!-- Source tab navigation (managed by topology-generator.js).
+                     Tabs: live | canvas | mapper (LLDP) | import. -->
+                <div id="gen-tab-nav" style="display: flex; gap: 2px; padding: 8px 12px 0 12px; background: rgba(255, 255, 255, 0.02); border-bottom: 1px solid rgba(255, 255, 255, 0.08); overflow-x: auto;">
+                    <button class="gen-tab-btn active" data-gen-tab="live" style="padding: 8px 12px; background: transparent; border: none; border-bottom: 2px solid transparent; color: rgba(255, 255, 255, 0.55); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; letter-spacing: 0.3px;">Discover</button>
+                    <button class="gen-tab-btn" data-gen-tab="canvas" style="padding: 8px 12px; background: transparent; border: none; border-bottom: 2px solid transparent; color: rgba(255, 255, 255, 0.55); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; letter-spacing: 0.3px;">Canvas</button>
+                    <button class="gen-tab-btn" data-gen-tab="mapper" style="padding: 8px 12px; background: transparent; border: none; border-bottom: 2px solid transparent; color: rgba(255, 255, 255, 0.55); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; letter-spacing: 0.3px;">LLDP</button>
+                    <button class="gen-tab-btn" data-gen-tab="import" style="padding: 8px 12px; background: transparent; border: none; border-bottom: 2px solid transparent; color: rgba(255, 255, 255, 0.55); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; letter-spacing: 0.3px;">Import</button>
+                </div>
+
+                <!-- Scrollable body wraps every tab pane + the LLDP legacy
+                     content below. The LLDP tab keeps the original nm-*
+                     fields untouched so topology-network-mapper.js wires
+                     up its handlers on the same DOM nodes as before. -->
+                <div id="gen-panel-body" style="overflow-y: auto; max-height: calc(85vh - 110px);">
+
+                <!-- ===== CANVAS TAB ============================================ -->
+                <div class="gen-tab-pane" data-gen-pane="canvas" style="display: none; padding: 14px 18px;">
+                    <div style="font-size: 10px; color: rgba(6, 182, 212, 0.9); font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Source: Existing Canvas</div>
+                    <div style="font-size: 11px; color: rgba(255, 255, 255, 0.65); line-height: 1.4; margin-bottom: 12px;">
+                        Advanced: rebuild from the topology already on the canvas. This does not connect to devices and should only be used for cleanup/testing, not for real discovery.
+                    </div>
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.75); margin-bottom: 6px; cursor: pointer;">
+                        <input type="checkbox" id="gen-canvas-add-text" checked style="accent-color: #06b6d4;">
+                        Add text labels (IP, system type, version)
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.75); margin-bottom: 6px; cursor: pointer;">
+                        <input type="checkbox" id="gen-canvas-add-shapes" checked style="accent-color: #06b6d4;">
+                        Add grouping shapes (tier / role bands)
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.75); margin-bottom: 6px; cursor: pointer;">
+                        <input type="checkbox" id="gen-canvas-restyle-links" checked style="accent-color: #06b6d4;">
+                        Restyle links (protocol-aware colors and widths)
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.75); margin-bottom: 12px; cursor: pointer;">
+                        <input type="checkbox" id="gen-canvas-link-table" checked style="accent-color: #06b6d4;">
+                        Populate link-table metadata (interfaces, VLAN, IP)
+                    </label>
+                    <button id="gen-canvas-generate" class="gen-secondary-btn" style="width: 100%; padding: 11px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 10px; color: rgba(255, 255, 255, 0.85); cursor: pointer; font-weight: 600; font-size: 12px; backdrop-filter: blur(10px); transition: all 0.2s;">Rebuild from Current Canvas</button>
+                </div>
+
+                <!-- ===== LIVE DEVICES TAB ====================================== -->
+                <div class="gen-tab-pane" data-gen-pane="live" style="display: block; padding: 14px 18px;">
+                    <div style="font-size: 10px; color: rgba(6, 182, 212, 0.9); font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Discover from devices</div>
+                    <div style="font-size: 11px; color: rgba(255, 255, 255, 0.65); line-height: 1.4; margin-bottom: 12px;">
+                        Connect to DUTs, collect LLDP and running-config facts, match peers and addresses across physical and logical protocols, then build a clean topology preview.
+                    </div>
+
+                    <!-- DUT target entry: hostnames / serials / IPs -->
+                    <div style="font-size: 10px; color: rgba(255, 255, 255, 0.55); font-weight: 600; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">DUT targets</div>
+                    <textarea id="gen-live-targets" rows="3" placeholder="Hostnames, serials or management IPs — comma, space or newline separated"
+                              style="width: 100%; padding: 9px 11px; border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 8px; background: rgba(255, 255, 255, 0.05); color: rgba(255, 255, 255, 0.92); font-size: 12px; font-family: 'Monaco', 'Menlo', 'Consolas', monospace; resize: vertical; box-sizing: border-box; margin-bottom: 8px;"></textarea>
+
+                    <!-- Optional credentials override (used when seeding raw IPs) -->
+                    <details style="margin-bottom: 10px;">
+                        <summary style="font-size: 11px; color: rgba(255, 255, 255, 0.7); cursor: pointer; user-select: none;">SSH credentials (optional override)</summary>
+                        <div style="display: flex; gap: 6px; margin-top: 8px;">
+                            <input type="text" id="gen-live-ssh-user" placeholder="user (default dnroot)"
+                                   style="flex: 1; padding: 7px 9px; border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 7px; background: rgba(255, 255, 255, 0.05); color: rgba(255, 255, 255, 0.9); font-size: 11px; box-sizing: border-box;">
+                            <input type="password" id="gen-live-ssh-pass" placeholder="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true"
+                                   style="flex: 1; padding: 7px 9px; border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 7px; background: rgba(255, 255, 255, 0.05); color: rgba(255, 255, 255, 0.9); font-size: 11px; box-sizing: border-box;">
+                        </div>
+                    </details>
+
+                    <!-- Auto-source toggles -->
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.75); margin-bottom: 6px; cursor: pointer;">
+                        <input type="checkbox" id="gen-live-use-canvas-ssh" checked style="accent-color: #06b6d4;">
+                        Auto-include canvas devices that already have SSH credentials
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.75); margin-bottom: 10px; cursor: pointer;">
+                        <input type="checkbox" id="gen-live-use-canvas-selected" style="accent-color: #06b6d4;">
+                        Use only currently selected canvas device(s)
+                    </label>
+
+                    <div id="gen-live-target-summary" style="font-size: 11px; color: rgba(255, 255, 255, 0.7); padding: 8px 10px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; margin-bottom: 12px;">
+                        Enter device targets above or rely on canvas SSH devices.
+                    </div>
+
+                    <!-- Behavior / output toggles -->
+                    <details style="margin-bottom: 12px;">
+                        <summary style="font-size: 11px; color: rgba(255, 255, 255, 0.7); cursor: pointer; user-select: none;">Advanced discovery options</summary>
+                        <div style="margin-top: 8px;">
+                            <label style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.75); margin-bottom: 6px; cursor: pointer;">
+                                <input type="checkbox" id="gen-live-fetch-config" checked style="accent-color: #06b6d4;">
+                                Fetch full running config for logical topology
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.75); margin-bottom: 6px; cursor: pointer;">
+                                <input type="checkbox" id="gen-live-include-lldp" checked style="accent-color: #06b6d4;">
+                                Use DUT LLDP neighbors as physical adjacency
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.75); margin-bottom: 6px; cursor: pointer;">
+                                <input type="checkbox" id="gen-live-monitor" checked style="accent-color: #06b6d4;">
+                                Register resolved DUTs for per-user monitoring
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.75); margin-bottom: 6px; cursor: pointer;">
+                                <input type="checkbox" id="gen-live-include-shapes" checked style="accent-color: #06b6d4;">
+                                Add AS / area / VRF / BD grouping shapes
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.75); margin-bottom: 0; cursor: pointer;">
+                                <input type="checkbox" id="gen-live-include-text" checked style="accent-color: #06b6d4;">
+                                Add IP / AS / RD / role text labels
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.75); margin-top: 6px; cursor: pointer;">
+                                <input type="checkbox" id="gen-live-use-learning" checked style="accent-color: #06b6d4;">
+                                Use learned per-user layout/style hints
+                            </label>
+                        </div>
+                    </details>
+
+                    <div style="display: flex; gap: 8px;">
+                        <button id="gen-live-resolve" class="gen-secondary-btn" style="flex: 1; padding: 10px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 10px; color: rgba(255, 255, 255, 0.85); cursor: pointer; font-weight: 600; font-size: 11px; backdrop-filter: blur(10px); transition: all 0.2s;">Resolve Only</button>
+                        <button id="gen-live-generate" class="gen-primary-btn" style="flex: 2; padding: 10px; background: rgba(6, 182, 212, 0.2); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 10px; color: rgba(255, 255, 255, 0.95); cursor: pointer; font-weight: 600; font-size: 12px; box-shadow: 0 4px 15px rgba(6, 182, 212, 0.2); backdrop-filter: blur(10px); transition: all 0.2s;">Discover Topology</button>
+                    </div>
+                </div>
+
+                <!-- ===== LLDP / NETWORK MAPPER TAB ============================= -->
+                <!-- Wraps the existing nm-* IDs unchanged so                     -->
+                <!-- topology-network-mapper.js continues to work as-is.          -->
+                <div class="gen-tab-pane" data-gen-pane="mapper" style="display: none;">
+                    <div style="font-size: 10px; color: rgba(6, 182, 212, 0.9); font-weight: 600; padding: 14px 18px 0 18px; text-transform: uppercase; letter-spacing: 0.5px;">Source: LLDP Discovery (Network Mapper)</div>
 
                 <!-- Known Devices Section -->
                 <div id="nm-suggestions-section" style="display: none; padding: 14px 18px; background: rgba(255, 255, 255, 0.02); border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
@@ -1107,7 +1706,7 @@
                     <div style="display: flex; gap: 8px; margin-bottom: 10px;">
                         <input type="text" id="nm-username" value="dnroot" placeholder="Username"
                                style="flex: 1; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.8); font-size: 11px; box-sizing: border-box;">
-                        <input type="password" id="nm-password" value="dnroot" placeholder="Password"
+                        <input type="password" id="nm-password" value="dnroot" placeholder="Password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true"
                                style="flex: 1; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.8); font-size: 11px; box-sizing: border-box;">
                     </div>
                     <!-- Limits -->
@@ -1155,19 +1754,165 @@
                     <!-- Result Actions -->
                     <div id="nm-result-actions" style="display: none; margin-top: 14px; display: none; gap: 10px; flex-wrap: wrap;">
                         <button id="nm-generate-topology" style="flex: 1; padding: 10px 14px; background: rgba(39, 174, 96, 0.2); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 10px; color: rgba(255, 255, 255, 0.9); cursor: pointer; font-weight: 600; font-size: 12px; box-shadow: 0 4px 15px rgba(39, 174, 96, 0.2); backdrop-filter: blur(10px); transition: all 0.2s;">
-                            🗺️ Generate Topology
+                            Generate Topology
                         </button>
                         <button id="nm-save-topology" style="padding: 10px 14px; background: rgba(6, 182, 212, 0.2); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 10px; color: rgba(255, 255, 255, 0.9); cursor: pointer; font-weight: 600; font-size: 12px; box-shadow: 0 4px 15px rgba(6, 182, 212, 0.2); backdrop-filter: blur(10px); transition: all 0.2s;">
-                            💾 Save
+                            Save
                         </button>
                         <button id="nm-dismiss" style="padding: 10px 14px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 10px; color: rgba(255, 255, 255, 0.7); cursor: pointer; font-size: 12px; backdrop-filter: blur(10px); transition: all 0.2s;">
                             Dismiss
                         </button>
                     </div>
                 </div>
+                </div><!-- /gen-tab-pane data-gen-pane="mapper" -->
+
+                <!-- ===== IMPORT TAB =========================================== -->
+                <div class="gen-tab-pane" data-gen-pane="import" style="display: none; padding: 14px 18px;">
+                    <div style="font-size: 10px; color: rgba(6, 182, 212, 0.9); font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Source: Imported File</div>
+                    <div style="font-size: 11px; color: rgba(255, 255, 255, 0.65); line-height: 1.4; margin-bottom: 12px;">
+                        Generate a topology from an offline file: a saved topology JSON snapshot, a Network Mapper export, or a pasted DNOS running-config. DNAAS discoveries stay in the DNAAS panel. The file is parsed locally, normalized into facts, and rendered as a preview before applying.
+                    </div>
+                    <input type="file" id="gen-import-file" accept=".json,.txt,.cfg,.conf" style="display: none;">
+                    <button id="gen-import-pick" style="width: 100%; padding: 11px; margin-bottom: 8px; background: rgba(255, 255, 255, 0.04); border: 1px dashed rgba(255, 255, 255, 0.2); border-radius: 10px; color: rgba(255, 255, 255, 0.85); cursor: pointer; font-weight: 500; font-size: 12px; transition: all 0.2s;">Choose file (.json / .txt / .cfg)</button>
+                    <div id="gen-import-summary" style="font-size: 11px; color: rgba(255, 255, 255, 0.7); padding: 8px 10px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; margin-bottom: 12px; min-height: 18px;">
+                        No file selected.
+                    </div>
+                    <textarea id="gen-import-paste" placeholder="...or paste DNOS running config / topology JSON here" rows="6" style="width: 100%; padding: 10px; border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 8px; background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.85); font-family: 'SF Mono', monospace; font-size: 10px; box-sizing: border-box; margin-bottom: 12px; resize: vertical;"></textarea>
+                    <button id="gen-import-generate" class="gen-primary-btn" style="width: 100%; padding: 11px; background: rgba(6, 182, 212, 0.2); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 10px; color: rgba(255, 255, 255, 0.9); cursor: pointer; font-weight: 600; font-size: 12px; box-shadow: 0 4px 15px rgba(6, 182, 212, 0.2); backdrop-filter: blur(10px); transition: all 0.2s;">Generate from Imported File</button>
+                </div>
+
+                <!-- ===== GENERATOR PROGRESS LOG (shared by Canvas/Live/Import) -->
+                <div id="gen-progress" style="display: none; padding: 14px 18px; background: rgba(255, 255, 255, 0.02); border-top: 1px solid rgba(255, 255, 255, 0.06);">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div id="gen-spinner" style="width: 14px; height: 14px; border: 2px solid rgba(6, 182, 212, 0.3); border-top-color: rgba(6, 182, 212, 0.9); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                            <span id="gen-progress-text" style="font-size: 11px; color: rgba(255, 255, 255, 0.85);">Working...</span>
+                        </div>
+                        <button id="gen-cancel" style="padding: 4px 10px; background: rgba(231, 76, 60, 0.18); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 6px; color: rgba(255, 255, 255, 0.85); cursor: pointer; font-size: 10px;">Cancel</button>
+                    </div>
+                    <div id="gen-log" style="background: rgba(0, 0, 0, 0.3); border-radius: 8px; padding: 8px 10px; font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 10px; max-height: 110px; overflow-y: auto; color: rgba(255, 255, 255, 0.6); white-space: pre-wrap; border: 1px solid rgba(255, 255, 255, 0.08);"></div>
+                </div>
+
+                <!-- ===== GENERATOR PREVIEW + APPLY FOOTER ===================== -->
+                <div id="gen-preview" style="display: none; padding: 14px 18px; background: rgba(39, 174, 96, 0.06); border-top: 1px solid rgba(255, 255, 255, 0.08);">
+                    <div style="font-size: 10px; color: rgba(39, 174, 96, 0.9); font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Preview</div>
+                    <div id="gen-preview-summary" style="font-size: 11px; color: rgba(255, 255, 255, 0.85); line-height: 1.5; margin-bottom: 10px;"></div>
+                    <div id="gen-preview-counts" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;"></div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button id="gen-apply" style="flex: 1.4; min-width: 160px; padding: 9px 12px; background: rgba(39, 174, 96, 0.25); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 8px; color: rgba(255, 255, 255, 0.95); cursor: pointer; font-weight: 700; font-size: 11px; box-shadow: 0 2px 8px rgba(39, 174, 96, 0.2);">Save + Merge to Canvas</button>
+                        <button id="gen-save-domain" style="padding: 9px 12px; background: rgba(6, 182, 212, 0.16); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 8px; color: rgba(255, 255, 255, 0.9); cursor: pointer; font-weight: 600; font-size: 11px;">Save Only</button>
+                        <button id="gen-regenerate" style="padding: 9px 12px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 8px; color: rgba(255, 255, 255, 0.85); cursor: pointer; font-weight: 500; font-size: 11px;">Regenerate</button>
+                        <button id="gen-enrich-ai" style="display: none; padding: 9px 12px; background: rgba(155, 89, 182, 0.18); border: 1px solid rgba(155, 89, 182, 0.35); border-radius: 8px; color: rgba(255, 255, 255, 0.9); cursor: pointer; font-weight: 500; font-size: 11px;">AI Enrich</button>
+                        <button id="gen-cancel-preview" style="padding: 9px 12px; background: rgba(231, 76, 60, 0.15); border: 1px solid rgba(255, 255, 255, 0.125); border-radius: 8px; color: rgba(255, 255, 255, 0.8); cursor: pointer; font-weight: 500; font-size: 11px;">Discard</button>
+                    </div>
+                </div>
+
+                </div><!-- /gen-panel-body -->
             </div>
         </div>
         <style>
+            /* Generate Topology panel tab styling. */
+            #network-mapper-panel {
+                width: min(520px, calc(100vw - 40px)) !important;
+                background:
+                    radial-gradient(circle at 16% 0%, rgba(6, 182, 212, 0.20), transparent 34%),
+                    linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(10, 16, 30, 0.94)) !important;
+                border: 1px solid rgba(125, 211, 252, 0.22) !important;
+                border-radius: 20px !important;
+                box-shadow:
+                    0 22px 70px rgba(0, 0, 0, 0.48),
+                    0 8px 24px rgba(2, 132, 199, 0.14),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+                overflow: hidden !important;
+            }
+            #network-mapper-panel > div:first-child {
+                background: linear-gradient(135deg, rgba(8, 145, 178, 0.28), rgba(15, 23, 42, 0.72)) !important;
+                padding: 16px 18px !important;
+                border-bottom: 1px solid rgba(125, 211, 252, 0.16) !important;
+                border-radius: 19px 19px 0 0 !important;
+            }
+            #network-mapper-panel > div:first-child > div:first-child {
+                font-size: 14px !important;
+                letter-spacing: 0.15px;
+            }
+            #network-mapper-panel > div:first-child > div:first-child > div {
+                width: 34px !important;
+                height: 34px !important;
+                border-radius: 11px !important;
+                background: linear-gradient(135deg, rgba(6, 182, 212, 0.30), rgba(59, 130, 246, 0.18)) !important;
+                border-color: rgba(125, 211, 252, 0.28) !important;
+                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 8px 18px rgba(6, 182, 212, 0.16);
+            }
+            #nm-panel-status {
+                background: rgba(16, 185, 129, 0.18) !important;
+                border-color: rgba(110, 231, 183, 0.30) !important;
+                color: rgba(209, 250, 229, 0.96) !important;
+                padding: 5px 11px !important;
+                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+            }
+            #gen-tab-nav {
+                gap: 7px !important;
+                padding: 10px 12px !important;
+                background: rgba(3, 7, 18, 0.34) !important;
+                border-bottom: 1px solid rgba(148, 163, 184, 0.12) !important;
+                scrollbar-width: none;
+            }
+            #gen-tab-nav::-webkit-scrollbar { display: none; }
+            .gen-tab-btn {
+                flex: 1 0 auto;
+                min-width: 74px;
+                padding: 9px 12px !important;
+                border: 1px solid transparent !important;
+                border-bottom: 1px solid transparent !important;
+                border-radius: 11px !important;
+                background: rgba(255, 255, 255, 0.035) !important;
+                color: rgba(226, 232, 240, 0.66) !important;
+                transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+            }
+            .gen-tab-btn:hover {
+                color: rgba(255, 255, 255, 0.92) !important;
+                background: rgba(255, 255, 255, 0.075) !important;
+                border-color: rgba(125, 211, 252, 0.14) !important;
+                transform: translateY(-1px);
+            }
+            .gen-tab-btn.active {
+                color: #ffffff !important;
+                background: linear-gradient(135deg, rgba(6, 182, 212, 0.30), rgba(37, 99, 235, 0.22)) !important;
+                border-color: rgba(125, 211, 252, 0.36) !important;
+                box-shadow: 0 8px 18px rgba(6, 182, 212, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.13);
+            }
+            #gen-panel-body {
+                background:
+                    linear-gradient(180deg, rgba(15, 23, 42, 0.38), rgba(2, 6, 23, 0.24)) !important;
+                max-height: calc(85vh - 126px) !important;
+            }
+            .gen-tab-pane {
+                min-height: 120px;
+                animation: gen-pane-in 0.16s ease-out;
+            }
+            @keyframes gen-pane-in {
+                from { opacity: 0; transform: translateY(4px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            .gen-primary-btn:hover { background: rgba(6, 182, 212, 0.32) !important; transform: translateY(-1px); }
+            .gen-secondary-btn:hover { background: rgba(255, 255, 255, 0.09) !important; transform: translateY(-1px); }
+            #network-mapper-panel input,
+            #network-mapper-panel textarea {
+                outline: none;
+                transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+            }
+            #network-mapper-panel input:focus,
+            #network-mapper-panel textarea:focus {
+                border-color: rgba(125, 211, 252, 0.42) !important;
+                background: rgba(255, 255, 255, 0.075) !important;
+                box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.10);
+            }
+            #gen-preview-counts .gen-count-pill {
+                font-size: 10px; padding: 3px 8px; border-radius: 10px;
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                color: rgba(255, 255, 255, 0.85); font-weight: 500;
+            }
             @keyframes spin { to { transform: rotate(360deg); } }
             @keyframes dnaas-pulse { 
                 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 94, 31, 0.7); }
@@ -1494,9 +2239,56 @@
                 </svg>
             </div>
         </button>
+        <!-- Multi-User: Share Topology button (replaces legacy "My Topologies" pill) + User Menu -->
+        <div id="auth-share-toolbar" style="display:none;"></div>
+        <div id="auth-domain-selector" style="display:none;" hidden></div>
+        <div id="auth-user-menu"></div>
     </div>
     
-    <div class="toolbar" id="left-toolbar">
+    <div class="toolbar tool-rail-mode" id="left-toolbar">
+        <nav class="tool-rail" aria-label="Canvas tools">
+            <button type="button" class="tool-rail-button active" id="btn-tool-select" data-tool="select" data-tooltip="Select and edit objects [1]" aria-label="Select tool">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M5 3l11 9-5 1.5L8.5 20 5 3z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+                <span class="tool-rail-key">1</span>
+            </button>
+            <button type="button" class="tool-rail-button" id="btn-tool-link" data-tool="link" data-tooltip="Link devices [2]" aria-label="Link tool">
+                <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-link"/></svg>
+                <span class="tool-rail-key">2</span>
+            </button>
+            <button type="button" class="tool-rail-button" id="btn-tool-device" data-tool="device" data-tooltip="Place devices [3]" aria-label="Device tool">
+                <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-router"/></svg>
+                <span class="tool-rail-key">3</span>
+            </button>
+            <button type="button" class="tool-rail-button" id="btn-tool-shape" data-tool="shape" data-tooltip="Draw shapes [4]" aria-label="Shape tool">
+                <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="4" y="4" width="7" height="7" rx="1.5" fill="currentColor" opacity="0.7"/>
+                    <circle cx="17" cy="8" r="4" fill="currentColor" opacity="0.9"/>
+                    <path d="M7 21l-4-7h8l-4 7z" fill="currentColor" opacity="0.8"/>
+                </svg>
+                <span class="tool-rail-key">4</span>
+            </button>
+            <button type="button" class="tool-rail-button" id="btn-tool-text" data-tool="text" data-tooltip="Add text [5]" aria-label="Text tool">
+                <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-text"/></svg>
+                <span class="tool-rail-key">5</span>
+            </button>
+            <button type="button" class="tool-rail-button" id="btn-tool-laser" data-tool="laser" data-tooltip="Laser pointer [6]" aria-label="Laser pointer">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M4 20l6-6M13 11l7-7M11 13l2-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <circle cx="20" cy="4" r="2" fill="currentColor"/>
+                </svg>
+                <span class="tool-rail-key">6</span>
+            </button>
+            <div class="tool-rail-divider" aria-hidden="true"></div>
+            <button type="button" class="tool-rail-button" id="btn-tool-settings" data-tool="settings" data-tooltip="Settings, packet capture, helpers [0]" aria-label="Settings">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                    <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6l-.03.04a2 2 0 0 1-3.94 0L10 20a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1L3.96 14a2 2 0 0 1 0-4L4 10a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6l.03-.04a2 2 0 0 1 3.94 0L14 4a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04A1.7 1.7 0 0 0 19.4 9c.25.36.42.7.6 1l.04.03a2 2 0 0 1 0 3.94L20 14c-.18.3-.35.64-.6 1z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                </svg>
+                <span class="tool-rail-key">0</span>
+            </button>
+        </nav>
         <!-- Status Section (always visible) -->
         <div class="toolbar-section status-section">
             <div class="toolbar-section-content">
@@ -1509,6 +2301,8 @@
                 </div>
             </div>
         </div>
+
+        <aside class="tool-side-panel" data-tool="" aria-label="Tool options">
         
         <!-- Edit Section (Fixed - Always Open, not collapsible) -->
         <div class="toolbar-section fixed-section expanded" data-section="edit">
@@ -1829,6 +2623,10 @@
                                 <div data-color="" title="Recent 2"></div>
                                 <div data-color="" title="Recent 3"></div>
                                 <div data-color="" title="Recent 4"></div>
+                                <div data-color="" title="Recent 5"></div>
+                                <div data-color="" title="Recent 6"></div>
+                                <div data-color="" title="Recent 7"></div>
+                                <div data-color="" title="Recent 8"></div>
                             </div>
                             <div id="default-link-color-palette" class="color-palette-grid">
                                 <div class="default-link-palette-color" data-color="#ffffff" style="background: #ffffff;" title="White"></div>
@@ -1855,7 +2653,7 @@
                 <!-- Curve Settings Sub-Section (Collapsible) -->
                 <div class="nested-subsection expanded" data-subsection="link-curve">
                     <div class="nested-subsection-header" onclick="toggleNestedSubsection(this.parentElement)">
-                        <span class="nested-icon">〰️</span>
+                        <span class="nested-icon"><svg width="14" height="14"><use href="#ico-curve"/></svg></span>
                         <span>Curve Settings</span>
                         <span class="nested-chevron">▼</span>
                     </div>
@@ -1941,28 +2739,13 @@
             <button class="tool-btn" id="btn-text" data-tooltip="Add text — click canvas to place [3]" style="display: none;"></button>
             
             <!-- Quick Actions Description -->
-            <div class="tool-description">
-                <span class="description-text">Click grid to place text. Double-click to edit.</span>
+            <div class="tool-description text-panel-intro">
+                <strong>Text boxes</strong>
+                <span class="description-text">Shortcut 5 starts Place TBs. Click the canvas to add text boxes, then double-click a TB to edit it.</span>
             </div>
             
             <!-- Place TBs Toggle Button - Continuous Text Placement Mode -->
-            <button class="tool-btn place-tbs-btn" id="btn-place-tbs" data-tooltip="Continuous text placement mode" style="
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                gap: 8px;
-                width: 100%;
-                padding: 10px 12px;
-                margin: 8px 0 12px 0;
-                background: linear-gradient(135deg, rgba(245, 130, 32, 0.15), rgba(255, 94, 31, 0.08));
-                border: 1px solid rgba(245, 130, 32, 0.3);
-                border-radius: 8px;
-                color: rgba(255, 255, 255, 0.9);
-                font-size: 12px;
-                font-weight: 600;
-                cursor: pointer;
-                transition: all 0.2s ease;
-            ">
+            <button class="tool-btn place-tbs-btn" id="btn-place-tbs" data-tooltip="Continuous text placement mode">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="3" y="3" width="18" height="18" rx="2"/>
                     <path d="M8 8h8M8 12h8M8 16h4"/>
@@ -1970,14 +2753,7 @@
                     <path d="M18 16v4M16 18h4" stroke="#fff" stroke-width="1.5"/>
                 </svg>
                 <span>Place TBs</span>
-                <span id="place-tbs-status" style="
-                    padding: 2px 8px;
-                    border-radius: 4px;
-                    font-size: 10px;
-                    font-weight: 700;
-                    background: rgba(100, 100, 100, 0.4);
-                    color: rgba(255, 255, 255, 0.6);
-                ">OFF</span>
+                <span id="place-tbs-status">OFF</span>
             </button>
             
             <!-- Hidden buttons for JS compatibility -->
@@ -2135,6 +2911,10 @@
                                 <div data-color="" title="Recent 2"></div>
                                 <div data-color="" title="Recent 3"></div>
                                 <div data-color="" title="Recent 4"></div>
+                                <div data-color="" title="Recent 5"></div>
+                                <div data-color="" title="Recent 6"></div>
+                                <div data-color="" title="Recent 7"></div>
+                                <div data-color="" title="Recent 8"></div>
                             </div>
                         </div>
                         
@@ -2263,6 +3043,61 @@
             </div>
         </div>
         
+        <!-- Laser Section - transient pointer overlay, not saved to topology -->
+        <div class="toolbar-section tool-section expanded" data-section="laser" id="laser-tool-section">
+            <div class="toolbar-section-header tool-header">
+                <h3>
+                    <span class="section-icon tool-icon">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                            <path d="M4 20l6-6M13 11l7-7M11 13l2-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            <circle cx="20" cy="4" r="2" fill="currentColor"/>
+                        </svg>
+                    </span>
+                    Laser
+                </h3>
+                <span class="tool-mode-indicator" id="laser-mode-indicator">HOLD TO DRAW</span>
+            </div>
+            <div class="toolbar-section-content">
+                <div class="laser-panel-card">
+                    <div class="laser-panel-title">Temporary pointer</div>
+                    <p>Hold the left mouse button on the canvas to show the laser trail. Release to stop drawing; the trail fades automatically.</p>
+                    <div class="laser-control-group">
+                        <label for="laser-pointer-color" class="laser-control-label">Trail color</label>
+                        <div class="color-picker-row laser-color-row">
+                            <input type="color" id="laser-pointer-color" value="#00B4D8">
+                            <span id="laser-pointer-color-hex" class="laser-color-hex">#00B4D8</span>
+                        </div>
+                        <div class="last-used-label laser-recent-label"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2" stroke="#1a1a2e" stroke-width="2" fill="none"/></svg> Recent</div>
+                        <div class="last-used-colors synced-last-used" id="laser-last-used-colors">
+                            <div data-color="" title="Recent 1"></div>
+                            <div data-color="" title="Recent 2"></div>
+                            <div data-color="" title="Recent 3"></div>
+                            <div data-color="" title="Recent 4"></div>
+                            <div data-color="" title="Recent 5"></div>
+                            <div data-color="" title="Recent 6"></div>
+                            <div data-color="" title="Recent 7"></div>
+                            <div data-color="" title="Recent 8"></div>
+                        </div>
+                    </div>
+                    <div class="laser-control-group">
+                        <label for="laser-pointer-fade" class="laser-control-label">
+                            <span>Fade duration</span>
+                            <span id="laser-pointer-fade-value" class="slider-value-badge">850 ms</span>
+                        </label>
+                        <input type="range" id="laser-pointer-fade" min="250" max="3000" step="50" value="850">
+                    </div>
+                    <div class="laser-panel-status">
+                        <span>Saved objects</span>
+                        <strong>Not affected</strong>
+                    </div>
+                    <div class="laser-panel-status">
+                        <span>Shortcut</span>
+                        <strong>6</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Packet-Capture Settings Section (Mac / Wireshark config) -->
         <div class="toolbar-section" data-section="xray-settings" id="xray-settings-section">
             <div class="toolbar-section-header" onclick="toggleToolbarSection(this.parentElement)">
@@ -2277,22 +3112,36 @@
                 </span>
             </div>
             <div class="toolbar-section-content">
+                <!-- Bug fix (2026-04-26): users were clicking this section
+                     expecting it to start a capture. Make it explicit
+                     that this section is the SETTINGS for Packet Capture
+                     and that the actual capture starts from the link
+                     toolbar magnifier. -->
+                <div class="xray-howto-banner" style="margin: 4px 8px 10px; padding: 8px 10px; border-radius: 8px; background: rgba(0, 102, 250, 0.10); border: 1px solid rgba(0, 102, 250, 0.30); color: var(--text-color, #cbd5e1); font-size: 11px; line-height: 1.45;">
+                    <div style="font-weight:600;color:#3385FF;margin-bottom:4px;">How to start a capture</div>
+                    <ol style="padding-left:16px;margin:0;">
+                        <li>Configure your workstation below (IP / user / password) and click <b>Save</b>, then <b>Verify Workstation</b>.</li>
+                        <li>On the canvas, <b>click a link between two devices</b>.</li>
+                        <li>In the link toolbar that pops up, click the <b>magnifier icon</b> (Packet Capture).</li>
+                        <li>Pick the mode (<b>CP</b>, <b>DP</b>, or <b>DNAAS-DP</b>) and click <b>Start Capture</b>.</li>
+                    </ol>
+                </div>
                 <div class="xray-settings-form">
-                    <label class="xray-settings-label">Mac IP</label>
+                    <label class="xray-settings-label">Workstation IP</label>
                     <input type="text" id="xray-mac-ip" placeholder="10.x.x.x" class="xray-settings-input" />
-                    <label class="xray-settings-label">Mac User</label>
+                    <label class="xray-settings-label">SSH User</label>
                     <input type="text" id="xray-mac-user" placeholder="username" class="xray-settings-input" />
-                    <label class="xray-settings-label">Mac Password</label>
+                    <label class="xray-settings-label">SSH Password</label>
                     <div class="xray-password-row">
-                        <input type="password" id="xray-mac-password" placeholder="password" class="xray-settings-input" />
+                        <input type="password" id="xray-mac-password" placeholder="password" class="xray-settings-input" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
                         <button type="button" id="xray-password-toggle" class="xray-password-toggle" data-tooltip="Show password" title="Show password">Show</button>
                     </div>
                     <label class="xray-settings-label">Wireshark Path</label>
-                    <input type="text" id="xray-wireshark-path" placeholder="/Applications/Wireshark.app/Contents/MacOS/Wireshark" class="xray-settings-input" />
+                    <input type="text" id="xray-wireshark-path" placeholder="auto-detected" class="xray-settings-input" />
                     <label class="xray-settings-label">pcap Directory</label>
-                    <input type="text" id="xray-pcap-dir" placeholder="~/Desktop/Packet-captures" class="xray-settings-input" />
+                    <input type="text" id="xray-pcap-dir" placeholder="auto-detected" class="xray-settings-input" />
                     <div class="xray-settings-buttons">
-                        <button type="button" id="xray-verify-mac" class="xray-settings-btn xray-verify-btn">Verify Mac</button>
+                        <button type="button" id="xray-verify-mac" class="xray-settings-btn xray-verify-btn">Verify Workstation</button>
                         <button type="button" id="xray-save-config" class="xray-settings-btn xray-save-btn">Save</button>
                     </div>
                     <div id="xray-verify-status" class="xray-verify-status" style="display:none;"></div>
@@ -2321,10 +3170,18 @@
             </div>
         </div>
         
-        <!-- Notification Center -->
-        <div class="toolbar-section fixed-section" style="margin-top:auto; border-top:1px solid rgba(255,255,255,0.06); padding-top:6px;">
+        </aside>
+
+        <!-- Notification Center -- id is referenced from styles.css to pin
+             this section to the bottom of the scroll container via
+             position:sticky so short viewports (e.g. a laptop split-screen
+             where DEVICE is expanded) can't scroll the Logs button below
+             the fold. Keep margin-top:auto as a pre-sticky fallback for
+             browsers with :has() disabled -- if content fits it still
+             lands at the bottom naturally. -->
+        <div id="toolbar-notification-section" class="toolbar-section fixed-section" style="margin-top:auto; padding-top:6px;">
             <div class="toolbar-section-content">
-                <button class="tool-btn" id="btn-notification-center" data-tooltip="Notification Center" onclick="window.NotificationManager.toggleCenter()">
+                <button class="tool-btn" id="btn-notification-center" data-tooltip="Activity Log (per-topology history &amp; session notifications)" onclick="window.NotificationManager.toggleCenter()">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                         <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
@@ -2477,22 +3334,65 @@
             ">Click navigate • Scroll zoom • Right-drag pan</div>
         </div>
         
-        <!-- Current Topology Indicator - Bottom Left, beside left toolbar -->
-        <div id="topo-active-indicator" class="topo-active-bar" style="display:none;">
-            <div id="topo-active-inner" style="display:flex;align-items:center;gap:6px;padding:4px 12px 4px 6px;background:linear-gradient(135deg,rgba(0,102,250,0.85),rgba(0,82,204,0.9));backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,0.2);border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,0.25),inset 0 1px 0 rgba(255,255,255,0.15);pointer-events:auto;">
-                <div id="topo-active-color-dot" style="width:8px;height:8px;border-radius:50%;background:#0066fa;flex-shrink:0;box-shadow:0 0 6px currentColor;"></div>
-                <button id="topo-active-save" style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.12);cursor:pointer;pointer-events:auto;color:#fff;flex-shrink:0;padding:0;transition:background 0.15s,border-color 0.15s,transform 0.15s;">
-                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-                        <polyline points="17 21 17 13 7 13 7 21"/>
-                        <polyline points="7 3 7 8 15 8"/>
-                    </svg>
-                </button>
-                <span id="topo-active-name" style="font-size:11px;font-weight:600;color:#fff;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis;font-family:'Poppins',-apple-system,sans-serif;"></span>
-                <span id="topo-active-sep" style="color:rgba(255,255,255,0.3);font-size:9px;display:none;">|</span>
-                <span id="topo-active-domain" style="font-size:10px;font-weight:500;color:rgba(255,255,255,0.65);white-space:nowrap;max-width:100px;overflow:hidden;text-overflow:ellipsis;font-family:'Poppins',-apple-system,sans-serif;display:none;"></span>
-                <span id="topo-active-dots" style="display:none;align-items:center;gap:4px;margin-left:4px;pointer-events:auto;"></span>
+        <!-- Bottom-left bar: the active topology indicator + the AI assistant
+             launcher pill always sit side-by-side here. The wrapper owns the
+             absolute positioning so the launcher stays anchored even when the
+             indicator itself is hidden (e.g. brand-new canvas with no active
+             topology saved yet). Topology indicator legacy rules
+             (.topo-active-bar ...) still apply: the child is neutralized back
+             to position:static below so all existing styling keeps working. -->
+        <div id="topo-bottom-left-bar" class="topo-bottom-left-bar">
+            <!-- Current Topology Indicator - Bottom Left, beside left toolbar -->
+            <div id="topo-active-indicator" class="topo-active-bar" style="display:none;">
+                <div id="topo-active-inner">
+                    <div id="topo-active-color-dot" style="background:#0066fa;color:#0066fa;"></div>
+                    <button id="topo-active-save">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                            <polyline points="17 21 17 13 7 13 7 21"/>
+                            <polyline points="7 3 7 8 15 8"/>
+                        </svg>
+                    </button>
+                    <span id="topo-active-domain" style="display:none;"></span>
+                    <!-- Shared-by chip + View/Edit badge: only rendered when the
+                         active topology was shared INTO this user (sharedInfo
+                         present in updateTopologyIndicator). Both segments are
+                         hidden by default and toggled together. The chip itself
+                         is a button that opens a small popover with the owner's
+                         attribution, the permission row (re-uses .ta-perm-badge),
+                         a "Request edit access" affordance when read-only, and
+                         a "Remove from Shared with me" action that calls the
+                         same backend endpoint as the sidebar list row.
+                         See DEVELOPMENT_GUIDELINES.md -> "Shared Topology
+                         Permissions -- View / Edit -- 2026-05-12" -> "Top-bar
+                         pill" subsection. -->
+                    <button id="topo-active-shared-by" type="button" style="display:none;" aria-label="Sharing details" aria-haspopup="dialog"></button>
+                    <span id="topo-active-perm-badge" style="display:none;"></span>
+                    <span id="topo-active-sep" style="display:none;">|</span>
+                    <span id="topo-active-name-wrap"><span id="topo-active-name"></span></span>
+                    <span id="topo-active-dots" style="display:none;"></span>
+                </div>
             </div>
+            <!-- AI assistant launcher pill. Always visible. Toggles the
+                 right-side drawer. The drawer itself is injected + managed
+                 by topology-ai.js -- this element only has to exist in the
+                 DOM so the JS module can wire a click handler on page load.
+                 Keyboard: press "A" (outside text fields) to toggle the drawer. -->
+            <button id="ai-chat-launcher"
+                    class="ai-chat-launcher"
+                    type="button"
+                    aria-label="Open AI assistant (press A)"
+                    data-tooltip="AI Assistant - press A">
+                <span class="ai-chat-launcher__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 3l1.8 4.5L18 9l-4.2 1.5L12 15l-1.8-4.5L6 9l4.2-1.5L12 3z"/>
+                        <path d="M5 17l.9 2.1L8 20l-2.1.9L5 23l-.9-2.1L2 20l2.1-.9L5 17z"/>
+                        <path d="M19 13l.7 1.6L21.3 15l-1.6.4L19 17l-.7-1.6L16.7 15l1.6-.4L19 13z"/>
+                    </svg>
+                </span>
+                <span class="ai-chat-launcher__label">AI</span>
+                <span id="ai-chat-launcher__badge" class="ai-chat-launcher__badge" hidden></span>
+            </button>
         </div>
 
         <!-- Grid Controls - Bottom Right Corner - Liquid Glass Style -->
@@ -2561,7 +3461,7 @@
             <div style="width: 1px; height: 20px; background: rgba(255,255,255,0.25);"></div>
             
             <!-- Grid Toggle Button with ON/OFF indicator -->
-            <button id="btn-grid-lines" data-tooltip="Show/hide grid lines [G]" class="hud-btn grid-on" style="
+            <button id="btn-grid-lines" data-tooltip="Show/hide grid lines [Cmd/Ctrl+Shift+G]" class="hud-btn grid-on" style="
                 background: linear-gradient(135deg, rgba(255,255,255,0.25), rgba(255,255,255,0.1));
                 border: 1px solid rgba(255,255,255,0.25);
                 border-radius: 8px;
@@ -2928,7 +3828,7 @@
             stroke: #e74c3c !important;
         }
     </style>
-    <div id="topologies-dropdown-menu" onclick="event.stopPropagation();" class="liquid-glass-dropdown" style="display: none; max-height: 80vh; overflow-y: auto; min-width: 300px;">
+    <div id="topologies-dropdown-menu" onclick="event.stopPropagation();" class="liquid-glass-dropdown topo-menu-inverted" style="display: none; max-height: 80vh; overflow-y: auto; min-width: 300px; max-width: min(720px, calc(100vw - 40px));">
         <!-- Manage Topology Domains -->
         <div class="menu-category" id="topology-domains-header" style="border-left: 3px solid #6366f1; background: rgba(99,102,241,0.05);">
             <button class="liquid-menu-item" style="color: #6366f1;" onclick="this.closest('.liquid-glass-dropdown').style.display='none'; if(window.topologyEditor) window.topologyEditor.showManageSections();">
@@ -2982,7 +3882,7 @@
         <div class="context-menu-item" id="ctx-ssh-address" style="display:none;"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><polyline points="7,8 9,10 7,12"/><line x1="11" y1="12" x2="15" y2="12"/></svg></span> Set SSH Address</div>
         <div class="context-menu-item" id="ctx-enable-lldp" style="display:none;"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/><circle cx="12" cy="12" r="3"/></svg></span> Enable LLDP</div>
         <div class="context-menu-separator" id="ctx-ssh-separator" style="display:none;"></div>
-        <div class="context-menu-item" id="ctx-copy-style" title="Click: Copy & paste to single objects | Long-press: Copy & paste to marquee selection"><span class="ico"><svg><use href="#ico-brush"/></svg></span> Copy Style</div>
+        <div class="context-menu-item" id="ctx-copy-style" title="Click: Copy &amp; paste to single objects | Long-press: Copy &amp; paste to marquee selection | Includes split-color halves when source device is split"><span class="ico"><svg><use href="#ico-brush"/></svg></span> Copy Style</div>
         <div class="context-menu-item" id="ctx-duplicate">Duplicate</div>
         <div class="context-menu-item" id="ctx-add-text">Add Adjacent Text</div>
         <div class="context-menu-item ctx-submenu" id="ctx-curve" style="display:none;"><span class="ico"><svg><use href="#ico-curve"/></svg></span> Curve ▶</div>
@@ -3385,6 +4285,10 @@
                 <span class="link-table-title">Link Configuration</span>
                 <button class="link-table-btn link-table-btn-close" id="close-link-details">&times;</button>
             </div>
+            <div class="lt-modal-tabs" id="lt-modal-tabs">
+                <button type="button" class="lt-modal-tab active" data-lt-tab="static">Dynamic</button>
+                <button type="button" class="lt-modal-tab" data-lt-tab="live">Live Telemetry</button>
+            </div>
             
             <!-- Column Headers with Device Names -->
             <div class="link-table-columns">
@@ -3734,6 +4638,9 @@
                 <!-- Validation Messages -->
                 <div id="link-vlan-validation" class="link-table-validation"></div>
             </div>
+            <div id="lt-live-telemetry-panel" class="lt-live-telemetry-panel" style="display:none;">
+                <div class="lt-live-empty">Open a device-to-device link to load live telemetry.</div>
+            </div>
             
             <!-- Action Buttons Footer -->
             <div class="link-table-actions">
@@ -3748,96 +4655,134 @@
     <!-- All scripts use defer: downloads in parallel, executes in order after HTML parsed -->
     
     <!-- Layer 0: Foundation modules (no dependencies) -->
+    <!-- Global single-overlay mutex must load BEFORE every panel that
+         registers with it (AI, Scaler, Terminal, Debugger, ...). -->
+    <script defer src="topology-panel-mutex.js?v=20260422c"></script>
+    <script defer src="topology-auth.js?v=20260426-userswitch-reload"></script>
+    <script defer src="topology-domains.js?v=20260513a-topology-safety"></script>
+    <script defer src="topology-domain-knowledge.js?v=20260428f-branch-monitor-only"></script>
+    <script defer src="topology-share.js?v=20260512d-share-permissions"></script>
+    <script defer src="topology-cursor-install.js?v=20260512o-cursor-mcp"></script>
+    <script defer src="topology-bugs.js?v=20260513a-quota-cleanup"></script>
+    <script defer src="topology-ai.js?v=20260430i-chat-chip-guard"></script>
     <script defer src="topology-errors.js?v=20260203"></script>
     <script defer src="topology-clipboard-utils.js?v=20260311"></script>
     <script defer src="topology-registry.js?v=20260203"></script>
     <script defer src="topology-events.js?v=20260203"></script>
+    <!-- Graceful-restart coordinator must load before any module that
+         opens a WS/SSE/poll, so window.GracefulRestart is defined when
+         those modules read it. -->
+    <script defer src="topology-graceful-restart.js?v=20260511b-identity-sse"></script>
+    <script defer src="topology-device-events.js?v=20260426a-graceful"></script>
     <script defer src="topology-geometry.js?v=20260203"></script>
     <script defer src="topology-platform-data.js?v=20260203"></script>
     
     <!-- Layer 1: Core services -->
     <script defer src="topology-input.js?v=20260203"></script>
-    <script defer src="topology-files.js?v=20260203"></script>
-    <script defer src="topology-drawing.js?v=20260203"></script>
-    <script defer src="topology-history.js?v=20260203"></script>
+    <script defer src="topology-files.js?v=20260514b-packet-counter"></script>
+    <script defer src="topology-drawing.js?v=20260429l-visual-sharpness"></script>
+    <script defer src="topology-history.js?v=20260514a-undo-minimap-sync"></script>
     <script defer src="topology-text.js?v=20260203"></script>
     <script defer src="topology-shapes.js?v=20260203"></script>
-    <script defer src="topology-devices.js?v=20260311a"></script>
-    <script defer src="topology-links.js?v=20260317d"></script>
+    <script defer src="topology-devices.js?v=20260511b-identity-sse"></script>
+    <script defer src="topology-links.js?v=20260421n"></script>
     <script defer src="topology-ui.js?v=20260203"></script>
     <script defer src="topology-menus.js?v=20260203"></script>
-    <script defer src="topology-minimap.js?v=20260203"></script>
-    <script defer src="topology-link-editor.js?v=20260203"></script>
-    <script defer src="topology-groups.js?v=20260204"></script>
-    <script defer src="topology-toolbar.js?v=20260204"></script>
-    <script defer src="topology-dnaas.js?v=20260204"></script>
-    <script defer src="topology-network-mapper.js?v=20260310y"></script>
-    <script defer src="topology-multiselect-menu.js?v=20260204"></script>
-    <script defer src="topology-device-toolbar.js?v=20260322c"></script>
-    <script defer src="topology-link-toolbar.js?v=20260322a"></script>
-    <script defer src="topology-text-toolbar.js?v=20260317k"></script>
-    <script defer src="topology-shape-toolbar.js?v=20260317k"></script>
-    <script defer src="topology-ssh-dialog.js?v=20260323j"></script>
+    <script defer src="topology-minimap.js?v=20260426f-gui-polish"></script>
+    <script defer src="topology-link-editor.js?v=20260505g-linkeditor-reliability"></script>
+    <script defer src="topology-groups.js?v=20260510b-empty-groups"></script>
+    <script defer src="topology-toolbar.js?v=20260510c-openable-flyouts"></script>
+    <script defer src="topology-dnaas.js?v=20260507a-canvas-lifecycle"></script>
+    <script defer src="topology-network-mapper.js?v=20260507a-canvas-lifecycle"></script>
+    <script defer src="topology-generator.js?v=20260512y-mcp-save-merge"></script>
+    <script defer src="topology-multiselect-menu.js?v=20260430a-named-groups"></script>
+    <script defer src="topology-device-toolbar.js?v=20260512j-groups-canonical"></script>
+    <script defer src="topology-link-toolbar.js?v=20260514b-add-packet"></script>
+    <script defer src="topology-text-toolbar.js?v=20260512u-group-ux"></script>
+    <script defer src="topology-shape-toolbar.js?v=20260512u-group-ux"></script>
+    <!-- Layered Packet/Frame object (compact protocol-stack chip attached to links) -->
+    <script defer src="topology-packets.js?v=20260614f-packet-msel-stretch"></script>
+    <script defer src="topology-packet-popup.js?v=20260614d-packet-reattach"></script>
+    <script defer src="topology-ssh-dialog.js?v=20260513b-onboarding-reuse"></script>
     <script defer src="topology-rename-popup.js?v=20260204"></script>
-    <script defer src="topology-text-popups.js?v=20260204"></script>
-    <script defer src="topology-device-styles.js?v=20260204"></script>
-    <script defer src="topology-device-editor.js?v=20260204"></script>
-    <script defer src="topology-keyboard.js?v=20260322h"></script>
-    <script defer src="topology-mouse-down.js?v=20260212"></script>
-    <script defer src="topology-mouse-move.js?v=20260212"></script>
-    <script defer src="topology-mouse-up.js?v=20260212"></script>
+    <script defer src="topology-text-popups.js?v=20260512l-text-size-popup"></script>
+    <script defer src="topology-device-styles.js?v=20260512a-split-color"></script>
+    <script defer src="topology-device-editor.js?v=20260512a-split-color"></script>
+    <script defer src="topology-keyboard.js?v=20260514a-cmd-x-clear-current"></script>
+    <script defer src="topology-laser.js?v=20260510a-stroke-reset"></script>
+    <script defer src="topology-mouse-down.js?v=20260614f-packet-msel-stretch"></script>
+    <script defer src="topology-mouse-move.js?v=20260614f-packet-msel-stretch"></script>
+    <script defer src="topology-mouse-up.js?v=20260614d-packet-reattach"></script>
     <script defer src="topology-mouse.js?v=20260212"></script>
-    <script defer src="topology-link-drawing.js?v=20260310a"></script>
-    <script defer src="topology-xray-popup.js?v=20260322j"></script>
-    <script defer src="topology-toolbar-setup.js?v=20260311d"></script>
-    <script defer src="topology-draw.js?v=20260315a"></script>
-    <script defer src="topology-lldp-dialog.js?v=20260204"></script>
-    <script defer src="topology-stack-dialog.js?v=20260323g"></script>
-    <script defer src="topology-device-monitor.js?v=20260322m"></script>
-    <script defer src="topology-terminal.js?v=20260320h"></script>
-    <script defer src="topology-dnaas-helpers.js?v=20260322m"></script>
-    <script defer src="topology-canvas-drawing.js?v=20260322k"></script>
-    <script defer src="topology-minimap-render.js?v=20260204"></script>
-    <script defer src="topology-shape-drawing.js?v=20260204"></script>
-    <script defer src="topology-object-detection.js?v=20260322n"></script>
+    <script defer src="topology-link-styles.js?v=20260424a"></script>
+    <script defer src="topology-link-auto-curve-side.js?v=20260505b-pointer-lock"></script>
+    <script defer src="topology-link-drawing.js?v=20260512u-group-ux"></script>
+    <script defer src="topology-device-mode-gate.js?v=20260426q-mode-gate"></script>
+    <script defer src="topology-xray-popup.js?v=20260511a-xray-dnaas-dp"></script>
+    <script defer src="topology-toolbar-setup.js?v=20260505h-labels-tbs"></script>
+    <script defer src="topology-draw.js?v=20260514b-packet-render"></script>
+    <script defer src="topology-lldp-dialog.js?v=20260510c-native-iterm"></script>
+    <script defer src="topology-ssh-target.js?v=20260513b-active-ncc-target"></script>
+    <script defer src="topology-stack-dialog.js?v=20260510b-stack-identity-cache"></script>
+    <script defer src="topology-link-autofill.js?v=20260429d-drivenets-topology"></script>
+    <script defer src="topology-device-monitor.js?v=20260512a-mismatch-prompt"></script>
+    <script defer src="topology-terminal.js?v=20260510b-terminal-polish"></script>
+    <script defer src="topology-dnaas-helpers.js?v=20260506b-state-isolation"></script>
+    <script defer src="topology-canvas-drawing.js?v=20260512u-group-ux"></script>
+    <script defer src="topology-minimap-render.js?v=20260426d-canvas-sharpness"></script>
+    <script defer src="topology-shape-drawing.js?v=20260512u-group-ux"></script>
+    <script defer src="topology-object-detection.js?v=20260514c-packet-polish"></script>
     <script defer src="topology-modal-utils.js?v=20260204"></script>
-    <script defer src="topology-link-table.js?v=20260204"></script>
+    <script defer src="topology-link-table.js?v=20260505g-linktable-reliability"></script>
+    <script defer src="topology-link-telemetry.js?v=20260511a-debug-ingest-backoff"></script>
+    <script defer src="topology-link-drawer.js?v=20260430b-linktable-default"></script>
     <script defer src="topology-device-placement.js?v=20260204"></script>
     <script defer src="topology-curve-mode.js?v=20260204"></script>
-    <script defer src="topology-notifications.js?v=20260311g"></script>
+    <script defer src="topology-notifications.js?v=20260428y-activity-log-theme-sync"></script>
+    <!-- Live collaboration sync + per-topology activity log bus -->
+    <script defer src="topology-sync.js?v=20260513a-self-save-echo"></script>
     <script defer src="topology-dialogs.js?v=20260317e"></script>
     <script defer src="topology-sample-data.js?v=20260204"></script>
-    <script defer src="topology-bul-utils.js?v=20260204"></script>
+    <script defer src="topology-bul-utils.js?v=20260426f-gui-polish"></script>
     <script defer src="topology-interfaces.js?v=20260204"></script>
     <script defer src="topology-math-utils.js?v=20260204"></script>
     <script defer src="topology-link-popups.js?v=20260204"></script>
-    <script defer src="topology-color-popups.js?v=20260204"></script>
-    <script defer src="topology-scrollbars.js?v=20260321"></script>
-    <script defer src="topology-dnaas-operations.js?v=20260310x"></script>
-    <script defer src="topology-bd-legend.js?v=20260310x"></script>
+    <script defer src="topology-color-popups.js?v=20260512c-split-refine"></script>
+    <script defer src="topology-scrollbars.js?v=20260426f-gui-polish"></script>
+    <script defer src="topology-dnaas-operations.js?v=20260430a-dedupe-bd-save"></script>
+    <!--
+      SN-as-source-of-truth watchdog. Detects and (by default) self-heals
+      any overwrite of `device.sshConfig.host` that clobbers the value the
+      operator explicitly saved via the SSH credentials dialog. See the
+      top-of-file comment block in topology-sshconfig-guard.js for tuning
+      knobs and the public diagnostic API on `window.SSHConfigGuard`.
+    -->
+    <script defer src="topology-sshconfig-guard.js?v=20260426-snlock"></script>
+    <script defer src="topology-bd-legend.js?v=20260430a-user-scoped"></script>
+    <script defer src="topology-groups-panel.js?v=20260512x-dark-dynamic-refresh"></script>
     <script defer src="topology-touch.js?v=20260315a"></script>
     <script defer src="topology-context-menus.js?v=20260204"></script>
-    <script defer src="topology-text-editor.js?v=20260204"></script>
-    <script defer src="topology-device-rename.js?v=20260204"></script>
+    <script defer src="topology-text-editor.js?v=20260512n-raf-coalesce-typing"></script>
+    <script defer src="topology-device-rename.js?v=20260510a-gi-serial"></script>
     
     <!-- Phase 1 extracted modules (Feb 2026) -->
-    <script defer src="topology-context-menu-handlers.js?v=20260212"></script>
-    <script defer src="topology-link-details.js?v=20260212"></script>
-    <script defer src="topology-shape-methods.js?v=20260212"></script>
-    <script defer src="topology-selection-popups.js?v=20260323h"></script>
+    <script defer src="topology-context-menu-handlers.js?v=20260512c-split-refine"></script>
+    <script defer src="topology-link-details.js?v=20260505h-lldp-registry"></script>
+    <script defer src="topology-shape-methods.js?v=20260510a-shape-hitbox"></script>
+    <script defer src="topology-selection-popups.js?v=20260510h-git-fast"></script>
     <script defer src="topology-link-geometry.js?v=20260212"></script>
     <script defer src="topology-text-attachment.js?v=20260212"></script>
     
     <!-- Debugger (loads before topology.js due to defer order) -->
-    <script defer src="debugger.js?v=20260310y"></script>
+    <script defer src="debugger.js?v=20260422c"></script>
     <script defer src="topology-momentum.js"></script>
-    <script defer src="topology-file-ops.js?v=20260310x"></script>
+    <script defer src="topology-file-ops.js?v=20260514b-packet-counter"></script>
     
     <!-- Core orchestrator (loads last, uses all modules) -->
-    <script defer src="topology.js?v=20260319b"></script>
+    <script defer src="topology.js?v=20260614e-packet-ms-addr"></script>
     
     <!-- Test suite (optional, for development) -->
-    <script defer src="topology-tests.js?v=20260203"></script>
+    <script defer src="topology-tests.js?v=20260510i-groups-ux"></script>
     
     <!-- xterm.js for in-browser terminal (all self-hosted, no CDN dependency) -->
     <link rel="stylesheet" href="xterm.min.css">
@@ -3845,20 +4790,27 @@
     <script defer src="xterm-addon-fit.min.js"></script>
     <script defer src="xterm-addon-web-links.min.js"></script>
     <script defer src="xterm-addon-search.min.js"></script>
+    <!-- Device state orchestrator: single-flight + TTL + per-user/topology scope -->
+    <script defer src="topology-device-state.js?v=20260428d-auth-logout-parity"></script>
     <!-- SCALER Integration (modular: core + domain bundles + init last) -->
-    <script defer src="scaler-api.js?v=20260323c"></script>
-    <script defer src="scaler-gui.js?v=20260323c"></script>
+    <script defer src="scaler-api.js?v=20260510h-git-fast"></script>
+    <script defer src="scaler-gui.js?v=20260428a-scope-reset"></script>
     <script defer src="scaler-gui-history.js?v=20260323b"></script>
-    <script defer src="scaler-gui-devices.js?v=20260323b"></script>
+    <script defer src="scaler-gui-devices.js?v=20260424-cluster-signal-hint"></script>
     <script defer src="scaler-gui-wizards-network.js?v=20260323b"></script>
     <script defer src="scaler-gui-wizards-routing.js?v=20260323b"></script>
-    <script defer src="scaler-gui-wizards-security.js?v=20260323b"></script>
-    <script defer src="scaler-gui-progress.js?v=20260323b"></script>
-    <script defer src="scaler-gui-upgrade.js?v=20260323b"></script>
+    <script defer src="scaler-gui-wizards-security.js?v=20260430j-password-prompt"></script>
+    <script defer src="scaler-gui-progress.js?v=20260510b-upgrade-log-replay"></script>
+    <script defer src="scaler-gui-upgrade.js?v=20260614a-dd-delete-then-load-then-deploy"></script>
     <script defer src="scaler-gui-init.js?v=20260323b"></script>
     <!-- Quick Load & Modal panel position fix - ensures panels stay within viewport -->
     <script>
     document.addEventListener('DOMContentLoaded', () => {
+        // Multi-user auth init
+        if (window.TopologyAuth && window.TopologyAuth.init) {
+            window.TopologyAuth.init();
+        }
+
         // Fix any modal overlays that get created
         const observer = new MutationObserver((mutations) => {
             mutations.forEach(mutation => {

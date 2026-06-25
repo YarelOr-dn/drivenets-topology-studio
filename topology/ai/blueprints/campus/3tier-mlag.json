@@ -1,0 +1,274 @@
+{
+  "name": "3tier-mlag",
+  "protocol": "campus",
+  "scale": "medium",
+  "summary": "Enterprise 3-tier campus (Core / Distribution / Access) with MLAG. OSPF between core and distribution; access uplinks as LAGs terminating on the MLAG peer-group.",
+  "tags": [
+    "campus",
+    "3-tier",
+    "mlag",
+    "ospf",
+    "access"
+  ],
+  "layout_hint": "campus",
+  "objects": [
+    {
+      "id": "fab",
+      "type": "shape",
+      "shapeType": "rectangle",
+      "x": 960,
+      "y": 600,
+      "width": 1500,
+      "height": 820,
+      "fillColor": "#2ecc71",
+      "fillEnabled": true,
+      "fillOpacity": 0.05,
+      "strokeColor": "#2ecc71",
+      "strokeEnabled": true,
+      "strokeWidth": 2,
+      "cornerRadius": 16,
+      "label": "Enterprise Campus (Core / Dist / Access)"
+    },
+    {
+      "id": "core1",
+      "type": "device",
+      "label": "Core-1",
+      "x": 780,
+      "y": 260,
+      "role": "core",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "core2",
+      "type": "device",
+      "label": "Core-2",
+      "x": 1140,
+      "y": 260,
+      "role": "core",
+      "visualStyle": "classic",
+      "color": "#34495e"
+    },
+    {
+      "id": "dist1",
+      "type": "device",
+      "label": "Dist-1",
+      "x": 780,
+      "y": 540,
+      "role": "dist",
+      "visualStyle": "classic",
+      "color": "#7f8c8d"
+    },
+    {
+      "id": "dist2",
+      "type": "device",
+      "label": "Dist-2",
+      "x": 1140,
+      "y": 540,
+      "role": "dist",
+      "visualStyle": "classic",
+      "color": "#7f8c8d"
+    },
+    {
+      "id": "acc1",
+      "type": "device",
+      "label": "Access-1",
+      "x": 480,
+      "y": 820,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "acc2",
+      "type": "device",
+      "label": "Access-2",
+      "x": 780,
+      "y": 820,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "acc3",
+      "type": "device",
+      "label": "Access-3",
+      "x": 1140,
+      "y": 820,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "acc4",
+      "type": "device",
+      "label": "Access-4",
+      "x": 1440,
+      "y": 820,
+      "role": "access",
+      "visualStyle": "classic",
+      "color": "#95a5a6"
+    },
+    {
+      "id": "l_c1_c2",
+      "type": "link",
+      "device1": "core1",
+      "device2": "core2",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "OSPF a0"
+    },
+    {
+      "id": "l_core1_dist1",
+      "type": "link",
+      "device1": "core1",
+      "device2": "dist1",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "OSPF"
+    },
+    {
+      "id": "l_core1_dist2",
+      "type": "link",
+      "device1": "core1",
+      "device2": "dist2",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "OSPF"
+    },
+    {
+      "id": "l_core2_dist1",
+      "type": "link",
+      "device1": "core2",
+      "device2": "dist1",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "OSPF"
+    },
+    {
+      "id": "l_core2_dist2",
+      "type": "link",
+      "device1": "core2",
+      "device2": "dist2",
+      "linkType": "ospf",
+      "color": "#27ae60",
+      "style": "solid",
+      "label": "OSPF"
+    },
+    {
+      "id": "l_mlag",
+      "type": "link",
+      "device1": "dist1",
+      "device2": "dist2",
+      "color": "#f39c12",
+      "style": "solid",
+      "width": 3,
+      "label": "MLAG peer"
+    },
+    {
+      "id": "l_acc1_d1",
+      "type": "link",
+      "device1": "acc1",
+      "device2": "dist1",
+      "color": "#95a5a6",
+      "style": "solid",
+      "label": "LAG"
+    },
+    {
+      "id": "l_acc1_d2",
+      "type": "link",
+      "device1": "acc1",
+      "device2": "dist2",
+      "color": "#95a5a6",
+      "style": "solid",
+      "label": "LAG"
+    },
+    {
+      "id": "l_acc2_d1",
+      "type": "link",
+      "device1": "acc2",
+      "device2": "dist1",
+      "color": "#95a5a6",
+      "style": "solid",
+      "label": "LAG"
+    },
+    {
+      "id": "l_acc2_d2",
+      "type": "link",
+      "device1": "acc2",
+      "device2": "dist2",
+      "color": "#95a5a6",
+      "style": "solid",
+      "label": "LAG"
+    },
+    {
+      "id": "l_acc3_d1",
+      "type": "link",
+      "device1": "acc3",
+      "device2": "dist1",
+      "color": "#95a5a6",
+      "style": "solid",
+      "label": "LAG"
+    },
+    {
+      "id": "l_acc3_d2",
+      "type": "link",
+      "device1": "acc3",
+      "device2": "dist2",
+      "color": "#95a5a6",
+      "style": "solid",
+      "label": "LAG"
+    },
+    {
+      "id": "l_acc4_d1",
+      "type": "link",
+      "device1": "acc4",
+      "device2": "dist1",
+      "color": "#95a5a6",
+      "style": "solid",
+      "label": "LAG"
+    },
+    {
+      "id": "l_acc4_d2",
+      "type": "link",
+      "device1": "acc4",
+      "device2": "dist2",
+      "color": "#95a5a6",
+      "style": "solid",
+      "label": "LAG"
+    },
+    {
+      "id": "t_title",
+      "type": "text",
+      "text": "Campus 3-Tier with MLAG",
+      "x": 960,
+      "y": 120,
+      "fontSize": 20,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8
+    },
+    {
+      "id": "t_mlag",
+      "type": "text",
+      "text": "MLAG peer-link (orange, thick)\nAccess switches run a LAG toward\nboth distribution switches simultaneously",
+      "x": 960,
+      "y": 980,
+      "fontSize": 12,
+      "color": "#e2e8f0",
+      "showBackground": true,
+      "backgroundColor": "#0f172a",
+      "backgroundOpacity": 0.85,
+      "backgroundPadding": 8,
+      "showBorder": true,
+      "borderColor": "#334155",
+      "borderWidth": 1
+    }
+  ]
+}

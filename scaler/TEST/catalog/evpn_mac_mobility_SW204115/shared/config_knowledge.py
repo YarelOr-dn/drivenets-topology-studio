@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -247,10 +247,10 @@ EVPN_SI_CONFIG_TREE: Dict[str, ConfigRequirement] = {
         detect_keyword="multihoming",
     ),
     "label_pool": ConfigRequirement(
-        path="system label-pool vpls-pool range {start} {end}",
-        description="Dedicated MPLS label pool for VPLS (required before SI can allocate blocks)",
+        path="routing-options bgp-vpls-label-block-size {block_size}",
+        description="VPLS label block carved from MPLS shared pool (required for VPLS PW label allocation). Check via: show mpls label-allocation tables | no-more. Known bug SW-253359: cluster devices may show 0 labels due to FIB preservation.",
         required_for=["ac_pw", "pw_pw", "evpn_pw"],
-        detect_keyword="label-pool",
+        detect_keyword="bgp-vpls-label-block-size",
     ),
 
     # -- BGP address-families --
@@ -290,37 +290,43 @@ EVPN_SI_CONFIG_TREE: Dict[str, ConfigRequirement] = {
 
 VPLS_SHOW_COMMANDS: Dict[str, Dict[str, str]] = {
     "vpls_pw_status": {
-        "command": "show evpn vpls-pw instance {evpn_name}",
-        "description": "VPLS pseudowire status (up/down, egress/ingress labels, remote PE)",
+        "command": "show evpn vpls-pw | no-more",
+        "description": "VPLS pseudowire status (up/down, egress/ingress labels, remote PE); no per-instance filter -- narrow output to instance {evpn_name} manually",
         "required_for": "ac_pw,pw_pw,evpn_pw",
     },
     "evpn_instance_detail": {
-        "command": "show evpn instance {evpn_name} detail",
+        "command": "show evpn instance {evpn_name} detail | no-more",
         "description": "Service detail including migration phase (EVPN+VPLS), DF info",
         "required_for": "all",
     },
     "bgp_evpn_vpls_routes": {
-        "command": "show bgp instance evpn instance {evpn_name} vpls",
+        "command": "show bgp instance evpn instance {evpn_name} vpls | no-more",
         "description": "Filter only VPLS (VSI safi) routes for this service",
         "required_for": "ac_pw,pw_pw,evpn_pw",
     },
     "bgp_evpn_all_routes": {
-        "command": "show bgp instance evpn instance {evpn_name}",
+        "command": "show bgp instance evpn instance {evpn_name} | no-more",
         "description": "All routes (EVPN + VPLS) for this service",
         "required_for": "ac_pw,pw_pw,evpn_pw",
     },
     "evpn_mac_table_detail": {
-        "command": "show evpn mac-table instance {evpn_name} detail",
+        # CRITICAL ORDER: 'detail' MUST precede 'instance'.  Reverse order
+        # ('show evpn mac-table instance X detail') is REJECTED by DNOS as
+        # "Unknown word".  Validated against PE-1 live ? completion 2026-03-23.
+        "command": "show evpn mac-table detail instance {evpn_name} | no-more",
         "description": "MAC table with PW-learned MACs (VPLS_PW flag), nexthop type",
         "required_for": "all",
     },
     "evpn_summary": {
-        "command": "show evpn summary",
+        "command": "show evpn summary | no-more",
         "description": "Global counters: total VPLS MACs, VPLS neighbors, PW count",
         "required_for": "all",
     },
     "loop_prevention_evpn_mac": {
-        "command": "show loop-prevention evpn mac instance {evpn_name}",
+        # Confluence shows this form; live device validation pending.  If
+        # rejected, fall back to 'show evpn instance {evpn_name} loop-prevention
+        # mac-table | no-more' (the trace_analyzer-style canonical form).
+        "command": "show loop-prevention evpn mac instance {evpn_name} | no-more",
         "description": "Loop prevention status showing suppressed MACs (AC vs PW moves)",
         "required_for": "ac_ac,ac_pw",
     },
@@ -745,9 +751,8 @@ protocols bgp {asn}
 !""",
 
     "label_pool": """\
-# VPLS requires a dedicated label pool before seamless-integration can allocate blocks.
-# Adjust the range to avoid overlap with other label pools on this device.
-system label-pool vpls-pool range 900000 999999
+routing-options
+  bgp-vpls-label-block-size 130
 !""",
 
     "si_l2_mtu": """\
@@ -794,9 +799,9 @@ def run_config_gap_analysis(
             "auto_fixable_count": int,
         }
     """
-    evpn_cfg = run_show(device, "show config network-services evpn")
-    bgp_cfg = run_show(device, "show config protocols bgp")
-    mh_cfg = run_show(device, "show config network-services multihoming")
+    evpn_cfg = run_show(device, "show config network-services evpn | no-more")
+    bgp_cfg = run_show(device, "show config | flatten | no-more")
+    mh_cfg = run_show(device, "show config network-services multihoming | no-more")
 
     if not evpn_name:
         # Try show evpn summary first
