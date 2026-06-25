@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0",
+  "generated_by": "scaler/scripts/build_scale_limits.py",
+  "summary": "8 consumer value(s) differ from the canonical value; all PRESERVED (no behavior change). Review before overriding.",
+  "rows": [
+    {
+      "canonical": "max_fxc_instances",
+      "consumer": "cli_rules_db",
+      "consumer_key": "max_fxc_instances",
+      "current_effective": 32000,
+      "canonical_value": 8000,
+      "action": "PRESERVED (no change applied); adopt canonical only with explicit override"
+    },
+    {
+      "canonical": "max_evpn_instances",
+      "consumer": "cli_rules_db",
+      "consumer_key": "max_evpn_vpls_instances",
+      "current_effective": 4096,
+      "canonical_value": 4000,
+      "action": "PRESERVED (no change applied); adopt canonical only with explicit override"
+    },
+    {
+      "canonical": "max_bgp_peers",
+      "consumer": "cli_rules_db",
+      "consumer_key": "max_bgp_peers",
+      "current_effective": 1024,
+      "canonical_value": 2000,
+      "action": "PRESERVED (no change applied); adopt canonical only with explicit override"
+    },
+    {
+      "canonical": "max_pwhe_interfaces",
+      "consumer": "cli_rules_db",
+      "consumer_key": "max_pwhe_interfaces",
+      "current_effective": 8192,
+      "canonical_value": 4000,
+      "action": "PRESERVED (no change applied); adopt canonical only with explicit override"
+    },
+    {
+      "canonical": "max_bundle_interfaces",
+      "consumer": "cli_rules_db",
+      "consumer_key": "max_bundle_interfaces",
+      "current_effective": 128,
+      "canonical_value": 512,
+      "action": "PRESERVED (no change applied); adopt canonical only with explicit override"
+    },
+    {
+      "canonical": "max_physical_interfaces",
+      "consumer": "cli_rules_db",
+      "consumer_key": "max_physical_interfaces",
+      "current_effective": 512,
+      "canonical_value": 1024,
+      "action": "PRESERVED (no change applied); adopt canonical only with explicit override"
+    },
+    {
+      "canonical": "max_loopback_interfaces",
+      "consumer": "cli_rules_db",
+      "consumer_key": "max_loopback_interfaces",
+      "current_effective": 64,
+      "canonical_value": 256,
+      "action": "PRESERVED (no change applied); adopt canonical only with explicit override"
+    },
+    {
+      "canonical": "max_flowspec_interfaces",
+      "consumer": "cli_rules_db",
+      "consumer_key": "max_flowspec_interfaces",
+      "current_effective": 1000,
+      "canonical_value": 8000,
+      "action": "PRESERVED (no change applied); adopt canonical only with explicit override"
+    }
+  ]
+}

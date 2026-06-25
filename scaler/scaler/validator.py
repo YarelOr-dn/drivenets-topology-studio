@@ -52,6 +52,16 @@ DNOS_LIMITS = {
     "multihoming_esi": 2000,  # Max interfaces with ESI
 }
 
+# Reconcile through the single source of truth (scaler/scale_limits.json) so the
+# three limit sources stop drifting.  This PRESERVES every current effective value
+# (the DB records the same values) and falls back to the literal above if the DB
+# is missing - zero behavior change.  See scripts/build_scale_limits.py.
+try:
+    from .scale_limits_loader import reconcile_consumer as _reconcile_limits
+    DNOS_LIMITS = _reconcile_limits(DNOS_LIMITS, "validator")
+except Exception:  # noqa: BLE001 - never let DB reconciliation break the validator
+    pass
+
 
 class Validator:
     """Validates configuration against DNOS limits."""

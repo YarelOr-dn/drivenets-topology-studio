@@ -1,0 +1,724 @@
+{
+  "schema_version": "1.0",
+  "generated_by": "scaler/scripts/build_scale_limits.py",
+  "dnos_version_baseline": "25.4",
+  "description": "Reconciled DNOS scale-limit DB. Single source of truth across limits.json + validator.py + cli_rules_db.py. Per-limit provenance, disagreement flags, and per-consumer PRESERVED effective values so loaders stay byte-identical until a value is explicitly overridden.",
+  "limits": {
+    "max_fxc_instances": {
+      "value": 8000,
+      "scope": "per-system",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "low",
+      "sources": {
+        "limits.json": 8000,
+        "validator.py": 8000,
+        "cli_rules_db.py": 32000
+      },
+      "disagreement": true,
+      "reconciliation_notes": "sources disagree {'limits.json': 8000, 'validator.py': 8000, 'cli_rules_db.py': 32000}; authoritative=8000 (prefer=limits_json); resolve by live verification before raising any consumer's effective value",
+      "consumers": {
+        "validator": {
+          "key": "services_fxc",
+          "value": 8000
+        },
+        "cli_rules_db": {
+          "key": "max_fxc_instances",
+          "value": 32000
+        }
+      }
+    },
+    "max_evpn_instances": {
+      "value": 4000,
+      "scope": "per-system",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "low",
+      "sources": {
+        "limits.json": 4000,
+        "validator.py": 4000,
+        "cli_rules_db.py": 4096
+      },
+      "disagreement": true,
+      "reconciliation_notes": "sources disagree {'limits.json': 4000, 'validator.py': 4000, 'cli_rules_db.py': 4096}; authoritative=4000 (prefer=limits_json); resolve by live verification before raising any consumer's effective value",
+      "consumers": {
+        "validator": {
+          "key": "services_evpn",
+          "value": 4000
+        },
+        "cli_rules_db": {
+          "key": "max_evpn_vpls_instances",
+          "value": 4096
+        }
+      }
+    },
+    "max_vrf_instances": {
+      "value": 4096,
+      "scope": "per-system",
+      "source": "validator",
+      "dnos_version": "25.4",
+      "confidence": "medium",
+      "sources": {
+        "validator.py": 4096,
+        "cli_rules_db.py": 4096
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "validator": {
+          "key": "services_vrf",
+          "value": 4096
+        },
+        "cli_rules_db": {
+          "key": "max_l3vpn_instances",
+          "value": 4096
+        }
+      }
+    },
+    "max_vpws_instances": {
+      "value": 8000,
+      "scope": "per-system",
+      "source": "validator",
+      "dnos_version": "25.4",
+      "confidence": "medium",
+      "sources": {
+        "validator.py": 8000
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "validator": {
+          "key": "services_vpws",
+          "value": 8000
+        }
+      }
+    },
+    "max_bridge_domain_instances": {
+      "value": 16000,
+      "scope": "per-system",
+      "source": "validator",
+      "dnos_version": "25.4",
+      "confidence": "medium",
+      "sources": {
+        "validator.py": 16000
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "validator": {
+          "key": "services_bridge_domain",
+          "value": 16000
+        }
+      }
+    },
+    "max_bgp_peers": {
+      "value": 2000,
+      "scope": "per-system",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "low",
+      "sources": {
+        "limits.json": 2000,
+        "validator.py": 2000,
+        "cli_rules_db.py": 1024
+      },
+      "disagreement": true,
+      "reconciliation_notes": "sources disagree {'limits.json': 2000, 'validator.py': 2000, 'cli_rules_db.py': 1024}; authoritative=2000 (prefer=limits_json); resolve by live verification before raising any consumer's effective value",
+      "consumers": {
+        "validator": {
+          "key": "bgp_peers",
+          "value": 2000
+        },
+        "cli_rules_db": {
+          "key": "max_bgp_peers",
+          "value": 1024
+        }
+      }
+    },
+    "max_bgp_routes": {
+      "value": 10000000,
+      "scope": "per-system",
+      "source": "validator",
+      "dnos_version": "25.4",
+      "confidence": "medium",
+      "sources": {
+        "validator.py": 10000000
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "validator": {
+          "key": "bgp_routes",
+          "value": 10000000
+        }
+      }
+    },
+    "max_esi_interfaces": {
+      "value": 2000,
+      "scope": "per-system",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "high",
+      "sources": {
+        "limits.json": 2000,
+        "validator.py": 2000
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "validator": {
+          "key": "multihoming_esi",
+          "value": 2000
+        }
+      }
+    },
+    "max_pwhe_interfaces": {
+      "value": 4000,
+      "scope": "pool",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "low",
+      "sources": {
+        "limits.json": 4000,
+        "validator.py": 4000,
+        "cli_rules_db.py": 8192
+      },
+      "disagreement": true,
+      "reconciliation_notes": "sources disagree {'limits.json': 4000, 'validator.py': 4000, 'cli_rules_db.py': 8192}; authoritative=4000 (prefer=limits_json); resolve by live verification before raising any consumer's effective value",
+      "consumers": {
+        "validator": {
+          "key": "interfaces_pwhe",
+          "value": 4000
+        },
+        "cli_rules_db": {
+          "key": "max_pwhe_interfaces",
+          "value": 8192
+        }
+      }
+    },
+    "max_qinq_stag": {
+      "value": 4000,
+      "scope": "pool",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "high",
+      "sources": {
+        "limits.json": 4000,
+        "validator.py": 4000
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "validator": {
+          "key": "interfaces_pwhe_qinq",
+          "value": 4000
+        }
+      }
+    },
+    "max_vlan_subinterfaces": {
+      "value": 20480,
+      "scope": "pool",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "high",
+      "sources": {
+        "limits.json": 20480,
+        "validator.py": 20480
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "validator": {
+          "key": "vlan_subinterfaces",
+          "value": 20480
+        }
+      }
+    },
+    "max_irb_interfaces": {
+      "value": 4096,
+      "scope": "pool",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "high",
+      "sources": {
+        "limits.json": 4096,
+        "validator.py": 4096,
+        "cli_rules_db.py": 4096
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "validator": {
+          "key": "interfaces_irb",
+          "value": 4096
+        },
+        "cli_rules_db": {
+          "key": "max_irb_interfaces",
+          "value": 4096
+        }
+      }
+    },
+    "max_datapath_interfaces": {
+      "value": 8000,
+      "scope": "per-system",
+      "source": "validator",
+      "dnos_version": "25.4",
+      "confidence": "medium",
+      "sources": {
+        "validator.py": 8000
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "validator": {
+          "key": "interfaces_total",
+          "value": 8000
+        }
+      }
+    },
+    "max_bundle_interfaces": {
+      "value": 512,
+      "scope": "per-system",
+      "source": "validator",
+      "dnos_version": "25.4",
+      "confidence": "low",
+      "sources": {
+        "validator.py": 512,
+        "cli_rules_db.py": 128
+      },
+      "disagreement": true,
+      "reconciliation_notes": "sources disagree {'validator.py': 512, 'cli_rules_db.py': 128}; authoritative=512 (prefer=validator); resolve by live verification before raising any consumer's effective value",
+      "consumers": {
+        "validator": {
+          "key": "interfaces_bundle",
+          "value": 512
+        },
+        "cli_rules_db": {
+          "key": "max_bundle_interfaces",
+          "value": 128
+        }
+      }
+    },
+    "max_bundle_subinterfaces": {
+      "value": 4096,
+      "scope": "per-system",
+      "source": "cli",
+      "dnos_version": "25.4",
+      "confidence": "medium",
+      "sources": {
+        "cli_rules_db.py": 4096
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "cli_rules_db": {
+          "key": "max_bundle_subinterfaces",
+          "value": 4096
+        }
+      }
+    },
+    "max_physical_interfaces": {
+      "value": 1024,
+      "scope": "per-system",
+      "source": "validator",
+      "dnos_version": "25.4",
+      "confidence": "low",
+      "sources": {
+        "validator.py": 1024,
+        "cli_rules_db.py": 512
+      },
+      "disagreement": true,
+      "reconciliation_notes": "sources disagree {'validator.py': 1024, 'cli_rules_db.py': 512}; authoritative=1024 (prefer=validator); resolve by live verification before raising any consumer's effective value",
+      "consumers": {
+        "validator": {
+          "key": "interfaces_physical",
+          "value": 1024
+        },
+        "cli_rules_db": {
+          "key": "max_physical_interfaces",
+          "value": 512
+        }
+      }
+    },
+    "max_loopback_interfaces": {
+      "value": 256,
+      "scope": "per-system",
+      "source": "validator",
+      "dnos_version": "25.4",
+      "confidence": "low",
+      "sources": {
+        "validator.py": 256,
+        "cli_rules_db.py": 64
+      },
+      "disagreement": true,
+      "reconciliation_notes": "sources disagree {'validator.py': 256, 'cli_rules_db.py': 64}; authoritative=256 (prefer=validator); resolve by live verification before raising any consumer's effective value",
+      "consumers": {
+        "validator": {
+          "key": "interfaces_loopback",
+          "value": 256
+        },
+        "cli_rules_db": {
+          "key": "max_loopback_interfaces",
+          "value": 64
+        }
+      }
+    },
+    "max_flowspec_hw_ipv4_per_ncp": {
+      "value": 12000,
+      "scope": "per-NCP",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "high",
+      "sources": {
+        "limits.json": 12000,
+        "cli_rules_db.py": 12000
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "cli_rules_db": {
+          "key": "max_flowspec_hw_entries_ipv4",
+          "value": 12000
+        }
+      }
+    },
+    "max_flowspec_hw_ipv6_per_ncp": {
+      "value": 4000,
+      "scope": "per-NCP",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "high",
+      "sources": {
+        "limits.json": 4000,
+        "cli_rules_db.py": 4000
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "cli_rules_db": {
+          "key": "max_flowspec_hw_entries_ipv6",
+          "value": 4000
+        }
+      }
+    },
+    "max_flowspec_rules_total": {
+      "value": 20000,
+      "scope": "per-system",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "high",
+      "sources": {
+        "limits.json": 20000,
+        "cli_rules_db.py": 20000
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "cli_rules_db": {
+          "key": "max_flowspec_rules_total",
+          "value": 20000
+        }
+      }
+    },
+    "max_flowspec_rules_per_vrf": {
+      "value": 3000,
+      "scope": "per-system",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "high",
+      "sources": {
+        "limits.json": 3000,
+        "cli_rules_db.py": 3000
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "cli_rules_db": {
+          "key": "max_flowspec_rules_per_vrf",
+          "value": 3000
+        }
+      }
+    },
+    "max_flowspec_interfaces": {
+      "value": 8000,
+      "scope": "per-system",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "low",
+      "sources": {
+        "limits.json": 8000,
+        "cli_rules_db.py": 1000
+      },
+      "disagreement": true,
+      "reconciliation_notes": "sources disagree {'limits.json': 8000, 'cli_rules_db.py': 1000}; authoritative=8000 (prefer=limits_json); resolve by live verification before raising any consumer's effective value",
+      "consumers": {
+        "cli_rules_db": {
+          "key": "max_flowspec_interfaces",
+          "value": 1000
+        }
+      }
+    },
+    "max_flowspec_local_policies": {
+      "value": 40,
+      "scope": "per-system",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "high",
+      "sources": {
+        "limits.json": 40,
+        "cli_rules_db.py": 40
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {
+        "cli_rules_db": {
+          "key": "max_flowspec_local_policies",
+          "value": 40
+        }
+      }
+    },
+    "max_flowspec_vpn_peers": {
+      "value": 8,
+      "scope": "per-system",
+      "source": "limits_json",
+      "dnos_version": "25.4",
+      "confidence": "high",
+      "sources": {
+        "limits.json": 8
+      },
+      "disagreement": false,
+      "reconciliation_notes": "",
+      "consumers": {}
+    }
+  },
+  "pools": {
+    "ph_pool": {
+      "ifindex_min": 58882,
+      "ifindex_max": 62881,
+      "max_capacity": 4000,
+      "description": "Shared pool for phX parents AND phX.Y sub-interfaces (without outer-tag)",
+      "consumes": [
+        "phX",
+        "phX.Y"
+      ],
+      "per_service_usage": 2,
+      "note": "Each PWHE service uses 2 slots (1 parent + 1 sub-interface)"
+    },
+    "stag_pool": {
+      "ifindex_min": 88001,
+      "ifindex_max": 92000,
+      "max_capacity": 4000,
+      "description": "Pool for PWHE phX.Ys (Q-in-Q sub-interfaces with outer-tag) - PWHE ONLY!",
+      "consumes": [
+        "phX.Ys"
+      ],
+      "per_service_usage": 1,
+      "pr_reference": "PR-86760 extended from 91000 to 92000",
+      "note": "Physical interfaces (ge-*, lag*) with outer-tag use VLAN pool, NOT Stag pool"
+    },
+    "vlan_pool": {
+      "ifindex_min": 13313,
+      "ifindex_max": 33792,
+      "max_capacity": 20480,
+      "description": "Pool for physical sub-interfaces (ge-X.Y, lag-X.Y, bundle-X.Y) including L2-AC",
+      "consumes": [
+        "ge-X.Y",
+        "lag-X.Y",
+        "bundle-X.Y",
+        "et-X.Y",
+        "xe-X.Y"
+      ],
+      "per_service_usage": 1,
+      "note": "L2-AC sub-interfaces use this pool, NOT the Stag pool. Much larger capacity."
+    },
+    "irb_pool": {
+      "ifindex_min": 41985,
+      "ifindex_max": 46080,
+      "max_capacity": 4096,
+      "description": "Pool for IRB interfaces",
+      "consumes": [
+        "irb"
+      ]
+    }
+  },
+  "soft_limits": {
+    "max_irb_and_phxy_interfaces": {
+      "value": 4000,
+      "description": "Combined limit for IRB + phX.Y interfaces",
+      "error_message": "Number of irb and phX.Y interfaces cannot be greater than 4000",
+      "error_hook": "validate_number_of_irb_and_phxy_interfaces",
+      "jira_reference": "SW-216052"
+    },
+    "max_qinq_interfaces": {
+      "value": 4000,
+      "description": "Maximum unique Stags (parent + outer-vlan-id combinations)",
+      "error_message": "Number of unique Stags cannot be greater than 4000",
+      "error_hook": "validate_number_of_qinq_interfaces",
+      "jira_reference": "SW-229316",
+      "pr_reference": "PR-86760"
+    }
+  },
+  "pwhe_service_impact": {
+    "description": "Each PWHE/FXC service with Q-in-Q consumes from multiple pools",
+    "per_service_consumption": {
+      "ph_pool_slots": 2,
+      "stag_pool_slots": 1,
+      "irb_phxy_limit_count": 1
+    },
+    "max_services_formula": "min(ph_remaining/2, stag_remaining, 4000-current_irb_phxy)",
+    "example": {
+      "current_state": {
+        "phx_count": 2300,
+        "phxy_count": 2300,
+        "stag_count": 2300,
+        "irb_count": 0
+      },
+      "pool_usage": {
+        "ph_pool": "3000/4000 (75.0%)",
+        "stag_pool": "2300/4000 (57.5%)",
+        "irb_phxy": "2300/4000 (57.5%)"
+      },
+      "remaining_capacity": {
+        "ph_pool_remaining": 1544,
+        "stag_remaining": 1700,
+        "irb_phxy_remaining": 1700
+      },
+      "max_additional_services": 772,
+      "bottleneck": "PH pool (1544 remaining, need 2 per service)"
+    }
+  },
+  "per_ncp": {
+    "_default": {
+      "max_flowspec_hw_ipv4_per_ncp": 12000,
+      "max_flowspec_hw_ipv6_per_ncp": 4000
+    }
+  },
+  "hardware_model_mapping": {
+    "description": "Maps GI mode hardware models to DNOS system-types for deployment (from Confluence Platforms and FW info)",
+    "models": {
+      "S9700-53DX": {
+        "ncp_type": "NCP-40C",
+        "system_type": "SA-40C",
+        "description": "NCP1 - Standalone 40C"
+      },
+      "S9700-53DX-J": {
+        "ncp_type": "NCP-40C",
+        "system_type": "SA-40C",
+        "description": "NCP1 - Standalone 40C (with suffix)"
+      },
+      "S9700-23DX": {
+        "ncp_type": "NCP-10CD",
+        "system_type": "SA-10CD",
+        "description": "NCP2 - Standalone 10CD"
+      },
+      "S9710-76D": {
+        "ncp_type": "NCP-36CD-S",
+        "system_type": "SA-36CD-S",
+        "description": "NCP3 - Standalone 36CD-S"
+      },
+      "S9710-76D-R": {
+        "ncp_type": "NCP-36CD-S",
+        "system_type": "SA-36CD-S",
+        "description": "NCP3 - Standalone 36CD-S (with suffix)"
+      },
+      "S9710-76DX": {
+        "ncp_type": "NCP-36CD-S",
+        "system_type": "SA-36CD-S",
+        "description": "NCP3 - Standalone 36CD-S (alternate)"
+      },
+      "S9610-36D-R": {
+        "ncp_type": "NCP-36CD-S-SA",
+        "system_type": "SA-36CD-S-SA",
+        "description": "NCP3-SA - Standalone 36CD-S-SA"
+      },
+      "S9701-82DC": {
+        "ncp_type": "NCP-64X12C-S",
+        "system_type": "S9701-82DC-R",
+        "description": "NCPL"
+      },
+      "S9701-82DC-R": {
+        "ncp_type": "NCP-64X12C-S",
+        "system_type": "S9701-82DC-R",
+        "description": "NCPL (with suffix)"
+      },
+      "S9600-72XC-R": {
+        "ncp_type": "NCP-64X8C-S",
+        "system_type": "SA-64X8C-S",
+        "description": "NCP8/NCPL-S"
+      },
+      "ASA926-18XKA": {
+        "ncp_type": "NCP-38E",
+        "system_type": "NCP-38E",
+        "description": "NCP5 - Accton J3 AI cluster"
+      },
+      "ASA926-18XKE": {
+        "ncp_type": "NCP-38E",
+        "system_type": "NCP-38E",
+        "description": "NCP5 - Accton J3 AI cluster (E variant)"
+      },
+      "S9610-48DX-C": {
+        "ncp_type": "NCP-40C8CD",
+        "system_type": "SA-40C8CD",
+        "description": "NCP6/Emux"
+      },
+      "S9610-46DX": {
+        "ncp_type": "NCP-40C6CD-S",
+        "system_type": "SA-40C6CD-S",
+        "description": "NCP6-S/Emux-SA"
+      },
+      "AS9286-32D": {
+        "ncp_type": "NCP-32CD",
+        "system_type": "SA-32CD",
+        "description": "NCP7/CS1"
+      },
+      "S9601-102XC-R": {
+        "ncp_type": "NCP-96X6C-S",
+        "system_type": "SA-96X6C-S",
+        "description": "Q2C NCP"
+      },
+      "S9705-48D": {
+        "ncp_type": "NCF-48CD",
+        "system_type": "NCF-48CD",
+        "description": "NCF"
+      },
+      "S9705-48D-4": {
+        "ncp_type": "NCF-48CD",
+        "system_type": "NCF-48CD",
+        "description": "NCF (variant)"
+      },
+      "S9725-64E-9": {
+        "ncp_type": "NCF-64E",
+        "system_type": "NCF-64E",
+        "description": "NCF2 - UFI"
+      },
+      "AS9936-128D": {
+        "ncp_type": "NCF-128E",
+        "system_type": "NCF-128E",
+        "description": "NCF2 - Accton R3 AI cluster"
+      },
+      "DCS-7060CX2-32S": {
+        "ncp_type": "NCP-36CD-S",
+        "system_type": "SA-36CD-S",
+        "description": "Arista-based 36CD-S"
+      },
+      "S9300-32DX": {
+        "ncp_type": "NCP-36CD-S",
+        "system_type": "SA-36CD-S",
+        "description": "Standalone 36CD-S (legacy)"
+      },
+      "X86": {
+        "ncp_type": "NCC",
+        "system_type": "NCC-ONLY",
+        "description": "x86 NCC node"
+      }
+    },
+    "cluster_type_by_ncp_count": {
+      "1": "Standalone (SA-*)",
+      "2-4": "CL-16 to CL-32",
+      "5-8": "CL-48 to CL-76",
+      "9-16": "CL-86 to CL-134",
+      "17+": "CL-192+"
+    },
+    "note": "Use 'show system' in GI mode to see Hardware Model, then map to system-type"
+  }
+}

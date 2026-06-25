@@ -630,6 +630,17 @@ DNOS_LIMITS: Dict[str, int] = {
     "max_flowspec_hw_entries_ipv6": 4000,
 }
 
+# Reconcile through the single source of truth (scaler/scale_limits.json) so the
+# three limit sources stop drifting.  PRESERVES every current effective value
+# (incl. the known FXC 32000 / BGP 1024 / PWHE 8192 disagreements, recorded in
+# scale_limits_compat_diff.json for human resolution) and falls back to the
+# literal above if the DB is missing - zero behavior change.
+try:
+    from .scale_limits_loader import reconcile_consumer as _reconcile_limits
+    DNOS_LIMITS = _reconcile_limits(DNOS_LIMITS, "cli_rules_db")
+except Exception:  # noqa: BLE001 - never let DB reconciliation break the rules DB
+    pass
+
 
 def get_hierarchy_spec(path: str) -> Optional[HierarchySpec]:
     """Get hierarchy specification for a path."""
