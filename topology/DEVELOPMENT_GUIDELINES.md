@@ -16075,3 +16075,72 @@ suffix.
   users can group selected objects but the Groups panel may stay empty/stale
   until reopened. `topology-multiselect-menu.js` now awaits the named Groups
   flow and refreshes the panel when open.
+
+## Unified SCALE + TEST Engine + new SCALE vertical (2026-06-25)
+
+A shared MCP engine now backs two verticals: a NEW SCALE compatibility advisor
+and the redesigned `/TEST` engine. Build-alongside: the legacy `command_profiles.py`
+path and the six existing command MCP servers are untouched.
+
+### What shipped (all under `/home/dn/mcp_common/`, outside the topology git but
+file-safety protected and committed to the `mcp_common` git)
+
+- `mcp_common/engine/` shared primitives used by BOTH verticals:
+  - `verdicts.py` - one enumerated verdict/error taxonomy that ADOPTS the
+    `feature_knowledge` live-syntax statuses (`LIVE_VALIDATED`/`LIVE_INCOMPLETE`/
+    `LIVE_REJECTED`/`UNVALIDATED`) plus TEST + SCALE codes; fail-closed validator.
+  - `binder.py` (knowledge-first param resolution), `gates.py` (fail-closed gate
+    framework), `explore.py` (bounded, BGP-safe escalating tiers), `contracts.py`
+    (sibling MCP signature pinning + `MCP_CONTRACT_DRIFT`), `idempotency.py`
+    (atomic writes + run namespacing + guaranteed LIFO restore), `orchestrator.py`
+    (per-run `run_state` + canonical TEST/SCALE state machines + single
+    `suggested_next_call` + out-of-order/native-bypass hard-block), `selftest/`
+    (offline STC per-stream loss simulator + shared loss math).
+- `mcp_common/profiles/` modular registry: `_shared.py` re-exports the
+  `command_profiles` schema helpers (incl. `_object_array`); `registry.py` merges
+  legacy + new profiles, each new module isolated in try/except
+  (`PROFILE_LOAD_ERROR`), with a tool-name collision policy and a reversible
+  `MCP_REGISTRY_SOURCE` flag.
+- `mcp_common/profiles/scale/` - the SCALE vertical (9 tools): `scale_limits_lookup`,
+  `scale_state_collect`, `scale_compatibility_check`, `scale_parity_check`,
+  `scale_headroom_plan`, `scale_report`, `scale_config_generate` (dry-run),
+  `scale_config_push` (confirm-gated), `scale_explore`.
+- `mcp_common/profiles/test/` - the v3 TEST engine library (RecipeV3 intent-only +
+  strict schema, binder, gate stack, per-stream traffic math, `selfcheck`,
+  `scale_preflight`). Legacy `/TEST` stays default; v3 is opt-in + parity-gated.
+
+### New SCALE MCP + limits source of truth
+
+- New server `user-scale-mcp` (port 9311), systemd unit
+  `~/.config/systemd/user/user-scale-mcp.service`, registered in
+  `.cursor/mcp.json`; `/SCALE` command + `~/.cursor/skills/scale-compatibility/`.
+- `scaler/scale_limits.json` is the reconciled single source of truth (built by
+  `scaler/scripts/build_scale_limits.py`, `--check` golden gate). It records source
+  disagreements (FXC 8000 vs 32000, BGP 2000 vs 1024, PWHE 4000 vs 8192, ...) in
+  `scaler/scale_limits_compat_diff.json`. `validator.py` + `cli_rules_db.py` now read
+  THROUGH `scaler/scaler/scale_limits_loader.py` (PRESERVING every current effective
+  value - zero behavior change - so the sources can no longer silently drift).
+
+### Multi-user + safety discipline
+
+- SCALE reads shared physical truth (`~/SCALER/db/configs`) read-only; any future
+  topology-app surface must use `user_store.user_data_path`. Mutating
+  `scale_config_push` requires execute=true + confirm=true + predicted-post-state
+  limit gate + guaranteed baseline restore. BGP sessions untouchable.
+
+### Monolith split (Phase 5) - deferred verbatim moves
+
+- The byte-for-byte contract gate is in place
+  (`mcp_common/tests/test_split_contract.py` + golden snapshot: 6 profiles / 180
+  tools / 165 handlers with per-tool inputSchema hashes). The actual verbatim move
+  of `command_profiles.py` into per-profile modules + shim swap is intentionally
+  deferred to a focused, watched, one-profile-at-a-time follow-up gated against
+  this snapshot, because a mistake takes down all six live MCP servers.
+
+### Live-gated remainder
+
+- The STC per-stream live spike, the live Spirent `loss_verify` v2 subscription,
+  `migrate.py` + the TEST_V3 parity flip, and the Phase 7 device end-to-end
+  verification require the lab/Spirent rig and are run on demand. The offline
+  acceptance (engine + profiles + per-stream loss math + schema gates + registry
+  isolation) is fully green.
