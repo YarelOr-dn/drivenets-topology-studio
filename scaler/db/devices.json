@@ -3,39 +3,83 @@
     {
       "id": "pe1",
       "hostname": "PE-1",
-      "aliases": ["YOR_PE-1", "YOR-PE-1"],
-      "ip": "100.64.4.200",
-      "username": "dnroot",
-      "password": "ZG5yb290",
-      "platform": "NCP",
-      "last_sync": "2026-03-29T02:00:43.678601+03:00",
-      "description": "PE-1 Router",
-      "connection_method": "SSH\u2192MGMT"
-    },
-    {
-      "id": "rr_sa_2",
-      "hostname": "RR-SA-2",
-      "ip": "100.64.11.75",
+      "aliases": [
+        "YOR_PE-1",
+        "YOR-PE-1",
+        "PE-1"
+      ],
+      "ip": "100.64.10.205",
+      "serial_number": "WK31D7VV00023",
       "username": "dnroot",
       "password": "ZG5yb290",
       "platform": "NCP",
       "system_type": "SA-36CD-S",
-      "system_type_source": "pre_upgrade_backup_recovery",
-      "last_sync": "2026-03-29T02:00:43.756869+03:00",
-      "description": "RR-SA-2",
-      "connection_method": "SSH\u2192MGMT"
+      "description": "PE-1 Router (EVPN_SI_VPLS_1 site1001, irb4001 10.214.40.1/24)",
+      "connection_method": "SSH\u2192MGMT",
+      "last_sync": "2026-06-30T15:05:54.212999+03:00"
+    },
+    {
+      "id": "rr_sa_2",
+      "hostname": "RR-SA-2",
+      "aliases": [
+        "RR-SA-2"
+      ],
+      "ip": "",
+      "serial_number": "WKY1BC7400002B2",
+      "username": "dnroot",
+      "password": "ZG5yb290",
+      "platform": "NCP",
+      "system_type": "SA-36CD-S",
+      "description": "RR-SA-2 (RR + remote EVPN_SI_VPLS_1 site2001; bundle-100 to B15; candidate ip 100.64.3.100)",
+      "connection_method": "SSH\u2192MGMT",
+      "last_sync": "2026-06-30T15:05:55.012369+03:00",
+      "_stale_last_ip": "100.64.4.205",
+      "_stale": true,
+      "_stale_reason": "ghost_ip_fast_probe",
+      "_stale_at": "2026-06-23T13:25:46.063955+00:00"
     },
     {
       "id": "yor_cl_pe_4",
       "hostname": "YOR_CL_PE-4",
-      "ip": "100.64.7.197",
+      "aliases": [
+        "PE-4",
+        "pe-4",
+        "pe_4",
+        "PE4"
+      ],
+      "ip": "100.64.11.110",
       "username": "dnroot",
       "password": "ZG5yb290",
       "platform": "CL-86",
       "system_type": "CL-86",
-      "last_sync": "2026-03-29T02:00:43.774692+03:00",
-      "description": "PE-4 Cluster",
-      "connection_method": "SSH\u2192MGMT"
+      "cluster_active_ncc": 1,
+      "cluster_ncc": {
+        "0": "100.64.11.96",
+        "1": "100.64.4.122"
+      },
+      "description": "PE-4 Cluster (EVPN_SI_VPLS_1 site1002, AC ge100-18/0/0.4001 o219/i4001; NCC1 active 100.64.4.122, NCC0 100.64.11.96)",
+      "connection_method": "SSH\u2192MGMT",
+      "last_sync": "2026-06-30T15:05:55.094349+03:00",
+      "_stale_last_ip": "100.64.10.249",
+      "_stale": true,
+      "_stale_reason": "ghost_ip_fast_probe",
+      "_stale_at": "2026-06-18T16:22:49.869032+00:00",
+      "is_cluster": true,
+      "mgmt_ncc_1_ip": "100.64.4.122",
+      "mgmt_ncc_0_ip": "100.64.11.96",
+      "cluster_ncc_ips": [
+        "100.64.11.96",
+        "100.64.4.122"
+      ],
+      "serial_number": "WDY1A17E00011-P3",
+      "serial_numbers": [
+        "AAF1944AAAJ",
+        "WDY19C7M00013-P3",
+        "WDY1A17E00011-P3",
+        "WEB19B7G00012-P2",
+        "kvm108-cl408d-ncc0",
+        "kvm108-cl408d-ncc1"
+      ]
     }
   ],
   "settings": {

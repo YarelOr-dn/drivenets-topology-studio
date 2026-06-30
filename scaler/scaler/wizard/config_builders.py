@@ -805,57 +805,112 @@ def build_service_config(params: Dict[str, Any]) -> str:
     route_policy_import = params.get("route_policy_import")
     route_policy_export = params.get("route_policy_export")
 
+    # ASN used for the EVPN RT/BGP block; RD IP portion from rd_router_id.
+    rt_asn = str(rd_base)
+    rd_ip = str(params.get("rd_router_id") or "10.0.0.1")
     subifs = [i for i in interface_list if "." in i] if interface_list else []
+
+    def _desc(num: int, i: int, evi: int) -> str:
+        if not description_tpl:
+            return ""
+        return description_tpl.replace("{n}", str(num)).replace("{i}", str(i)).replace("{evi}", str(evi))
+
+    # NOTE (2026-06-30, SW-265301): the prior output used `evi`/`service-id`/a
+    # trailing `admin-state` under `network-services evpn instance`, which DNOS
+    # 26.2.x rejects ("Unknown word"). It also emitted one flat header per instance,
+    # which `load merge` cannot parse for >1 instance (a multi-token single-line
+    # context does not pop back to root between instances). We now emit the exact
+    # NESTED running-config shape: a single `network-services`/<service> parent with
+    # multiple nested `instance` blocks (closed by `!`). Grounded byte-for-byte in
+    # the live PE-1 running config + DNOS docs; nothing is guessed. This commits via
+    # both `load merge` (file) and terminal paste.
+
+    if "fxc" in svc_type:
+        container = "evpn-vpws-fxc"
+
+        def _inst(num: int, name: str, evi: int, desc: str) -> List[str]:
+            b = [f"    instance {name}", "      fxc-mode vlan-aware"]
+            if desc:
+                b.append(f'      description "{desc}"')
+            b += ["      admin-state enabled", "    !"]
+            return b
+    elif "evpn-vpws" in svc_type or svc_type == "vpws":
+        # EVPN-VPWS. Grounded in the live R2 running config: a protocols-bgp block
+        # (RD + export/import RT) + transport mpls + admin-state. NOTE: the
+        # per-AC `vpws-service-id local X remote Y` lives UNDER an `interface`
+        # sub-context (not directly under instance -> that is why a bare
+        # vpws-service-id is rejected as "Unknown word"); scale instances have no
+        # AC to attach, so the committable scale shape mirrors the EVPN instance.
+        container = "evpn-vpws"
+
+        def _inst(num: int, name: str, evi: int, desc: str) -> List[str]:
+            b = [f"    instance {name}",
+                 "      protocols",
+                 f"        bgp {rt_asn}",
+                 f"          route-distinguisher {rd_ip}:{evi}",
+                 f"          export-l2vpn-evpn route-target {rt_asn}:{evi}",
+                 f"          import-l2vpn-evpn route-target {rt_asn}:{evi}",
+                 "        !", "      !",
+                 "      transport-protocol", "        mpls", "        !", "      !"]
+            if desc:
+                b.append(f'      description "{desc}"')
+            b += ["      admin-state enabled", "    !"]
+            return b
+    elif "evpn" in svc_type and "vpls" not in svc_type:
+        container = "evpn"
+
+        def _inst(num: int, name: str, evi: int, desc: str) -> List[str]:
+            b = [f"    instance {name}",
+                 "      protocols",
+                 f"        bgp {rt_asn}",
+                 f"          route-distinguisher {rd_ip}:{evi}",
+                 f"          export-l2vpn-evpn route-target {rt_asn}:{evi}",
+                 f"          import-l2vpn-evpn route-target {rt_asn}:{evi}",
+                 "        !", "      !",
+                 "      transport-protocol", "        mpls", "        !", "      !"]
+            if desc:
+                b.append(f'      description "{desc}"')
+            if route_policy_import:
+                b.append(f"      route-policy import {route_policy_import}")
+            if route_policy_export:
+                b.append(f"      route-policy export {route_policy_export}")
+            b.append("    !")
+            return b
+    elif "bridge-domain" in svc_type:
+        container = "bridge-domain"
+
+        def _inst(num: int, name: str, evi: int, desc: str) -> List[str]:
+            b = [f"    instance {name}"]
+            if desc:
+                b.append(f'      description "{desc}"')
+            if subifs and interfaces_per_service > 0:
+                idx = (num - start) * interfaces_per_service
+                for j in range(interfaces_per_service):
+                    if idx + j < len(subifs):
+                        b += [f"      interface {subifs[idx + j]}", "      !"]
+            storm_rate = params.get("storm_control_broadcast_rate")
+            if storm_rate is not None and int(storm_rate) > 0:
+                b += ["      storm-control",
+                      f"        broadcast-packet-rate {int(storm_rate)}", "      !"]
+            b += ["      admin-state enabled", "    !"]
+            return b
+    else:
+        container = "evpn-vpws-fxc"
+
+        def _inst(num: int, name: str, evi: int, desc: str) -> List[str]:
+            b = [f"    instance {name}", "      fxc-mode vlan-aware"]
+            if desc:
+                b.append(f'      description "{desc}"')
+            b += ["      admin-state enabled", "    !"]
+            return b
+
+    lines = ["network-services", f"  {container}"]
     for i in range(count):
         num = start + i
         name = f"{prefix}{num}"
         evi = evi_start + i
-        if "evpn-vpws-fxc" in svc_type or "fxc" in svc_type:
-            lines.append(f"network-services evpn-vpws-fxc instance {name}")
-            lines.append(f"  service-id {evi}")
-            lines.append(f"  evi {evi}")
-        elif "evpn" in svc_type and "vpls" not in svc_type:
-            lines.append(f"network-services evpn instance {name}")
-            lines.append(f"  evi {evi}")
-        elif "bridge-domain" in svc_type:
-            lines.append(f"network-services bridge-domain instance {name}")
-            if description_tpl:
-                desc = description_tpl.replace("{n}", str(num)).replace("{i}", str(i))
-                lines.append(f'  description "{desc}"')
-            if subifs and interfaces_per_service > 0:
-                idx = i * interfaces_per_service
-                for j in range(interfaces_per_service):
-                    if idx + j < len(subifs):
-                        lines.append(f"  interface {subifs[idx + j]}")
-                        lines.append("  !")
-            storm_rate = params.get("storm_control_broadcast_rate")
-            if storm_rate is not None and int(storm_rate) > 0:
-                lines.append("  storm-control")
-                lines.append(f"    broadcast-packet-rate {int(storm_rate)}")
-                lines.append("  !")
-            lines.append("  admin-state enabled")
-            lines.append("!")
-            continue
-        else:
-            lines.append(f"network-services evpn-vpws-fxc instance {name}")
-            lines.append(f"  service-id {evi}")
-            lines.append(f"  evi {evi}")
-        if description_tpl:
-            desc = description_tpl.replace("{n}", str(num)).replace("{i}", str(i)).replace("{evi}", str(evi))
-            lines.append(f'  description "{desc}"')
-        if route_policy_import:
-            lines.append(f"  route-policy import {route_policy_import}")
-        if route_policy_export:
-            lines.append(f"  route-policy export {route_policy_export}")
-        if subifs and interfaces_per_service > 0:
-            idx = i * interfaces_per_service
-            for j in range(interfaces_per_service):
-                if idx + j < len(subifs):
-                    lines.append(f"  interface {subifs[idx + j]}")
-                    lines.append("  !")
-        lines.append("  admin-state enabled")
-        lines.append("!")
-
+        lines += _inst(num, name, evi, _desc(num, i, evi))
+    lines += ["  !", "!"]
     return "\n".join(lines)
 
 

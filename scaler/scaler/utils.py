@@ -3,6 +3,7 @@
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any
+import os
 import pytz
 import json
 import re
@@ -12,11 +13,26 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# Base directories
-SCALER_DIR = Path(__file__).parent.parent
+# Base directories.
+#
+# SINGLE SOURCE OF TRUTH for device data (db/devices.json,
+# db/configs/<host>/operational.json). We must NOT derive this from
+# ``__file__``: the scaler package can be imported from a git worktree via
+# PYTHONPATH (e.g. the user-scale MCP runs with
+# PYTHONPATH=...drivenets-topology-studio/scaler), in which case a
+# ``__file__``-relative db/ points at a STALE mirror that still holds dead
+# "ghost" IPs -- while every other tool (scaler_bridge, dnos-config) reads the
+# curated ~/SCALER/db. That split is exactly the ghost-IP bug. Resolve to the
+# canonical deployed SCALER root (env-overridable, same constant bridge_helpers
+# uses) whenever it actually contains a devices.json; otherwise fall back to the
+# package-relative path so dev/test checkouts still work standalone.
+_PKG_DIR = Path(__file__).parent.parent
+_CANONICAL_ROOT = Path(os.environ.get("SCALER_ROOT", str(Path.home() / "SCALER")))
+SCALER_DIR = _CANONICAL_ROOT if (_CANONICAL_ROOT / "db" / "devices.json").exists() else _PKG_DIR
 DB_DIR = SCALER_DIR / "db"
 CONFIGS_DIR = DB_DIR / "configs"
 HISTORY_DIR = DB_DIR / "history"
+DEVICES_JSON = DB_DIR / "devices.json"
 
 
 def get_device_config_dir(hostname: str) -> Path:
@@ -732,12 +748,67 @@ def safe_connect_and_verify(device, credentials: list = None,
     return result
 
 
+def _lookup_devices_entry(hostname: str) -> Optional[Dict[str, Any]]:
+    """Return the canonical devices.json entry for ``hostname`` (or one of its
+    aliases), reading the SINGLE source of truth (``DEVICES_JSON``). Returns
+    None on any error / no match. Never raises."""
+    try:
+        if not DEVICES_JSON.exists():
+            return None
+        with open(DEVICES_JSON) as f:
+            data = json.load(f)
+        want = (hostname or "").strip().lower()
+        for dev in data.get("devices", []):
+            names = [dev.get("hostname", "")]
+            names.extend(dev.get("aliases", []) or [])
+            if any((n or "").strip().lower() == want for n in names):
+                return dev
+    except Exception:
+        return None
+    return None
+
+
+def resolve_cluster_active_ip(hostname: str) -> Optional[str]:
+    """For a clustered device, return the management IP of the ACTIVE NCC from
+    the canonical devices.json -- the same source/logic the dnos-config
+    DNOSSession uses. Returns None for non-cluster devices or when the active
+    mgmt IP is unknown. Stale-marked addresses are never returned here (the
+    active-NCC mgmt IPs are authoritative); ``_stale_last_ip`` is ignored.
+    """
+    entry = _lookup_devices_entry(hostname)
+    if not entry:
+        return None
+    is_cluster = entry.get("is_cluster") or ("cluster_active_ncc" in entry)
+    if not is_cluster:
+        return None
+    active = entry.get("cluster_active_ncc")
+    candidates = []
+    if active is not None:
+        candidates.append(entry.get(f"mgmt_ncc_{active}_ip"))
+        ncc_map = entry.get("cluster_ncc") or {}
+        candidates.append(ncc_map.get(str(active)))
+    # Fall back to the active-side mgmt IP if only one NCC mgmt IP is recorded.
+    candidates.append(entry.get("mgmt_ncc_1_ip"))
+    for ip in candidates:
+        if ip and isinstance(ip, str):
+            ip = ip.split("/")[0].strip()
+            if re.match(r"^\d+\.\d+\.\d+\.\d+$", ip):
+                return ip
+    return None
+
+
 def get_ssh_hostname(device, fallback_to_device_ip: bool = True) -> str:
     """Get the best SSH hostname/IP for a device.
-    
-    Prefers mgmt IP from operational.json over devices.json IP.
-    This ensures we use the actual working mgmt IP discovered during operations.
-    
+
+    Resolution order (all rooted in the SINGLE source of truth, the canonical
+    ``db/devices.json`` + ``db/configs/<host>/operational.json``):
+      1. For a CLUSTER device, the ACTIVE-NCC management IP from devices.json
+         (matches the dnos-config DNOSSession resolver, e.g. NCC1 active ->
+         100.64.4.122). This avoids dead/standby/ghost addresses.
+      2. mgmt IP from operational.json, unless the caller passed an explicit
+         differing IPv4 in ``device.ip`` (then honor the requested IP).
+      3. ``device.ip`` fallback.
+
     Args:
         device: Device object (must have .hostname and .ip attributes)
         fallback_to_device_ip: If True, falls back to device.ip if no mgmt IP found
@@ -751,6 +822,17 @@ def get_ssh_hostname(device, fallback_to_device_ip: bool = True) -> str:
     """
     import json
     
+    # (1) Cluster devices: the active-NCC mgmt IP from devices.json is
+    # authoritative and matches what the dnos-config MCP connects to. This is
+    # the fix for the "ghost IP" split where a stale per-package db/ mirror or
+    # operational.json could send the ConfigPusher to a dead address.
+    try:
+        cluster_ip = resolve_cluster_active_ip(getattr(device, "hostname", ""))
+        if cluster_ip:
+            return cluster_ip
+    except Exception:
+        pass
+
     # Start with device.ip as default
     hostname = device.ip if fallback_to_device_ip else None
     
@@ -815,8 +897,8 @@ def sync_device_ip_from_operational(hostname: str) -> bool:
         
         connection_method = ops_data.get("connection_method", "")
         
-        # Update devices.json
-        devices_file = Path(__file__).parent.parent / "db" / "devices.json"
+        # Update devices.json (canonical single source of truth)
+        devices_file = DEVICES_JSON
         if not devices_file.exists():
             return False
             
@@ -884,8 +966,8 @@ def update_device_connection_info(hostname: str, ip: str, connection_method: str
         with open(ops_file, "w") as f:
             json.dump(ops_data, f, indent=4)
         
-        # Also update devices.json
-        devices_file = Path(__file__).parent.parent / "db" / "devices.json"
+        # Also update devices.json (canonical single source of truth)
+        devices_file = DEVICES_JSON
         if devices_file.exists():
             with open(devices_file) as f:
                 devices_data = json.load(f)

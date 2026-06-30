@@ -394,11 +394,37 @@ class StackManager:
         if current_major != 0 and target_major != 0 and current_major != target_major:
             return True
 
+        # Private feature-branch target -> always delete+deploy (2026-06-28).
+        # See target_is_private_branch() for the rationale (private lineages
+        # diverge from mainline base; in-DNOS install across them is unsafe).
+        if StackManager.target_is_private_branch(target_version):
+            return True
+
         is_switch, _, _ = StackManager.detect_branch_switch(
             current_version, target_version, target_branch_name
         )
         return is_switch
-    
+
+    @staticmethod
+    def target_is_private_branch(target_version: str) -> bool:
+        """True when the target build is a PRIVATE feature-branch build.
+
+        Private feature-branch builds carry a ``_priv.`` segment in the DNOS
+        label, e.g. ``26.2.0.15_priv.usirota_evpn_vpls_irb_15`` (the Jenkins
+        branch ``usirota/evpn_vpls/irb``). Such a branch forks off an OLDER
+        base than mainline and carries a divergent package/stack set, so an
+        in-DNOS ``normal`` install -- or a partial ``gi_deploy`` -- onto that
+        lineage has repeatedly left lab devices stuck / non-converged (the
+        build-12 incident on PE-1/PE-4/RR-SA-2, 2026-06). The only clean
+        transition onto ANY private build is a full delete+deploy (config
+        taken pre-delete and restored post-deploy). Mainline ``_dev.`` builds
+        and plain releases return False. Operators can still force another
+        method explicitly via ``--method``.
+        """
+        if not target_version:
+            return False
+        return "_priv." in str(target_version).lower()
+
     @staticmethod
     def extract_branch_name(version_str: str) -> str:
         """Extract the branch/build portion from a full DNOS version string.

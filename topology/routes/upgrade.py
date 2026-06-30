@@ -1155,12 +1155,18 @@ def image_upgrade_plan(body: dict):
 
                 if mode == "RECOVERY":
                     upgrade_type = "blocked"
-                    reason = "Device in RECOVERY mode -- restore first"
-                    warnings.append("Cannot upgrade from RECOVERY")
+                    reason = ("Device in RECOVERY mode -- restore to full GI "
+                              "first, then delete+deploy")
+                    warnings.append("Cannot upgrade from RECOVERY (recover to GI, then delete+deploy)")
                 elif mode == "GI":
-                    upgrade_type = "gi_deploy"
-                    reason = "Device in GI mode -- deploy flow"
-                    warnings.append("GI mode requires deploy flow")
+                    # GI -> full delete+deploy (NOT gi_deploy). delete_deploy is
+                    # resume-safe: it skips `request system delete` when the
+                    # device is already in GI/BASEOS_SHELL and loads+deploys
+                    # directly, while a plain gi_deploy is refused by GI_RECOVERY
+                    # for a NEW build (revert-only). (2026-06-28)
+                    upgrade_type = "delete_deploy"
+                    reason = "Device in GI mode -- full delete+deploy (resume-safe: skips the wipe when already in GI)"
+                    warnings.append("GI mode uses delete+deploy")
                 elif mode == "DNOS" and current_version and target_version and target_version != "0.0.0":
                     cv = re.match(r"(\d+\.\d+\.\d+\.\d+)", current_version)
                     tv = re.match(r"(\d+\.\d+\.\d+\.\d+)", target_version)
@@ -1189,6 +1195,15 @@ def image_upgrade_plan(body: dict):
                 else:
                     reason = "Unknown current version -- assuming normal"
                     warnings.append("Could not detect current DNOS version")
+
+                # Private feature-branch target -> always delete+deploy, even
+                # for a same-branch build bump or an unknown current version.
+                # An in-DNOS `normal` install onto a private lineage has
+                # repeatedly left devices stuck/non-converged. (2026-06-28)
+                if upgrade_type == "normal" and StackManager.target_is_private_branch(target_version):
+                    upgrade_type = "delete_deploy"
+                    reason = "Private feature-branch build -- full delete+deploy (in-DNOS install across a private lineage is unsafe)"
+                    warnings.append("Private-branch target forces delete+deploy")
 
                 result_item = {
                     "mode": mode,
@@ -2560,10 +2575,16 @@ def _run_device_upgrade(job_id: str, device_id: str, mgmt_ip: str,
         _detected_state = (_op_data_cached.get("device_state") or "").upper()
         from scaler.connection_strategy import classify_device_state
         _classified = classify_device_state(_detected_state)
-        if _classified == "GI":
-            upgrade_type = "gi_deploy"
-        elif _classified == "RECOVERY":
-            upgrade_type = "gi_deploy"
+        # GI / RECOVERY -> delete_deploy (NOT gi_deploy). delete_deploy is
+        # resume-safe: it skips `request system delete` when the device is
+        # already in GI/BASEOS_SHELL and goes straight to load+deploy, while a
+        # plain gi_deploy is refused by GI_RECOVERY for a NEW build (it only
+        # permits a revert to the on-box stack). Routing GI/RECOVERY through
+        # delete_deploy therefore handles both a real in-DNOS wipe and the
+        # already-in-GI resume, and avoids the "GI_RECOVERY won't load a new
+        # build" dead-end. (2026-06-28)
+        if _classified in ("GI", "RECOVERY"):
+            upgrade_type = "delete_deploy"
     # --- Major version jump detection (v25->v26 etc) requires delete_deploy ---
     if upgrade_type == "normal" and _op_data_cached:
         _cur_dnos = _op_data_cached.get("dnos_version") or ""
@@ -2611,6 +2632,31 @@ def _run_device_upgrade(job_id: str, device_id: str, mgmt_ip: str,
             import logging
             logging.warning(
                 f"[UPGRADE] {device_id}: branch-lineage check skipped: {_bse}")
+    # --- Private feature-branch target -> delete_deploy (2026-06-28) -------
+    #     A private build (label contains `_priv.`, e.g.
+    #     26.2.0.15_priv.usirota_evpn_vpls_irb_15) forks off an older base
+    #     with a divergent package/stack set. An in-DNOS `normal` install onto
+    #     a private lineage -- even a same-branch build bump -- has repeatedly
+    #     left devices stuck/non-converged (build-12 incident, PE-1/PE-4/
+    #     RR-SA-2). The clean transition onto ANY private build is a full
+    #     delete+deploy (config taken pre-delete, restored post-deploy).
+    #     Operators can still force another method with an explicit --method.
+    if upgrade_type == "normal" and url_list:
+        try:
+            from scaler.stack_manager import StackManager
+            _tgt_dnos_url3 = next((u for c, u in url_list if c.upper() == "DNOS"), "")
+            _tgt_label3 = _dnos_url_to_version_label(_tgt_dnos_url3) if _tgt_dnos_url3 else ""
+            if StackManager.target_is_private_branch(_tgt_label3):
+                import logging
+                logging.warning(
+                    f"[UPGRADE] {device_id}: target '{_tgt_label3}' is a PRIVATE "
+                    f"feature-branch build, forcing delete_deploy (in-DNOS "
+                    f"install across a private lineage is unsafe)")
+                upgrade_type = "delete_deploy"
+        except Exception as _pbe:
+            import logging
+            logging.warning(
+                f"[UPGRADE] {device_id}: private-branch check skipped: {_pbe}")
     # --- Fill deploy_params via the single shared normaliser ---
     # One call here replaces three previously-duplicated fill sites.
     # Crucially, ncc_id is normalised unconditionally -- the old code

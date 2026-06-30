@@ -3,6 +3,59 @@
 # These guidelines document the codebase patterns and rules for development.
 # Agents MUST read this file before making changes and UPDATE it after fixes.
 
+## MCP backend monolith split (mcp_common/profiles) -- 2026-06-25
+
+The shared MCP backend `/home/dn/mcp_common/command_profiles.py` has been split:
+every per-vertical tool definition and handler body now lives under
+`/home/dn/mcp_common/profiles/<vertical>/` (test, spirent, ha, debug_dnos, xray,
+exabgp), and `command_profiles.py` imports them back. The split is **byte-for-byte**
+(per-profile tool list + each tool's `inputSchema` hash + the global handler-key
+set are unchanged) and gated by `mcp_common/tests/test_split_contract.py` +
+`test_relocation_guard.py`. `command_profiles.py` shrank ~23.6k -> ~12.7k lines.
+
+- **Authoritative doc:** `/home/dn/mcp_common/profiles/README.md` (architecture,
+  the re-host mechanism, editing rules, tooling, escape hatch).
+- **Editing a handler:** edit it in its vertical module, NOT in
+  `command_profiles.py` (a relocated `_<vertical>_*` def re-added to the monolith
+  fails the guard test). The handler is re-hosted onto `command_profiles.__dict__`
+  so bare-name + monkeypatch resolution stays live.
+- **Changing the served surface:** edit the vertical's `tools.py` and regenerate
+  the golden (`test_split_contract.py`) only for an intentional change.
+- Always file-safety snapshot before each `command_profiles.py` edit; run
+  `test_split_contract` + `test_relocation_guard` + the full `mcp_common/tests`
+  suite after changes.
+
+## MCP lean descriptor surface (`MCP_LEAN_SURFACE`) -- 2026-06-28
+
+Default **`MCP_LEAN_SURFACE=1`** serves a smaller `tools/list` descriptor set;
+**every handler stays callable** (`tools/call` dispatches by name against
+`HANDLERS`, not the served list). Toggle without code revert:
+
+```bash
+# lean (default) -- fewer descriptors, same capabilities
+systemctl --user unset-environment MCP_LEAN_SURFACE 2>/dev/null || true
+systemctl --user restart user-spirent-mcp user-ha-mcp user-debug-dnos-mcp user-xray-mcp user-exabgp-mcp
+
+# full legacy descriptor list (A/B / rollback)
+systemctl --user set-environment MCP_LEAN_SURFACE=0
+systemctl --user restart user-spirent-mcp user-ha-mcp user-debug-dnos-mcp user-xray-mcp user-exabgp-mcp
+```
+
+**What lean hides (descriptors only):**
+- **Spirent:** 9 umbrellas + `spirent_create_stream` + `spirent_loss_verify` (42 legacy
+  defs kept in `SPIRENT_LEGACY_TOOLS`, not deleted).
+- **handoff_*** on spirent/ha/debug-dnos/xray/exabgp (discoverable on **test-mcp**).
+- **debug_knowledge_lookup** (use `test_knowledge_lookup` or `tp_knowledge_lookup`).
+
+**Contract tests:** `split_contract_golden.json` = lean surface;
+`split_contract_golden_full.json` = `MCP_LEAN_SURFACE=0`. Run
+`pytest mcp_common/tests/test_split_contract.py` after intentional surface edits.
+
+**Atlassian:** workspace `.cursor/mcp.json` has no `dn-mcp-server`; use the Cursor
+**Atlassian plugin** for Jira/Confluence (`getJiraIssue`, `searchJiraIssuesUsingJql`,
+`search`). The old `dn-mcp-server` also exposed `github_*` tools -- not replaced in
+the workspace MCP set.
+
 ## /TEST -> /XRAY -> /debug-dnos Packet-Proof Contract -- 2026-06-21
 
 Packet proof is now a first-class TEST/debug evidence path in
@@ -4763,6 +4816,171 @@ Cache buster suffix: `?v=20260512c-split-refine`.
   Testing Tasks are `SW-265303` (IRB lifecycle and bulk move), `SW-265302`
   (PW learning and mobility, including 3,500-service and multi-PW fanout
   cases), and `SW-265304` (matrix, cleanup, and EVI delete).
+
+## SW-265301 fast scale push (`dnos_load_merge`) -- 2026-06-29
+
+- **Problem:** Chunked `dnos_atomic_commit` setup (`CHUNK=100` in
+  `_gen_bulk_move_recipe.py`) serialized 20x `rollback 0` + line paste +
+  `commit check` + `commit` per N=2000 IRBs (~55 min setup alone).
+- **Fix:** New dnos-config MCP tool `dnos_load_merge` wraps scaler-wizard
+  `ConfigPusher` (`scaler/scaler/config_pusher.py`): SCP + `load merge` /
+  `load override`, or single-session terminal `paste` + one commit.
+- **Recipe generator:** `_gen_bulk_move_recipe.py --push-mode load` (default)
+  emits ONE `setup_scale_irbs_load` (`file_merge`), move phases (`paste`),
+  and one teardown restore (`paste` via guaranteed baseline_restore when
+  `metadata.scale_push_mode=load`). Large blobs go to sidecar files under
+  `catalog/.../config/*.cfg` referenced by `config_path` (avoids subprocess
+  argv limits). Legacy `--push-mode chunked` unchanged.
+- **Engine:** `h_runner.py` routes guaranteed baseline_restore through
+  `dnos_load_merge method=paste` when `scale_push_mode=load`.
+- **Restart after tool add:** `systemctl --user restart dnos-config-mcp.service`
+  (tool list) and `user-test-mcp.service` (h_runner restore path).
+- **Ramp:** `python3 .../_gen_bulk_move_recipe.py --n <N> --irb-base 9500`
+  then `test_category_run source_tc=TC-IRB-BULK-MOVE-01 device=PE-1
+  execute=true confirm=true rerun_all=true background=true`.
+- **/SCALE background push + live monitor + auto-fix (2026-06-30):**
+  - New generic, stdlib-only `mcp_common/job_store.py` (`JobStore`): durable
+    background job + append-only `.progress.jsonl` event sink + `since_seq`
+    long-poll (`status(wait_for_event, since_seq, max_block_ms)`), lifted from the
+    proven /TEST engine primitives. Profile-agnostic; /TEST keeps its own copy
+    (split-contract) - this is the shared home for new consumers.
+  - New `mcp_common/push_remediation.py`: `classify_push_error` +
+    SAFE transforms (`sanitize_config` strips `password enc-`/removed dampening,
+    `reorder_for_dependencies` puts interface defs before attach, `remove_offending`
+    drops the single line DNOS named) + `run_push_with_remediation` (bounded retry,
+    emits events). Remediable: attach-nonexisting-interface (reorder),
+    "command 'X' failed" (remove). NON-remediable (honest fail): limit_breach,
+    ip_overlap, already_attached_other_vrf, bgp_as_change.
+  - `scale_config_push` gains `background=true` (returns `job_id` immediately,
+    runs the push on a daemon thread emitting push_start/push_progress/push_error/
+    remediation/push_end) and `auto_fix=true` (default). New `scale_push_status`
+    tool long-polls the job (event-driven, no sleeps), echo `job.events` + pass
+    back `job.next_seq`.
+  - `dnos_load_merge` (dnos-config, used by /TEST) gains `auto_fix` (default true):
+    on commit-check failure it self-heals via the same remediation lib and retries.
+    The bulk-move recipe sets `auto_fix=false` on MOVE phases so move atomicity
+    fails HONESTLY (never auto-stripped); setup/teardown keep `auto_fix=true`.
+  - FIXED (2026-06-30): the scale config-builder
+    (`scaler/scaler/wizard/config_builders.py` -> `build_service_config`) used to
+    emit `evi`/`service-id`/`admin-state` under `network-services evpn instance`
+    plus one flat header per instance, which DNOS 26.2.x rejects ("Unknown word")
+    and `load merge` cannot parse for >1 instance. It now emits the exact NESTED
+    running-config shape (single `network-services`/<service> parent + nested
+    `instance` blocks, closed by `!`), grounded byte-for-byte in the live PE-1 / R2
+    running configs + DNOS docs. All four scale service types (evpn, evpn-vpws-fxc,
+    evpn-vpws, bridge-domain) now commit-check clean on PE-1; a live N=3 EVPN
+    background push verified COMPLETED/OK on attempt 1 (no remediation), then
+    cleaned up. VPWS note: per-AC `vpws-service-id local X remote Y` lives under an
+    `interface` sub-context, NOT directly under instance.
+  - DEPLOY SYNC (critical): the scale MCP loads config_builders from the LIVE
+    `/home/dn/SCALER/scaler/wizard/config_builders.py` (scaler_root prefers
+    `/home/dn/SCALER`), which is a SEPARATE copy from the worktree
+    `/home/dn/drivenets-topology-studio/scaler/...`. Edits MUST be applied to BOTH
+    (worktree = source of truth, /home/dn/SCALER = what runs). `_SERVICE_MAP` in
+    `generate.py` maps max_evpn_instances/max_fxc_instances/max_vrf_instances/
+    max_bridge_domain_instances/max_vpws_instances/max_bgp_peers to svc types.
+  - Restart after edits: `systemctl --user restart user-scale-mcp dnos-config-mcp`.
+- **/SCALE push-strategy chooser + raw_paste via DNOSSession (2026-06-30):**
+  `scale_config_push` now takes `strategy` (preferred over `method`):
+  - `load_merge` / `load_override` -> ConfigPusher SCP-file + load (NESTED config form).
+  - `raw_paste` -> NEW: pastes via **DNOSSession** (the same engine
+    `dnos_atomic_commit` uses): config-mode, per-line LIVE "Unknown word" validation,
+    `top` re-root after each line, optional `commit_check`, guaranteed auto-rollback.
+    `_raw_paste_dnossession` + `_flatten_dnos_config` in
+    `mcp_common/profiles/scale/generate.py`. IMPORTANT: load-merge needs the NESTED
+    indented form; raw_paste needs FLAT full-path leaves -> `_flatten_dnos_config`
+    converts nested->flat (config-mode paste with top-after-each-line cannot use the
+    nested form). ConfigPusher's own paramiko paste is NOT DNOSSession.
+  - `commit_check` (bool, default true): raw_paste honors it (skip the separate
+    `commit check` for fastest). `on_fail` (suggest|auto|stop, default suggest):
+    on failure returns `escalation` with the next strategy (merge->override->raw_paste)
+    and, for syntax/Unknown-word errors, a "fix generator + regen" suggestion (waits
+    for approval; with fix_core=auto_source the agent then edits config_builders in
+    BOTH copies, snapshots, dry-run-validates, re-pushes).
+  - Verified live on PE-1: load_merge N=3 OK attempt 1; raw_paste N=2 OK attempt 1
+    ("DNOSSession live-validated, commit-checked"); raw_paste commit-check correctly
+    caught a real RD-collision and rolled back clean; all probes cleaned up.
+  - LEFTOVER NOTE (cleared 2026-06-30): PE-1 `SCALE_EVI_95xx` + `SCALE_VRF_A/B` scratch
+    from superseded job `test_category_1782743964` removed via idempotent
+    `dnos_atomic_commit` teardown (VRF_A/B + EVI 9501-9520 + irb9501-9520).
+- **/SCALE ultimate scale-reliable-test system (2026-06-30):**
+  Closed loop: generate(valid) -> predicted gate -> push(live, 3 strategies) ->
+  verify(reached + health) -> /TEST handoff -> layered verdict -> failure rollback +
+  explicit teardown. Key pieces in `mcp_common/profiles/scale/generate.py`:
+  - **Real restore:** `_scale_scratch_lines` + `RunScope.on_restore` on FAILURE only
+    (success PERSISTS). Gated by `SCALE_REAL_RESTORE=1` (default on). Push manifest
+    at `scale/_shared/manifests/<run_id>.json` records names/RDs/teardown lines.
+  - **`scale_teardown`:** confirm-gated explicit removal by `run_id` or
+    device+service+prefix; uses `dnos_atomic_commit`; background-capable.
+  - **`pre_clean`:** on `scale_config_push`, run teardown for same prefix first.
+  - **`scale_verify`:** ACTUAL reached count vs requested + health_cmds
+    (fibmgrd/bgpd/wb_agent restarts, cores, config compare). Wired via `verify=true`
+    (default on sync pushes; background runs as final event).
+  - **`scale_test`:** orchestrator generate->push->verify->`/TEST` handoff
+    (`test_category_run source_tc=TC-IRB-BULK-MOVE-01`).
+  - **`scale_test_report`:** renders layered verdict
+    GENERATED_VALID->PREDICTED_FIT->PUSHED->REACHED_SCALE->HEALTH_OK->
+    TRAFFIC_NO_LOSS->TEARDOWN_CLEAN.
+  - **Accuracy:** `push_remediation.classify_push_error` adds `rd_collision`,
+    `name_collision`, `unknown_word(token)`; escalation surfaces offending keyword.
+  - **Speed:** `SCALE_WARM_SESSION=1` pools paramiko SSH in `config_pusher.py`
+    (both worktree + `/home/dn/SCALER`); `commit_check=false` skips separate check
+    for file methods (`skip_commit_check` param).
+  - Restart: `systemctl --user restart user-scale-mcp`.
+- **/SCALE EVPN-VPLS SI IRB native service (SW-265301, 2026-06-30):**
+  `/SCALE` can now drive the SW-265301 "EVPN-VPLS SI IRB | Scale" epic natively
+  (instead of the `/TEST` recipe engine) for the config-plane lifecycle:
+  - New composite service key `max_evpn_si_irb_instances` (svc_type `evpn_si_irb`)
+    in `_SERVICE_MAP`. `_build_si_irb_config` emits FLAT full-path lines grounded
+    VERBATIM in `TC-IRB-BULK-MOVE-01` build_setup: 2 scale VRFs
+    (`SCALE_VRF_A/B`, RD `1.1.1.1:8001/8002`, ASN `1234567`) + per IRB
+    {`interfaces irbN admin-state/ipv4`, `evpn instance SCALE_EVI_N` (RD + export/
+    import l2vpn-evpn RT + `transport-protocol mpls` + `router-interface irbN
+    irb-mac-ip enabled`), `vrf SCALE_VRF_A interface irbN`}. irb_base default 9500,
+    subnet `10.(120+i//250).(i%250+1).1/24`. Commit-check verified clean on PE-1.
+  - Defaults to `strategy=raw_paste` (the exact DNOSSession path the recipe uses).
+  - Composite teardown (`_scale_scratch_lines`): `no evpn instance` + `no vrf A/B`
+    + `no interfaces irbN`. Verify counts `instance SCALE_EVI_` in the evpn container.
+  - New `scale_irb_move` tool: atomic bulk VRF A->B (or B->A) move of N IRBs in a
+    SINGLE `dnos_atomic_commit` (the bulk-move atomicity measure) + dst-attach count
+    + FibMgr/bgpd/wb_agent/core health + `/TEST` loss-verify handoff. Layers
+    MOVE_ATOMIC -> MOVED_SCALE -> HEALTH_OK.
+  - Scope: /SCALE owns generate/push/verify/move/teardown of the SI-IRB scale
+    config; the PW-learning + traffic/loss TCs (3,500-service, multi-PW fanout)
+    still hand off to `/TEST` (SCALE does not drive Spirent). Tunables: `count`,
+    `irb_base`, `asn`/`rt_asn`, `rid`/`rd_router_id`, `vrf_a`/`vrf_b`, `evi_prefix`.
+  - Flow: `scale_config_push service=max_evpn_si_irb_instances count=N device=PE-1
+    execute=true confirm=true` -> `scale_irb_move count=N` -> `scale_teardown`.
+  - **/SPIRENT tied into /SCALE (2026-06-30):** `scale_irb_move traffic_verify=true`
+    drives `spirent_loss_verify` BEFORE (baseline) and AFTER the atomic move via the
+    `MCP_CLI` cross-process bridge (same path /TEST uses), adding an in-loop
+    `TRAFFIC_NO_LOSS` layer -- no /TEST needed. Helpers `_spirent_tool` /
+    `_spirent_loss_verify` / `_spirent_params` in generate.py. Stream/AC are NEVER
+    guessed: pass `spirent_stream` + `spirent_ac_device` + `spirent_ac_interface`,
+    or run on PE-1 to use the proven `MS_CLEAN_PE1` / `ge400-0/0/5.4001` contract;
+    otherwise traffic_verify returns a needs-params error.
+  - **LAB PATH FACT (2026-06-30, corrected):** PE-4 accepts the SI-IRB config
+    (commit-check clean) AND **does have a Spirent fabric path** -- a cached
+    `dnos_dnaas_walk_from_dut` (14-day-stale leaf data) wrongly reported no path;
+    the authoritative FRESH `dnos_dnaas_spirent_preflight dut=PE-4` resolves:
+    Spirent ingress `DNAAS-LEAF-B14 ge100-0/0/15.211` -> egress
+    `DNAAS-LEAF-B10 ge100-0/0/4.211` -> DUT landing `PE-4 ge100-18/0/1` (ready=OK),
+    fabric BD `g_yor_v211_*` (single_tag 211). ALWAYS preflight FRESH for Spirent
+    pathing; never trust the cached DNAAS walk for a no-path conclusion.
+    Current blocker on the default AC is a fixable `ENCAP_LOGIC_MISMATCH`:
+    `ge100-18/0/1` is port-mode untagged (service EVPN_PW_S001) while the fabric
+    egress is single-tag 211 -> an AC matching single-tag 211 (e.g.
+    `ge100-18/0/1.211`) bound into the target SI-IRB EVPN instance is needed for
+    loss-verify to land. PE-1 keeps the proven double-tag AC (ge400-0/0/5.4001).
+- **/SCALE push methods (2026-06-30):** `scale_config_push` now takes a
+  `method` arg dispatching the scaler `ConfigPusher`:
+  `load_merge` (DEFAULT, SCP file + `load merge`, additive),
+  `load_override` (SCP file + `load override`, full replace), and
+  `terminal_paste` (paste lines straight to the device terminal, no file).
+  Aliases accepted: merge/file_merge, override/file_override/load/replace,
+  paste/terminal. Dispatch lives in `mcp_common/profiles/scale/generate.py`
+  (`_normalize_push_method` + `_PUSH_METHOD_FN`); restart `user-scale-mcp`
+  after edits. Dry-run plan + `suggested_next_call` echo the chosen method.
 
 ## TP HA Sticky/Static/PW-Learned IRB Coverage -- 2026-05-10
 
@@ -16144,3 +16362,51 @@ file-safety protected and committed to the `mcp_common` git)
   verification require the lab/Spirent rig and are run on demand. The offline
   acceptance (engine + profiles + per-stream loss math + schema gates + registry
   isolation) is fully green.
+
+## Device-connection single source of truth (ghost-IP fix, 2026-06-30)
+
+Symptom: during SW-265301 SCALE work, the scaler `ConfigPusher` (used by
+`scale_config_push` load_merge / `dnos_load_merge` SCP) connected to a dead
+"ghost" IP `100.64.7.197` and returned PERMANENT_ERROR, while the dnos-config
+MCP (atomic_commit / show) reached PE-4 fine. Two independent SSH-host resolvers
+diverged.
+
+Root cause (two leaks, both in `scaler/scaler/utils.py`):
+
+1. `SCALER_DIR = Path(__file__).parent.parent` -> the whole `db/` (devices.json +
+   `configs/<host>/operational.json`) was resolved relative to the imported
+   package. The user-scale MCP runs with
+   `PYTHONPATH=...drivenets-topology-studio/scaler`, so it imported the WORKTREE
+   scaler and read the STALE worktree `scaler/db/devices.json` (3 devices,
+   `last_sync 2026-03-29`, PE-4 ip = ghost `100.64.7.197`) -- while
+   `scaler_bridge` (cwd `~/SCALER`) and dnos-config read the curated
+   `~/SCALER/db/devices.json` (cluster-aware, `cluster_active_ncc:1` ->
+   `mgmt_ncc_1_ip 100.64.4.122`). That split IS the ghost.
+2. `get_ssh_hostname()` preferred `operational.json` `mgmt_ip`/`ssh_host` and was
+   NOT cluster-active-NCC aware, so it never matched the DNOSSession resolver.
+
+Fix (applied to BOTH `scaler/scaler/utils.py` and the deployed
+`~/SCALER/scaler/utils.py`, kept identical):
+
+- Canonical DB root: `SCALER_DIR` now resolves to
+  `os.environ.get("SCALER_ROOT", ~/SCALER)` whenever that root actually has a
+  `db/devices.json` (same constant `bridge_helpers.SCALER_ROOT` uses), else falls
+  back to the package-relative path for standalone dev checkouts. So every
+  scaler import -- worktree or deployed -- reads the ONE curated
+  `~/SCALER/db/devices.json`. Added `DEVICES_JSON` const; redirected the two
+  stray `__file__`-relative devices.json writers to it.
+- `get_ssh_hostname()` now first calls new `resolve_cluster_active_ip(hostname)`
+  which reads the single devices.json and returns the ACTIVE-NCC mgmt IP for
+  cluster devices (matches DNOSSession, e.g. PE-4 -> `100.64.4.122`), ignoring
+  `_stale_last_ip`. Non-cluster devices keep prior operational-first behavior, so
+  PE-1/RR are unaffected.
+- The stale worktree `scaler/db/devices.json` mirror was re-synced from the
+  canonical file (ghost `.197` removed) so the dev-checkout fallback is also
+  clean.
+
+Verified: imported via the worktree PYTHONPATH and via the deployed cwd, both
+yield `SCALER_DIR=~/SCALER` and PE-4 -> `100.64.4.122`; `get_ssh_hostname` returns
+`.122` even when handed a Device whose `.ip` is the ghost `.197`; PE-1
+(non-cluster) unchanged. NOTE: the long-running user-scale MCP / scaler_bridge
+cache `utils.py` in memory -- reload the Cursor window (rebinds the MCP servers)
+to pick up the fix.

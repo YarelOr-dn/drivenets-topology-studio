@@ -14,8 +14,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Tuple, Optional, Callable, Dict, Any, List
 import paramiko
+import threading
 
 from .models import Device
+
+# Warm pooled SSH sessions (SCALE_WARM_SESSION=1). Keyed by device hostname.
+_WARM_SESSION_POOL: Dict[str, Dict[str, Any]] = {}
+_WARM_SESSION_LOCK = threading.Lock()
+
+
+def _warm_session_enabled() -> bool:
+    return os.environ.get("SCALE_WARM_SESSION", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
 @contextmanager
@@ -1212,6 +1221,79 @@ class ConfigPusher:
         self.load_timeout = load_timeout
         self._console = None
 
+    def _invalidate_warm_session(self, device: Device) -> None:
+        key = getattr(device, "hostname", None) or str(device)
+        with _WARM_SESSION_LOCK:
+            entry = _WARM_SESSION_POOL.pop(key, None)
+        if not entry:
+            return
+        for obj in (entry.get("channel"), entry.get("client")):
+            if obj:
+                try:
+                    obj.close()
+                except Exception:
+                    pass
+
+    def _acquire_shell(self, device: Device, *, progress_callback: Callable = None,
+                       live_output_callback: Callable = None,
+                       progress_pct: int = 5) -> Tuple[Any, Any, bool]:
+        """Return (client, channel, reused). Reuses pooled session when SCALE_WARM_SESSION=1."""
+        key = getattr(device, "hostname", None) or str(device)
+        if _warm_session_enabled():
+            with _WARM_SESSION_LOCK:
+                entry = _WARM_SESSION_POOL.get(key)
+            if entry:
+                client = entry.get("client")
+                channel = entry.get("channel")
+                try:
+                    transport = client.get_transport() if client else None
+                    if transport and transport.is_active() and channel and not channel.closed:
+                        if progress_callback:
+                            progress_callback("Reusing warm SSH session...", progress_pct)
+                        return client, channel, True
+                except Exception:
+                    pass
+                self._invalidate_warm_session(device)
+        if progress_callback:
+            progress_callback("Connecting to device...", progress_pct)
+        ssh_host = get_ssh_hostname(device)
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            hostname=ssh_host,
+            username=device.username,
+            password=device.get_password(),
+            timeout=self.timeout,
+            look_for_keys=False,
+            allow_agent=False,
+        )
+        channel = client.invoke_shell()
+        channel.settimeout(self.timeout)
+        time.sleep(1)
+        self._read_until_prompt(channel, live_output_callback=live_output_callback)
+        return client, channel, False
+
+    def _release_shell(self, device: Device, client: Any, channel: Any, *, reused: bool,
+                       invalidate: bool = False) -> None:
+        if invalidate:
+            self._invalidate_warm_session(device)
+            return
+        if _warm_session_enabled() and client and channel and not invalidate:
+            key = getattr(device, "hostname", None) or str(device)
+            with _WARM_SESSION_LOCK:
+                _WARM_SESSION_POOL[key] = {"client": client, "channel": channel}
+            return
+        if channel:
+            try:
+                channel.close()
+            except Exception:
+                pass
+        if client:
+            try:
+                client.close()
+            except Exception:
+                pass
+
     def _get_console(self):
         """Get or create a Rich console for live output."""
         if self._console is None:
@@ -1329,6 +1411,7 @@ class ConfigPusher:
         dry_run: bool = False,
         progress_callback: Callable[[str, int], None] = None,
         live_output_callback: Callable[[str], None] = None,
+        skip_commit_check: bool = False,
     ) -> Tuple[bool, str]:
         """
         Push a configuration to a device.
@@ -1346,6 +1429,8 @@ class ConfigPusher:
         """
         client = None
         channel = None
+        reused = False
+        invalidate = False
 
         try:
             # Time-budget-based progress for file upload path
@@ -1353,7 +1438,7 @@ class ConfigPusher:
             connect_budget = 5.0
             upload_budget = max(2.0, len(config_text) / 1024 / 500.0)  # SCP
             load_budget = max(3.0, 3.0 + total_lines / 1000.0)
-            commit_check_budget = max(60.0, 60.0 + total_lines / 1000.0 * 20.0)
+            commit_check_budget = 0.0 if skip_commit_check else max(60.0, 60.0 + total_lines / 1000.0 * 20.0)
             commit_budget = max(30.0, 30.0 + total_lines / 1000.0 * 10.0)
             total_budget = connect_budget + upload_budget + load_budget + commit_check_budget + commit_budget
             fp_connect_end = int(100 * connect_budget / total_budget)
@@ -1363,30 +1448,9 @@ class ConfigPusher:
             fp_cc_start = fp_load_end
             fp_cc_elapsed = [0.0]  # mutable for closure
 
-            # Progress: Connecting
-            if progress_callback:
-                progress_callback("Connecting to device...", 5)
-
-            # Connect to device using best available IP
-            ssh_host = get_ssh_hostname(device)
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            client.connect(
-                hostname=ssh_host,
-                username=device.username,
-                password=device.get_password(),
-                timeout=self.timeout,
-                look_for_keys=False,
-                allow_agent=False
-            )
-
-            # Open interactive shell
-            channel = client.invoke_shell()
-            channel.settimeout(self.timeout)
-
-            # Wait for prompt
-            time.sleep(1)
-            self._read_until_prompt(channel, live_output_callback=live_output_callback)
+            client, channel, reused = self._acquire_shell(
+                device, progress_callback=progress_callback,
+                live_output_callback=live_output_callback, progress_pct=5)
             
             # Generate config filename
             if not config_name:
@@ -1451,34 +1515,39 @@ class ConfigPusher:
                 return False, f"Load failed: {error_msg}"
             
             # Progress: Running commit check (with time-based tick during long wait)
-            commit_check_start = time.time()
-            def _cc_tick():
-                fp_cc_elapsed[0] = time.time() - commit_check_start
+            if skip_commit_check:
                 if progress_callback:
-                    cc_width = fp_cc_end - fp_cc_start
-                    pct = fp_cc_start + int((fp_cc_elapsed[0] / max(0.1, commit_check_budget)) * cc_width)
-                    pct = min(fp_cc_end, max(fp_cc_start, pct))
-                    progress_callback("Running commit check...", pct)
-            if progress_callback:
-                progress_callback("Running commit check...", fp_cc_start)
-            channel.send("commit check\n")
-            output = self._read_until_prompt(
-                channel,
-                timeout=self.commit_timeout,
-                live_output_callback=live_output_callback,
-                progress_tick_callback=_cc_tick,
-                progress_tick_interval=2.0,
-            )
+                    progress_callback("Skipping commit check (commit_check=false)...", fp_cc_start)
+            else:
+                commit_check_start = time.time()
+                def _cc_tick():
+                    fp_cc_elapsed[0] = time.time() - commit_check_start
+                    if progress_callback:
+                        cc_width = fp_cc_end - fp_cc_start
+                        pct = fp_cc_start + int((fp_cc_elapsed[0] / max(0.1, commit_check_budget)) * cc_width)
+                        pct = min(fp_cc_end, max(fp_cc_start, pct))
+                        progress_callback("Running commit check...", pct)
+                if progress_callback:
+                    progress_callback("Running commit check...", fp_cc_start)
+                channel.send("commit check\n")
+                output = self._read_until_prompt(
+                    channel,
+                    timeout=self.commit_timeout,
+                    live_output_callback=live_output_callback,
+                    progress_tick_callback=_cc_tick,
+                    progress_tick_interval=2.0,
+                )
 
-            # Check for success - includes "no changes" which means config already on device
-            output_lower = output.lower()
-            commit_success = any(p in output_lower for p in [
-                "commit check passed", "no configuration changes were made", "commit action is not applicable"
-            ])
-            if not commit_success:
-                # Try to extract error message
-                error_msg = self._extract_error(output)
-                return False, f"Commit check failed: {error_msg}"
+                # Check for success - includes "no changes" which means config already on device
+                output_lower = output.lower()
+                commit_success = any(p in output_lower for p in [
+                    "commit check passed", "no configuration changes were made", "commit action is not applicable"
+                ])
+                if not commit_success:
+                    # Try to extract error message
+                    error_msg = self._extract_error(output)
+                    invalidate = True
+                    return False, f"Commit check failed: {error_msg}"
             
             if dry_run:
                 # Exit without committing
@@ -1512,31 +1581,28 @@ class ConfigPusher:
             return True, "Configuration committed successfully"
             
         except paramiko.AuthenticationException:
+            invalidate = True
             return False, "Authentication failed - check username/password"
         except paramiko.SSHException as e:
+            invalidate = True
             error_msg = str(e)
             if "Channel closed" in error_msg or not error_msg:
                 error_msg = "SSH channel closed unexpectedly. This often happens with large configs (>1MB). Try manual SCP upload."
             return False, f"SSH error: {error_msg}"
         except socket.timeout:
+            invalidate = True
             return False, "Connection timeout - device may be slow or unresponsive. Try increasing timeout."
         except OSError as e:
+            invalidate = True
             return False, f"Network error: {str(e)} - check connectivity to device"
         except Exception as e:
+            invalidate = True
             import traceback
             tb = traceback.format_exc()
             return False, f"Error: {str(e)}\n\nDetails:\n{tb[-500:]}"  # Last 500 chars of traceback
         finally:
-            if channel:
-                try:
-                    channel.close()
-                except:
-                    pass
-            if client:
-                try:
-                    client.close()
-                except:
-                    pass
+            if client or channel:
+                self._release_shell(device, client, channel, reused=reused, invalidate=invalidate)
 
     def push_config_merge(
         self,
@@ -1546,6 +1612,7 @@ class ConfigPusher:
         dry_run: bool = False,
         progress_callback: Callable[[str, int], None] = None,
         live_output_callback: Callable[[str], None] = None,
+        skip_commit_check: bool = False,
     ) -> Tuple[bool, str]:
         """
         Push configuration using 'load merge' - appends to existing config.
@@ -1568,29 +1635,13 @@ class ConfigPusher:
         """
         client = None
         channel = None
+        reused = False
+        invalidate = False
 
         try:
-            if progress_callback:
-                progress_callback("Connecting to device...", 10)
-
-            # Connect using best available IP from operational.json
-            ssh_host = get_ssh_hostname(device)
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            client.connect(
-                hostname=ssh_host,
-                username=device.username,
-                password=device.get_password(),
-                timeout=self.timeout,
-                look_for_keys=False,
-                allow_agent=False
-            )
-
-            channel = client.invoke_shell()
-            channel.settimeout(self.timeout)
-
-            time.sleep(1)
-            self._read_until_prompt(channel, live_output_callback=live_output_callback)
+            client, channel, reused = self._acquire_shell(
+                device, progress_callback=progress_callback,
+                live_output_callback=live_output_callback, progress_pct=10)
 
             if not config_name:
                 config_name = f"scaler_merge_{timestamp_filename(suffix='')}.txt"
@@ -1647,19 +1698,24 @@ class ConfigPusher:
                 return False, f"Load merge failed: {error_msg}"
             
             if progress_callback:
-                progress_callback("Running commit check...", 60)
-            
-            channel.send("commit check\n")
-            output = self._read_until_prompt(channel, timeout=self.commit_timeout, live_output_callback=live_output_callback)
+                if skip_commit_check:
+                    progress_callback("Skipping commit check (commit_check=false)...", 60)
+                else:
+                    progress_callback("Running commit check...", 60)
 
-            # Check for success - includes "no changes" which means config already on device
-            output_lower = output.lower()
-            commit_success = any(p in output_lower for p in [
-                "commit check passed", "no configuration changes were made", "commit action is not applicable"
-            ])
-            if not commit_success:
-                error_msg = self._extract_error(output)
-                return False, f"Commit check failed: {error_msg}"
+            if not skip_commit_check:
+                channel.send("commit check\n")
+                output = self._read_until_prompt(channel, timeout=self.commit_timeout, live_output_callback=live_output_callback)
+
+                # Check for success - includes "no changes" which means config already on device
+                output_lower = output.lower()
+                commit_success = any(p in output_lower for p in [
+                    "commit check passed", "no configuration changes were made", "commit action is not applicable"
+                ])
+                if not commit_success:
+                    error_msg = self._extract_error(output)
+                    invalidate = True
+                    return False, f"Commit check failed: {error_msg}"
 
             if dry_run:
                 channel.send("exit\n")
@@ -1687,31 +1743,28 @@ class ConfigPusher:
             return True, "Configuration merged successfully"
             
         except paramiko.AuthenticationException:
+            invalidate = True
             return False, "Authentication failed - check username/password"
         except paramiko.SSHException as e:
+            invalidate = True
             error_msg = str(e)
             if "Channel closed" in error_msg or not error_msg:
                 error_msg = "SSH channel closed unexpectedly"
             return False, f"SSH error: {error_msg}"
         except socket.timeout:
+            invalidate = True
             return False, "Connection timeout"
         except OSError as e:
+            invalidate = True
             return False, f"Network error: {str(e)}"
         except Exception as e:
+            invalidate = True
             import traceback
             tb = traceback.format_exc()
             return False, f"Error: {str(e)}\n\nDetails:\n{tb[-500:]}"
         finally:
-            if channel:
-                try:
-                    channel.close()
-                except:
-                    pass
-            if client:
-                try:
-                    client.close()
-                except:
-                    pass
+            if client or channel:
+                self._release_shell(device, client, channel, reused=reused, invalidate=invalidate)
 
     def push_config_terminal_paste(
         self,

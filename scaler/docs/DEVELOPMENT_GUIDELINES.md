@@ -4594,3 +4594,60 @@ Operational notes:
 2. The recipe gates on SW-253359 before it creates services: PE-4 `show mpls label-allocation tables` must not show `bgp-vpls: 0 labels, N/A`.
 3. Config is applied via `dnos_multi_device_commit` in paired PE-4/RR-SA-2 chunks of 25 services by default. Do not replace this with ad-hoc SSH config scripts.
 4. If MAC learning fails after DNAAS + Spirent proof pass, stop and invoke `/debug-dnos`; do not clear MAC state or retry with workaround commands before evidence capture.
+
+---
+
+## Spirent multicast / IGMP / MLD (EVPN IGMP-Proxy, SW-211037)
+
+`SPIRENT/spirent_tool.py` can now create and control multicast sources,
+receivers, and IGMP/MLD versions for the `/evpn-igmp-proxy-paths` epic. The DUT
+(PE) is the IGMP proxy / querier; Spirent emulates hosts, sources, and (when
+needed) an external mrouter.
+
+### CLI commands (and the MCP `spirent_multicast` umbrella operation)
+
+| Command | Umbrella op | Purpose |
+|---|---|---|
+| `create-mcast-source` | `source` | Multicast data SENDER. Auto-derives the group L2 MAC (RFC 1112 IPv4 `01:00:5e`+low-23, RFC 2464 IPv6 `33:33`+low-32). `--source`=S, `--group`=G, `--family ipv4|ipv6`. |
+| `create-mcast-receiver` | `receiver`/`join` | Stateless IGMP/MLD membership report. `--version 1|2|3`, `--family`, `(*,G)` via `--filter-mode exclude`, `(S,G)` via `--filter-mode include --source S1,S2`, `--record-type` override. |
+| `mcast-leave` | `leave` | IGMPv2 Leave (-> 224.0.0.2) / IGMPv3 block / MLD Done (-> ff02::2). |
+| `mcast-querier` | `querier` | External-mrouter emulation: General Query (omit `--group`) or Group-Specific Query (set `--group`) with src != 0 so the DUT marks the port as mrouter (RFC 4541). |
+| `igmp-host` | `host` | Stateful `IgmpHostConfig` stack on an existing emulated device (auto-replies to queries). Requires `create-device` first. |
+
+### Object model
+
+- RECEIVERS/LEAVES/QUERIES use stateless StreamBlock PDUs: `igmp:Igmpv1`,
+  `igmp:Igmpv2Report`, `igmp:Igmpv2Leave`, `igmp:Igmpv3Report` +
+  `grpRecords` + `GroupRecord` (`recordType` = `CHANGE_TO_INCLUDE_MODE` /
+  `CHANGE_TO_EXCLUDE_MODE` / `BLOCK_OLD_SOURCES` / ...), and the `mld:*` peers.
+  These StreamBlock object types are verified.
+- Stateful host (`IgmpHostConfig` / `IgmpGroupMembership` / `Ipv4Group` /
+  `Ipv4NetworkBlock`), the IGMPv3 GroupRecord source-list child/attr, and the
+  `igmp:Igmpv2Query` / `igmp:Igmpv3Query` / `mld:*Query` object names are marked
+  `[VALIDATE-LIVE]` in the code: confirm exact STC names against the Lab Server
+  on the first live `/TEST` run. The builders degrade gracefully (warn, do not
+  crash) if a name needs correcting.
+
+### Control-plane destinations (RFC, not guessed)
+
+- v1/v2 report -> group G; v2 Leave -> 224.0.0.2; v3 report -> 224.0.0.22;
+  general query -> 224.0.0.1. MLDv1 report -> group; MLDv1 Done -> ff02::2;
+  MLDv2 report -> ff02::16; MLD general query -> ff02::1. IGMP TTL / MLD
+  hop-limit = 1.
+
+### Mapping to the EVPN IGMP-proxy test matrix
+
+- Group A (type-7 joins): `receiver` v2 `(*,G)` and v3 `(S,G)` INCLUDE.
+- Group B (type-6 SMET): `source` + `receiver`; transitions via `record-type`.
+- Group C (leave/MRT): `mcast-leave`.
+- Groups M/N (IRB+PIM / external mrouter): `mcast-querier`.
+
+### IMPORTANT - repo vs live divergence (spirent_tool.py)
+
+The live MCP runs `/home/dn/SCALER/SPIRENT/spirent_tool.py`; the worktree source
+is `scaler/SPIRENT/spirent_tool.py`. These two had pre-existing divergence
+(live carried auto-heal + `_wait_for_stc_condition` not in the repo, and the
+repo had a few unique lines). The multicast additions above were applied
+**identically and additively to both** files via string-anchored edits, without
+touching the divergent regions. Do NOT blindly `cp` one over the other - that
+would lose work on one side. Reconcile the pre-existing divergence deliberately.

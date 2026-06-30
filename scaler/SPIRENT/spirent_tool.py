@@ -7604,6 +7604,486 @@ def cmd_mark_dnos(args):
     print(f"\n[DONE] {len(plan)} descriptions applied on {dut_host}.", flush=True)
 
 
+# ============================================================================
+# Multicast / IGMP / MLD support  (EVPN IGMP-Proxy testing, epic SW-211037)
+# ----------------------------------------------------------------------------
+# The DUT (PE) is the IGMP proxy / querier. Spirent emulates:
+#   * multicast SOURCES  -> data StreamBlock to a group address (auto group MAC)
+#   * multicast RECEIVERS -> stateless IGMP/MLD membership reports (joins/leaves)
+#   * external mrouter   -> stateless IGMP/MLD General/Group queries (src != 0)
+#   * stateful host      -> IgmpHostConfig stack that auto-replies to queries
+# Stateless StreamBlock objects (igmp:Igmpv2Report / igmp:Igmpv3Report+grpRecords
+# +GroupRecord / igmp:Igmpv1, and the mld:* peers) are verified STC object types.
+# The stateful host model (IgmpHostConfig / IgmpGroupMembership / Ipv4Group) and a
+# few v3 source-list / query attributes are marked [VALIDATE-LIVE]: confirm the
+# exact STC attribute names against the Lab Server on first live /TEST run.
+# ============================================================================
+
+# RFC well-known control destinations (group address / L2 MAC).
+IGMP_ALL_ROUTERS_IP = "224.0.0.2"        # v2 Leave destination
+IGMP_ALL_ROUTERS_MAC = "01:00:5e:00:00:02"
+IGMP_V3_REPORT_IP = "224.0.0.22"         # v3 report destination (all IGMPv3 routers)
+IGMP_V3_REPORT_MAC = "01:00:5e:00:00:16"
+IGMP_ALL_HOSTS_IP = "224.0.0.1"          # general query destination
+IGMP_ALL_HOSTS_MAC = "01:00:5e:00:00:01"
+MLD_ALL_ROUTERS_IP = "ff02::2"           # MLDv1 Done destination
+MLD_V2_REPORT_IP = "ff02::16"            # MLDv2 report destination
+MLD_ALL_NODES_IP = "ff02::1"             # MLD general query destination
+
+# IGMPv3 / MLDv2 GroupRecord types (RFC 3376 / RFC 3810; STC enum names).
+_V3_RECORD_TYPES = {
+    "mode_is_include": "MODE_IS_INCLUDE",
+    "mode_is_exclude": "MODE_IS_EXCLUDE",
+    "change_to_include": "CHANGE_TO_INCLUDE_MODE",
+    "change_to_exclude": "CHANGE_TO_EXCLUDE_MODE",
+    "allow_new_sources": "ALLOW_NEW_SOURCES",
+    "block_old_sources": "BLOCK_OLD_SOURCES",
+}
+
+
+def _ipv4_mcast_mac(group_ip):
+    """RFC 1112: IPv4 multicast group -> 01:00:5e + low 23 bits of the group."""
+    octs = [int(x) for x in str(group_ip).split(".")]
+    if len(octs) != 4 or not (224 <= octs[0] <= 239):
+        raise ValueError(f"{group_ip} is not an IPv4 multicast group (224.0.0.0/4)")
+    return "01:00:5e:%02x:%02x:%02x" % (octs[1] & 0x7f, octs[2], octs[3])
+
+
+def _ipv6_mcast_mac(group_ip):
+    """RFC 2464: IPv6 multicast group -> 33:33 + low 32 bits of the group."""
+    packed = ipaddress.IPv6Address(str(group_ip)).packed
+    return "33:33:%02x:%02x:%02x:%02x" % (packed[12], packed[13], packed[14], packed[15])
+
+
+def _is_ipv4_mcast(ip):
+    try:
+        return ipaddress.IPv4Address(str(ip)).is_multicast
+    except Exception:
+        return False
+
+
+def _is_ipv6_mcast(ip):
+    try:
+        return ipaddress.IPv6Address(str(ip)).is_multicast
+    except Exception:
+        return False
+
+
+def _mcast_l2_for_ip(ip):
+    """Return the derived multicast L2 MAC for an IPv4 or IPv6 group, or None."""
+    if _is_ipv4_mcast(ip):
+        return _ipv4_mcast_mac(ip)
+    if _is_ipv6_mcast(ip):
+        return _ipv6_mcast_mac(ip)
+    return None
+
+
+def _v3_record_type(*, leave, filter_mode, sources, override):
+    """Pick the IGMPv3/MLDv2 GroupRecord type for the requested action.
+
+    join  + include + S  -> CHANGE_TO_INCLUDE_MODE  (S,G) join
+    join  + exclude      -> CHANGE_TO_EXCLUDE_MODE  (*,G) join
+    leave + S            -> BLOCK_OLD_SOURCES       (S,G) leave
+    leave (no source)    -> CHANGE_TO_INCLUDE_MODE  (*,G) leave (to empty INCLUDE)
+    """
+    if override:
+        key = str(override).strip().lower()
+        return _V3_RECORD_TYPES.get(key, override)
+    if leave:
+        return "BLOCK_OLD_SOURCES" if sources else "CHANGE_TO_INCLUDE_MODE"
+    fm = (filter_mode or ("include" if sources else "exclude")).lower()
+    return "CHANGE_TO_INCLUDE_MODE" if fm == "include" else "CHANGE_TO_EXCLUDE_MODE"
+
+
+def _mcast_build_l2(stc, sb, src_mac, dst_mac, outer_vlan, inner_vlan_id):
+    """Build EthernetII (+ optional VLAN tags) on a fresh StreamBlock."""
+    eth = stc.get(sb, "children-ethernet:EthernetII")
+    if eth:
+        stc.config(eth, srcMac=src_mac, dstMac=dst_mac)
+    else:
+        eth = stc.create("ethernet:EthernetII", under=sb, srcMac=src_mac, dstMac=dst_mac)
+    if outer_vlan is not None:
+        vlans = stc.create("vlans", under=eth)
+        stc.create("Vlan", under=vlans, id=str(outer_vlan), pri="0", cfi="0")
+        if inner_vlan_id is not None:
+            stc.create("Vlan", under=vlans, id=str(inner_vlan_id), pri="0", cfi="0")
+    return eth
+
+
+def _add_igmp_v3_records(stc, report_handle, *, group, sources, record_type):
+    """Attach grpRecords/GroupRecord (+ best-effort source list) to a v3/MLDv2 report."""
+    grp_records = stc.create("grpRecords", under=report_handle)
+    record = stc.create(
+        "GroupRecord", under=grp_records,
+        mcastAddr=str(group), recordType=record_type, numSource=str(len(sources)),
+    )
+    if sources:
+        # [VALIDATE-LIVE] confirm the GroupRecord source-list child/attr name on
+        # the Lab Server. Tried (in order) common STC encodings; degrade quietly.
+        applied = False
+        for attr in ("srcList", "sourceList", "SrcList"):
+            try:
+                stc.config(record, **{attr: " ".join(str(s) for s in sources)})
+                applied = True
+                break
+            except Exception:
+                continue
+        if not applied:
+            try:
+                for s in sources:
+                    stc.create("SourceAddr", under=record, address=str(s))
+                applied = True
+            except Exception:
+                applied = False
+        if not applied:
+            print(f"[WARN] v3 source list {sources} could not be set "
+                  "(STC source-record attr name needs live validation [VALIDATE-LIVE])")
+    return record
+
+
+def _mcast_membership_stream(args, *, leave):
+    """Create a stateless IGMP/MLD membership report (join) or leave StreamBlock.
+
+    Builds Eth -> VLAN(s) -> IPv4/IPv6 (ttl/hop-limit 1) -> IGMP/MLD PDU.
+    family=ipv4 -> IGMP v1/v2/v3 ; family=ipv6 -> MLD v1/v2.
+    """
+    config = load_config()
+    stc, sess = _require_ready(config)
+    port_handle = sess["port_handle"]
+
+    family = (getattr(args, "family", None) or "ipv4").lower()
+    version = str(getattr(args, "version", None) or ("2" if family == "ipv4" else "1"))
+    group = args.group
+    sources = [s.strip() for s in (getattr(args, "source", None) or "").split(",") if s.strip()]
+    filter_mode = getattr(args, "filter_mode", None)
+    record_override = getattr(args, "record_type", None)
+    action = "leave" if leave else "join"
+
+    default_name = f"mcast_{family}_v{version}_{action}_{len(sess.get('streams', []))}"
+    stream_name = args.name or default_name
+    host_mac = args.src_mac or "00:10:94:00:00:02"
+    if family == "ipv6":
+        host_ip = args.src_ip or "fe80::1094:1"
+    else:
+        host_ip = args.src_ip or "10.0.0.2"
+
+    frame_size = int(args.frame_size) if getattr(args, "frame_size", None) else 64
+    rate_pps = float(args.rate_pps) if getattr(args, "rate_pps", None) else 1.0
+
+    outer_vlan, inner_vlan_id = _resolve_qinq_vlans(
+        config, sess, getattr(args, "vlan", None), getattr(args, "inner_vlan", None),
+        no_qinq=getattr(args, "no_qinq", False),
+    )
+
+    # Decide L2/L3 control destination + PDU class per family/version/action.
+    record_type = None
+    if family == "ipv6":
+        if version == "2":
+            dst_ip = MLD_V2_REPORT_IP
+            record_type = _v3_record_type(leave=leave, filter_mode=filter_mode,
+                                          sources=sources, override=record_override)
+        elif leave:
+            dst_ip = MLD_ALL_ROUTERS_IP            # MLDv1 Done
+        else:
+            dst_ip = str(group)                    # MLDv1 Report -> group
+        dst_mac = _ipv6_mcast_mac(dst_ip)
+    else:
+        if version == "3":
+            dst_ip = IGMP_V3_REPORT_IP
+            dst_mac = IGMP_V3_REPORT_MAC
+            record_type = _v3_record_type(leave=leave, filter_mode=filter_mode,
+                                          sources=sources, override=record_override)
+        elif version == "2" and leave:
+            dst_ip = IGMP_ALL_ROUTERS_IP           # v2 Leave -> all-routers
+            dst_mac = IGMP_ALL_ROUTERS_MAC
+        else:
+            dst_ip = str(group)                    # v1/v2 Report -> group
+            dst_mac = _ipv4_mcast_mac(group)
+
+    sb = stc.create("streamBlock", under=port_handle, insertSig="false",
+                    frameLengthMode="FIXED", FixedFrameLength=str(frame_size),
+                    load=str(rate_pps), loadUnit="FRAMES_PER_SECOND", name=stream_name)
+    _mcast_build_l2(stc, sb, host_mac, dst_mac, outer_vlan, inner_vlan_id)
+
+    if family == "ipv6":
+        stc.create("ipv6:IPv6", under=sb, sourceAddr=host_ip, destAddr=dst_ip, hopLimit="1")
+        if version == "2":
+            rpt = stc.create("mld:Mldv2Report", under=sb)      # [VALIDATE-LIVE]
+            _add_igmp_v3_records(stc, rpt, group=group, sources=sources, record_type=record_type)
+        elif leave:
+            stc.create("mld:MldDone", under=sb, groupAddress=str(group))   # [VALIDATE-LIVE]
+        else:
+            stc.create("mld:Mldv1Report", under=sb, groupAddress=str(group))  # [VALIDATE-LIVE]
+    else:
+        stc.create("ipv4:IPv4", under=sb, sourceAddr=host_ip, destAddr=dst_ip, ttl="1")
+        if version == "3":
+            rpt = stc.create("igmp:Igmpv3Report", under=sb)
+            _add_igmp_v3_records(stc, rpt, group=group, sources=sources, record_type=record_type)
+        elif version == "2" and leave:
+            stc.create("igmp:Igmpv2Leave", under=sb, groupAddress=str(group))
+        elif version == "2":
+            stc.create("igmp:Igmpv2Report", under=sb, groupAddress=str(group))
+        else:  # v1 (join only; v1 has no Leave message)
+            stc.create("igmp:Igmpv1", under=sb, groupAddress=str(group))
+
+    stc.apply()
+
+    info = {
+        "name": stream_name, "handle": sb, "kind": f"mcast-{action}",
+        "family": family, "igmp_version": version, "group": group,
+        "sources": sources, "filter_mode": filter_mode, "record_type": record_type,
+        "src_ip": host_ip, "src_mac": host_mac, "dst_ip": dst_ip, "dst_mac": dst_mac,
+        "vlan": outer_vlan, "inner_vlan": inner_vlan_id,
+        "rate": rate_pps, "rate_unit": "FRAMES_PER_SECOND", "frame_size": frame_size,
+        "protocol": f"{'mld' if family == 'ipv6' else 'igmp'}-v{version}-{action}",
+        "created": datetime.utcnow().isoformat(),
+    }
+    sess["streams"] = [s for s in sess.get("streams", []) if s.get("name") != stream_name]
+    sess.setdefault("streams", []).append(info)
+    save_session(sess)
+    print(f"Multicast {action} stream created: {stream_name} "
+          f"({'MLD' if family == 'ipv6' else 'IGMP'}v{version} group {group}"
+          f"{(' src ' + ','.join(sources)) if sources else ''})")
+    print(json.dumps(info, indent=2))
+
+
+def cmd_create_mcast_source(args):
+    """Create a multicast data SOURCE StreamBlock (auto group L2 MAC).
+
+    src_ip is the multicast source S; group is the destination group G. The
+    Ethernet destination is derived per RFC 1112 (IPv4) / RFC 2464 (IPv6).
+    """
+    config = load_config()
+    stc, sess = _require_ready(config)
+    port_handle = sess["port_handle"]
+
+    family = (getattr(args, "family", None) or "ipv4").lower()
+    group = args.group
+    if family == "ipv6":
+        if not _is_ipv6_mcast(group):
+            raise SystemExit(f"--group {group} is not an IPv6 multicast address (ff00::/8)")
+        dst_mac = _ipv6_mcast_mac(group)
+        src_ip = args.source or args.src_ip or "2001:db8::1"
+    else:
+        if not _is_ipv4_mcast(group):
+            raise SystemExit(f"--group {group} is not an IPv4 multicast group (224.0.0.0/4)")
+        dst_mac = _ipv4_mcast_mac(group)
+        src_ip = args.source or args.src_ip or "10.0.0.1"
+
+    stream_name = args.name or f"mcast_src_{len(sess.get('streams', []))}"
+    src_mac = args.src_mac or "00:10:94:00:00:01"
+    frame_size = int(args.frame_size) if getattr(args, "frame_size", None) else 128
+
+    load_unit = "MEGABITS_PER_SECOND"
+    rate = float(args.rate_mbps) if getattr(args, "rate_mbps", None) else 1.0
+    if getattr(args, "rate_pps", None):
+        load_unit = "FRAMES_PER_SECOND"
+        rate = float(args.rate_pps)
+
+    outer_vlan, inner_vlan_id = _resolve_qinq_vlans(
+        config, sess, getattr(args, "vlan", None), getattr(args, "inner_vlan", None),
+        no_qinq=getattr(args, "no_qinq", False),
+    )
+
+    sb = stc.create("streamBlock", under=port_handle, insertSig="true",
+                    frameLengthMode="FIXED", FixedFrameLength=str(frame_size),
+                    load=str(rate), loadUnit=load_unit, name=stream_name)
+    _mcast_build_l2(stc, sb, src_mac, dst_mac, outer_vlan, inner_vlan_id)
+    if family == "ipv6":
+        stc.create("ipv6:IPv6", under=sb, sourceAddr=src_ip, destAddr=str(group))
+    else:
+        existing_ip = stc.get(sb, "children-ipv4:IPv4")
+        if existing_ip:
+            stc.config(existing_ip, sourceAddr=src_ip, destAddr=str(group))
+        else:
+            stc.create("ipv4:IPv4", under=sb, sourceAddr=src_ip, destAddr=str(group))
+    stc.apply()
+
+    info = {
+        "name": stream_name, "handle": sb, "kind": "mcast-source",
+        "family": family, "group": group, "src_ip": src_ip,
+        "src_mac": src_mac, "dst_mac": dst_mac,
+        "vlan": outer_vlan, "inner_vlan": inner_vlan_id,
+        "rate": rate, "rate_unit": load_unit, "frame_size": frame_size,
+        "protocol": "mcast-source-" + family,
+        "created": datetime.utcnow().isoformat(),
+    }
+    sess["streams"] = [s for s in sess.get("streams", []) if s.get("name") != stream_name]
+    sess.setdefault("streams", []).append(info)
+    save_session(sess)
+    print(f"Multicast source stream created: {stream_name} "
+          f"(S={src_ip} -> G={group}, dst_mac={dst_mac})")
+    print(json.dumps(info, indent=2))
+
+
+def cmd_create_mcast_receiver(args):
+    """Create a stateless IGMP/MLD membership report (join) StreamBlock."""
+    return _mcast_membership_stream(args, leave=False)
+
+
+def cmd_mcast_leave(args):
+    """Create a stateless IGMP/MLD leave/done StreamBlock."""
+    return _mcast_membership_stream(args, leave=True)
+
+
+def cmd_mcast_querier(args):
+    """Emulate an external mrouter: send a stateless IGMP/MLD query.
+
+    A query with source != 0.0.0.0 (RFC 4541) makes the DUT mark the Spirent
+    port as an mrouter port. --group empty => General Query; --group set =>
+    Group-Specific Query.
+    """
+    config = load_config()
+    stc, sess = _require_ready(config)
+    port_handle = sess["port_handle"]
+
+    family = (getattr(args, "family", None) or "ipv4").lower()
+    version = str(getattr(args, "version", None) or ("2" if family == "ipv4" else "1"))
+    group = getattr(args, "group", None)
+    general = not group
+    querier_ip = args.src_ip or ("fe80::1094:fe" if family == "ipv6" else "10.0.0.254")
+    querier_mac = args.src_mac or "00:10:94:00:00:fe"
+    stream_name = args.name or f"mcast_{family}_v{version}_query_{len(sess.get('streams', []))}"
+    frame_size = int(args.frame_size) if getattr(args, "frame_size", None) else 64
+    rate_pps = float(args.rate_pps) if getattr(args, "rate_pps", None) else 1.0
+
+    outer_vlan, inner_vlan_id = _resolve_qinq_vlans(
+        config, sess, getattr(args, "vlan", None), getattr(args, "inner_vlan", None),
+        no_qinq=getattr(args, "no_qinq", False),
+    )
+
+    if family == "ipv6":
+        dst_ip = MLD_ALL_NODES_IP if general else str(group)
+        dst_mac = _ipv6_mcast_mac(dst_ip)
+    else:
+        dst_ip = IGMP_ALL_HOSTS_IP if general else str(group)
+        dst_mac = IGMP_ALL_HOSTS_MAC if general else _ipv4_mcast_mac(group)
+
+    sb = stc.create("streamBlock", under=port_handle, insertSig="false",
+                    frameLengthMode="FIXED", FixedFrameLength=str(frame_size),
+                    load=str(rate_pps), loadUnit="FRAMES_PER_SECOND", name=stream_name)
+    _mcast_build_l2(stc, sb, querier_mac, dst_mac, outer_vlan, inner_vlan_id)
+
+    group_addr = "0.0.0.0" if (general and family == "ipv4") else ("::" if general else str(group))
+    if family == "ipv6":
+        stc.create("ipv6:IPv6", under=sb, sourceAddr=querier_ip, destAddr=dst_ip, hopLimit="1")
+        # [VALIDATE-LIVE] MLD query object names.
+        mld_query = "mld:Mldv2Query" if version == "2" else "mld:Mldv1Query"
+        stc.create(mld_query, under=sb, groupAddress=group_addr)
+    else:
+        stc.create("ipv4:IPv4", under=sb, sourceAddr=querier_ip, destAddr=dst_ip, ttl="1")
+        # [VALIDATE-LIVE] IGMP query object names (v2/v3).
+        igmp_query = "igmp:Igmpv3Query" if version == "3" else "igmp:Igmpv2Query"
+        stc.create(igmp_query, under=sb, groupAddress=group_addr)
+    stc.apply()
+
+    info = {
+        "name": stream_name, "handle": sb, "kind": "mcast-querier",
+        "family": family, "igmp_version": version,
+        "query_type": "general" if general else "group-specific",
+        "group": None if general else group, "querier_ip": querier_ip,
+        "src_mac": querier_mac, "dst_ip": dst_ip, "dst_mac": dst_mac,
+        "vlan": outer_vlan, "inner_vlan": inner_vlan_id,
+        "rate": rate_pps, "rate_unit": "FRAMES_PER_SECOND", "frame_size": frame_size,
+        "protocol": f"{'mld' if family == 'ipv6' else 'igmp'}-v{version}-query",
+        "created": datetime.utcnow().isoformat(),
+    }
+    sess["streams"] = [s for s in sess.get("streams", []) if s.get("name") != stream_name]
+    sess.setdefault("streams", []).append(info)
+    save_session(sess)
+    print(f"Multicast querier stream created: {stream_name} "
+          f"({'general' if general else 'group-specific'} {('MLD' if family == 'ipv6' else 'IGMP')}v{version} query, "
+          f"src {querier_ip})")
+    print(json.dumps(info, indent=2))
+
+
+def cmd_igmp_host(args):
+    """Configure a STATEFUL IGMP host stack (IgmpHostConfig) on an existing device.
+
+    A stateful host auto-replies to membership queries from the DUT. It must be
+    attached to an existing EmulatedDevice (created via create-device) that has an
+    IPv4 stack. [VALIDATE-LIVE]: the IgmpHostConfig / IgmpGroupMembership /
+    Ipv4Group object + relation names are confirmed against the Lab Server on the
+    first live /TEST run; this builder degrades gracefully on a name mismatch.
+    """
+    config = load_config()
+    stc, sess = _require_ready(config)
+    project = sess["project_handle"]
+
+    dev_name = getattr(args, "device_name", None)
+    devices = [d for d in sess.get("devices", []) if d.get("handle")]
+    if dev_name:
+        devices = [d for d in devices if d.get("name") == dev_name]
+    if not devices:
+        raise SystemExit("igmp-host requires an existing emulated device "
+                         "(create-device first); use --device-name to select it")
+    device = devices[0]
+    device_handle = device["handle"]
+
+    version = str(getattr(args, "version", None) or "3")
+    stc_version = {"1": "IGMP_V1", "2": "IGMP_V2", "3": "IGMP_V3"}.get(version, "IGMP_V3")
+    group = args.group
+    group_count = int(getattr(args, "group_count", None) or 1)
+    sources = [s.strip() for s in (getattr(args, "source", None) or "").split(",") if s.strip()]
+    filter_mode = (getattr(args, "filter_mode", None) or ("INCLUDE" if sources else "EXCLUDE")).upper()
+
+    warnings = []
+    try:
+        igmp = stc.create("IgmpHostConfig", under=device_handle, Version=stc_version)
+    except Exception as exc:
+        raise SystemExit(f"[VALIDATE-LIVE] IgmpHostConfig create failed: {exc}. "
+                         "Confirm the stateful host object name against the Lab Server.")
+
+    # Multicast group pool object (Ipv4Group + Ipv4NetworkBlock).
+    grp_handle = None
+    try:
+        grp_handle = stc.create("Ipv4Group", under=project)
+        stc.create("Ipv4NetworkBlock", under=grp_handle,
+                   StartIpList=str(group), NetworkCount=str(group_count), PrefixLength="32")
+    except Exception as exc:
+        warnings.append(f"[VALIDATE-LIVE] Ipv4Group/Ipv4NetworkBlock failed: {exc}")
+
+    member = None
+    try:
+        member = stc.create("IgmpGroupMembership", under=igmp,
+                            DeviceGroupMapping="MANY_TO_MANY", FilterMode=filter_mode)
+        if grp_handle:
+            stc.config(member, **{"MulticastGroup-targets": [grp_handle]})
+    except Exception as exc:
+        warnings.append(f"[VALIDATE-LIVE] IgmpGroupMembership failed: {exc}")
+
+    if sources and member:
+        try:
+            src_grp = stc.create("Ipv4Group", under=project)
+            stc.create("Ipv4NetworkBlock", under=src_grp,
+                       StartIpList=str(sources[0]), NetworkCount=str(len(sources)), PrefixLength="32")
+            stc.config(member, **{"SrcListBlk-targets": [src_grp]})
+        except Exception as exc:
+            warnings.append(f"[VALIDATE-LIVE] v3 source block failed: {exc}")
+
+    try:
+        stc.apply()
+    except Exception as exc:
+        warnings.append(f"apply failed: {exc}")
+
+    device.setdefault("igmp_hosts", []).append({
+        "handle": igmp, "version": version, "group": group,
+        "group_count": group_count, "sources": sources, "filter_mode": filter_mode,
+    })
+    save_session(sess)
+    print(f"IGMP host (stateful) configured on {device['name']}: "
+          f"IGMPv{version} {filter_mode} group {group} x{group_count}"
+          f"{(' src ' + ','.join(sources)) if sources else ''}")
+    for w in warnings:
+        print(w)
+    print(json.dumps({
+        "device": device["name"], "igmp_handle": igmp, "version": version,
+        "group": group, "group_count": group_count, "sources": sources,
+        "filter_mode": filter_mode, "warnings": warnings,
+        "note": "Start with protocol-start; [VALIDATE-LIVE] object names on first live run.",
+    }, indent=2))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Spirent TestCenter CLI tool")
     sub = parser.add_subparsers(dest="command")
@@ -8083,6 +8563,74 @@ def main(argv=None):
     p_daemon.add_argument("run_argv", nargs=argparse.REMAINDER,
                           help="Arguments to forward to spirent_tool.py inside the daemon (for 'run')")
 
+    # ---- Multicast / IGMP / MLD (EVPN IGMP-Proxy, SW-211037) ----
+    p_mc_src = sub.add_parser("create-mcast-source",
+        help="Create a multicast data SOURCE stream (auto group MAC; (S,G) src + group dst)")
+    p_mc_src.add_argument("--group", required=True, help="Multicast group G (dst IP, e.g. 239.1.1.1 or ff38::1)")
+    p_mc_src.add_argument("--source", default=None, help="Multicast source S (src IP); alias of --src-ip")
+    p_mc_src.add_argument("--src-ip", default=None, help="Source IP S (if --source not given)")
+    p_mc_src.add_argument("--family", default="ipv4", choices=["ipv4", "ipv6"], help="ipv4 (IGMP) or ipv6 (MLD)")
+    p_mc_src.add_argument("--src-mac", default=None, help="Source MAC")
+    p_mc_src.add_argument("--vlan", type=int, default=None, help="Outer VLAN")
+    p_mc_src.add_argument("--inner-vlan", type=int, default=None, help="Inner VLAN (auto Q-in-Q if unset)")
+    p_mc_src.add_argument("--no-qinq", action="store_true", help="Force single-tagged")
+    p_mc_src.add_argument("--rate-mbps", default=None, help="Rate in Mbps (default 1)")
+    p_mc_src.add_argument("--rate-pps", default=None, help="Rate in frames/sec (overrides --rate-mbps)")
+    p_mc_src.add_argument("--frame-size", default=None, help="Frame size bytes (default 128)")
+    p_mc_src.add_argument("--name", default=None, help="Stream name")
+
+    def _add_membership_args(p, *, with_action=False):
+        p.add_argument("--group", required=True, help="Multicast group G")
+        p.add_argument("--version", default=None, choices=["1", "2", "3"],
+                       help="IGMP version (ipv4) / MLD version 1|2 (ipv6); default 2 (ipv4) / 1 (ipv6)")
+        p.add_argument("--family", default="ipv4", choices=["ipv4", "ipv6"], help="ipv4 (IGMP) / ipv6 (MLD)")
+        p.add_argument("--source", default=None, help="Comma-separated source list S for (S,G) (v3 / MLDv2)")
+        p.add_argument("--filter-mode", default=None, choices=["include", "exclude"],
+                       help="v3/MLDv2 filter mode (default include if --source else exclude)")
+        p.add_argument("--record-type", default=None,
+                       help="Override v3 GroupRecord type (mode_is_include|mode_is_exclude|"
+                            "change_to_include|change_to_exclude|allow_new_sources|block_old_sources)")
+        p.add_argument("--src-ip", default=None, help="Host source IP")
+        p.add_argument("--src-mac", default=None, help="Host source MAC")
+        p.add_argument("--vlan", type=int, default=None, help="Outer VLAN")
+        p.add_argument("--inner-vlan", type=int, default=None, help="Inner VLAN")
+        p.add_argument("--no-qinq", action="store_true", help="Force single-tagged")
+        p.add_argument("--rate-pps", default=None, help="Frames/sec (default 1)")
+        p.add_argument("--frame-size", default=None, help="Frame size bytes (default 64)")
+        p.add_argument("--name", default=None, help="Stream name")
+
+    p_mc_rcv = sub.add_parser("create-mcast-receiver",
+        help="Create a stateless IGMP/MLD membership report (join): v1/v2/v3, (*,G)/(S,G), include/exclude")
+    _add_membership_args(p_mc_rcv)
+
+    p_mc_lv = sub.add_parser("mcast-leave",
+        help="Create a stateless IGMP/MLD leave/done (v2 Leave / v3 block / MLD Done)")
+    _add_membership_args(p_mc_lv)
+
+    p_mc_q = sub.add_parser("mcast-querier",
+        help="Emulate an external mrouter: send an IGMP/MLD General or Group-Specific Query (src != 0)")
+    p_mc_q.add_argument("--group", default=None, help="Group for a Group-Specific Query (omit for General Query)")
+    p_mc_q.add_argument("--version", default=None, choices=["1", "2", "3"], help="IGMP/MLD query version")
+    p_mc_q.add_argument("--family", default="ipv4", choices=["ipv4", "ipv6"], help="ipv4 (IGMP) / ipv6 (MLD)")
+    p_mc_q.add_argument("--src-ip", default=None, help="Querier source IP (must be non-zero to mark mrouter)")
+    p_mc_q.add_argument("--src-mac", default=None, help="Querier source MAC")
+    p_mc_q.add_argument("--vlan", type=int, default=None, help="Outer VLAN")
+    p_mc_q.add_argument("--inner-vlan", type=int, default=None, help="Inner VLAN")
+    p_mc_q.add_argument("--no-qinq", action="store_true", help="Force single-tagged")
+    p_mc_q.add_argument("--rate-pps", default=None, help="Frames/sec (default 1)")
+    p_mc_q.add_argument("--frame-size", default=None, help="Frame size bytes (default 64)")
+    p_mc_q.add_argument("--name", default=None, help="Stream name")
+
+    p_igmp_host = sub.add_parser("igmp-host",
+        help="Configure a STATEFUL IGMP host stack (IgmpHostConfig) on an existing emulated device")
+    p_igmp_host.add_argument("--device-name", default=None, help="Existing emulated device to attach the host stack to")
+    p_igmp_host.add_argument("--group", required=True, help="Multicast group G (start of pool)")
+    p_igmp_host.add_argument("--group-count", type=int, default=1, help="Number of groups in the pool (default 1)")
+    p_igmp_host.add_argument("--version", default=None, choices=["1", "2", "3"], help="IGMP version (default 3)")
+    p_igmp_host.add_argument("--source", default=None, help="Comma-separated source list for (S,G) (v3)")
+    p_igmp_host.add_argument("--filter-mode", default=None, choices=["include", "exclude"],
+                             help="v3 filter mode (default include if --source else exclude)")
+
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
@@ -8135,6 +8683,11 @@ def main(argv=None):
         "footprint": cmd_footprint,
         "mac-mob-flap": cmd_mac_mob_flap,
         "daemon": cmd_daemon,
+        "create-mcast-source": cmd_create_mcast_source,
+        "create-mcast-receiver": cmd_create_mcast_receiver,
+        "mcast-leave": cmd_mcast_leave,
+        "mcast-querier": cmd_mcast_querier,
+        "igmp-host": cmd_igmp_host,
     }
     rc = cmds[args.command](args)
     return rc
