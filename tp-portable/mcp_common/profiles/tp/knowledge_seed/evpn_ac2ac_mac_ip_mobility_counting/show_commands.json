@@ -1,0 +1,74 @@
+[
+  {
+    "cmd": "show evpn instance EVPN_CLTEST_IRB mac-table detail | no-more",
+    "device_role": "PE",
+    "expected_keywords": [
+      "MAC address",
+      "Protocol",
+      "Interface"
+    ],
+    "expected_section_markers": [],
+    "purpose": "PRIMARY mobility surface: per-MAC Protocol/ESI/Interface/Timestamp, Sequence number, and (only when a counted move occurred) the 'MAC Mobility -> Moves per Detection Window' + 'Mobility History' block. Table-level 'detail' only; per-MAC '... mac <mac> detail' is INVALID (Unknown word detail).",
+    "source_id": null,
+    "live_validated_at": "2026-07-09T14:37:05Z",
+    "live_status": "LIVE_VALIDATED",
+    "last_excerpt": "EVPN    : EVPN_CLTEST_IRB\nEVI ID  : 203\nETH TAG : 0\nMAC address: 00:de:ad:00:18:01\n  Protocol: Local\n      ESI: N/A\n      Interface: ge100-18/0/0.601\n      Timestamp: 09-Jul-2026-17:29:35\nMAC address: 84:40:76:9f:84:62\n  Protocol: Local\n      ESI: N/A\n      Interface: irb6001\n      Timestamp: 09-Jul-2026-12:15:54\n        Default Gateway: True\n        Sticky: True\n        Sequence number: 0\nMAC address: e8:c5:7a:39:bf:4b\n  Protocol: Local\n      ESI: N/A\n      Interface: ge100-6/0/2.601\n      Time",
+    "live_device": "YOR_CL_PE-4"
+  },
+  {
+    "cmd": "show evpn mac-ip-table instance EVPN_CLTEST_IRB | no-more",
+    "device_role": "PE",
+    "expected_keywords": [
+      "IP Address",
+      "Source"
+    ],
+    "expected_section_markers": [],
+    "purpose": "MAC-IP owner interface (follows host on any move). Use 'ip <ip>' for per-IP incl. IP Mobility block + IP Sequence number.",
+    "source_id": null,
+    "live_validated_at": "2026-07-09T14:37:08Z",
+    "live_status": "LIVE_VALIDATED",
+    "last_excerpt": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, A - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: EVPN_CLTEST_IRB\n  EVI ID : 203\n\n  ETH TAG: 0\n    Flags     | MAC address          | ESI                           | IP Address                                 | Source                 | Label",
+    "live_device": "YOR_CL_PE-4"
+  },
+  {
+    "cmd": "show dnos-internal routing evpn mac-mobility-redis-count | no-more",
+    "device_role": "PE",
+    "expected_keywords": [
+      "entries in redis"
+    ],
+    "expected_section_markers": [],
+    "purpose": "Cluster-wide counted-move gauge. 0 for null-ESI moves; increments (e.g. 0->2 for MAC+IP) on a distinct-ESI counted move. Sample before AND after each suspected move.",
+    "source_id": null,
+    "live_validated_at": "2026-07-09T14:37:12Z",
+    "live_status": "LIVE_VALIDATED",
+    "last_excerpt": "Number of MAC-Mobility entries in redis: 0",
+    "live_device": "YOR_CL_PE-4"
+  },
+  {
+    "cmd": "show evpn instance EVPN_CLTEST_IRB mac-table suppress | no-more",
+    "device_role": "PE",
+    "expected_keywords": [],
+    "expected_section_markers": [],
+    "purpose": "Mobility suppression table. Empty unless the move rate crosses the mac-move threshold. Empty during a single counted move.",
+    "source_id": null,
+    "live_validated_at": "2026-07-09T14:37:16Z",
+    "live_status": "LIVE_EMPTY",
+    "last_excerpt": "",
+    "live_device": "YOR_CL_PE-4"
+  },
+  {
+    "cmd": "show ethernet-segments detail | no-more",
+    "device_role": "PE",
+    "expected_keywords": [
+      "ESI",
+      "Interface"
+    ],
+    "expected_section_markers": [],
+    "purpose": "Confirms the per-AC ESI actually formed an Ethernet Segment (State Up, Attached to service). Renders ESI as 10 octets (config value is 9).",
+    "source_id": null,
+    "live_validated_at": "2026-07-09T14:37:20Z",
+    "live_status": "LIVE_VALIDATED",
+    "last_excerpt": "Number of ethernet segments: 1\n\nESI: 00:00:00:00:00:00:00:00:03:ea\n  Configured Mode: single-active\n  DF Election Algorithm: Mod based\n  DF Election timer: 3 seconds\n  Advertised ESI label: 256\n  Algorithm: mod\n\n  Interface: ge100-18/0/0.4001 State: Up\n  Number of sub-interfaces: 1\n\n  sub-interface: ge100-18/0/0.4001 State: Up\n  Attached to service: EVPN_SI_VPLS_1",
+    "live_device": "YOR_CL_PE-4"
+  }
+]

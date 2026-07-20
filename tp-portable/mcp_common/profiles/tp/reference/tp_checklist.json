@@ -1,0 +1,375 @@
+{
+  "_meta": {
+    "note": "Jira Test Category keys (reference_jira_key) are FlowSpec-VPN examples only; resolve per-epic at Jira push time.",
+    "jira_category_key": "jira_category",
+    "reference_jira_key_note": "Historical FlowSpec-VPN category issue; do not reuse for other epics.",
+    "run1_format_defaults": {
+      "readable_tc_ids": "TC-<FEAT>-<CAT>-<slug-from-name>",
+      "per_category_prerequisites": "SW-265228 numbered build+verify block before each category",
+      "procedure_action_column": "Rich TC table: Step|Dev|Action|Command|Expected",
+      "negative_malformation_category": "Auto-add when HLD Group G / RFC-7606 negatives present",
+      "scenario_coverage": "Every scenario_inventory needs-coverage item mapped via covers_scenarios[] or waived with reason"
+    }
+  },
+  "Interface Types/Services": {
+    "id": 1,
+    "description": "Interface types/services permutations, speed changes",
+    "contributor": "Rami Merimski",
+    "tasks": [
+      "All relevant interface types supported by feature",
+      "Non-supported interface types (negative testing)",
+      "Bundle/physical/breakout/speed layer 3",
+      "Bundle/physical/breakout/speed layer 2 with vlan single&double tagging",
+      "Cross-connect, vpws, evpn, evpn-vpws",
+      "MPLS enabled/disabled with traffic",
+      "Layer 3 VPN (ipv4/ipv6) / Layer 2 VPN (evpn)",
+      "IRB (bridge domain)",
+      "Bandwidth test - throughput to full capacity",
+      "LFS/RFS and system events"
+    ],
+    "jira_category": "Basic functionality + Topology",
+    "reference_jira_key": "SW-231823"
+  },
+  "Sanity": {
+    "id": 2,
+    "description": "Basic positive/negative test, ON/OFF switch of feature",
+    "contributor": "Amir Foox",
+    "tasks": [
+      "Basic positive test with granulated steps",
+      "Basic negative test",
+      "ON/OFF switch of tested feature",
+      "Basic functionality in terms of CLI",
+      "Config and no form of command from all hierarchies",
+      "Basic functionality in terms of traffic/control",
+      "Basic scale per spec",
+      "Basic Interop (DN-to-DN, DN-to-Cisco/Juniper/Arista)",
+      "Physical/Sub-Physical/Bundle/Sub-Bundle/Breakout interfaces"
+    ],
+    "jira_category": "Basic functionality + Topology",
+    "reference_jira_key": "SW-231823"
+  },
+  "CLI": {
+    "id": 3,
+    "description": "Rollback, load override/merge, admin-state, show commands",
+    "contributor": "Mark Kazakov, Lea Gutin",
+    "tasks": [
+      "Rollback while candidate config exists",
+      "Load override/merge from file",
+      "Admin-state disabled/enabled on interfaces and BGP neighbors (NOT on BGP address-families)",
+      "Rollback 1-49",
+      "No command",
+      "Load override factory-default",
+      "Commit check/confirm/and-exit/log/no-warning",
+      "Help lines with ?",
+      "Show config from config/oper modes",
+      "Show commands in scale",
+      "Auto completion with TAB",
+      "All knobs on all hierarchy levels",
+      "End/exit/quit/top from every hierarchy",
+      "Show with count/exclude/find/include/monitor/no-more/tail",
+      "Show config with flatten"
+    ],
+    "jira_category": "CLI",
+    "reference_jira_key": "SW-231824"
+  },
+  "Negative Testing": {
+    "id": 4,
+    "description": "Malformed packets, error handling per RFC",
+    "contributor": "",
+    "tasks": [
+      "Malformed packets for protocol testing",
+      "Different message types altered",
+      "BGP error handling per RFC7606",
+      "Unsupported cases (negative TC)"
+    ],
+    "jira_category": "Advanced Functionality",
+    "reference_jira_key": "SW-231828"
+  },
+  "Various RIBs": {
+    "id": 5,
+    "description": "IPv4/IPv6 unicast, ILM, FTN, FTB with color",
+    "contributor": "",
+    "tasks": [
+      "IPv4 unicast in VRF default",
+      "IPv6 unicast in VRF default",
+      "IPv4 unicast in non-default VRF",
+      "IPv6 unicast in non-default VRF",
+      "ILM RIB (show mpls route)",
+      "FTN RIB (show route table mpls-nh)",
+      "FTNv6 RIB",
+      "FTB with color"
+    ],
+    "jira_category": "Advanced Functionality",
+    "reference_jira_key": "SW-231828"
+  },
+  "System Resources": {
+    "id": 6,
+    "description": "CPU, Memory, Disk, PIDs exhaustion testing",
+    "contributor": "",
+    "tasks": [
+      "Identify processes involved in feature",
+      "Memory consumption/clearing scenarios",
+      "CPU consumption/clearing scenarios",
+      "Child processes create/release",
+      "Threads create/release",
+      "TCP sockets create/release",
+      "Disk write scenarios",
+      "Stress test high scale"
+    ],
+    "jira_category": "Stress",
+    "reference_jira_key": "SW-234155"
+  },
+  "DNOR": {
+    "id": 7,
+    "description": "DNOR backup/restore config",
+    "contributor": "Adrian-Alexandru Irimia",
+    "tasks": [
+      "Connection between DUT and DNOR established",
+      "Save config on DNOR",
+      "Upload saved config from DNOR to DUT",
+      "Check connections via IPv4/IPv6, inband, oob"
+    ],
+    "jira_category": "CLI",
+    "reference_jira_key": "SW-231824"
+  },
+  "IPv4/IPv6": {
+    "id": 8,
+    "description": "Traffic types, neighbors, address-families",
+    "contributor": "Shachar Abramson",
+    "tasks": [
+      "Traffic type variants",
+      "IPv4/IPv6 neighbors",
+      "Address-families (ISIS/BGP/static)",
+      "ISIS single/multi topology",
+      "Different subnets",
+      "Secondary addresses",
+      "Illegal addresses (negative)",
+      "IPv4 NHs for IPv6 routes"
+    ],
+    "jira_category": "Advanced Functionality",
+    "reference_jira_key": "SW-231828"
+  },
+  "Counters": {
+    "id": 11,
+    "description": "uCLI commands, show views, clear commands",
+    "contributor": "Galit Gabay",
+    "tasks": [
+      "uCLI command TAB and ? completion",
+      "uCLI show view fields per US",
+      "uCLI clear command (counters start from 0)",
+      "Forward/fail traffic and check counters",
+      "Drop counters",
+      "Restart processes and check counters",
+      "GNMI/Netconf/SNMP counter match"
+    ],
+    "jira_category": "CLI",
+    "reference_jira_key": "SW-231824"
+  },
+  "Logs/Traces": {
+    "id": 12,
+    "description": "Trigger traces, check format, file rotation",
+    "contributor": "Galit Gabay",
+    "tasks": [
+      "Trigger each type of trace/log",
+      "Check required info in trace/log",
+      "Search with relevant greps",
+      "Enable debug knobs for traces",
+      "Check files rotate when relevant",
+      "Check trace/log in TS",
+      "GNMI/SNMP trace access"
+    ],
+    "jira_category": "CLI",
+    "reference_jira_key": "SW-231824"
+  },
+  "Traps": {
+    "id": 15,
+    "description": "SNMP traps with Ireasoning MIB Browser",
+    "contributor": "Robert Davidoiu, Cristiana Elena Nehoianu",
+    "tasks": [
+      "Configure trap-server",
+      "Verify DUT sending traps",
+      "Capture and verify SNMP packets",
+      "Verify trap type",
+      "Coldstart/warmstart events"
+    ],
+    "jira_category": "NetConf",
+    "reference_jira_key": "SW-231835"
+  },
+  "HA": {
+    "id": 17,
+    "description": "Containers/processes/system restarts, switchover/failover",
+    "contributor": "Mark Katsenelson, Cristiana Elena Nehoianu",
+    "tasks": [
+      "Container restarts (Routing/DP/Infra)",
+      "Process restarts (wb_agent, rib-manager, wb_fe_agent)",
+      "System restarts cold/warm",
+      "Switchover/Failover",
+      "NCE restarts (NCM/NCF/NCP/NCC)",
+      "Power off/on using remote PDU",
+      "CLI + Linux kill commands",
+      "SB restart in high scale of sockets",
+      "Pull PSU cable and perform restarts"
+    ],
+    "jira_category": "HA",
+    "reference_jira_key": "SW-231830"
+  },
+  "SNMP": {
+    "id": 18,
+    "description": "SNMP walk, community, traps",
+    "contributor": "Robert Davidoiu",
+    "tasks": [
+      "Configure SNMP community",
+      "SNMP walk on mgmt0",
+      "Feature-relevant permutations for traps"
+    ],
+    "jira_category": "NetConf",
+    "reference_jira_key": "SW-231835"
+  },
+  "System Events": {
+    "id": 19,
+    "description": "iLo/iDRAC actions, reboot events",
+    "contributor": "Alexey Kashin, Bogdan Nita",
+    "tasks": [
+      "System events on iLo/iDRAC reboots",
+      "Verify events after warm/cold reboot",
+      "Events for each element restart",
+      "Power off/on from PDU events"
+    ],
+    "jira_category": "HA",
+    "reference_jira_key": "SW-231830"
+  },
+  "Netconf": {
+    "id": 20,
+    "description": "Get/Edit-config, all knobs, RPC operations",
+    "contributor": "Tudor Segarceanu, Dany Zayat",
+    "tasks": [
+      "Configure all knobs via CLI and Get running-conf via Netconf",
+      "Configure all knobs via Netconf edit-config",
+      "No form via Netconf delete operation",
+      "Get oper data via Netconf",
+      "Password encrypted/clear testing",
+      "GET from ODL, MGSoft clients"
+    ],
+    "jira_category": "NetConf",
+    "reference_jira_key": "SW-231835"
+  },
+  "GNMI": {
+    "id": 21,
+    "description": "Get/Subscribe/On-change operations",
+    "contributor": "Tudor Segarceanu, Robert Davidoiu, Nitsan Stoler",
+    "tasks": [
+      "Subscribe once (GET equivalent)",
+      "GET operation",
+      "Subscribe sample interval mode",
+      "Subscribe on-change mode"
+    ],
+    "jira_category": "NetConf",
+    "reference_jira_key": "SW-231835"
+  },
+  "Scale": {
+    "id": 25,
+    "description": "Max limit, over limit, scale validations",
+    "contributor": "Alexey Kashin",
+    "tasks": [
+      "Show commands with all permutations in scale",
+      "Max limit of all feature parameters",
+      "Over limit testing",
+      "Config-sync scale limit violation",
+      "Show system npu resources before/during/after scale",
+      "Violate max scale on all NCPs (CL)",
+      "xraycli mempools_diff and dbal_tables_diff"
+    ],
+    "jira_category": "Scale",
+    "reference_jira_key": "SW-231829"
+  },
+  "Load + Stress": {
+    "id": 27,
+    "description": "Combined changes, load override/merge cycling",
+    "contributor": "Rami Merimski",
+    "tasks": [
+      "Stress test changes in one commit",
+      "Configuration change with interface type change",
+      "Load override/merge and factory-default cycling",
+      "Global deletes and reconfiguration"
+    ],
+    "jira_category": "Stress",
+    "reference_jira_key": "SW-234155"
+  },
+  "Upgrade/Downgrade": {
+    "id": 28,
+    "description": "Version upgrades, config changes, defaults",
+    "contributor": "Alin Dumitran, Mark Katsenelson, Nitsan Stoler",
+    "tasks": [
+      "Upgrade between versions (not just builds)",
+      "Check config changes/differences after upgrade",
+      "Non-default config values persist after upgrade",
+      "IPMI interfaces receive IPs after upgrade"
+    ],
+    "jira_category": "Upgrade",
+    "reference_jira_key": "SW-234156"
+  },
+  "Defaults": {
+    "id": 30,
+    "description": "Default values verification",
+    "contributor": "Mark Kazakov",
+    "tasks": [
+      "Admin-state default without explicit config",
+      "Default values per configurable knob",
+      "Configure default values explicitly",
+      "Load override/no returns default value"
+    ],
+    "jira_category": "CLI",
+    "reference_jira_key": "SW-231824"
+  },
+  "VRF Testing": {
+    "id": 45,
+    "description": "Default/non-default VRF, source-interface",
+    "contributor": "Cristiana Elena Nehoianu",
+    "tasks": [
+      "Remove servers and add on different VRF in same commit",
+      "Scaled number of servers remain after VRF change",
+      "Copy configuration in CLI",
+      "Load config from file",
+      "Source-interface validations and functionality"
+    ],
+    "jira_category": "Advanced Functionality",
+    "reference_jira_key": "SW-231828"
+  },
+  "Logs Rotation": {
+    "id": 49,
+    "description": "Logs rotation monitoring",
+    "contributor": "Constantin Ilinca",
+    "tasks": [
+      "Monitor traces/logs folder rotation",
+      "Add file larger than 120M and check rotation"
+    ],
+    "jira_category": "CLI",
+    "reference_jira_key": "SW-231824"
+  },
+  "Sanitizer": {
+    "id": 75,
+    "description": "Testing with Sanitizer build",
+    "contributor": "Constantin Ilinca",
+    "tasks": [
+      "Run TCs with Sanitizer build",
+      "Enable many different areas of feature (w/o Scale)"
+    ],
+    "jira_category": "Stress",
+    "reference_jira_key": "SW-234155"
+  },
+  "Interoperability": {
+    "id": 76,
+    "description": "Third-party vendor interoperability (DN-to-vendor)",
+    "contributor": "",
+    "jira_category": "Interoperability",
+    "reference_jira_key": "",
+    "tasks": [
+      "DN-to-DN baseline interoperability",
+      "DN-to-Cisco wire-format/TLV/adjacency per named vendor",
+      "DN-to-Juniper wire-format/TLV/adjacency per named vendor",
+      "DN-to-Arista wire-format/TLV/adjacency per named vendor",
+      "Known vendor limitation negative TC per named vendor",
+      "Vendor-deterministic role topology (CE-CISCO-X, PE-JUNIPER-Y, RR-ARISTA-Z)"
+    ]
+  }
+}

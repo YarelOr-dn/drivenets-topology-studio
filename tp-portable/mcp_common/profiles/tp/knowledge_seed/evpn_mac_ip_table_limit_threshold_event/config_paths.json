@@ -1,0 +1,11 @@
+[
+  {
+    "hierarchy": "network-services evpn instance <svc> mac-ip-handling",
+    "syntax": "network-services evpn instance <svc> mac-ip-handling mac-ip-table-limit <16-1048575>",
+    "purpose": "Per-service MAC-IP table limit (min 16). Threshold event fires at 90%, clears at 85%. Warn-only (not a hard cap).",
+    "source_id": null,
+    "live_validated_at": "2026-07-09T15:24:08Z",
+    "live_status": "LIVE_VALIDATED",
+    "live_device": "PE-1"
+  }
+]

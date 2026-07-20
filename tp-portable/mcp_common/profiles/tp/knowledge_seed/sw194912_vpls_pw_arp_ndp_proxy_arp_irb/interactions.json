@@ -1,0 +1,20 @@
+[
+  {
+    "scenario": "no_irb_pw_arp_or_ndp",
+    "when": "PW-side ARP/ND request/response enters service with no IRB",
+    "expected_result": "Flooded/forwarded to AC only; no Routing ARP/NDP row and no EVPN MAC-IP row",
+    "anti_pattern": "Routing learns PW MAC-IP or proxy reply is generated"
+  },
+  {
+    "scenario": "irb_pw_in_subnet_arp_or_ndp",
+    "when": "PW-side ARP/ND request/response enters IRB-attached service and IP is in IRB subnet",
+    "expected_result": "Flooded to AC and punted to Routing; Routing ARP/NDP row plus EVPN MAC-IP row created",
+    "anti_pattern": "DP flood works but Routing table remains empty"
+  },
+  {
+    "scenario": "proxy_reply_direction_guard",
+    "when": "Proxy ARP/NDP has learned a PW-side host and receives requests",
+    "expected_result": "AC-side requests may receive proxy reply; PW-side requests never receive generated proxy reply",
+    "anti_pattern": "Proxy reply egresses VPLS PW"
+  }
+]

@@ -1,0 +1,132 @@
+[
+  {
+    "device": "PE-IRB",
+    "cmd": "show evpn instance <service> detail | no-more",
+    "purpose": "Confirm service mode and EVI state",
+    "expected_keywords": [
+      "EVPN",
+      "EVI"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show evpn instance <service> vpls-pw | no-more",
+    "purpose": "Confirm VPLS PW installed and labels/source role",
+    "expected_keywords": [
+      "Installed",
+      "Label"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show evpn arp-table instance <service> | no-more",
+    "purpose": "IPv4 EVPN ARP table",
+    "expected_keywords": [
+      "EVPN"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show evpn ndp-table instance <service> | no-more",
+    "purpose": "IPv6 EVPN NDP table",
+    "expected_keywords": [
+      "EVPN"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show arp vrf <vrf> ipv4-address <ip> | no-more",
+    "purpose": "Routing ARP truth for in-subnet IPv4 PW host",
+    "expected_keywords": [
+      "VRF"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show ndp vrf <vrf> ipv6-address <ip> | no-more",
+    "purpose": "Routing NDP truth for in-subnet IPv6 PW host",
+    "expected_keywords": [
+      "VRF"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show evpn mac-ip-table instance <service> ip <ip> | no-more",
+    "purpose": "EVPN MAC-IP truth; expected live validation because static docs may not list it",
+    "expected_keywords": [
+      "EVPN"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show evpn mac-table instance <service> mac <mac> | no-more",
+    "purpose": "Source role and AC/PW MAC ownership",
+    "expected_keywords": [
+      "EVPN"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show evpn forwarding-table mac-address-table instance <service> mac <mac> | no-more",
+    "purpose": "Datapath owner/egress must match control-plane owner",
+    "expected_keywords": [
+      "NCP-ID"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show bgp l2vpn evpn route-type 2 | include regex \"<mac>|<ip>|ESI|best\"",
+    "purpose": "Prove PW-source MAC-IP is not illegally advertised as local RT-2",
+    "expected_keywords": [
+      "Route Distinguisher"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show system cprl | no-more",
+    "purpose": "Reject CPRL-contaminated ARP/NDP runs",
+    "expected_keywords": [
+      "NDP"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show dnos-internal routing fib-manager database evpn local-mac service-instance <service> | no-more",
+    "purpose": "Fib-manager EVPN local MAC DB for local-vs-PW source parity",
+    "expected_keywords": [
+      "EVPN"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show dnos-internal routing fib-manager database evpn remote-mac service-instance <service> | no-more",
+    "purpose": "Fib-manager EVPN remote/PW MAC DB for source-role parity",
+    "expected_keywords": [
+      "EVPN"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show dnos-internal routing fib-manager database evpn evi-id <evi_id> l2-neighbor ip <ip> | no-more",
+    "purpose": "Fib-manager EVPN L2-neighbor backing state for IPv4/IPv6 MAC-IP",
+    "expected_keywords": [
+      "EVPN"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show dnos-internal routing fib-manager database neighbor address <ip> | no-more",
+    "purpose": "Fib-manager global neighbor DB backing state",
+    "expected_keywords": [
+      "Neighbor"
+    ]
+  },
+  {
+    "device": "PE-IRB",
+    "cmd": "show dnos-internal routing fib-manager database l2-maintained-neighbors instance <service> | no-more",
+    "purpose": "Fib-manager L2-maintained-neighbor retention/source-role surface",
+    "expected_keywords": [
+      "neighbor"
+    ]
+  }
+]

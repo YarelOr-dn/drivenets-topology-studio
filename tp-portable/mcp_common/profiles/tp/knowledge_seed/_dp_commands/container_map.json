@@ -1,0 +1,45 @@
+{
+  "containers": {
+    "cli_handler": [
+      "cli_handler"
+    ],
+    "cluster_manager": [
+      "cluster_manager"
+    ],
+    "fabric_manager": [
+      "fabric_manager"
+    ],
+    "routing_engine": [
+      "bgpd",
+      "fibmgrd",
+      "rib-manager",
+      "evpnd",
+      "ndpd",
+      "arpd",
+      "isisd",
+      "ldpd"
+    ],
+    "wb_agent": [
+      "wb_agent"
+    ],
+    "wb_fe_agent": [
+      "wb_fe_agent"
+    ]
+  },
+  "schema_version": 1,
+  "shell_targets": {
+    "datapath": {
+      "component_type": "ncp",
+      "container": "wb_agent"
+    },
+    "routing_engine": {
+      "component_type": "ncc",
+      "container": "routing_engine"
+    },
+    "wb_agent": {
+      "component_type": "ncp",
+      "container": "wb_agent"
+    }
+  },
+  "updated_at": "20260513T064041Z"
+}

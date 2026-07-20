@@ -1,0 +1,108 @@
+{
+  "command_template": "xraycli {path}",
+  "paths": {
+    "/acl/rules": {
+      "purpose": "ACL rules installed in datapath"
+    },
+    "/acl/stats": {
+      "purpose": "ACL counters where populated"
+    },
+    "/dbal_tables_diff": {
+      "purpose": "DBAL table diff since previous query"
+    },
+    "/interfaces/operational": {
+      "live_status": "timeout_on_pe1_20260513_bare_datapath_shell",
+      "purpose": "per-interface operational and VSI/L2/L3 flags"
+    },
+    "/interfaces/show": {
+      "live_status": "timeout_on_pe1_20260513_bare_datapath_shell",
+      "purpose": "full interface state, IDs, MACs, VRF, L2 service"
+    },
+    "/interfaces/stats": {
+      "live_status": "timeout_on_pe1_20260513_bare_datapath_shell",
+      "purpose": "per-interface packet/drop counters"
+    },
+    "/proxy_arp/db": {
+      "purpose": "Proxy-ARP/NDP learned DB, including IPv6 and IRB flags",
+      "source": "proxy_arp_cheat_sheet_or_cheetah"
+    },
+    "/proxy_arp/db_info": {
+      "purpose": "Proxy-ARP DB sizing/generation metadata",
+      "source": "proxy_arp_cheat_sheet_or_cheetah"
+    },
+    "/proxy_arp/db_ipv4": {
+      "purpose": "Proxy-ARP IPv4 DB",
+      "source": "proxy_arp_cheat_sheet_or_cheetah"
+    },
+    "/proxy_arp/db_ipv6": {
+      "purpose": "Proxy-NDP IPv6 DB",
+      "source": "proxy_arp_cheat_sheet_or_cheetah"
+    },
+    "/proxy_arp/msg_recv": {
+      "purpose": "FIB-MGR to DP proxy-ARP message counters",
+      "source": "proxy_arp_cheat_sheet_or_cheetah"
+    },
+    "/proxy_arp/msg_sent": {
+      "purpose": "DP to FIB-MGR proxy-ARP UpdateRaw counters",
+      "source": "proxy_arp_cheat_sheet_or_cheetah"
+    },
+    "/proxy_arp/rx": {
+      "live_status": "timeout_on_pe1_20260513",
+      "purpose": "registered in Cheetah source but timed out on PE-1 bare shell; use /wb_agent/proxy_arp/rx on live DNOS"
+    },
+    "/proxy_arp/tx": {
+      "purpose": "Proxy-ARP/NDP response/backup/probe counters",
+      "source": "proxy_arp_cheat_sheet_or_cheetah"
+    },
+    "/threads/state": {
+      "live_status": "timeout_on_pe1_20260513_bare_datapath_shell",
+      "purpose": "wb_agent thread liveness"
+    },
+    "/wb_agent/proxy_arp/db": {
+      "namespace": "wb_agent",
+      "purpose": "Proxy-ARP/NDP thought table",
+      "source": "Confluence/Cheetah"
+    },
+    "/wb_agent/proxy_arp/msg_recv": {
+      "namespace": "wb_agent",
+      "purpose": "FIB-MGR to DP counters",
+      "source": "Confluence/Cheetah"
+    },
+    "/wb_agent/proxy_arp/msg_sent": {
+      "namespace": "wb_agent",
+      "purpose": "DP to FIB-MGR counters",
+      "source": "Confluence/Cheetah"
+    },
+    "/wb_agent/proxy_arp/rx": {
+      "namespace": "wb_agent",
+      "purpose": "Proxy-ARP/NDP receive counters",
+      "source": "Confluence/Cheetah"
+    },
+    "/wb_agent/proxy_arp/tx": {
+      "namespace": "wb_agent",
+      "purpose": "Proxy-ARP/NDP transmit counters",
+      "source": "Confluence/Cheetah"
+    },
+    "/wb_agent/rsm/active": {
+      "namespace": "wb_agent",
+      "purpose": "RSM active table",
+      "source": "Confluence/Cheetah"
+    },
+    "/wb_agent/traps": {
+      "namespace": "wb_agent",
+      "purpose": "trap/drop reason counters",
+      "source": "Confluence/Cheetah"
+    }
+  },
+  "schema_version": 1,
+  "sources": [
+    "/home/dn/cheetah/.ai/skills/datapath/run-wbox-tests/diagnostics-reference.md",
+    "Confluence Proxy-ARP Debug tools cheat sheet (page 5485461507)",
+    "Confluence Working with a Real WHITE-BOX (page 1619132871)",
+    "/home/dn/cheetah/src/wbox/src/proxy_arp_manager/ProxyArpXray.cpp",
+    "/home/dn/cheetah/src/tests/wbox/tests/test_proxy_arp.py",
+    "Confluence Proxy-ARP Debug tools cheat sheet page 5485461507",
+    "Confluence Working with a Real WHITE-BOX page 1619132871"
+  ],
+  "updated_at": "20260513T064041Z"
+}

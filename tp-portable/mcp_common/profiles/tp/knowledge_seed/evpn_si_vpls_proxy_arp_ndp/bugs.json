@@ -1,0 +1,27 @@
+[
+  {
+    "bug_id": "",
+    "title": "PE-1 EVPN-SI VPLS-PW IRB MAC-IP integration BROKEN for IPv6 ONLY (IPv4 works correctly)",
+    "status": "OBSERVED",
+    "url": "",
+    "signature": "IPv4 PW works: when Spirent emulates an in-IRB-subnet PW host that periodically sends ARP (gratuitous or solicited), PE-1 populates mac-ip-table with v> entries; ages out 20min after last refresh. Evidence: RUN_20260511_082651 shows v> 00:fe:11:00:40:06 / 10.214.40.6 / src 2.2.2.2 (PW). IPv6 PW BROKEN: across every /TEST run in catalog, NO v> entry with any IPv6 address ever produced. Kernel NDP shows Origin=dynamic (RFC 4861 only); EVPN mac-ip-table never integrated with PW-side IPv6 NA. Even with RFC-correct sNA (S=1/O=1/R=0, unicast, TLLA option) the v> entry does NOT appear. Bug is specific to IPv6 proxy-NDP-from-PW; IPv4 proxy-ARP-from-PW is unaffected.",
+    "source_id": null,
+    "id": "SW-228552-bug-ipv6-only"
+  },
+  {
+    "bug_id": "SW-277948",
+    "title": "EVPN VPLS SI IRB | NDP NS from a PW-attached host to the IRB is dropped in DP instead of punted to Routing",
+    "status": "Open",
+    "url": "https://drivenets.atlassian.net/browse/SW-277948",
+    "signature": "IPv6 ping host<->IRB across the VPLS-PW fails 100% except for a few seconds after 'clear ndp'; DP ProxyArp sets shouldSendUpwards=0 and skips the proxy response for is_vpls_pw=1, so the NS never reaches Routing and no NA is generated.",
+    "source_id": null
+  },
+  {
+    "bug_id": "SW-278456",
+    "title": "EVPN VPLS SI IRB | ARP/NS not-for-us is sent to the GRE of the IRB",
+    "status": "Open",
+    "url": "https://drivenets.atlassian.net/browse/SW-278456",
+    "signature": "On an EVPN/BD with an oper-up IRB, the DP ProxyArp candidate handler SW-snoops every ARP request received on the BD.",
+    "source_id": null
+  }
+]

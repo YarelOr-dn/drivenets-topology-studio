@@ -1,0 +1,66 @@
+[
+  {
+    "scenario": "Fresh in-IRB-subnet IPv4 ARP arrives via PW (e.g. ARP for 10.214.40.6 with src MAC 00:fe:11:00:40:06)",
+    "expected": "",
+    "anti_pattern": "Looking at mac-ip-table 20+ min after last ARP and concluding feature is broken when it's actually just aged out. Verify by sending fresh ARP and re-checking within 20 min.",
+    "source_id": null,
+    "expected_outcome": "(1) mac-table gets v> for the MAC (VPLS DP learning), (2) mac-ip-table gets v> for the MAC+IP (proxy-ARP snoop), (3) kernel ARP gets Origin=evpn, (4) PE-1 originates RT-2 MAC-IP into global bgp l2vpn evpn. WORKS PER EPIC."
+  },
+  {
+    "scenario": "Fresh in-IRB-subnet IPv6 NA arrives via PW (e.g. solicited NA for 2001:214:4001::3)",
+    "expected": "",
+    "anti_pattern": "BUG: NEVER produces v> in mac-ip-table for IPv6 PW. Across every /TEST run in the catalog, zero v> IPv6 mac-ip entries observed. Kernel NDP stays Origin=dynamic (RFC 4861 fallback only). This is a real DNOS bug specific to IPv6 PW NDP integration.",
+    "source_id": null,
+    "expected_outcome": "Same 4-step integration as IPv4: mac-table v>, mac-ip-table v>, kernel NDP Origin=evpn, BGP RT-2 originated."
+  },
+  {
+    "scenario": "Out-of-IRB-subnet host traffic via PW",
+    "expected": "",
+    "anti_pattern": "Trying to test mac-ip integration with out-of-subnet hosts; will always show empty mac-ip-table regardless of v4/v6 and regardless of bug state.",
+    "source_id": null,
+    "expected_outcome": "No mac-ip-table entry expected (proxy-ARP/NDP only snoops in-IRB-subnet hosts)."
+  },
+  {
+    "scenario": "Spirent stream stopped for >20 min, then checking mac-ip-table",
+    "expected": "",
+    "anti_pattern": "Concluding the feature is broken when you're just looking at stale state. Restart ARP traffic and re-check within 20 min before declaring the bug.",
+    "source_id": null,
+    "expected_outcome": "v> entries aged out from mac-ip-table (mac-ip aging timer = 20 min). v> entries in mac-table persist because mac-table aging is 320s but refreshes on any data-plane frame."
+  },
+  {
+    "scenario": "PW(core)-ingress ARP arrives at PE-1 for a host PE-1 already owns on its LOCAL AC (10.214.40.2 / 00:fe:11:00:40:01, L>)",
+    "expected": "PE-1 floods the ARP to its local AC; the REAL host replies; PE-1 does NOT proxy-answer a core/PW-ingress ARP back into the VPLS-PW (proxy reply is never sent to a PW; core-ingress ARP/NDP is not punted). VERIFIED correct on PE-1 build 14, 2026-06-25.",
+    "anti_pattern": "Concluding from the reply's sender MAC who answered. DriveNets proxy-ARP answers with the TARGET HOST's REAL MAC, so the sender MAC cannot distinguish 'host replied' from 'PE proxied'. Use the negative control.",
+    "source_id": null
+  },
+  {
+    "scenario": "Decisive negative control for who answers a PW-ingress ARP",
+    "expected": "Remove the target host while PE-1 STILL holds its L> mac-ip entry, then re-ARP over the PW. Still resolves => PE-1 proxied into the PW (BUG). Fails (Destination Host Unreachable, ARP dynamic/failed) => the real host answered (CORRECT). ICMP can never be proxied, so ICMP success across the PW also proves the real host.",
+    "anti_pattern": "Chasing per-packet datapath proxy-arp traces first: 'wbox-cli proxy arp tracing enable' logs no per-packet decision at default verbosity, and routing-engine fibmgrd/neighbour_manager full reads time out under PE-1 mgmt contention.",
+    "source_id": null
+  },
+  {
+    "scenario": "Selecting a remote PE to source a PW-ingress ARP into PE-1",
+    "expected": "Source PE must (a) have a DIRECT Installed PW to PE-1 and (b) NOT already know the target MAC-IP. RR-SA-2 (2.2.2.2) is correct: direct PW to PE-1 and VPLS-only for this EVI (empty mac-ip-table => no proxy-suppression). Source the ARP with a transient IRB in 10.214.40.0/24 + 'run ping <target> source-interface <irb>'.",
+    "anti_pattern": "Using PE-4 as the source: fabric is hub-and-spoke (PE-4<->RR-SA-2 only; no direct PE-4<->PE-1 PW; split-horizon blocks PW->PW relay), AND PE-4 holds the target via RT-2 so its own proxy-ARP suppresses the flood before it crosses any PW.",
+    "source_id": null
+  },
+  {
+    "scenario": "PW-side NS for a THIRD-PARTY target (LL / in-subnet fresh / out-of-subnet) arrives at an EVPN-SI IRB PE",
+    "expected": "SUPPRESSION: no proxy-NDP NA emitted toward the PW; no mac-ip entry learned for the target; no RT-2 advertised (no sanction); wb_agent proxy_arp/tx txPktsResponse unchanged. This is CORRECT behavior.",
+    "anti_pattern": "Concluding suppression logic is proven correct from the negative result alone. SW-277948 drops the PW NS in DP before the proxy engine sees it, so 'no NA' is guaranteed regardless. A rigorous suppression test needs a POSITIVE control in the same window (e.g. IPv4 proxy-ARP-from-PW which works, or an on-AC NS the proxy DOES answer).",
+    "source_id": null
+  },
+  {
+    "scenario": "Choosing the CP capture point to prove 'no proxy-NDP NA toward PW'",
+    "expected": "Authoritative proof = wb_agent proxy_arp/tx (txPktsResponse delta 0) + BGP RT-2 absence + mac-ip-table absence. A proxy NA toward the PW would egress the MPLS core (encapsulated), NOT irb4001.",
+    "anti_pattern": "Treating a 0-packet CP capture on irb4001 as the proof. irb4001 returns 0 for structural reasons (punted NS is DP-dropped and any toward-PW NA egresses the core), so its 0-count is expected either way and is corroborating-only, not decisive.",
+    "source_id": null
+  },
+  {
+    "scenario": "Distinguishing suppression PASS from SW-277948 fixed",
+    "expected": "They are orthogonal. Suppression = no NA toward PW for third-party targets. SW-277948 fix = NS to the IRB's own IP over PW is punted (GRE-IRB + MACT_Recycle) and the IRB answers. Test each with its own target: third-party target for suppression, IRB's own IP for SW-277948.",
+    "anti_pattern": "Reporting 'proxy-NDP PW feature works' from a suppression PASS while SW-277948 (own-IP NS drop) is still open, or vice-versa.",
+    "source_id": null
+  }
+]

@@ -1,0 +1,10 @@
+{
+  "epic": "FIXTURE-INCOMPLETE",
+  "test_cases": [
+    {
+      "id": "TC-FIX-01",
+      "name": "Covers A1 only",
+      "covers_scenarios": ["A1"]
+    }
+  ]
+}

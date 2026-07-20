@@ -1,0 +1,8 @@
+[
+  {
+    "scenario": "snoop-DB show command name (SW-251450 spec vs code)",
+    "expected": "SA story SW-251450 = 'show evpn igmp-snooping multicast-db' is the spec/authority pre-live; on first build run BOTH multicast-db and groups, whichever the CLI accepts is truth -> cache it and /TP improve SW-211037",
+    "anti_pattern": "silently rewriting the TP from 'multicast-db' to 'groups' because code differs (record the divergence and keep SA syntax until live proves otherwise)",
+    "source_id": null
+  }
+]

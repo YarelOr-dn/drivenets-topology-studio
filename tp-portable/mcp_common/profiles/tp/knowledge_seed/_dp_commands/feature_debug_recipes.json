@@ -1,0 +1,96 @@
+{
+  "recipes": {
+    "evpn_si_vpls_proxy_arp_ndp": {
+      "debug_enables": [
+        {
+          "cleanup": "wbox-cli proxy arp tracing disable",
+          "command": "wbox-cli proxy arp tracing enable",
+          "component_type": "ncp",
+          "name": "dp_proxy_arp",
+          "source": "Confluence Proxy-ARP Debug tools cheat sheet page 5485461507",
+          "source_status": "company_knowledge_validated"
+        }
+      ],
+      "dp_processes": [
+        "wb_agent",
+        "wb_fe_agent"
+      ],
+      "dp_read_commands": [
+        "wbox-cli tracing",
+        "wbox-cli fib dump pw",
+        "wbox-cli stats show counters"
+      ],
+      "optional_heavy_debug_enables": [
+        {
+          "cleanup": "wbox-cli packet processor tracing disable",
+          "command": "wbox-cli packet processor tracing enable",
+          "component_type": "ncp",
+          "name": "dp_packet_processor",
+          "source": "Confluence Proxy-ARP Debug tools cheat sheet page 5485461507",
+          "warning": "More detailed packet tracing; use for narrow windows only."
+        }
+      ],
+      "processes": [
+        "bgpd",
+        "fibmgrd",
+        "rib-manager",
+        "evpnd",
+        "ndpd",
+        "arpd"
+      ],
+      "routing_log_levels": [
+        {
+          "cleanup_level": "info",
+          "level": "debug",
+          "process": "evpnd"
+        },
+        {
+          "cleanup_level": "info",
+          "level": "debug",
+          "process": "fibmgrd"
+        }
+      ],
+      "sources": [
+        "Confluence Proxy-ARP Debug tools cheat sheet page 5485461507",
+        "Confluence Working with a Real WHITE-BOX page 1619132871",
+        "Confluence Logs Infra: Rotation page 1860567078",
+        "/home/dn/cheetah/src/wbox/src/proxy_arp_manager/ProxyArpXray.cpp",
+        "/home/dn/cheetah/src/tests/wbox/tests/test_proxy_arp.py"
+      ],
+      "symbols": [
+        "mac",
+        "ipv4",
+        "ipv6",
+        "evi",
+        "label",
+        "peer_ip"
+      ],
+      "title": "EVPN-SI VPLS PW proxy ARP/NDP flow",
+      "xraycli_paths": [
+        {
+          "live_status": "validated_pe1_20260513",
+          "path": "/wb_agent/proxy_arp/rx",
+          "purpose": "rxNdpNS/rxNdpNA counters"
+        },
+        {
+          "path": "/wb_agent/proxy_arp/tx",
+          "purpose": "backup/response/probe counters"
+        },
+        {
+          "path": "/wb_agent/proxy_arp/msg_recv",
+          "purpose": "FIB-MGR to DP messages"
+        },
+        {
+          "path": "/wb_agent/proxy_arp/msg_sent",
+          "purpose": "DP to FIB-MGR UpdateRaw"
+        },
+        {
+          "path": "/wb_agent/proxy_arp/db",
+          "purpose": "proxy ARP/NDP thought table"
+        }
+      ]
+    }
+  },
+  "schema_version": 1,
+  "updated_at": "20260513T064041Z"
+}

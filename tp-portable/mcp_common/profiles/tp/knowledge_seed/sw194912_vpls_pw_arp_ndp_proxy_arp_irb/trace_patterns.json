@@ -1,0 +1,27 @@
+[
+  {
+    "file": "routing_engine/fibmgrd_traces",
+    "regex": "<mac>|<ip>|evpn|neighbor|mac-ip",
+    "meaning": "Routing/FIB manager MAC-IP install path"
+  },
+  {
+    "file": "routing_engine/rib-manager_traces",
+    "regex": "<mac>|<ip>|EVPN|neighbor|l2-neighbor|ARP|NDP",
+    "meaning": "RIB/zebra EVPN neighbor path before fib-manager programming"
+  },
+  {
+    "file": "routing_engine/neighbour_manager_oob_ns",
+    "regex": "<ip>|<mac>",
+    "meaning": "ARP/NDP neighbor-manager learning path"
+  },
+  {
+    "file": "routing_engine/bgpd_traces",
+    "regex": "route-type 2|<mac>|<ip>",
+    "meaning": "RT-2 advertisement/withdraw proof"
+  },
+  {
+    "file": "wb_agent",
+    "regex": "ProxyArp|NDP|ARP|is_vpls_pw|shouldSendUpwards|shouldRespondToIrbDestMac|ARP-FROM-PW|PweInLifWideData|GRE-IRB|MACT_Recycle|RawSocket",
+    "meaning": "DP proxy-ARP/NDP classification, PW source mark, and per-packet disposition (GRE-IRB / Proxy-ARP raw socket / MACT_Recycle)"
+  }
+]

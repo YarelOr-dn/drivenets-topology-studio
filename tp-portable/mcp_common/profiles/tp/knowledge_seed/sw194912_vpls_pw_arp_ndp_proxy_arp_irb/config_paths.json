@@ -1,0 +1,24 @@
+[
+  {
+    "hierarchy": "network-services evpn instance <irb_service> router-interface <irb>",
+    "expected_values": [
+      "IRB attached"
+    ],
+    "notes": "IRB-present mode where PW ARP/NDP must also punt to Routing."
+  },
+  {
+    "hierarchy": "network-services evpn instance <no_irb_service>",
+    "expected_values": [
+      "no router-interface"
+    ],
+    "notes": "No-IRB mode where PW ARP/NDP is flood-only."
+  },
+  {
+    "hierarchy": "interfaces <ac_subif>",
+    "expected_values": [
+      "admin-state enabled",
+      "oper up"
+    ],
+    "notes": "Local AC attachment circuit used to prove flood/forward from PW to AC."
+  }
+]

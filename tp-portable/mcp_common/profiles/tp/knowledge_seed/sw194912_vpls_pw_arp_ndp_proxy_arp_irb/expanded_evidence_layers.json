@@ -1,0 +1,120 @@
+[
+  {
+    "layer": 1,
+    "name": "packet_and_pw_ingress",
+    "purpose": "Prove exact ARP/NDP packet type and ingress role before judging DNOS behavior.",
+    "commands": [
+      "spirent_loss_verify / stream metadata for ARP/ND packet type",
+      "xray_arrival_compare for PW ingress capture with arp.opcode / icmpv6.type / vlan / mpls labels",
+      "packet capture on PW ingress and AC egress during active traffic"
+    ]
+  },
+  {
+    "layer": 2,
+    "name": "dn_arch_counters",
+    "purpose": "Prove the frame entered the DUT and, when expected, flooded to AC.",
+    "commands": [
+      "show evpn instance <service> vpls-pw counters | no-more",
+      "show interfaces <local_ac_interface> counters | no-more",
+      "show interfaces <pw_core_or_bundle_interface> counters | no-more"
+    ]
+  },
+  {
+    "layer": 3,
+    "name": "dp_proxyarp_classification",
+    "purpose": "Prove DP classified the source as VPLS PW (ARP-FROM-PW indication via PMF PweInLifWideData, comment 816399) and made the expected punt/recycle decision.",
+    "commands": [
+      "xraycli /wb_agent/proxy_arp/rx",
+      "xraycli /wb_agent/proxy_arp/msg_recv",
+      "xraycli /wb_agent/pmf/pwe_in_lif",
+      "show file traces datapath/wb_agent.evpn | include regex \"<mac>|<ip>|ProxyArp|is_vpls_pw|ARP-FROM-PW|PweInLifWideData|NDP|ARP\"",
+      "show file traces datapath/wb_pkt_proc | include regex \"<mac>|<ip>|ProxyArp|is_vpls_pw|ARP-FROM-PW|GRE-IRB|MACT_Recycle|RawSocket|NDP|ARP\""
+    ]
+  },
+  {
+    "layer": 4,
+    "name": "proxy_reply_direction_guard",
+    "purpose": "Prove no generated proxy ARP/NDP reply egresses toward VPLS PW.",
+    "commands": [
+      "xraycli /wb_agent/proxy_arp/tx",
+      "xraycli /wb_agent/proxy_arp/msg_sent",
+      "xray_arrival_compare on PW egress for generated ARP reply / NA",
+      "show interfaces <pw_core_or_bundle_interface> counters | no-more"
+    ]
+  },
+  {
+    "layer": 5,
+    "name": "routing_neighbor_learning",
+    "purpose": "Prove Routing learns only in IRB in-subnet mode and stays empty for no-IRB/out-of-subnet cases.",
+    "commands": [
+      "show arp vrf <vrf> ipv4-address <pw_source_ipv4> | no-more",
+      "show ndp vrf <vrf> ipv6-address <pw_source_ipv6> | no-more",
+      "show dnos-internal routing fib-manager database neighbor address <pw_source_ipv4> | no-more",
+      "show dnos-internal routing fib-manager database neighbor address <pw_source_ipv6> | no-more",
+      "show file traces routing_engine/neighbour_manager_oob_ns | include regex \"<pw_source_ipv4>|<pw_source_ipv6>|<pw_source_mac_ipv4>|<pw_source_mac_ipv6>\""
+    ]
+  },
+  {
+    "layer": 6,
+    "name": "evpn_mac_ip_state",
+    "purpose": "Prove EVPN ARP/NDP/MAC-IP tables reflect the Routing learn and source role.",
+    "commands": [
+      "show evpn arp-table instance <irb_service> ip <pw_source_ipv4> | no-more",
+      "show evpn ndp-table instance <irb_service> ip <pw_source_ipv6> | no-more",
+      "show evpn mac-ip-table instance <irb_service> ip <pw_source_ipv4> | no-more",
+      "show evpn mac-ip-table instance <irb_service> ip <pw_source_ipv6> | no-more",
+      "show evpn mac-table instance <irb_service> mac <pw_source_mac_ipv4> | no-more",
+      "show evpn mac-table instance <irb_service> mac <pw_source_mac_ipv6> | no-more"
+    ]
+  },
+  {
+    "layer": 7,
+    "name": "fib_manager_programming",
+    "purpose": "Prove fib-manager backing DB and traces agree with EVPN/Routing state.",
+    "commands": [
+      "show dnos-internal routing fib-manager database evpn local-mac service-instance <irb_service> | include regex \"<pw_source_mac_ipv4>|<pw_source_mac_ipv6>|<pw_source_ipv4>|<pw_source_ipv6>\"",
+      "show dnos-internal routing fib-manager database evpn remote-mac service-instance <irb_service> | include regex \"<pw_source_mac_ipv4>|<pw_source_mac_ipv6>|<pw_source_ipv4>|<pw_source_ipv6>\"",
+      "show dnos-internal routing fib-manager database evpn evi-id <evi_id> l2-neighbor ip <pw_source_ipv4> | no-more",
+      "show dnos-internal routing fib-manager database evpn evi-id <evi_id> l2-neighbor ip <pw_source_ipv6> | no-more",
+      "show dnos-internal routing fib-manager database l2-maintained-neighbors instance <irb_service> | no-more",
+      "show file traces routing_engine/fibmgrd_traces | include regex \"<pw_source_mac_ipv4>|<pw_source_ipv4>|<pw_source_mac_ipv6>|<pw_source_ipv6>|EvpnLocalMac|EvpnPwMac|L2Neighbor\""
+    ]
+  },
+  {
+    "layer": 8,
+    "name": "rib_manager_and_zebra_path",
+    "purpose": "Prove the RIB/zebra side accepted or rejected the EVPN neighbor state before fib-manager.",
+    "commands": [
+      "show file traces routing_engine/rib-manager_traces | include regex \"<pw_source_mac_ipv4>|<pw_source_ipv4>|<pw_source_mac_ipv6>|<pw_source_ipv6>|EVPN|neighbor|l2-neighbor|ARP|NDP\"",
+      "debug_routing_vtysh_bundle with mac/ip/evi filters when DNOS CLI and fib-manager disagree"
+    ]
+  },
+  {
+    "layer": 9,
+    "name": "datapath_forwarding_owner",
+    "purpose": "Prove DP owner/egress agrees with Routing/fib-manager.",
+    "commands": [
+      "show evpn forwarding-table mac-address-table instance <irb_service> mac <pw_source_mac_ipv4> | no-more",
+      "show evpn forwarding-table mac-address-table instance <irb_service> mac <pw_source_mac_ipv6> | no-more"
+    ]
+  },
+  {
+    "layer": 10,
+    "name": "bgp_rt2_non_origination",
+    "purpose": "Prove PW-source MAC-IP is not illegally originated as local RT-2.",
+    "commands": [
+      "show bgp l2vpn evpn route-type 2 | include regex \"<pw_source_mac_ipv4>|<pw_source_ipv4>|<pw_source_mac_ipv6>|<pw_source_ipv6>|ESI|best\"",
+      "show file traces routing_engine/bgpd_traces | include regex \"<pw_source_mac_ipv4>|<pw_source_ipv4>|<pw_source_mac_ipv6>|<pw_source_ipv6>|route-type 2|RT-2\""
+    ]
+  },
+  {
+    "layer": 11,
+    "name": "cprl_contamination_guard",
+    "purpose": "Prove ARP/NDP behavior is not explained by control-plane rate limiting.",
+    "commands": [
+      "show system cprl | no-more",
+      "show config system cprl | no-more",
+      "show system logging system-events CPRL_RATE_LIMIT_CROSSED | no-more"
+    ]
+  }
+]

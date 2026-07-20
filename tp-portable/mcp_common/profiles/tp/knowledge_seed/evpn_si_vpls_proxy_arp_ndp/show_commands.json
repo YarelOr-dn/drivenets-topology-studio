@@ -1,0 +1,131 @@
+[
+  {
+    "cmd": "show evpn instance <NAME> detail | no-more",
+    "device_role": "pe_with_irb",
+    "expected_keywords": [
+      "MAC IP table aging time",
+      "Number of VPLS PW entries"
+    ],
+    "expected_section_markers": [],
+    "purpose": "Service detail. MAC IP table aging time = 20 min. After fresh PW ARP, Number of VPLS PW entries > 0; ages out 20 min after last refresh.",
+    "source_id": null,
+    "live_validated_at": "2026-07-08T17:42:46Z",
+    "live_status": "LIVE_VALID_NO_ENTRIES",
+    "last_excerpt": "EVPN instance <NAME> does not exist",
+    "command": "show evpn instance <NAME> detail | no-more",
+    "command_type": "show",
+    "feature": "evpn_si_vpls_proxy_arp_ndp",
+    "live_device": "PE-1"
+  },
+  {
+    "cmd": "show evpn mac-ip-table instance <NAME> | no-more",
+    "device_role": "pe_with_irb",
+    "expected_keywords": [
+      "v>"
+    ],
+    "expected_section_markers": [],
+    "purpose": "EXPECTED for IPv4 PW: v> entry with PW source (e.g. 2.2.2.2) for in-IRB-subnet IPv4 host. EXPECTED for IPv6 PW: same v> behavior. BUG SIGNATURE for IPv6: NEVER produces v> entry for any IPv6 PW host across all recorded test runs.",
+    "source_id": null,
+    "live_validated_at": "2026-07-08T17:42:50Z",
+    "live_status": "LIVE_VALID_NO_ENTRIES",
+    "last_excerpt": "EVPN instance <NAME> does not exist",
+    "command": "show evpn mac-ip-table instance <NAME> | no-more",
+    "command_type": "show",
+    "feature": "evpn_si_vpls_proxy_arp_ndp",
+    "live_device": "PE-1"
+  },
+  {
+    "cmd": "show evpn mac-table instance <NAME> | no-more",
+    "device_role": "pe_with_irb",
+    "expected_keywords": [
+      "v>"
+    ],
+    "expected_section_markers": [],
+    "purpose": "VPLS DP MAC learning. v> entries persist longer than mac-ip-table v> entries because mac-table refreshes on any data-plane frame, while mac-ip-table needs fresh ARP/NDP specifically.",
+    "source_id": null,
+    "live_validated_at": "2026-07-08T17:42:54Z",
+    "live_status": "LIVE_VALID_NO_ENTRIES",
+    "last_excerpt": "EVPN instance <NAME> does not exist",
+    "command": "show evpn mac-table instance <NAME> | no-more",
+    "command_type": "show",
+    "feature": "evpn_si_vpls_proxy_arp_ndp",
+    "live_device": "PE-1"
+  },
+  {
+    "cmd": "show ndp | include irb4001",
+    "device_role": "pe_with_irb",
+    "expected_keywords": [
+      "evpn"
+    ],
+    "expected_section_markers": [],
+    "purpose": "EXPECTED for IPv6 PW: kernel NDP Origin=evpn. BUG: shows Origin=dynamic (no proxy-NDP engagement).",
+    "source_id": null,
+    "live_validated_at": "2026-07-08T17:42:58Z",
+    "live_status": "LIVE_VALIDATED",
+    "last_excerpt": "| 2001:214:4001::c6 | 00:fe:11:00:40:c6 | evpn   | reachable |     | irb4001   | Host |",
+    "command": "show ndp | include irb4001",
+    "command_type": "show",
+    "feature": "evpn_si_vpls_proxy_arp_ndp",
+    "live_device": "PE-1"
+  },
+  {
+    "cmd": "show evpn instance EVPN_SI_VPLS_1 vpls-pw | no-more",
+    "device_role": "pe_with_irb",
+    "expected_keywords": [
+      "Installed",
+      "Remote Site Id"
+    ],
+    "expected_section_markers": [],
+    "purpose": "Map the VPLS-PW fabric. Hub-and-spoke via RR-SA-2 (2.2.2.2); a PW-ingress test source must have a DIRECT Installed PW to PE-1.",
+    "source_id": null,
+    "live_validated_at": "2026-07-08T17:43:02Z",
+    "live_status": "LIVE_VALIDATED",
+    "last_excerpt": "   EVPN: EVPN_SI_VPLS_1\n    EVI ID : 6\n    Seamless-integration: enabled\n    Control-word: enabled\n    Fat-label: disabled\n  \n    VPLS PWs:\n  \n    | IP Address        | Remote Site Id   | Ingress-label   | Local site-id   | Egress-label   | Status        |\n    +-------------------+------------------+-----------------+-----------------+----------------+---------------+\n    | 2.2.2.2           | 1002             | 1028696         | 1001            | 1029903        | Installed     |",
+    "live_device": "PE-1"
+  },
+  {
+    "cmd": "show arp interface irb4001 | no-more",
+    "device_role": "pe_with_irb",
+    "expected_keywords": [
+      "irb4001",
+      "10.214.40"
+    ],
+    "expected_section_markers": [],
+    "purpose": "PE-1 IRB ARP table; local host 10.214.40.2 shows origin evpn/reachable.",
+    "source_id": null,
+    "live_validated_at": "2026-07-08T17:43:08Z",
+    "live_status": "LIVE_VALIDATED",
+    "last_excerpt": "VRF: default\n\n| IPv4 Address | MAC Address       | Origin  | State  | Age | Interface |\n+--------------+-------------------+---------+--------+-----+-----------+\n| 10.214.40.1  | 84:40:76:42:50:c2 | local   |        |     | irb4001   |\n| 10.214.40.2  |                   | dynamic | failed |     | irb4001   |\n| 10.214.41.1  | 84:40:76:42:50:c2 | local   |        |     | irb4001   |",
+    "live_device": "PE-1"
+  },
+  {
+    "cmd": "show evpn mac-ip-table instance EVPN_SI_VPLS_1 | no-more",
+    "device_role": "pe_with_irb",
+    "expected_keywords": [
+      "EVI ID",
+      "10.214.40.2"
+    ],
+    "expected_section_markers": [],
+    "purpose": "Local AC host 10.214.40.2 is L>; a PW-learned remote sender appears as v> with the PW source loopback (e.g. 2.2.2.2).",
+    "source_id": null,
+    "live_validated_at": "2026-07-08T17:43:13Z",
+    "live_status": "LIVE_VALIDATED",
+    "last_excerpt": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, A - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: EVPN_SI_VPLS_1\n  EVI ID : 6\n  Description : VPLS-SI-PW1 | RD=1.1.1.1:1001 RT-VPLS=1234567:2001 site=1001 peer=RR-SA-2(2.2.2.2:2001) AC=ge400-0/0/5.4001 outer=214 inner=4001 TEST=SW-228552_bas",
+    "live_device": "PE-1"
+  },
+  {
+    "cmd": "show config network-services evpn instance EVPN_SI_VPLS_1 | no-more",
+    "device_role": "pe_with_irb",
+    "expected_keywords": [
+      "router-interface irb4001",
+      "seamless-integration"
+    ],
+    "expected_section_markers": [],
+    "purpose": "Service config: router-interface irb4001 irb-mac-ip enabled + seamless-integration. NOTE: there is NO per-instance proxy-arp DISABLE knob (mac-ip-handling only has aging/limit).",
+    "source_id": null,
+    "live_validated_at": "2026-07-08T17:43:19Z",
+    "live_status": "LIVE_VALIDATED",
+    "last_excerpt": "# YOR_PE-1 config-start [08-Jul-2026 20:43:19 UTC+03:00 (Israel)]\n\nnetwork-services\n  evpn\n    instance EVPN_SI_VPLS_1\n      description \"VPLS-SI-PW1 | RD=1.1.1.1:1001 RT-VPLS=1234567:2001 site=1001 peer=RR-SA-2(2.2.2.2:2001) AC=ge400-0/0/5.4001 outer=214 inner=4001 TEST=SW-228552_basic_readiness\"\n      protocols\n        bgp 1234567\n          export-l2vpn-evpn route-target 1234567:2001\n          import-l2vpn-evpn route-target 1234567:2001\n          route-distinguisher 1.1.1.1:1001\n        !\n    ",
+    "live_device": "PE-1"
+  }
+]

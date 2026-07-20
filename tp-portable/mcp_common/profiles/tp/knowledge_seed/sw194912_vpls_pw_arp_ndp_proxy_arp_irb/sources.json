@@ -1,0 +1,15 @@
+[
+  {
+    "type": "jira",
+    "id": "SW-194912",
+    "url": "https://drivenets.atlassian.net/browse/SW-194912",
+    "title": "ARP/NDP/ISIS/Proxy-ARP with VPLS PWs",
+    "captured_at": "2026-06-23T11:24:49Z"
+  },
+  {
+    "type": "jira_parent",
+    "id": "SW-241473",
+    "title": "EVPN(ELAN) Seamless integration with VPLS (BGP) - IRB support - Datapath Enabler",
+    "captured_at": "2026-06-23T11:24:49Z"
+  }
+]

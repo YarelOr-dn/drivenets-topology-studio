@@ -1,0 +1,86 @@
+{
+  "families": {
+    "bcm_diag": {
+      "notes": "BCM diag reads can be heavy; use explicit user intent and bounded output.",
+      "read": [
+        "wbox-cli bcm diag pp vis fdt",
+        "wbox-cli bcm diag dbal table dump table={table} default",
+        "wbox-cli bcm diag field presel list"
+      ]
+    },
+    "debug": {
+      "mutating": [
+        "wbox-cli debug dropped_packets enable",
+        "wbox-cli debug dropped_packets disable",
+        "wbox-cli debug open pcap file {path}",
+        "wbox-cli debug close pcap"
+      ],
+      "read": [
+        "wbox-cli debug status"
+      ]
+    },
+    "fib": {
+      "read": [
+        "wbox-cli fib show routes",
+        "wbox-cli fib show ecmp",
+        "wbox-cli fib dump pw",
+        "wbox-cli fib dump encap"
+      ]
+    },
+    "link_state": {
+      "mutating": [
+        "wbox-cli set link {interface} {state}"
+      ]
+    },
+    "log_marker": {
+      "mutating": [
+        "wbox-cli log {message}"
+      ]
+    },
+    "online_diagnostic": {
+      "mutating": [
+        "wbox-cli online diagnostic enable",
+        "wbox-cli online diagnostic disable"
+      ]
+    },
+    "stats": {
+      "mutating": [
+        "wbox-cli stats set qos counters ..."
+      ],
+      "read": [
+        "wbox-cli stats show counters"
+      ]
+    },
+    "tracing": {
+      "disable_template": "wbox-cli tracing {trace_name} disable",
+      "enable_template": "wbox-cli tracing {trace_name} enable",
+      "notes": "Discover exact trace_name values live with debug_dp_tracing_list before enabling.",
+      "read": [
+        "wbox-cli tracing",
+        "wbox-cli tracing status"
+      ]
+    },
+    "vrf_route": {
+      "read": [
+        "wbox-cli vrf {vrf_id} route ipv4 print {prefix} {prefix_len}"
+      ]
+    }
+  },
+  "read_only_allowlist_prefixes": [
+    "wbox-cli tracing",
+    "wbox-cli tracing status",
+    "wbox-cli debug status",
+    "wbox-cli fib show",
+    "wbox-cli fib dump",
+    "wbox-cli stats show",
+    "wbox-cli bcm diag",
+    "wbox-cli vrf"
+  ],
+  "schema_version": 1,
+  "sources": [
+    "/home/dn/cheetah/.ai/skills/datapath/run-wbox-tests/diagnostics-reference.md",
+    "/home/dn/cheetah/src/py_packages/wb_ctrl_agent/wb_ctrl_agent/utils/wbox_cli.py",
+    "/home/dn/cheetah/tests"
+  ],
+  "updated_at": "20260513T064041Z"
+}

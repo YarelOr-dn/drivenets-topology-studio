@@ -1,0 +1,20 @@
+[
+  {
+    "scenario": "Single-homed null-ESI AC-to-AC move of same MAC (.601 -> .602)",
+    "expected": "UPDATE_LOCAL: MAC + MAC-IP owner interface follow the host; Sequence number NOT bumped (no seq line for the host MAC); no Mobility History block; mac-table suppress empty; mac-mobility-redis-count stays 0.",
+    "anti_pattern": "Reporting moved=0 / seq=0 as a bug. It is CORRECT for null-ESI AC-to-AC. Do NOT open a defect.",
+    "source_id": null
+  },
+  {
+    "scenario": "Distinct-ESI AC-to-AC move of same MAC (.602 ESI-B -> .601 ESI-A)",
+    "expected": "MOVE_LOCAL_TO_LOCAL (counted): Sequence number 0->1; MAC Mobility 'Moves per Detection Window' = 1; Mobility History block (Local <ac1> #seq0 -> Local <ac2> #seq1); mac-mobility-redis-count 0->2.",
+    "anti_pattern": "Expecting the counter to move for a null-ESI setup. Counting requires an ESI/path-type change.",
+    "source_id": null
+  },
+  {
+    "scenario": "IP vs MAC move counter on the first counted move",
+    "expected": "MAC 'Moves per Detection Window' = 1 while IP 'Moves per Detection Window' = 0, even though IP Sequence bumped to 1 and IP Mobility History recorded the move.",
+    "anti_pattern": "Treating the IP window-counter lag as MAC/IP inconsistency without noting the IP Sequence + IP Mobility History DID update.",
+    "source_id": null
+  }
+]

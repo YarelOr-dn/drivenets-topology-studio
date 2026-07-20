@@ -1,0 +1,333 @@
+{
+  "archived_counts": {
+    "datapath": 0,
+    "routing_engine": 0
+  },
+  "containers": {
+    "datapath": [
+      "dbclient-hw_monitor_agent",
+      "dbclient-process_monitor_probe",
+      "dbclient-wb_agent",
+      "dbclient-wb_fe_agent",
+      "dn_conn-wb_fe_agent",
+      "extended_entry_point",
+      "hw_monitor_agent",
+      "hw_monitor_agent.platform",
+      "hw_monitor_sensors",
+      "process_monitor_probe",
+      "qos_trace",
+      "ts_client",
+      "wb_agent",
+      "wb_agent.bfd",
+      "wb_agent.cfm",
+      "wb_agent.dhcp",
+      "wb_agent.efm",
+      "wb_agent.events",
+      "wb_agent.flowspec",
+      "wb_agent.lacp",
+      "wb_agent.platform",
+      "wb_agent.ptp_servo",
+      "wb_agent.startup",
+      "wb_agent.synce",
+      "wb_agent.thermal",
+      "wb_fe_agent",
+      "yang_must_validations"
+    ],
+    "routing_engine": [
+      "UriBrokerClient",
+      "bgpd_standby_traces",
+      "dbclient-ftp_manager",
+      "dbclient-mgmt_interface_manager",
+      "dbclient-northbound_ctrl_configurator",
+      "dbclient-process_monitor_probe",
+      "dbclient-re_config_manager",
+      "dbclient-security_file_manager",
+      "dbclient-syslog_relay",
+      "dn_conn-ftp_manager",
+      "dn_conn-mgmt_interface_manager",
+      "dn_conn-neighbour_syncer",
+      "dn_conn-northbound_ctrl_configurator",
+      "dn_conn-python3",
+      "dn_conn-re_config_manager",
+      "dn_conn-security_file_manager",
+      "dn_conn-syslog_relay",
+      "ftp_manager",
+      "ipr_dispatch",
+      "kernel_logger",
+      "ldpd_standby_traces",
+      "mgmt_interface_manager",
+      "neighbour_syncer",
+      "netstats",
+      "netstats.stderr",
+      "northbound_ctrl_configurator",
+      "ospf6d_standby_traces",
+      "process_monitor_probe",
+      "ps",
+      "ps.stderr",
+      "qos_trace",
+      "re_config_manager",
+      "routing-resources",
+      "security_file_manager",
+      "syslog_relay",
+      "sysmonitor",
+      "ts_client",
+      "vtysh_traces",
+      "yang_must_validations"
+    ]
+  },
+  "device": "PE-4",
+  "missing": [
+    {
+      "archives": 0,
+      "expected": "routing_engine/bgpd_traces",
+      "newest_archive": null,
+      "probed": true,
+      "process": "bgpd"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/fibmgrd_traces",
+      "newest_archive": null,
+      "probed": true,
+      "process": "fibmgrd"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/rib-manager_traces",
+      "newest_archive": null,
+      "probed": true,
+      "process": "rib-manager"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/zebra",
+      "newest_archive": null,
+      "probed": true,
+      "process": "zebra"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/isisd_traces",
+      "newest_archive": null,
+      "probed": true,
+      "process": "isisd"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/ospfd_traces",
+      "newest_archive": null,
+      "probed": true,
+      "process": "ospfd"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/ospf6d_traces",
+      "newest_archive": null,
+      "probed": true,
+      "process": "ospf6d"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/ldpd_traces",
+      "newest_archive": null,
+      "probed": true,
+      "process": "ldpd"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/ldpe_traces",
+      "newest_archive": null,
+      "probed": true,
+      "process": "ldpe"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/lde_traces",
+      "newest_archive": null,
+      "probed": true,
+      "process": "lde"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/rsvpd_traces",
+      "newest_archive": null,
+      "probed": true,
+      "process": "rsvpd"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/pimd_traces",
+      "newest_archive": null,
+      "probed": true,
+      "process": "pimd"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/vrrpd_traces",
+      "newest_archive": null,
+      "probed": false,
+      "process": "vrrpd"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/oamd_traces",
+      "newest_archive": null,
+      "probed": false,
+      "process": "oamd"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/twampd",
+      "newest_archive": null,
+      "probed": false,
+      "process": "twampd"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/tund_traces",
+      "newest_archive": null,
+      "probed": false,
+      "process": "tund"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/routing_manager",
+      "newest_archive": null,
+      "probed": false,
+      "process": "routing_manager"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/neighbour_manager_inband_ns",
+      "newest_archive": null,
+      "probed": false,
+      "process": "neighbour_manager_inband_ns"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/neighbour_manager_oob_ns",
+      "newest_archive": null,
+      "probed": false,
+      "process": "neighbour_manager_oob_ns"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/cli",
+      "newest_archive": null,
+      "probed": false,
+      "process": "cli"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/netconf_out_of_band",
+      "newest_archive": null,
+      "probed": false,
+      "process": "netconf"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/gnmi_northbound_agent",
+      "newest_archive": null,
+      "probed": false,
+      "process": "gnmi_northbound_agent"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/gnmi_proxy_agent",
+      "newest_archive": null,
+      "probed": false,
+      "process": "gnmi_proxy_agent"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/grpc_server",
+      "newest_archive": null,
+      "probed": false,
+      "process": "grpc_server"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/snmp_agent",
+      "newest_archive": null,
+      "probed": false,
+      "process": "snmp_agent"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/oob_lldp_manager",
+      "newest_archive": null,
+      "probed": false,
+      "process": "oob_lldp_manager"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/session_monitor",
+      "newest_archive": null,
+      "probed": false,
+      "process": "session_monitor"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/tcp_rate_limiter",
+      "newest_archive": null,
+      "probed": false,
+      "process": "tcp_rate_limiter"
+    },
+    {
+      "archives": 0,
+      "expected": "datapath/element_manager",
+      "newest_archive": null,
+      "probed": false,
+      "process": "element_manager"
+    }
+  ],
+  "platform_hint": "Only 0/7 core routing-engine processes are visible on the default component -- this looks like a CL-86 / disaggregated cluster where routing-engine runs on a separate NCC. Re-run with ncc_id=<active-ncc> to enumerate routing_engine traces.",
+  "refreshed_at": "2026-06-15T10:29:31Z",
+  "rotated_only": [],
+  "validated": [
+    {
+      "process": "vtysh",
+      "resolved": "routing_engine/vtysh_traces"
+    },
+    {
+      "process": "yang_must_validations",
+      "resolved": "routing_engine/yang_must_validations"
+    },
+    {
+      "process": "northbound_ctrl_configurator",
+      "resolved": "routing_engine/northbound_ctrl_configurator"
+    },
+    {
+      "process": "re_config_manager",
+      "resolved": "routing_engine/re_config_manager"
+    },
+    {
+      "process": "mgmt_interface_manager",
+      "resolved": "routing_engine/mgmt_interface_manager"
+    },
+    {
+      "process": "qos_trace_re",
+      "resolved": "routing_engine/qos_trace"
+    },
+    {
+      "process": "kernel_logger",
+      "resolved": "routing_engine/kernel_logger"
+    },
+    {
+      "process": "wb_agent",
+      "resolved": "datapath/wb_agent"
+    },
+    {
+      "process": "wb_fe_agent",
+      "resolved": "datapath/wb_fe_agent"
+    },
+    {
+      "process": "hw_monitor_agent",
+      "resolved": "datapath/hw_monitor_agent"
+    },
+    {
+      "process": "qos_trace_dp",
+      "resolved": "datapath/qos_trace"
+    }
+  ]
+}

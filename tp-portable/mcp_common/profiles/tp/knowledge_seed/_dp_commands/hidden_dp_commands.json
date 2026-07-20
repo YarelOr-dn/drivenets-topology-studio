@@ -1,0 +1,27 @@
+{
+  "commands": [
+    {
+      "cleanup": [
+        "wbox-cli debug close pcap",
+        "wbox-cli debug dropped_packets disable"
+      ],
+      "close": "wbox-cli debug close pcap",
+      "disable": "wbox-cli debug dropped_packets disable",
+      "enable": "wbox-cli debug dropped_packets enable",
+      "name": "dropped_packets_capture",
+      "notes": "Used by XRAY DP dropped-packets backend; always pair open/enable with close/disable.",
+      "open": "wbox-cli debug open pcap file {remote_pcap_path}"
+    },
+    {
+      "name": "bcm_pp_visibility",
+      "notes": "Broad datapath packet-processing visibility dump.",
+      "read": "wbox-cli bcm diag pp vis fdt"
+    },
+    {
+      "name": "dbal_table_dump",
+      "read": "wbox-cli bcm diag dbal table dump table={table} default"
+    }
+  ],
+  "schema_version": 1,
+  "updated_at": "20260513T064041Z"
+}

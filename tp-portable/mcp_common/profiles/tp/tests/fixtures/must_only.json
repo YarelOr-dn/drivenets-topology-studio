@@ -1,0 +1,5 @@
+{
+  "must_requirements": [
+    {"id": "MUST-ONLY", "text": "Unique requirement with no HLD overlap keyword xyzzyplugh.", "source": "jira"}
+  ]
+}

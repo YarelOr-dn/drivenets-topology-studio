@@ -1,0 +1,14 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Vendored backup snapshots (not part of the shipped profile)
+.backup_*/
+
+# Local runtime config / secrets (never ship a user's Jira token)
+tp_config.json
+*.bak.*
+
+# Epic artifacts are generated per-user under TP_ROOT, never committed here
+SW-*/

@@ -1,0 +1,11 @@
+[
+  {
+    "path": "/wb_agent/proxy_arp/tx",
+    "kind": "wbox_cli",
+    "counter": "txPktsResponse",
+    "increments_on": "",
+    "no_increment_on": "",
+    "purpose": "Proxy-ARP/NDP transmit counters. txPktsResponse = number of proxy ARP/NDP RESPONSES the engine sent (the discriminator for 'did PE proxy-answer'); txProbePkts = refresh probes; txPktsBackUp = backup. For toward-PW suppression, txPktsResponse delta MUST be 0. Live-working namespace on PE-1 (bare /proxy_arp/* timed out; use /wb_agent/proxy_arp/*).",
+    "source_id": null
+  }
+]

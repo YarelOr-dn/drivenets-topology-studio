@@ -1,0 +1,69 @@
+[
+  {
+    "kind": "confluence",
+    "id": "",
+    "title": "RUN_20260511_082651: v> 00:fe:11:00:40:06 / 10.214.40.6 in mac-ip-table (PROOF IPv4 PW proxy-ARP works)",
+    "url": "/home/dn/SCALER/TEST/catalog/TEST_SW-228552_TC-IRB-IPV4-ARP-BASIC-01_017/results/RUN_20260511_082651_PE-1/evidence/10_tp_step_04_pe1_pw_source_installation_verify/stdout.md",
+    "page_version": null,
+    "fetched_at": null,
+    "author": null,
+    "type": "test_evidence_pass"
+  },
+  {
+    "kind": "confluence",
+    "id": "",
+    "title": "ZERO v> IPv6 mac-ip entries across ALL test runs in catalog (PROOF IPv6 PW proxy-NDP broken)",
+    "url": "grep result across /home/dn/SCALER/TEST/catalog/ for pattern 'v>.*2001:'",
+    "page_version": null,
+    "fetched_at": null,
+    "author": null,
+    "type": "test_evidence_negative"
+  },
+  {
+    "kind": "confluence",
+    "id": "",
+    "title": "EVPN(ELAN) Seamless integration with VPLS (BGP) - IRB support",
+    "url": "https://drivenets.atlassian.net/browse/SW-228552",
+    "page_version": null,
+    "fetched_at": null,
+    "author": null,
+    "type": "confluence"
+  },
+  {
+    "kind": "confluence",
+    "id": "",
+    "title": "EVPN - proxy ARP/NDP (parent epic)",
+    "url": "https://drivenets.atlassian.net/browse/SW-65398",
+    "page_version": null,
+    "fetched_at": null,
+    "author": null,
+    "type": "confluence"
+  },
+  {
+    "kind": "confluence",
+    "id": "5614796833",
+    "title": "(v25.4) EVPN Proxy ARP",
+    "url": "https://drivenets.atlassian.net/wiki/spaces/QA/pages/5614796833/v25.4+EVPN+Proxy+ARP",
+    "page_version": null,
+    "fetched_at": null,
+    "author": null
+  },
+  {
+    "kind": "confluence",
+    "id": "5723357187",
+    "title": "EVPN (ELAN) Seamless integration with VPLS (BGP) - MAC and MAC-IP Handling Design",
+    "url": "https://drivenets.atlassian.net/wiki/spaces/DV/pages/5723357187",
+    "page_version": null,
+    "fetched_at": null,
+    "author": null
+  },
+  {
+    "kind": "agent_evidence",
+    "id": "pe1_pw_ingress_negctrl_20260625",
+    "title": "PE-1 negative control 2026-06-25: target host removed, PW-ingress re-ARP from RR-SA-2 FAILED while PE-1 still held L> mac-ip => PE-1 does not proxy into the PW (correct)",
+    "url": "",
+    "page_version": null,
+    "fetched_at": null,
+    "author": null
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "hierarchy": "network-services evpn instance <NAME> router-interface <irb> irb-mac-ip enabled",
+    "syntax": "",
+    "purpose": "Required on PE-1 (EVPN-with-IRB side). Enables proxy-ARP/NDP for in-IRB-subnet hosts.",
+    "source_id": null,
+    "live_validated_at": "2026-07-08T17:43:59Z",
+    "live_status": "LIVE_VALIDATED",
+    "live_device": "PE-1",
+    "syntax_example": "network-services evpn instance EVPN_SI_VPLS_1 router-interface irb4001 irb-mac-ip enabled",
+    "side": "EVPN_PE_WITH_IRB"
+  },
+  {
+    "hierarchy": "network-services evpn instance EVPN_SI_VPLS_1 router-interface irb4001 irb-mac-ip enabled",
+    "syntax": "network-services evpn instance EVPN_SI_VPLS_1 router-interface irb4001 irb-mac-ip enabled",
+    "purpose": "Binds the IRB and enables proxy-ARP/NDP MAC-IP for in-subnet hosts. No per-instance proxy-ARP disable knob exists; XRAY is capture-only (no packet inject).",
+    "source_id": null,
+    "live_validated_at": "2026-07-08T17:44:05Z",
+    "live_status": "LIVE_VALIDATED",
+    "live_device": "PE-1"
+  }
+]

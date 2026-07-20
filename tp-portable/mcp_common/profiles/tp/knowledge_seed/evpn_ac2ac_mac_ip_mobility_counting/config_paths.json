@@ -1,0 +1,29 @@
+[
+  {
+    "hierarchy": "network-services multihoming interface <if>",
+    "syntax": "network-services multihoming interface <if> esi arbitrary value <9-hex-octets>",
+    "purpose": "Assign a Type-0 arbitrary ESI to an AC. Value is 9 octets (e.g. 00:00:00:00:00:00:00:06:01); DNOS prepends the type byte so show renders 10 octets. 10-octet value is REJECTED. Distinct ESI per AC is what turns an AC-to-AC move into a COUNTED MOVE_LOCAL_TO_LOCAL.",
+    "source_id": null,
+    "live_validated_at": "2026-07-09T14:38:08Z",
+    "live_status": "LIVE_VALIDATED",
+    "live_device": "YOR_CL_PE-4"
+  },
+  {
+    "hierarchy": "network-services multihoming interface <if>",
+    "syntax": "network-services multihoming interface <if> redundancy-mode <all-active|single-active|port-active>",
+    "purpose": "Redundancy mode for the ES; single-active used in the repro. Adding esi+redundancy-mode forms a single-homed ES after a brief DF-election transient.",
+    "source_id": null,
+    "live_validated_at": "2026-07-09T14:38:16Z",
+    "live_status": "LIVE_VALIDATED",
+    "live_device": "YOR_CL_PE-4"
+  },
+  {
+    "hierarchy": "delete-form",
+    "syntax": "no network-services multihoming interface <if>",
+    "purpose": "Delete via dnos_atomic_commit needs a LEADING full-path 'no'; mid-hierarchy 'no interface' is rejected as Unknown word 'no'.",
+    "source_id": null,
+    "live_validated_at": "2026-07-09T14:39:06Z",
+    "live_status": "LIVE_VALIDATED",
+    "live_device": "YOR_CL_PE-4"
+  }
+]

@@ -1,0 +1,33 @@
+{
+  "feature_id": "evpn_mac_ip_table_limit_threshold_event",
+  "title": "EVPN mac-ip-table-limit + threshold system events (EVPN_MAC_IP_TABLE_THRESHOLD_EXCEEDED/CLEARED) incl. via VPLS-PW",
+  "description": "Per-service EVPN mac-ip-handling mac-ip-table-limit (min 16). fib-manager fires system event EVPN_MAC_IP_TABLE_THRESHOLD_EXCEEDED (WARNING, group fib-manager) when the service instance mac-ip-table crosses 90% of the configured limit, and EVPN_MAC_IP_TABLE_THRESHOLD_CLEARED when it drops below 85% (hysteresis). The limit is WARN-ONLY, not a hard cap: learning continues past the limit. PW-sourced (v flag) mac-ips learned over a VPLS-PW DO count toward the limit and DO trigger the event. Box-wide variants: TOTAL_EVPN_MAC_IP_TABLE_THRESHOLD_EXCEEDED/CLEARED. Verify occurrences in the fibmgrd trace (FibMgrMacIpTableSysEvents.cpp onServiceInstanceMacIpTableThresholdExceeded/Cleared) or a configured syslog server -- NOT via `show system logging system-events <NAME>` which shows only the event catalog/schema. Live-proven PE-1 EVPN_SI_VPLS_1 2026-07-09: limit 16, 20 PW hosts injected, Exceeded value=14 then Cleared value=12.",
+  "primary_device": "PE-1",
+  "epic_keys": [
+    "SW-228552"
+  ],
+  "rst_labels": [],
+  "ttl_sec": 86400,
+  "captured_at": "2026-07-09T15:24:08Z",
+  "validated_at": "2026-07-09T15:24:08Z",
+  "payload_hash": "f515f9bc8b15d1cc",
+  "counts": {
+    "sources": 1,
+    "config_paths": 1,
+    "show_commands": 3,
+    "xraycli_paths": 0,
+    "trace_patterns": 2,
+    "interactions": 3,
+    "bugs": 0
+  },
+  "validation_summary": {
+    "validated": 3,
+    "valid_no_entries": 0,
+    "empty": 0,
+    "incomplete": 0,
+    "rejected": 0,
+    "error": 0,
+    "skipped": 0
+  },
+  "schema_version": 1
+}

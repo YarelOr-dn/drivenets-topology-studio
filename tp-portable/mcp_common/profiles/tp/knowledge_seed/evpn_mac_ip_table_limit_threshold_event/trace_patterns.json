@@ -1,0 +1,16 @@
+[
+  {
+    "process": "fibmgrd",
+    "pattern": "onServiceInstanceMacIpTableThresholdExceeded",
+    "meaning": "Event fired: mac-ip count crossed 90% of limit for the service instance (incl PW v mac-ips).",
+    "expected_when": "pass",
+    "source_id": null
+  },
+  {
+    "process": "fibmgrd",
+    "pattern": "onServiceInstanceMacIpTableThresholdCleared",
+    "meaning": "Event fired: mac-ip count dropped below 85% of limit.",
+    "expected_when": "pass",
+    "source_id": null
+  }
+]

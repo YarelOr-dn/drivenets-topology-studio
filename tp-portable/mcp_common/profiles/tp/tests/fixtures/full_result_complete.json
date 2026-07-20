@@ -1,0 +1,10 @@
+{
+  "epic": "FIXTURE-COMPLETE",
+  "test_cases": [
+    {
+      "id": "TC-FIX-01",
+      "name": "Covers all needs-coverage",
+      "covers_scenarios": ["A1", "G1", "MUST-001"]
+    }
+  ]
+}

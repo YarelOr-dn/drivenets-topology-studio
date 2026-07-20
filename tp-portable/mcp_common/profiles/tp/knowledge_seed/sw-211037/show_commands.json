@@ -1,0 +1,32 @@
+[
+  {
+    "cmd": "show evpn igmp-snooping multicast-db",
+    "device_role": "proxy PE",
+    "expected_keywords": [
+      "Source",
+      "Group",
+      "Originator",
+      "ESI",
+      "Flags"
+    ],
+    "expected_section_markers": [],
+    "purpose": "snoop-DB (x,G) view - SA-story spec (SW-251450); UNVERIFIED on build",
+    "source_id": null,
+    "live_validated_at": null,
+    "live_status": "UNVALIDATED",
+    "last_excerpt": null
+  },
+  {
+    "cmd": "show evpn igmp-snooping groups",
+    "device_role": "proxy PE",
+    "expected_keywords": [
+      "Group"
+    ],
+    "expected_section_markers": [],
+    "purpose": "snoop-DB view as registered in code (feature branch); candidate rename of multicast-db",
+    "source_id": null,
+    "live_validated_at": null,
+    "live_status": "UNVALIDATED",
+    "last_excerpt": null
+  }
+]

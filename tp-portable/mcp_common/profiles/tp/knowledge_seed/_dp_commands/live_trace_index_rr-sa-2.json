@@ -1,0 +1,365 @@
+{
+  "archived_counts": {
+    "datapath": 0,
+    "routing_engine": 0
+  },
+  "containers": {
+    "datapath": [
+      "db_migration_probe",
+      "dbclient-hw_monitor_agent",
+      "dbclient-process_monitor_probe",
+      "dbclient-wb_agent",
+      "dbclient-wb_fe_agent",
+      "dn_conn-wb_fe_agent",
+      "element_manager",
+      "element_manager.applicator",
+      "element_manager_gi",
+      "extended_entry_point",
+      "hw_monitor_agent",
+      "hw_monitor_agent.platform",
+      "hw_monitor_sensors",
+      "ncc_discovery_listener",
+      "process_monitor_probe",
+      "qos_trace",
+      "ts_client",
+      "wb_agent",
+      "wb_agent.bfd",
+      "wb_agent.cfm",
+      "wb_agent.dhcp",
+      "wb_agent.efm",
+      "wb_agent.events",
+      "wb_agent.flowspec",
+      "wb_agent.lacp",
+      "wb_agent.platform",
+      "wb_agent.ptp_servo",
+      "wb_agent.startup",
+      "wb_agent.synce",
+      "wb_agent.thermal",
+      "wb_fe_agent",
+      "yang_must_validations"
+    ],
+    "routing_engine": [
+      "dbclient-routing_manager",
+      "dbclient-rsvpd",
+      "dbclient-security_file_manager",
+      "dbclient-session_monitor",
+      "dbclient-snmp_agent",
+      "dbclient-sshd_cli_host_2026-06-14-15:50:00.474_d136cbb4",
+      "dbclient-sshd_cli_host_2026-06-15-09:40:22.394_3eab443e",
+      "dbclient-sshd_cli_host_2026-06-15-09:46:17.648_e267b9ea",
+      "dbclient-sshd_cli_host_2026-06-15-09:49:17.222_fb69c97",
+      "dbclient-sshd_cli_host_2026-06-15-10:08:27.701_ba95cf18",
+      "dbclient-sshd_cli_host_2026-06-15-10:09:45.550_bb745966",
+      "dbclient-sshd_cli_host_2026-06-15-10:22:41.851_84af3f13",
+      "dbclient-sshd_cli_host_2026-06-15-10:30:31.373_b95e7357",
+      "dbclient-sshd_cli_host_2026-06-15-10:30:34.337_67b8558c",
+      "dbclient-sshd_cli_host_2026-06-15-11:06:46.532_2f9827f5",
+      "dbclient-sshd_cli_host_2026-06-15-11:16:08.672_495820e6",
+      "dbclient-sshd_cli_host_2026-06-15-11:26:35.730_77748033",
+      "dbclient-sshd_cli_host_2026-06-15-11:26:51.792_3a675db",
+      "dbclient-sshd_cli_host_2026-06-15-11:26:54.906_6a71aa32",
+      "dbclient-sshd_cli_host_2026-06-15-11:28:38.297_428bb1dd",
+      "dbclient-sshd_cli_host_2026-06-15-11:28:40.154_ea9da635",
+      "dbclient-sshd_cli_host_2026-06-15-11:28:43.115_e6fa9e99",
+      "dbclient-sshd_cli_host_2026-06-15-11:56:43.518_bdccf9ac",
+      "dbclient-sshd_cli_host_2026-06-15-11:56:46.076_5f5d1f8f",
+      "dbclient-sshd_cli_host_2026-06-15-11:56:58.393_90a303fd",
+      "dbclient-sshd_cli_host_2026-06-15-11:57:00.170_3e8983eb",
+      "dbclient-sshd_cli_host_2026-06-15-11:57:02.829_31701e18",
+      "dbclient-sshd_cli_host_2026-06-15-12:01:51.150_95ba9b61",
+      "dbclient-sshd_cli_host_2026-06-15-12:01:53.736_f687c6e5",
+      "dbclient-sshd_cli_host_2026-06-15-12:04:46.227_ab56d7dd",
+      "dbclient-sshd_cli_host_2026-06-15-12:04:47.835_deda1add",
+      "dbclient-sshd_cli_host_2026-06-15-12:04:50.674_7c8cf170",
+      "dbclient-sshd_cli_host_2026-06-15-12:08:08.779_63ad15b1",
+      "dbclient-sshd_cli_host_2026-06-15-12:08:11.178_2f2e076b",
+      "dbclient-sshd_cli_host_2026-06-15-12:11:03.545_df488d2b",
+      "dbclient-sshd_cli_host_2026-06-15-12:11:05.652_dbf33f9f",
+      "dbclient-sshd_cli_host_2026-06-15-12:11:08.096_bd154eba",
+      "dbclient-sshd_cli_host_2026-06-15-12:29:28.658_9acb0ab5",
+      "dbclient-sshd_cli_host_2026-06-15-12:29:31.104_80d5500b",
+      "dbclient-sshd_cli_host_2026-06-15-12:30:08.045_f6c71693",
+      "dbclient-sshd_cli_host_2026-06-15-12:30:09.757_2b9c5e9",
+      "dbclient-sshd_cli_host_2026-06-15-12:30:12.707_2bed1099",
+      "dbclient-sshd_cli_host_2026-06-15-12:30:17.188_a7fdef7c",
+      "dbclient-sshd_cli_host_2026-06-15-12:30:19.358_c8248ccd",
+      "dbclient-sshd_cli_host_2026-06-15-12:30:21.857_506dda17",
+      "dbclient-sshd_cli_host_2026-06-15-12:35:22.777_dffdc121",
+      "dbclient-sshd_cli_host_2026-06-15-12:35:25.726_bef0a07",
+      "dbclient-sshd_cli_host_2026-06-15-12:36:28.738_c4f6d151",
+      "dbclient-sshd_cli_host_2026-06-15-12:36:31.383_19504ff6",
+      "dbclient-sshd_cli_host_2026-06-15-12:36:51.674_1d3fb805",
+      "dbclient-sshd_cli_host_2026-06-15-12:36:53.377_389c9043",
+      "dbclient-sshd_cli_host_2026-06-15-12:36:55.926_46df631b",
+      "dbclient-sshd_cli_host_2026-06-15-12:37:00.348_bd9c56bd",
+      "dbclient-sshd_cli_host_2026-06-15-12:37:01.911_c844af7b",
+      "dbclient-sshd_cli_host_2026-06-15-12:37:04.669_10c4d49c",
+      "dbclient-sshd_cli_host_2026-06-15-13:23:22.080_ff1e3e54",
+      "dbclient-syslog_relay",
+      "dbclient-tcp_rate_limiter",
+      "dbclient-techsupport_manager",
+      "dbclient-twampd",
+      "dbclient-vrrpd",
+      "dbclient-zebra",
+      "dialout_agent",
+      "dialout_server",
+      "dn_conn-bootstrap_purveyor",
+      "dn_conn-cli",
+      "dn_conn-dialout_agent",
+      "dn_conn-eem",
+      "dn_conn-ftp_manager",
+      "dn_conn-gnmi_proxy_agent",
+      "dn_conn-mgmt_interface_manager",
+      "dn_conn-northbound_ctrl_configurator",
+      "dn_conn-ntp_server",
+      "dn_conn-oob_lldp_manager",
+      "dn_conn-python3",
+      "dn_conn-re_config_manager",
+      "dn_conn-routing_manager",
+      "dn_conn-security_file_manager",
+      "dn_conn-snmp_agent",
+      "dn_conn-snmptrap_agent",
+      "dn_conn-snmptrap_managerd",
+      "dn_conn-syslog_relay",
+      "eem",
+      "fibmgrd_traces",
+      "ftp_manager",
+      "gi_discovery_inband",
+      "gnmi_northbound_agent",
+      "gnmi_proxy_agent",
+      "gnoi_proxy",
+      "grpc_server",
+      "ipr_dispatch",
+      "isisd_traces",
+      "kernel_logger",
+      "lde_traces",
+      "ldpd_traces",
+      "ldpe_traces",
+      "mgmt_interface_manager",
+      "mgmt_interface_manager_dhcp",
+      "neighbour_manager_inband_ns",
+      "neighbour_manager_inband_ns.libnetlink",
+      "neighbour_manager_inband_ns.nanocon",
+      "neighbour_manager_oob_ns",
+      "neighbour_manager_oob_ns.libnetlink",
+      "neighbour_manager_oob_ns.nanocon",
+      "netconf_in_band",
+      "netconf_out_of_band",
+      "netstats",
+      "netstats.stderr",
+      "northbound_ctrl_configurator",
+      "ntp_server",
+      "oamd_traces",
+      "oob_lldp_manager",
+      "ospf6d_traces",
+      "ospfd_traces",
+      "password_recovery_manager",
+      "pimd_traces",
+      "process_monitor_probe",
+      "ps",
+      "ps.stderr",
+      "pysnmp_engine",
+      "qos_trace",
+      "re_config_manager",
+      "rib-manager_traces",
+      "routing-resources",
+      "routing_manager",
+      "rsvpd_traces",
+      "security_file_manager",
+      "session_monitor",
+      "snmp_agent",
+      "snmptrap_agent",
+      "sshd_host_ns",
+      "sshd_in_band",
+      "sshd_out_of_band",
+      "syslog_relay",
+      "sysmonitor",
+      "system-events-spoofed.log",
+      "tcp_rate_limiter",
+      "techsupport_manager",
+      "telnetd_host_ns",
+      "ts_client",
+      "tund_traces",
+      "twampd",
+      "vrrpd_traces",
+      "vtysh_traces",
+      "yang_must_validations"
+    ]
+  },
+  "device": "RR-SA-2",
+  "missing": [
+    {
+      "archives": 0,
+      "expected": "routing_engine/bgpd_traces",
+      "newest_archive": null,
+      "probed": true,
+      "process": "bgpd"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/zebra",
+      "newest_archive": null,
+      "probed": true,
+      "process": "zebra"
+    },
+    {
+      "archives": 0,
+      "expected": "routing_engine/cli",
+      "newest_archive": null,
+      "probed": true,
+      "process": "cli"
+    }
+  ],
+  "refreshed_at": "2026-06-15T10:23:20Z",
+  "rotated_only": [],
+  "validated": [
+    {
+      "process": "vtysh",
+      "resolved": "routing_engine/vtysh_traces"
+    },
+    {
+      "process": "fibmgrd",
+      "resolved": "routing_engine/fibmgrd_traces"
+    },
+    {
+      "process": "rib-manager",
+      "resolved": "routing_engine/rib-manager_traces"
+    },
+    {
+      "process": "isisd",
+      "resolved": "routing_engine/isisd_traces"
+    },
+    {
+      "process": "ospfd",
+      "resolved": "routing_engine/ospfd_traces"
+    },
+    {
+      "process": "ospf6d",
+      "resolved": "routing_engine/ospf6d_traces"
+    },
+    {
+      "process": "ldpd",
+      "resolved": "routing_engine/ldpd_traces"
+    },
+    {
+      "process": "ldpe",
+      "resolved": "routing_engine/ldpe_traces"
+    },
+    {
+      "process": "lde",
+      "resolved": "routing_engine/lde_traces"
+    },
+    {
+      "process": "rsvpd",
+      "resolved": "routing_engine/rsvpd_traces"
+    },
+    {
+      "process": "pimd",
+      "resolved": "routing_engine/pimd_traces"
+    },
+    {
+      "process": "vrrpd",
+      "resolved": "routing_engine/vrrpd_traces"
+    },
+    {
+      "process": "oamd",
+      "resolved": "routing_engine/oamd_traces"
+    },
+    {
+      "process": "twampd",
+      "resolved": "routing_engine/twampd"
+    },
+    {
+      "process": "tund",
+      "resolved": "routing_engine/tund_traces"
+    },
+    {
+      "process": "routing_manager",
+      "resolved": "routing_engine/routing_manager"
+    },
+    {
+      "process": "neighbour_manager_inband_ns",
+      "resolved": "routing_engine/neighbour_manager_inband_ns"
+    },
+    {
+      "process": "neighbour_manager_oob_ns",
+      "resolved": "routing_engine/neighbour_manager_oob_ns"
+    },
+    {
+      "process": "netconf",
+      "resolved": "routing_engine/netconf_out_of_band"
+    },
+    {
+      "process": "yang_must_validations",
+      "resolved": "routing_engine/yang_must_validations"
+    },
+    {
+      "process": "northbound_ctrl_configurator",
+      "resolved": "routing_engine/northbound_ctrl_configurator"
+    },
+    {
+      "process": "re_config_manager",
+      "resolved": "routing_engine/re_config_manager"
+    },
+    {
+      "process": "gnmi_northbound_agent",
+      "resolved": "routing_engine/gnmi_northbound_agent"
+    },
+    {
+      "process": "gnmi_proxy_agent",
+      "resolved": "routing_engine/gnmi_proxy_agent"
+    },
+    {
+      "process": "grpc_server",
+      "resolved": "routing_engine/grpc_server"
+    },
+    {
+      "process": "snmp_agent",
+      "resolved": "routing_engine/snmp_agent"
+    },
+    {
+      "process": "oob_lldp_manager",
+      "resolved": "routing_engine/oob_lldp_manager"
+    },
+    {
+      "process": "mgmt_interface_manager",
+      "resolved": "routing_engine/mgmt_interface_manager"
+    },
+    {
+      "process": "qos_trace_re",
+      "resolved": "routing_engine/qos_trace"
+    },
+    {
+      "process": "kernel_logger",
+      "resolved": "routing_engine/kernel_logger"
+    },
+    {
+      "process": "session_monitor",
+      "resolved": "routing_engine/session_monitor"
+    },
+    {
+      "process": "tcp_rate_limiter",
+      "resolved": "routing_engine/tcp_rate_limiter"
+    },
+    {
+      "process": "wb_agent",
+      "resolved": "datapath/wb_agent"
+    },
+    {
+      "process": "wb_fe_agent",
+      "resolved": "datapath/wb_fe_agent"
+    },
+    {
+      "process": "element_manager",
+      "resolved": "datapath/element_manager"
+    },
+    {
+      "process": "hw_monitor_agent",
+      "resolved": "datapath/hw_monitor_agent"
+    },
+    {
+      "process": "qos_trace_dp",
+      "resolved": "datapath/qos_trace"
+    }
+  ]
+}

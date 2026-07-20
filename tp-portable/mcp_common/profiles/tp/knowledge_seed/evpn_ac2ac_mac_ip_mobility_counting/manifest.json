@@ -1,0 +1,33 @@
+{
+  "feature_id": "evpn_ac2ac_mac_ip_mobility_counting",
+  "title": "EVPN AC-to-AC (local->local) MAC/IP mobility counting: null-ESI = UPDATE_LOCAL (not counted) vs distinct-ESI = MOVE_LOCAL_TO_LOCAL (counted)",
+  "description": "For EVPN (incl. EVPN-VPLS-SI IRB) services, a single-homed NULL-ESI AC-to-AC move of the same MAC (e.g. ge100-x.601 -> ge100-x.602) is treated as UPDATE_LOCAL: the owning interface follows the host for BOTH MAC and MAC-IP, but the move is NOT counted -- RT-2 Sequence number is not bumped, no Mobility History block is printed, mac-table suppress is empty, and mac-mobility-redis-count stays 0. Move counting (MOVE_LOCAL_TO_LOCAL) happens ONLY when the ESI or path-type changes: assigning a DISTINCT ESI to each AC makes the same move bump the Sequence number 0->1, populate the MAC Mobility 'Moves per Detection Window' counter (=1), print a Mobility History block, and increment mac-mobility-redis-count 0->2. Therefore moved=0 on a null-ESI AC-to-AC move is CORRECT behavior, not a bug. Live-proven 2026-07-09 on PE-4 EVPN_CLTEST_IRB EVI 203 build 9b1112366c98.",
+  "primary_device": "YOR_CL_PE-4",
+  "epic_keys": [
+    "SW-228552"
+  ],
+  "rst_labels": [],
+  "ttl_sec": 86400,
+  "captured_at": "2026-07-09T14:39:06Z",
+  "validated_at": "2026-07-09T14:39:06Z",
+  "payload_hash": "ca17c69a2769c564",
+  "counts": {
+    "sources": 2,
+    "config_paths": 3,
+    "show_commands": 5,
+    "xraycli_paths": 0,
+    "trace_patterns": 1,
+    "interactions": 3,
+    "bugs": 0
+  },
+  "validation_summary": {
+    "validated": 4,
+    "valid_no_entries": 0,
+    "empty": 1,
+    "incomplete": 0,
+    "rejected": 0,
+    "error": 0,
+    "skipped": 0
+  },
+  "schema_version": 1
+}

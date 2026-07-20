@@ -1,0 +1,26 @@
+[
+  {
+    "component": "wb_agent",
+    "path": "xraycli /wb_agent/proxy_arp/rx",
+    "purpose": "DP ingress classification of PW ARP/NDP packets; prove ARP-FROM-PW indication set",
+    "expected_pattern": "is_vpls_pw|PW|ProxyArp|ARP-FROM-PW|PweInLifWideData"
+  },
+  {
+    "component": "wb_agent",
+    "path": "xraycli /wb_agent/proxy_arp/tx",
+    "purpose": "Generated proxy replies; must show no reply toward VPLS PW",
+    "expected_pattern": "tx|reply"
+  },
+  {
+    "component": "wb_agent",
+    "path": "xraycli /wb_agent/pmf/pwe_in_lif",
+    "purpose": "PMF PweInLifWideData / PWE in-LIF marking that drives the ARP-FROM-PW classification (comment 816399)",
+    "expected_pattern": "PweInLifWideData|pwe|proxy_arp|ARP-FROM-PW"
+  },
+  {
+    "component": "neighbour_manager",
+    "path": "xraycli /neighbour_manager/neigh",
+    "purpose": "Routing neighbor-manager state for learned ARP/NDP",
+    "expected_pattern": "<ip>|<mac>"
+  }
+]

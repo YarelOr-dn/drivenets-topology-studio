@@ -1,0 +1,38 @@
+{
+  "feature_id": "sw194912_vpls_pw_arp_ndp_proxy_arp_irb",
+  "title": "SW-194912 ARP/NDP/Proxy-ARP with VPLS PWs",
+  "description": "With no IRB, ARP/NDP requests and responses arriving from a VPLS PW are flood/forward-only to local ACs with no Routing punt, no MAC-IP learning, and no proxy response. With an IRB present, PW-side ARP/NDP is still flooded/forwarded to ACs and is also punted to Routing; in-subnet MAC/IP entries are learned into Routing ARP/NDP and EVPN MAC-IP tables so AC-side proxy ARP/NDP can answer later. Proxy ARP/NDP must never send generated replies toward the VPLS PW; only actual host responses may go to the PW.",
+  "primary_device": "PE-1",
+  "epic_keys": [
+    "SW-194912",
+    "SW-241473"
+  ],
+  "rst_labels": [
+    "evpn-si-irb",
+    "vpls-pw",
+    "arp",
+    "ndp",
+    "proxy-arp",
+    "datapath",
+    "routing"
+  ],
+  "ttl_sec": 604800,
+  "captured_at": "2026-06-23T11:24:49Z",
+  "validated_at": null,
+  "payload_hash": "manual-sw194912-20260623",
+  "counts": {
+    "sources": 2,
+    "config_paths": 3,
+    "show_commands": 16,
+    "xraycli_paths": 4,
+    "trace_patterns": 5,
+    "expanded_evidence_layers": 11,
+    "interactions": 3,
+    "bugs": 2
+  },
+  "validation_summary": {
+    "live_validate": false,
+    "reason": "PE-1 is currently broken; commands are doc/history validated pending live revalidation."
+  },
+  "schema_version": 1
+}

@@ -1,0 +1,34 @@
+{
+  "feature_id": "evpn_si_vpls_proxy_arp_ndp",
+  "title": "EVPN-SI VPLS IRB: proxy-NDP PW-suppression vs SW-277948 (2-way split + DP-drop confound)",
+  "description": "Two orthogonal PW-side proxy-NDP behaviors that must never be conflated. (1) SUPPRESSION (correct): proxy-NDP must NEVER emit an NA toward the VPLS PW for a third-party/LL/OOS/fresh target, and a PW-learned MAC-IP is never re-advertised in RT-2. (2) SW-277948 (bug): an NS to the IRB's OWN IP over the PW is dropped in DP (shouldSendUpwards=0, is_vpls_pw=1) instead of punted to Routing. The DP-drop is a CONFOUND for suppression tests: it guarantees 'no NA / proxy counter unchanged' for ANY target regardless of whether suppression logic is correct, so a negative-only suppression test cannot distinguish 'proxy declined' from 'NS never reached proxy'. Live-verified 2026-07-08 on PE-1 DNOS 26.3.0-7_priv: 4 PW-source NS variants (LL fe80::face:1, in-subnet fresh ::a2/::f1, OOS 2001:dead:beef::99) from RR-SA-2 bundle-100.2001 inner3001 -> proxy_arp/tx txPktsResponse 423->423 (delta 0), no mac-ip, no RT-2, 0 icmp6 at irb4001.",
+  "primary_device": "PE-1",
+  "epic_keys": [
+    "SW-228552",
+    "SW-65398"
+  ],
+  "rst_labels": [],
+  "ttl_sec": 86400,
+  "captured_at": "2026-05-13T05:24:07Z",
+  "validated_at": "2026-07-08T17:44:05Z",
+  "payload_hash": "0f9fd62b610d6ae4",
+  "counts": {
+    "sources": 7,
+    "config_paths": 2,
+    "show_commands": 8,
+    "xraycli_paths": 1,
+    "trace_patterns": 0,
+    "interactions": 10,
+    "bugs": 3
+  },
+  "validation_summary": {
+    "validated": 5,
+    "valid_no_entries": 3,
+    "empty": 0,
+    "incomplete": 0,
+    "rejected": 0,
+    "error": 0,
+    "skipped": 0
+  },
+  "schema_version": 1
+}

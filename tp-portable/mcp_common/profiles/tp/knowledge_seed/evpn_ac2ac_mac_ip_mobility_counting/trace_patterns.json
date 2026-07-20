@@ -1,0 +1,9 @@
+[
+  {
+    "process": "fibmgrd",
+    "pattern": "MOVE_LOCAL_TO_LOCAL",
+    "meaning": "Kernel-level confirmation of a COUNTED local-to-local move (distinct ESI). Absent for null-ESI UPDATE_LOCAL.",
+    "expected_when": "pass",
+    "source_id": null
+  }
+]

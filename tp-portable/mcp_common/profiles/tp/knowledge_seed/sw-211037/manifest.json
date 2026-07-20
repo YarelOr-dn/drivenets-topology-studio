@@ -1,0 +1,25 @@
+{
+  "feature_id": "SW-211037",
+  "title": "EVPN IGMP Proxy - CLI syntax divergence (snoop-DB show)",
+  "description": "System-architect CLI story SW-251450 (owner Menachem Dodge, To Do) specifies 'show evpn igmp-snooping multicast-db' as the snoop-DB show; code on feature/evpn_igmp_proxy_integration_v1 registers 'show evpn igmp-snooping groups'/'interfaces'. SA story is the syntax source of truth pre-live; keep 'multicast-db' as spec (EXPECTED_LIVE_VALIDATE) until the first lab build resolves it. Do NOT rewrite the TP to match code.",
+  "primary_device": null,
+  "epic_keys": [
+    "SW-211037"
+  ],
+  "rst_labels": [],
+  "ttl_sec": 86400,
+  "captured_at": "2026-07-15T10:46:22Z",
+  "validated_at": null,
+  "payload_hash": "c7af9e222db3670e",
+  "counts": {
+    "sources": 1,
+    "config_paths": 0,
+    "show_commands": 2,
+    "xraycli_paths": 0,
+    "trace_patterns": 0,
+    "interactions": 1,
+    "bugs": 0
+  },
+  "validation_summary": null,
+  "schema_version": 1
+}

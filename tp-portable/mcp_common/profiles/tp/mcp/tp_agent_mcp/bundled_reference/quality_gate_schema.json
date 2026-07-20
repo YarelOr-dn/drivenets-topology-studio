@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "confluence_tp_checklist_page_id": "3934912829",
+  "always_required_category_numbers": [2, 3, 4, 6, 10, 17, 24, 25, 27, 28, 29, 30, 34, 42, 44, 50, 52, 57, 75],
+  "tc_template": {
+    "max_steps": 15,
+    "steps_pass_criteria_one_to_one": true,
+    "negative_name_must_contain": "Negative",
+    "header_pattern": "### **TC-NNN:"
+  },
+  "rules": [
+    "At least one TC per User Story",
+    "No silent skip of always-required checklist categories",
+    "Variants are NOT coverage for topology/trigger/process/dataplane changes",
+    "HA decomposed per process/container/restart type where applicable",
+    "Protocol mechanics: ECMP, encapsulation modes, SID/label types when relevant",
+    "Combined persistence sequence when stateful: configure -> reboot -> upgrade -> switchover",
+    "Traditional and inverse negative tests where applicable"
+  ]
+}

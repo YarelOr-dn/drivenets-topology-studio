@@ -1,0 +1,49 @@
+[
+  {
+    "cmd": "show evpn instance EVPN_SI_VPLS_1 mac-ip-table | no-more",
+    "device_role": "PE",
+    "expected_keywords": [
+      "IP Address",
+      "Source"
+    ],
+    "expected_section_markers": [],
+    "purpose": "Current mac-ip entries incl v> (PW-sourced) rows that count toward the limit.",
+    "source_id": null,
+    "live_validated_at": "2026-07-09T15:23:48Z",
+    "live_status": "LIVE_VALIDATED",
+    "last_excerpt": "Codes: L - Local route, B - BGP route, P - Suppressed, F - E-Tree-Leaf, V - VXLAN\n       I - Suppressed Indefinitely, A - Static ARP, s - Sticky, si - Sticky Interface,\n       M - Only MAC-IP received, > - Selected route, S - Stale route,\n       ri - router-interface, G - Default Gateway, v - VPLS PW\n\nEVPN: EVPN_SI_VPLS_1\n  EVI ID : 6\n  Description : VPLS-SI-PW1 | RD=1.1.1.1:1001 RT-VPLS=1234567:2001 site=1001 peer=RR-SA-2(2.2.2.2:2001) AC=ge400-0/0/5.4001 outer=214 inner=4001 TEST=SW-228552_bas",
+    "live_device": "PE-1"
+  },
+  {
+    "cmd": "show file traces routing_engine/fibmgrd_traces | include regex \"MacIpTableThreshold\" | no-more",
+    "device_role": "PE",
+    "expected_keywords": [
+      "ThresholdExceeded",
+      "ServiceInstance",
+      "limit"
+    ],
+    "expected_section_markers": [],
+    "purpose": "AUTHORITATIVE occurrence proof: onServiceInstanceMacIpTableThresholdExceeded/Cleared with ServiceInstance, value, limit.",
+    "source_id": null,
+    "live_validated_at": "2026-07-09T15:23:57Z",
+    "live_status": "LIVE_VALIDATED",
+    "last_excerpt": "2026-07-09T18:15:10.848985 +03:00 [DEBUG     ] [FibMgrMacIpTableSysEvents.cpp:21:onServiceInstanceMacIpTableThresholdExceeded] [fibmgrd:1643:1643] 1810041:5968561: [EVENT] ServiceInstance: EVPN_SI_VPLS_1 - Mac Ip Table Threshold Exceeded: value=14 threshold=94.444444 limit=16\n2026-07-09T18:21:25.970755 +03:00 [DEBUG     ] [FibMgrMacIpTableSysEvents.cpp:32:onServiceInstanceMacIpTableThresholdCleared] [fibmgrd:1643:1643] 2054090:5978268: [EVENT] ServiceInstance: EVPN_SI_VPLS_1 - Mac Ip Table Thres",
+    "live_device": "PE-1"
+  },
+  {
+    "cmd": "show system logging system-events group fib-manager event EVPN_MAC_IP_TABLE_THRESHOLD_EXCEEDED | no-more",
+    "device_role": "PE",
+    "expected_keywords": [
+      "service_name",
+      "limit",
+      "numeric_value"
+    ],
+    "expected_section_markers": [],
+    "purpose": "Event SCHEMA/catalog only (service_name/limit/numeric_value attrs). Does NOT show fired occurrences.",
+    "source_id": null,
+    "live_validated_at": "2026-07-09T15:24:01Z",
+    "live_status": "LIVE_VALIDATED",
+    "last_excerpt": "EVPN_MAC_IP_TABLE_THRESHOLD_EXCEEDED\ndescription: \"The number of entries in the MAC-IP Table has crossed the 90% threshold of the configured limit for this service instance.\"\nmessage string: \"The number of MAC-IP entries for this service instance {service_name} has crossed the 90% threshold of the configured limit {limit}, the current number of entries is {numeric_value}.\"\nsnmp trap name: \"None\"\nsnmp trap oid: \"None\"\nrequired attributes:\n\n\tservice_name {\n\t\ttype string;\n\t\tdescription \"The name of",
+    "live_device": "PE-1"
+  }
+]

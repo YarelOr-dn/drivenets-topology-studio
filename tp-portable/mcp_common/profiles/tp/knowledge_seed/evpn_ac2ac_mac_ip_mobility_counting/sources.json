@@ -1,0 +1,20 @@
+[
+  {
+    "kind": "agent_evidence",
+    "id": "evpn-ac2ac-mobility-reproA-PASS",
+    "title": "Repro A live: null-ESI .601->.602 = UPDATE_LOCAL, moved=0/seq=0/redis=0",
+    "url": "",
+    "page_version": null,
+    "fetched_at": null,
+    "author": null
+  },
+  {
+    "kind": "agent_evidence",
+    "id": "evpn-ac2ac-mobility-reproB-PASS",
+    "title": "Repro B live: distinct-ESI .602->.601 = MOVE_LOCAL_TO_LOCAL, seq0->1/Moves-per-Window=1/redis0->2",
+    "url": "",
+    "page_version": null,
+    "fetched_at": null,
+    "author": null
+  }
+]

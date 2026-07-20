@@ -1,0 +1,31 @@
+[
+  {
+    "id": "SW-277948",
+    "title": "EVPN VPLS SI IRB IPv6 NDP NS to IRB over VPLS-PW is dropped in DP",
+    "status": "Open",
+    "url": "https://drivenets.atlassian.net/browse/SW-277948",
+    "triggers": [
+      "PW-side NS to IRB IP"
+    ],
+    "symptoms": [
+      "no NA",
+      "gateway unresolved",
+      "ProxyArp shouldSendUpwards=0"
+    ]
+  },
+  {
+    "id": "SW-278456",
+    "title": "IS_IP_OF_IRB BD behavior change (handled as a bug, agreed with Menachem Dodge 2026-06-23)",
+    "status": "Open; agreed in SW-194912 comment 1050602 to be fixed as a bug while VPLS punt behavior ships under the epic",
+    "url": "https://drivenets.atlassian.net/browse/SW-278456",
+    "triggers": [
+      "BD never inspects IS_IP_OF_IRB and always sends to linux",
+      "adding VPLS to current IS_IP_OF_IRB behavior"
+    ],
+    "symptoms": [
+      "behavior difference between BD and VPLS for IS_IP_OF_IRB"
+    ],
+    "role_in_test": "negative_control",
+    "negative_control_note": "SW-194912 must NOT regress BD: assert BD path still sends IS_IP_OF_IRB to linux while the VPLS IRB path follows the agreed-final disposition matrix. A behavior change here is the SW-278456 bug, not a SW-194912 pass/fail."
+  }
+]

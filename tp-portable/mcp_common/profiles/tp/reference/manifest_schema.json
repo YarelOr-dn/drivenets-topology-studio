@@ -1,0 +1,255 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TP Manifest Schema",
+  "description": "Schema for test plan manifests that bridge TP output to /TEST automation. Saved at ~/SCALER/TEST/tp/<EPIC_ID>/manifest.json",
+  "type": "object",
+  "required": ["request_id", "epic_id", "generated_at", "categories", "test_count"],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "description": "Unique request ID from tp-agent-mcp queue"
+    },
+    "epic_id": {
+      "type": "string",
+      "pattern": "^SW-\\d{4,6}$",
+      "description": "Primary EPIC ID"
+    },
+    "linked_epics": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^SW-\\d{4,6}$"},
+      "description": "Additional epics intentionally covered by this TP"
+    },
+    "source_documents": {
+      "type": "array",
+      "description": "Jira, Confluence, RFC, local skill, and local rule sources used for generation",
+      "items": {
+        "type": "object",
+        "required": ["source_key", "source_type", "title", "provenance_status"],
+        "properties": {
+          "source_key": {"type": "string"},
+          "source_type": {"type": "string"},
+          "title": {"type": "string"},
+          "url_or_path": {"type": ["string", "null"]},
+          "provenance_status": {"type": "string"},
+          "content_hash": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "quality_gate": {
+      "type": "object",
+      "description": "Self-review and validation status for the generated TP",
+      "properties": {
+        "costake_stage_3_completed": {"type": "boolean"},
+        "dedup_completed": {"type": "boolean"},
+        "manifest_validated": {"type": "boolean"},
+        "quality_audit_path": {"type": ["string", "null"]},
+        "db_integrity_ok": {"type": "boolean"}
+      }
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of generation"
+    },
+    "generator": {
+      "type": "string",
+      "enum": ["tp_agent_mcp", "openai", "anthropic", "manual"],
+      "description": "Which LLM provider generated this TP"
+    },
+    "test_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total number of test cases generated"
+    },
+    "categories": {
+      "type": "object",
+      "description": "Map of category_name -> category data",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["description", "tasks"],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Category description from TP checklist"
+          },
+          "jira_key": {
+            "type": ["string", "null"],
+            "description": "Jira issue key for the category (if pushed)"
+          },
+          "jira_status": {
+            "type": "string",
+            "enum": ["NEW", "FOUND", "CREATED"],
+            "description": "Whether this category existed in Jira"
+          },
+          "tasks": {
+            "type": "object",
+            "description": "Map of task_name -> task data",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["test_flow", "status"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Unique test ID (auto-generated: <epic>_<category>_<task_index>)"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Human-readable test name"
+                },
+                "test_flow": {
+                  "type": "string",
+                  "description": "Full test content in Jira wiki markup format"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["new_generated", "found_in_jira", "error", "manual"],
+                  "description": "Generation status"
+                },
+                "jira_key": {
+                  "type": ["string", "null"],
+                  "description": "Jira issue key (if pushed or found)"
+                },
+                "jira_url": {
+                  "type": ["string", "null"],
+                  "description": "Jira issue URL"
+                },
+                "category": {
+                  "type": "string",
+                  "description": "Parent category name"
+                },
+                "automation_type": {
+                  "type": "string",
+                  "enum": ["cli_verify", "ha_trigger", "traffic_test", "config_apply", "show_compare", "scale_ramp", "upgrade_cycle", "manual_only"],
+                  "description": "Type of /TEST automation recipe to generate"
+                },
+                "primary_automation_type": {
+                  "type": "string",
+                  "enum": ["cli_verify", "ha_trigger", "traffic_test", "config_apply", "show_compare", "scale_ramp", "upgrade_cycle", "manual_only"],
+                  "description": "Main automation type when a test covers multiple categories"
+                },
+                "linked_epics": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "Linked epics covered by this test"
+                },
+                "coverage_tags": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "Human-readable tags such as routing, datapath, proxy-arp, irb, pw-source"
+                },
+                "covers_epics": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "Primary and linked epics covered by this test"
+                },
+                "covers_user_stories": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "Jira user stories covered by this test"
+                },
+                "covers_categories": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "TP categories explicitly covered by this test"
+                },
+                "covers_rubric_rules": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "Costake rubric rules or local rule IDs covered by this test"
+                },
+                "source_documents": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "Source document keys that justify this test"
+                },
+                "source_skill_refs": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "Local skill files/sections used by this test"
+                },
+                "dedup_fingerprint": {
+                  "type": ["string", "null"],
+                  "description": "Normalized duplicate-detection fingerprint"
+                },
+                "packed_categories_reason": {
+                  "type": ["string", "null"],
+                  "description": "Why multiple categories can be covered by this one test"
+                },
+                "prerequisites": {
+                  "type": "object",
+                  "properties": {
+                    "topology_devices": {
+                      "type": "array",
+                      "items": {"type": "string"},
+                      "description": "Required devices (DUT, DN01, R2, etc.)"
+                    },
+                    "config_requirements": {
+                      "type": "array",
+                      "items": {"type": "string"},
+                      "description": "Config blocks that must be applied before test"
+                    },
+                    "features_required": {
+                      "type": "array",
+                      "items": {"type": "string"},
+                      "description": "DNOS features that must be enabled"
+                    }
+                  }
+                },
+                "verification_commands": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {"type": "string"},
+                      {
+                        "type": "object",
+                        "required": ["command", "verification_status"],
+                        "properties": {
+                          "command": {"type": "string"},
+                          "command_type": {"type": "string"},
+                          "verification_status": {"type": "string"},
+                          "source_key": {"type": ["string", "null"]},
+                          "notes": {"type": ["string", "null"]}
+                        }
+                      }
+                    ]
+                  },
+                  "description": "DNOS show/debug commands for pass/fail verification, with optional provenance"
+                },
+                "pass_criteria": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "Conditions that must be true for PASS verdict"
+                },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "step": {"type": "integer"},
+                      "action": {"type": "string"},
+                      "command": {"type": "string"},
+                      "expected": {"type": "string"}
+                    }
+                  },
+                  "description": "Structured test steps (parsed from test_flow)"
+                },
+                "test_import_hints": {
+                  "type": "object",
+                  "description": "Hints consumed by /TEST create/import",
+                  "properties": {
+                    "recipe_id_hint": {"type": ["string", "null"]},
+                    "requires_spirent": {"type": "boolean"},
+                    "requires_bgp": {"type": "boolean"},
+                    "requires_dnaas": {"type": "boolean"},
+                    "debug_layers": {"type": "array", "items": {"type": "string"}},
+                    "traffic_strategy": {"type": ["string", "null"]}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

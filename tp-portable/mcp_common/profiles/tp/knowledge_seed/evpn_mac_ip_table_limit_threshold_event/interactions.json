@@ -1,0 +1,20 @@
+[
+  {
+    "scenario": "Cross the mac-ip-table-limit via MAC-IPs advertised over a VPLS-PW (remote hosts' ARP/ND snooped on the PW -> v mac-ips)",
+    "expected": "EVPN_MAC_IP_TABLE_THRESHOLD_EXCEEDED fires at 90% with correct service_name+limit; CLEARED at 85%. PW v mac-ips count toward the limit.",
+    "anti_pattern": "Assuming PW-sourced mac-ips are excluded from the limit -- they are included.",
+    "source_id": null
+  },
+  {
+    "scenario": "Verifying the event fired",
+    "expected": "Read fibmgrd trace (FibMgrMacIpTableSysEvents.cpp) or configured syslog.",
+    "anti_pattern": "Using `show system logging system-events <NAME>` to see occurrences -- it only prints the catalog/schema, not fired events.",
+    "source_id": null
+  },
+  {
+    "scenario": "Expecting the limit to block new mac-ip learning",
+    "expected": "Learning continues past the limit; the event is informational (WARNING).",
+    "anti_pattern": "Treating mac-ip-table-limit as a hard cap.",
+    "source_id": null
+  }
+]

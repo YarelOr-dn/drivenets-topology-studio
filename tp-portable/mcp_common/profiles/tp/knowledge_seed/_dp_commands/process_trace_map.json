@@ -1,0 +1,103 @@
+{
+  "schema_version": 2,
+  "updated_at": "20260615T120000Z",
+  "validated_on": {
+    "pe1": {"platform": "SA-36CD-S", "dnos": "26.2.0", "date": "20260615", "nodes": "NCC0 active + NCP0 (co-located)", "ip": "100.64.2.33", "enumerated_via": "backend ls -1 /core/traces/<container> | grep -v .gz (active-only)", "result": "40 active validated, bgpd+cli rotated-only, zebra absent", "containers_confirmed": ["routing_engine", "datapath", "cluster-engine", "inband-engine", "management-engine", "node-manager", "policy-executor", "dnos-agent", "gi-agent", "gi-manager", "ncc-conductor", "redis", "redis-config"]},
+    "rr_sa_2": {"platform": "SA-36CD-S", "is_cluster": false, "date": "20260615", "nodes": "NCC0 active + NCP0 (co-located, single box)", "ip": "100.64.4.205", "enumerated_via": "backend ls -1 /core/traces/<container> | grep -v .gz (active-only)", "result": "37 active validated; bgpd/zebra/cli not active that run (same SA pattern as PE-1: bgpd/cli typically rotated-only, zebra absent)", "note": "standalone SA box like PE-1 -- NO ncc_id needed; routing-engine is co-located on the default component"},
+    "pe4": {"platform": "CL-86", "date": "20260615", "enumerated_via": "backend ls active-only (default component)", "result": "only 11 active validated on default component; all core routing procs absent", "note": "CL-86 disaggregated: routing-engine runs on a SEPARATE NCC node. Re-run with ncc_id=<active-ncc> to enumerate routing_engine; the default component shell sees a near-empty routing_engine dir."}
+  },
+  "platform_notes": {
+    "active_only_enumeration": "debug_trace_catalog refresh lists ACTIVE files only via `ls -1 /core/traces/<c> | grep -v .gz`. The read-only guard allows `|`+`grep` but rejects ; && || and the chars > < ` $, so the pattern must avoid `$` (use '\\.gz', not '\\.gz$'). Active-only keeps output small so a busy dir's 120+ rotated archives never overflow the component-shell scrollback and truncate the active-file head.",
+    "rotation_classification": "Refresh reclassifies a catalog entry whose active file is absent: if `<base>-*.gz` archives exist it is rotated_only (evidence lives in the newest archive); if only connection artifacts like dbclient-<base>-* / dn_conn-<base>-* exist it is truly absent (wrong base name for the platform). Exact-prefix match `<base>-` is required so dbclient-cli is not mistaken for cli.",
+    "cl86_cluster_ncc": "On CL-86 and disaggregated clusters the routing-engine is on a separate NCC. `ls /core/traces/routing_engine` on the default (NCP) component is nearly empty. debug_trace_catalog auto-detects this (routing_engine <15 active AND bgpd+fibmgrd+rib-manager+isisd+rsvpd+ldpd all absent) and returns platform_hint telling the caller to re-run with ncc_id=<active-ncc>.",
+    "datapath_ncp": "datapath container is on the NCP; pass ncp_id for a specific NCP, otherwise the first operationally-up NCP is used."
+  },
+  "listing_grammar": {
+    "primary": "backend component shell: ls -1 /core/traces/<container> | grep -v .gz  (active-only, bounded, scrollback-safe)",
+    "active_only_rationale": "grep -v .gz drops rotated archives ON THE DEVICE so a busy dir (120+ .gz) does not push the active-file head off the component-shell scrollback. Archives are listed lazily per-base with `ls -1 <dir> | grep <base>-` only when rotation resolution needs them.",
+    "single_box": "component_type=ncc for control containers; component_type=ncp for datapath",
+    "cluster": "pass ncc_id/ncp_id -> debug_trace_catalog runs ls on that specific node's component shell; CL-86 routing-engine REQUIRES ncc_id",
+    "cli_list_not_supported": "show file traces <container>/ list -> 'Unknown word: list' on DNOS 26.2.0 (PE-1) and CL-86 (PE-4). 'show file traces list' (file_type form per cmd_search) DUMPS full content (~19MB/2min) on CL-86 -- never use it for enumeration.",
+    "safety_guard": "debug_trace_catalog rejects any listing output >1500 lines or log-line dense (prevents ingesting a content dump).",
+    "rotation": "rotated history = <base>-YYYYMMDD_HH:MM:SS.gz under the same dir; active tail = bare <base>. The archive whose stamp is the smallest >= target-time contains entries at that time."
+  },
+  "containers": [
+    "routing_engine",
+    "datapath",
+    "inband-engine",
+    "cluster-engine",
+    "management-engine",
+    "node-manager",
+    "policy-executor",
+    "dnos-agent",
+    "gi-agent",
+    "gi-manager",
+    "ncc-conductor",
+    "redis",
+    "redis-config"
+  ],
+  "name_variant_rules": [
+    "Some active trace files use a bare name (bgpd_traces, vtysh_traces, fibmgrd_traces, rib-manager_traces); others use the <proc>_traces suffix. When a grep returns empty/No-such-file, retry the sibling variant (strip or add _traces).",
+    "Rotated history = <base>-YYYYMMDD_HH:MM:SS.gz; the archive whose stamp is the smallest >= target-time contains entries at that time. The bare <base> file is the live/active tail."
+  ],
+  "processes": {
+    "bgpd": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/bgpd_traces", "live_status": "validated_pe1_20260615", "aliases": ["routing:bgpd"], "name_variants": ["routing_engine/bgpd_traces"], "purpose": "FRR bgpd: sessions, UPDATE parse, RT/RD, add-path, treat-as-withdraw, EVPN RT-2"},
+    "vtysh": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/vtysh_traces", "live_status": "validated_pe1_20260615", "aliases": ["vtysh_traces", "frr_config_push"], "purpose": "DNOS->FRR config push with per-node return 0/1; cross-AFI config-leak fingerprint"},
+    "fibmgrd": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/fibmgrd_traces", "live_status": "validated_pe1_20260615", "aliases": ["routing:fibmgrd"], "purpose": "FIB manager: MAC/MAC-IP/neighbor program, label alloc"},
+    "rib-manager": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/rib-manager_traces", "live_status": "validated_pe1_20260615", "aliases": ["rib_manager", "ribmgr"], "purpose": "RIB manager: route selection, label block DB, site-id"},
+    "zebra": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/zebra", "live_status": "validated_pe1_20260615", "aliases": ["routing:zebra"], "purpose": "FRR zebra RIB/nexthop/kernel sync"},
+    "isisd": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/isisd_traces", "live_status": "validated_pe1_20260615", "aliases": ["routing:isisd"], "purpose": "IS-IS adjacency/LSP/SPF"},
+    "ospfd": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/ospfd_traces", "live_status": "validated_pe1_20260615", "aliases": ["routing:ospfd"], "purpose": "OSPFv2 adjacency/LSA/SPF"},
+    "ospf6d": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/ospf6d_traces", "live_status": "validated_pe1_20260615", "aliases": ["routing:ospf6d"], "purpose": "OSPFv3 adjacency/LSA/SPF"},
+    "ldpd": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/ldpd_traces", "live_status": "validated_pe1_20260615", "aliases": ["routing:ldpd"], "purpose": "LDP control"},
+    "ldpe": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/ldpe_traces", "live_status": "validated_pe1_20260615", "purpose": "LDP edge"},
+    "lde": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/lde_traces", "live_status": "validated_pe1_20260615", "purpose": "Label distribution engine"},
+    "rsvpd": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/rsvpd_traces", "live_status": "validated_pe1_20260615", "aliases": ["routing:rsvpd"], "purpose": "RSVP-TE LSP signaling"},
+    "pimd": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/pimd_traces", "live_status": "validated_pe1_20260615", "aliases": ["routing:pimd"], "purpose": "PIM multicast"},
+    "vrrpd": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/vrrpd_traces", "live_status": "validated_pe1_20260615", "aliases": ["routing:vrrpd"], "purpose": "VRRP failover"},
+    "oamd": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/oamd_traces", "live_status": "validated_pe1_20260615", "purpose": "OAM/CFM/SLA"},
+    "twampd": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/twampd", "live_status": "validated_pe1_20260615", "purpose": "TWAMP"},
+    "tund": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/tund_traces", "live_status": "validated_pe1_20260615", "purpose": "tunnel daemon (GRE/tunnel)"},
+    "routing_manager": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/routing_manager", "live_status": "validated_pe1_20260615", "purpose": "routing orchestration / process supervision"},
+    "neighbour_manager_inband_ns": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/neighbour_manager_inband_ns", "live_status": "validated_pe1_20260615", "aliases": ["arpd", "ndpd", "neighbor_manager", "neighbour_manager"], "subtraces": ["routing_engine/neighbour_manager_inband_ns.libnetlink", "routing_engine/neighbour_manager_inband_ns.nanocon"], "purpose": "in-band NS/NA (ARP/NDP) program path; EVPN MAC-IP punt (inband)"},
+    "neighbour_manager_oob_ns": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/neighbour_manager_oob_ns", "live_status": "validated_pe1_20260615", "subtraces": ["routing_engine/neighbour_manager_oob_ns.libnetlink", "routing_engine/neighbour_manager_oob_ns.nanocon"], "purpose": "OOB-namespace NS/NA (mgmt ARP/NDP)"},
+    "cli": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/cli", "live_status": "validated_pe1_20260615", "aliases": ["cli_handler", "dn_cmd_handler"], "subtraces": ["routing_engine/cli_show_output", "routing_engine/cli_fallback.log"], "purpose": "CLI command exec + show output; ORM crash / command-failed"},
+    "netconf": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/netconf_out_of_band", "live_status": "validated_pe1_20260615", "aliases": ["netconf_dn", "netconf_in_band", "netconf_oob"], "subtraces": ["routing_engine/netconf_dn", "routing_engine/netconf_in_band", "routing_engine/netconf_response_output"], "purpose": "NETCONF session/edit-config/RPC replies; NETCONF-vs-CLI parity"},
+    "yang_must_validations": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/yang_must_validations", "live_status": "validated_pe1_20260615", "purpose": "YANG must/when constraint evaluation; config that should have failed validation"},
+    "northbound_ctrl_configurator": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/northbound_ctrl_configurator", "live_status": "validated_pe1_20260615", "purpose": "northbound config apply pipeline"},
+    "re_config_manager": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/re_config_manager", "live_status": "validated_pe1_20260615", "purpose": "routing-engine config manager"},
+    "gnmi_northbound_agent": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/gnmi_northbound_agent", "live_status": "validated_pe1_20260615", "purpose": "gNMI northbound"},
+    "gnmi_proxy_agent": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/gnmi_proxy_agent", "live_status": "validated_pe1_20260615", "purpose": "gNMI proxy"},
+    "grpc_server": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/grpc_server", "live_status": "validated_pe1_20260615", "purpose": "gRPC server"},
+    "snmp_agent": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/snmp_agent", "live_status": "validated_pe1_20260615", "purpose": "SNMP get"},
+    "oob_lldp_manager": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/oob_lldp_manager", "live_status": "validated_pe1_20260615", "aliases": ["lldp"], "purpose": "OOB LLDP neighbor"},
+    "mgmt_interface_manager": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/mgmt_interface_manager", "live_status": "validated_pe1_20260615", "purpose": "mgmt interface + DHCP"},
+    "qos_trace_re": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/qos_trace", "live_status": "validated_pe1_20260615", "purpose": "control-plane QoS/policer"},
+    "kernel_logger": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/kernel_logger", "live_status": "validated_pe1_20260615", "purpose": "kernel messages"},
+    "session_monitor": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/session_monitor", "live_status": "validated_pe1_20260615", "purpose": "TCP session monitor (BGP churn)"},
+    "tcp_rate_limiter": {"component": "ncc", "plane": "cp", "container": "routing_engine", "trace_file": "routing_engine/tcp_rate_limiter", "live_status": "validated_pe1_20260615", "purpose": "control-plane TCP conn rate limiter"},
+
+    "wb_agent": {"component": "ncp", "plane": "dp", "container": "datapath", "trace_file": "datapath/wb_agent", "live_status": "validated_pe1_20260615", "subtraces": ["datapath/wb_agent.flowspec", "datapath/wb_agent.bfd", "datapath/wb_agent.cfm", "datapath/wb_agent.efm", "datapath/wb_agent.lacp", "datapath/wb_agent.dhcp", "datapath/wb_agent.synce", "datapath/wb_agent.ptp_servo", "datapath/wb_agent.platform", "datapath/wb_agent.thermal", "datapath/wb_agent.startup", "datapath/wb_agent.events"], "purpose": "white-box agent NPU program path (use debug_dp_component_traces)"},
+    "wb_fe_agent": {"component": "ncp", "plane": "dp", "container": "datapath", "trace_file": "datapath/wb_fe_agent", "live_status": "validated_pe1_20260615", "purpose": "fabric-engine agent (use debug_dp_component_traces)"},
+    "element_manager": {"component": "ncp", "plane": "dp", "container": "datapath", "trace_file": "datapath/element_manager", "live_status": "validated_pe1_20260615", "subtraces": ["datapath/element_manager.applicator", "datapath/element_manager_gi"], "purpose": "hardware element mgmt (port/optics state)"},
+    "hw_monitor_agent": {"component": "ncp", "plane": "dp", "container": "datapath", "trace_file": "datapath/hw_monitor_agent", "live_status": "validated_pe1_20260615", "subtraces": ["datapath/hw_monitor_agent.platform", "datapath/hw_monitor_sensors"], "purpose": "HW health + sensors (optics/PSU/fan)"},
+    "qos_trace_dp": {"component": "ncp", "plane": "dp", "container": "datapath", "trace_file": "datapath/qos_trace", "live_status": "validated_pe1_20260615", "purpose": "datapath QoS/policer drops"},
+
+    "network_reflector": {"component": "ncc", "plane": "cp", "container": "inband-engine", "trace_file": "inband-engine/network_reflector", "live_status": "validated_pe1_20260615", "aliases": ["nr_agent"], "subtraces": ["inband-engine/nr_agent"], "purpose": "in-band packet reflector (punt/inject, host-bound)"},
+    "inband_dhcp_manager": {"component": "ncc", "plane": "cp", "container": "inband-engine", "trace_file": "inband-engine/inband_dhcp_manager", "live_status": "validated_pe1_20260615", "subtraces": ["inband-engine/inband_ip_monitor"], "purpose": "in-band DHCP / IP monitor"},
+
+    "cluster_manager": {"component": "ncc", "plane": "cp", "container": "cluster-engine", "trace_file": "cluster-engine/cluster_manager", "live_status": "validated_pe1_20260615", "subtraces": ["cluster-engine/cluster_manager.applicator", "cluster-engine/cluster_manager_protocols", "cluster-engine/cluster_agent"], "purpose": "cluster mgmt + protocols; NCC switchover, label FIB-preserve"},
+    "transaction_manager": {"component": "ncc", "plane": "cp", "container": "management-engine", "trace_file": "management-engine/transaction_manager", "live_status": "validated_pe1_20260615", "subtraces": ["management-engine/transaction_agent"], "purpose": "commit/rollback transaction engine"},
+    "oper_manager": {"component": "ncc", "plane": "cp", "container": "management-engine", "trace_file": "management-engine/oper_manager", "live_status": "validated_pe1_20260615", "purpose": "oper-state DB"},
+    "node_manager": {"component": "ncc", "plane": "cp", "container": "node-manager", "trace_file": "node-manager/node_manager", "live_status": "validated_pe1_20260615", "subtraces": ["node-manager/node_manager_agent", "node-manager/ctrl_interface_agent", "node-manager/moninode"], "purpose": "node lifecycle / ctrl-IF / health"},
+    "auth_logger": {"component": "ncc", "plane": "cp", "container": "node-manager", "trace_file": "node-manager/auth_logger", "live_status": "validated_pe1_20260615", "purpose": "AAA / login auth"},
+    "policy_manager": {"component": "ncc", "plane": "cp", "container": "policy-executor", "trace_file": "policy-executor/policy_manager", "live_status": "validated_pe1_20260615", "purpose": "event/periodic policy execution"},
+    "core_handler": {"component": "ncc", "plane": "cp", "container": "dnos-agent", "trace_file": "dnos-agent/core_handler", "live_status": "validated_pe1_20260615", "purpose": "core-dump capture (pair debug_core_analyze)"},
+
+    "fabric_manager": {"component": "ncf", "plane": "fabric", "container": "fabric_manager", "trace_file": "fabric_manager/fabric_manager_traces", "live_status": "unvalidated", "purpose": "fabric manager (NCF; not present on single-box SA PE-1)"}
+  },
+  "timestamp_regexes": [
+    "(?P<ts>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)",
+    "(?P<ts>\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)"
+  ]
+}

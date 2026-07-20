@@ -1,0 +1,11 @@
+{
+  "epic": "FIXTURE-COMPLETE",
+  "must_requirements": [
+    {"id": "MUST-001", "text": "Follow RFC 9251 SMET route type 6 for multicast interest.", "source": "epic"}
+  ],
+  "scenarios": [
+    {"scenario_id": "A1", "source": "hld", "kind": "hld_group_item", "group": "A", "text": "A1 join", "status": "needs-coverage", "waive_reason": ""},
+    {"scenario_id": "G1", "source": "hld", "kind": "hld_group_item", "group": "G", "text": "G1 negative", "status": "needs-coverage", "waive_reason": ""},
+    {"scenario_id": "UC-0.1", "source": "hld", "kind": "use_case", "group": "UC", "text": "TBD", "status": "waived", "waive_reason": "TBD in HLD"}
+  ]
+}
