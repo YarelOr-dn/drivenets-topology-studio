@@ -62,6 +62,9 @@ def _exabgp_guarded_start(args: dict[str, Any]) -> dict[str, Any]:
     cmd = [PYTHON, BGP_TOOL, "start"]
     if args.get("device"):
         cmd += ["--device", str(args["device"])]
+    families = args.get("selected_afis") or args.get("families")
+    if families:
+        cmd += ["--selected-afis", str(families)]
     suggested = _next_call("user-exabgp-mcp", "exabgp_verify", {"device": args.get("device"), "format": "both"}, "Verify the session after start.", "read_only")
     return _dry_or_run("exabgp start", cmd, args, timeout=120, mutating=True, suggested_next_call=suggested)
 
@@ -185,6 +188,59 @@ def _exabgp_onboard(args: dict[str, Any]) -> dict[str, Any]:
     )
     return plan
 
+def _exabgp_malform(args: dict[str, Any]) -> dict[str, Any]:
+    catalog = [
+        "bad-marker", "bad-length", "oversized",
+        "truncated-nlri", "bad-afi-safi",
+        "duplicate-attr", "bad-origin", "bad-community",
+        "bad-extcommunity-0x0c",
+    ]
+    d = _exabgp_dir()
+    if str(d) not in sys.path:
+        sys.path.insert(0, str(d))
+    try:
+        import malform as _mal  # type: ignore
+        catalog = sorted(_mal.MALFORMATIONS.keys())
+    except Exception:
+        pass
+    if args.get("list_types"):
+        return {
+            "ok": True,
+            "action": "exabgp malform",
+            "verdict": "CATALOG",
+            "types": catalog,
+            "note": "Named catalog only. Well-formed inject uses exabgp_inject. EVPN wire tricks: spirent_bgp_raw_update / spirent_raw_frame.",
+        }
+    mtype = str(args.get("malform_type") or args.get("type") or "")
+    if mtype not in catalog:
+        return {"ok": False, "action": "exabgp malform", "verdict": "UNKNOWN_TYPE", "errors": [f"unknown type {mtype!r}"], "types": catalog}
+    blocked = _exabgp_lease_gate(args)
+    if blocked:
+        return blocked
+    target = args.get("target_ip") or args.get("device")
+    if args.get("execute") and not target:
+        return {"ok": False, "action": "exabgp malform", "errors": ["target_ip is required to send"]}
+    cmd = [PYTHON, BGP_TOOL, "malform", "--type", mtype]
+    if target:
+        cmd += ["--target-ip", str(target)]
+    if args.get("local_as") is not None:
+        cmd += ["--local-as", str(args["local_as"])]
+    if args.get("peer_as") is not None:
+        cmd += ["--peer-as", str(args["peer_as"])]
+    return _dry_or_run(
+        "exabgp malform",
+        cmd,
+        args,
+        timeout=int(args.get("timeout_sec") or 60),
+        mutating=True,
+        suggested_next_call=_next_call(
+            "user-exabgp-mcp", "exabgp_verify",
+            {"device": args.get("device"), "format": "text"},
+            "Verify DUT BGP after malform (session may have dropped).",
+            "read_only",
+        ),
+    )
+
 def _exabgp_save(args: dict[str, Any]) -> dict[str, Any]:
     payload = normalize_handoff_payload(args.get("payload") or {
         "user_intent": "BGP session handoff",
@@ -260,4 +316,5 @@ HANDLERS = {
     'exabgp_session_lock': _exabgp_session_lock,
     'exabgp_session_release': _exabgp_session_release,
     'exabgp_onboard': _exabgp_onboard,
+    'exabgp_malform': _exabgp_malform,
 }

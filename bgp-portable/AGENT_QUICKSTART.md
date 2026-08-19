@@ -12,8 +12,10 @@ ExaBGP **does not run on this laptop**. It runs on the lab DNAAS host (in-band).
    - your allocated global VLAN range
    - VLAN ID for this peering (inside that range)
    - DUT, inband subnet / DUT IP / gateway
+   - AFI/SAFI (multi-select + All): ipv4-unicast, ipv6-unicast, ipv4-flowspec, ipv4-flowspec-vpn, ipv6-flowspec, ipv6-flowspec-vpn, ipv4-vpn, ipv6-vpn, ipv4-labeled-unicast, ipv6-labeled-unicast, ipv4-multicast, ipv4-rt-constrains, l2vpn-evpn, l2vpn-vpls, link-state
    - confirm IL DNAAS global BD `g_*_v<VLAN>` from dry-run (never silent `g_mgmt_v999`)
-6. Do not `/BGP stop` unless you hold the ExaBGP lease and you explicitly asked to stop.
+6. Well-formed routes: MCP `exabgp_inject`. Named wire malform: `exabgp_malform` `list_types=true` then execute with lease. EVPN raw UPDATEs: Spirent MCP, not ExaBGP.
+7. Do not `/BGP stop` unless you hold the ExaBGP lease and you explicitly asked to stop.
 
 ## Profile schema (`~/.cursor/bgp_profile.json`)
 
@@ -29,6 +31,7 @@ ExaBGP **does not run on this laptop**. It runs on the lab DNAAS host (in-band).
   "dnaas_leaf": "DNAAS-LEAF-...",
   "bundle": "bundle-100",
   "subif": "bundle-100.2100",
+  "selected_afis": ["l2vpn-evpn", "ipv4-unicast"],
   "onboarded_at": "ISO-8601"
 }
 ```
@@ -43,4 +46,4 @@ chmod 0600. `/BGP reset-profile` deletes it and re-asks.
 
 ## Tools
 
-`exabgp_session_lock` / `exabgp_session_release` / `exabgp_onboard` / `exabgp_start` / `exabgp_verify` / `exabgp_inject` / `exabgp_withdraw` / `exabgp_stop`
+`exabgp_session_lock` / `exabgp_session_release` / `exabgp_onboard` / `exabgp_start` (`selected_afis`) / `exabgp_verify` / `exabgp_inject` / `exabgp_withdraw` / `exabgp_malform` / `exabgp_stop`
