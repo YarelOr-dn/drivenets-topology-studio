@@ -174,11 +174,107 @@ Infra durability (all local MCPs): systemd drop-ins at
 `StartLimitIntervalSec=0` so a local MCP always recovers and systemd never permanently
 gives up after a fast crash burst.
 
-## Portable /BGP (2026-08-19)
+## EVPN RT-3 IMET emission (added 2026-07-15, SW-252580 cross-vendor error-handling)
 
-Other Cursor users drive THIS host's ExaBGP over MCP (SSH tunnel to `127.0.0.1:9304`). They do not install ExaBGP locally. Delivery tree: `bgp-portable/` (`install-bgp.sh`, `AGENT_QUICKSTART.md`).
+The patched ExaBGP API handler `reactor/api/command/announce.py` now supports a
+`multicast` (alias `inclusive-multicast` / `imet`) EVPN subtype in BOTH
+`announce evpn` and `withdraw evpn`, in addition to the prior
+mac-advertisement / ethernet-segment / ethernet-ad (Type-2/4/1). It builds a
+real RFC 7432/9251 Type-3 IMET NLRI + a PMSI Ingress-Replication tunnel
+attribute so a receiver (Junos MX, DNOS) accepts it as a valid flooding tunnel,
+and passes extended-communities through verbatim so you can craft malformed ECs.
 
-First `/BGP` with no `~/.cursor/bgp_profile.json` AskQuestions allocated VLAN range + VLAN, then `exabgp_onboard` searches IL DNAAS for `g_*_v<VLAN>` and plans the DUT-facing sub-if AC. No silent `g_mgmt_v999` unless VLAN is 999.
+Syntax:
+```
+announce evpn multicast rd <rd> ethernet-tag <tag> ip <originator-ip> \
+  [label <vni>] [pmsi <tunnel-ip>] next-hop <nh> \
+  extended-community [ target:<rt> 0x030c000000000008 <mcast-flags-ec> ]
+```
+- `ip` = Originating Router IP (IMET NLRI key); `pmsi` = tunnel endpoint (defaults to `ip`).
+- `label <vni>` -> PMSI raw label = VNI (VXLAN). `0x030c000000000008` = encapsulation:vxlan EC.
+- Multicast Flags EC (RFC 9251 s9.4) = `0x0609` + 2-octet flags + reserved, e.g.
+  `0x0609000000000000` = M=0/I=0 (malformed per RFC), `0x0609000000010000` = I=1 (IGMP proxy).
 
-Host helpers: `lease.py` (single :179 lock), `onboard.py` (dry-run planner). MCP: `exabgp_session_lock`, `exabgp_session_release`, `exabgp_onboard`. Mutating start/stop/inject require the lease.
+VERIFIED FINDING (SW-252580 Q2): a malformed Multicast Flags EC (M=0/I=0) on an
+IMET is NOT enforced by Junos MX 23.4R1.9 (jun204-rt02) NOR by the DNOS RR
+(RR-SA-2). RR accepted + reflected it intact; MX installed the route ACTIVE
+(0 hidden) and RETAINED the EC verbatim as `evpn-mcast-flags:0x0` with no
+malformed/treat-as-withdraw log. i.e. both are PERMISSIVE, contrary to the
+RFC 9251 "treat-as-malformed / ignore the EC" MUST. Note: the ExaBGP<->RR-inband
+session storms under the FortiGate IDS RST; the inject only lands when the
+watchdog catches a stable window (see fabric-bypass note / h263 LEAF-B10 links).
 
+## rr_evpn peering: DNAAS fabric bypass (VLAN 212 p2p) - added 2026-07-15
+
+The ExaBGP<->RR-SA-2 EVPN session previously peered OOB (local-address
+100.64.11.95 -> RR 100.70.0.205, ebgp-multihop) which crosses a FortiGate IDS
+that RST-resets the BGP TCP (storm: "lost TCP session with peer"). FIX: peer over
+the DNAAS fabric instead, directly connected, no FortiGate.
+
+Topology: host h263 has fabric NICs enp94s0f0np0->DNAAS-LEAF-B10 ge100-0/0/0 and
+enp94s0f1np1->B10 ge100-0/0/1. New dedicated p2p:
+- VLAN 212, subnet 100.70.212.0/30. h263 fab212(enp94s0f1np1)=.2, RR
+  bundle-100.212=.1. BD g_yor_v212 (single-tag 212) on B10/B09/B15.
+- Path: h263 enp94s0f1np1 -> B10 ge100-0/0/1.212 + bundle-60000.212 -> B09
+  bundle-60001.212(->B10) + bundle-60004.212(->B15) -> B15 bundle-60000.212 +
+  bundle-100.212 -> RR bundle-100.212.
+- B10 ge100-0/0/1 was fully consumed by g_nogah_v200 (qinq vlan-id list 1-4094
+  -> outer 200); carved 212 out: `no interfaces ge100-0/0/1.200 vlan-id list
+  1-4094` then re-add `1-211,213-4094` (reversible).
+- RR neighbor 100.70.212.2 remote-as 65200 local-as 1234567 update-source
+  bundle-100.212 (NO ebgp-multihop, directly connected). Old OOB neighbor
+  100.64.11.95 KEPT admin-enabled as idle fallback.
+- ExaBGP /tmp/exabgp_rr_evpn.conf: local-address+router-id 100.70.212.2,
+  neighbor 100.70.212.1, local-as 65200 peer-as 1234567, family l2vpn evpn.
+
+Result: Established instantly (0.0s), stable, injections land immediately with no
+storm. To switch back to OOB, restore local-address 100.64.11.95 + neighbor
+100.70.0.205 in the conf (RR still has the 100.64.11.95 neighbor).
+
+CAVEAT: bgp_watchdog._clear_device_arp_and_verify_dg is OOB/FortiGate-specific.
+The fabric session is directly connected + stable so it should not need restarts,
+but if ExaBGP dies the DG-ARP precheck could block auto-restart. TODO: make the
+watchdog fabric-path aware (skip the OOB DG-ARP gate when peer is on 100.70.212/30).
+
+## EVPN RT-6 SMET encoder + direct ExaBGP<->Junos peering (added 2026-07-15, SW-252580 Q1/Q3)
+
+announce.py now also supports `announce/withdraw evpn smet` (alias
+selective-multicast) = RFC 9251 Type-6 SMET, built as a raw GenericEVPN(code=6)
+(registry untouched; received RT-6 keep generic decode). NLRI:
+RD + ethernet-tag + src-len[+src] + grp-len + group + orig-len + originator +
+Flags(1). Flags bits v1=0x01 v2=0x02 v3=0x04 IE=0x08.
+Syntax: `announce evpn smet rd <rd> [ethernet-tag N] [source <ip>] group <ip>
+originator <ip> flags <0xNN> next-hop <nh> extended-community [ target:<rt> ]`.
+
+KEY: DNOS (RR-SA-2 build) implements EVPN route-types **1-5 only** (CLI help:
+`route-type <1-5>`), so it treat-as-withdraws RT-6/7/8 -- a DNOS RR will NOT
+reflect RFC 9251 mcast routes to a Junos client. To test Junos directly, peer
+ExaBGP<->MX with the RR as a pure L3 ROUTER (not BGP RR):
+- h263: `ip route add <MX-lo>/32 via 100.70.212.1 dev fab212`.
+- MX: `set routing-options static route 100.70.212.0/30 next-hop 2.2.2.2 resolve`
+  + `set protocols bgp group EXABGP-EVPN type internal local-address 201.0.0.7
+  family evpn signaling local-as 1234567 loops 2 neighbor 100.70.212.2`.
+- ExaBGP conf: 2nd neighbor 201.0.0.7, iBGP local-as/peer-as 1234567,
+  local-address 100.70.212.2, outgoing-ttl 64. Session Established (multihop
+  transits the RR's IP forwarding; DNOS never parses the RT-6 as BGP).
+
+FINDING (Junos MX 23.4R1.9): RT-6 SMET with malformed flags is PERMISSIVE --
+IE-without-v3 (0x0a) and all-version-flags-zero (0x00) are both Import Accepted /
+Active (0 hidden), IGMP flags retained verbatim, NO error logged. i.e. Junos does
+NOT apply RFC 9251 treat-as-malformed/withdraw for these (same as Q2 IMET EC).
+
+## EVPN RT-7/8 encoders (added 2026-07-15, SW-252580 Q3)
+
+announce.py `_parse_evpn_mcast(words, code)` now shared by code 6 (smet),
+7 (join-sync), 8 (leave-sync). Subtypes: `announce evpn join-sync|leave-sync ...`.
+RT-7 = SMET + ESI after RD. RT-8 trailer order (as Junos parses it) =
+Reserved(4) + Flags(1) + MaxRespTime(1)  <-- NOT Reserved+MaxResp+Flags; getting
+this wrong shows up as swapped "IGMP flags" / "Max Response Time" on the MX.
+Tokens add: `esi <esi>` (req for 7/8), `max-response-time <n>` (RT-8).
+ECs for 7/8: ES-Import (0x0602<6-byte-mac>) matching the target ESI's es-import RT
++ exactly one EVI-RT EC (0x060c<4-oct-AS><2-oct-val> for a 4-octet-AS RT).
+
+FINDING (Junos MX 23.4R1.9): RT-7 and RT-8 with all-version-flags-zero (0x00)
+are Import Accepted / Active (0 hidden), flags retained, no error -- same as RT-6.
+=> Junos does NOT apply the RFC 9251 'at least one version flag / treat-as-withdraw'
+rule to ANY of RT-6/7/8. (SW-252580: Q3 = applies to none; Q1/Q2 also permissive.)
